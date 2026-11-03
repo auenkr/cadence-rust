@@ -75,6 +75,25 @@ pub struct Config {
     /// Go `authorization` section (common/config/authorization.go).
     #[serde(default)]
     pub authorization: AuthorizationConfig,
+    /// Go `publicClient`: how internal components dial the Frontend.
+    #[serde(default, rename = "publicClient")]
+    pub public_client: PublicClientConfig,
+    /// Go `headerForwardingRules`: inbound headers copied to outbound calls.
+    #[serde(default, rename = "headerForwardingRules")]
+    pub header_forwarding_rules: Vec<crate::header_forwarding::HeaderRule>,
+}
+
+/// Go `config.PublicClient`. Empty `hostPort` is filled from the current
+/// cluster's RPC address by `public_client_resolved`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublicClientConfig {
+    #[serde(default, rename = "hostPort")]
+    pub host_port: String,
+    #[serde(default)]
+    pub transport: String,
+    /// Go time.Duration (nanoseconds, or a duration string); 0 means 10s.
+    #[serde(default, rename = "RefreshInterval")]
+    pub refresh_interval: Option<serde_yaml::Value>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

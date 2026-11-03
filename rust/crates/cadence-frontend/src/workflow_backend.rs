@@ -946,15 +946,46 @@ pub fn build_workflow_api(
             })
         }
     };
-    let policy = |global: (&'static str, i64), domain: (&'static str, i64)| {
-        let global_rps = read_rps(global.0, global.1, false);
-        let domain_rps = read_rps(domain.0, domain.1, true);
-        std::sync::Arc::new(crate::wrappers::quota_policy::TokenBucketPolicy::new(
-            std::sync::Arc::new(move || global_rps("")),
-            std::sync::Arc::new(domain_rps),
-        )) as std::sync::Arc<dyn crate::wrappers::ratelimited::Policy>
+    // Go: NewMultiStageRateLimiter(dynamic(instance rps), perMember(global
+    // domain rps, per-instance domain rps), perMember(task list ...)).
+    // Member count is 1 until the Frontend ring size is plumbed through.
+    let read_tl_rps = |key: &'static str, default: i64| {
+        let overlay = overlay.clone();
+        move |domain: &str, task_list: &str| -> f64 {
+            let guard = overlay.lock();
+            guard.map_or(default as f64, |o| {
+                cadence_persistence::dynamic_config::task_list_integer(
+                    o.property_values(key),
+                    Some(domain),
+                    task_list,
+                    0,
+                    default,
+                ) as f64
+            })
+        }
     };
     let unlimited = crate::wrappers::quota_policy::UNLIMITED_RPS as i64;
+    let policy = |global: (&'static str, i64),
+                  domain: (&'static str, i64),
+                  global_domain: &'static str,
+                  tl: Option<(&'static str, &'static str, i64)>| {
+        use crate::wrappers::quota_policy::per_member;
+        let global_rps = read_rps(global.0, global.1, false);
+        let domain_rps = read_rps(domain.0, domain.1, true);
+        let global_domain_rps = read_rps(global_domain, unlimited, true);
+        let mut p = crate::wrappers::quota_policy::TokenBucketPolicy::new(
+            std::sync::Arc::new(move || global_rps("")),
+            std::sync::Arc::new(move |d: &str| per_member(global_domain_rps(d), domain_rps(d), 1)),
+        );
+        if let Some((instance_key, global_key, default)) = tl {
+            let instance = read_tl_rps(instance_key, default);
+            let shared = read_tl_rps(global_key, unlimited);
+            p = p.with_task_list_rps(std::sync::Arc::new(move |d: &str, t: &str| {
+                per_member(shared(d, t), instance(d, t), 1)
+            }));
+        }
+        std::sync::Arc::new(p) as std::sync::Arc<dyn crate::wrappers::ratelimited::Policy>
+    };
     let max_poll_delay_nanos = {
         let guard = overlay.lock();
         guard.map_or(0, |o| {
@@ -969,20 +1000,51 @@ pub fn build_workflow_api(
         std::sync::Arc::new(crate::wrappers::quota_policy::LookupDomainNames::new(
             lookup.clone(),
         )),
-        policy(("frontend.rps", 1200), ("frontend.domainrps", 1200)),
+        policy(
+            ("frontend.rps", 1200),
+            ("frontend.domainrps", 1200),
+            "frontend.globalDomainrps",
+            Some(("frontend.tasklistrps", "frontend.globalTaskListrps", 1200)),
+        ),
         policy(
             ("frontend.workerrps", unlimited),
             ("frontend.domainworkerrps", unlimited),
+            "frontend.globalDomainWorkerrps",
+            Some((
+                "frontend.tasklistworkerrps",
+                "frontend.globalTaskListWorkerrps",
+                unlimited,
+            )),
         ),
         policy(
             ("frontend.visibilityrps", unlimited),
             ("frontend.domainvisibilityrps", unlimited),
+            "frontend.globalDomainVisibilityrps",
+            None,
         ),
         policy(
             ("frontend.asyncrps", 10000),
             ("frontend.domainasyncrps", 10000),
+            "frontend.globalDomainAsyncrps",
+            Some((
+                "frontend.tasklistasyncrps",
+                "frontend.globalTaskListAsyncrps",
+                10000,
+            )),
         ),
-        std::sync::Arc::new(crate::wrappers::quota_policy::NoBypass),
+        std::sync::Arc::new(crate::wrappers::quota_policy::ConfiguredBypass::new({
+            let overlay = overlay.clone();
+            std::sync::Arc::new(move || {
+                overlay.lock().map_or_else(
+                    |_| Vec::new(),
+                    |o| {
+                        cadence_persistence::dynamic_config::string_list(
+                            o.property_values("system.rateLimiterBypassCallerTypes"),
+                        )
+                    },
+                )
+            })
+        })),
         std::time::Duration::from_nanos(max_poll_delay_nanos.max(0) as u64),
     );
     let async_domains: std::sync::Arc<dyn crate::async_publisher::AsyncDomainConfigLookup> =

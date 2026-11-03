@@ -1464,6 +1464,23 @@ async fn run_with_lifecycle(
             } else {
                 None
             };
+            // Go builds an HTTP inbound for every service whose `rpc.http` is set.
+            let frontend_http_addr = if run_frontend {
+                frontend_rpc.map(matching_http_addr).transpose()?.flatten()
+            } else {
+                None
+            };
+            let frontend_http_tls_config = if run_frontend {
+                match frontend_rpc.and_then(|rpc| rpc.http.as_ref()) {
+                    Some(http) => matching_http_tls(http).await?,
+                    None => None,
+                }
+            } else {
+                None
+            };
+            if let Some(addr) = frontend_http_addr {
+                println!("Cadence Frontend HTTP listening on {addr}");
+            }
             if run_matching {
                 if let Some(addr) = matching_http_addr {
                     println!("Cadence internal Matching HTTP listening on {addr}");
@@ -2074,6 +2091,7 @@ async fn run_with_lifecycle(
                     tchannel_state.workflow_api = Some(api);
                 }
             }
+            let frontend_http_state = tchannel_state.clone();
             // The listener accepts Ringpop JOIN before provider bootstrap
             // starts. Use the final Frontend state, including its workflow
             // API hook, and deliberately omit the Matching handler.
@@ -2170,6 +2188,43 @@ async fn run_with_lifecycle(
                             crate::tchannel::serve(tchannel_addr, tchannel_state).await
                         },
                     )
+                });
+            }
+            if let Some(addr) = frontend_http_addr {
+                let http = frontend_rpc
+                    .and_then(|rpc| rpc.http.as_ref())
+                    .expect("configured Frontend HTTP address");
+                let procedures = http.procedures.clone();
+                let tls_mode = http.tls_mode.clone();
+                let tls_enabled = http.tls.as_ref().is_some_and(|tls| tls.enabled);
+                let tls_config = frontend_http_tls_config.clone();
+                let http_state = frontend_http_state.clone();
+                serving.spawn(async move {
+                    let app = handlers::yarpc_http_router(http_state, procedures);
+                    let result = if tls_mode.as_deref() == Some("enforced") && tls_enabled {
+                        axum_server::bind_rustls(
+                            addr,
+                            tls_config.expect("validated enforced TLS configuration"),
+                        )
+                        .serve(app.into_make_service())
+                        .await
+                        .map_err(anyhow::Error::from)
+                    } else if tls_mode.as_deref() == Some("permissive") && tls_enabled {
+                        serve_matching_http_permissive(
+                            addr,
+                            app,
+                            tls_config.expect("validated permissive TLS configuration"),
+                        )
+                        .await
+                    } else {
+                        match tokio::net::TcpListener::bind(addr).await {
+                            Ok(listener) => axum::serve(listener, app)
+                                .await
+                                .map_err(anyhow::Error::from),
+                            Err(error) => Err(anyhow::Error::from(error)),
+                        }
+                    };
+                    ("Frontend HTTP", result)
                 });
             }
             if run_history {

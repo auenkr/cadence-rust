@@ -18,6 +18,19 @@ pub const UNLIMITED_RPS: f64 = 100_000.0;
 
 pub type RpsSource = Arc<dyn Fn() -> f64 + Send + Sync>;
 pub type DomainRpsSource = Arc<dyn Fn(&str) -> f64 + Send + Sync>;
+/// `(domain, task list)` -> rps, Go's `IntPropertyFnWithDomainAndTaskListFilter`.
+pub type TaskListRpsSource = Arc<dyn Fn(&str, &str) -> f64 + Send + Sync>;
+
+/// Go `permember.PerMember`: the per-instance limit is the global limit
+/// averaged over the member count, capped by the instance limit; a
+/// non-positive global limit or unknown member count falls back to the instance limit.
+pub fn per_member(global_rps: f64, instance_rps: f64, member_count: usize) -> f64 {
+    if global_rps <= 0.0 || member_count < 1 {
+        return instance_rps;
+    }
+    let avg = (global_rps / member_count as f64).max(1.0);
+    avg.min(instance_rps)
+}
 
 struct Bucket {
     tokens: f64,
@@ -49,6 +62,8 @@ pub struct TokenBucketPolicy {
     domain_rps: DomainRpsSource,
     global: Mutex<Bucket>,
     domains: Mutex<HashMap<String, Bucket>>,
+    task_list_rps: Option<TaskListRpsSource>,
+    task_lists: Mutex<HashMap<(String, String), Bucket>>,
 }
 
 impl TokenBucketPolicy {
@@ -59,7 +74,16 @@ impl TokenBucketPolicy {
             domain_rps,
             global: Mutex::new(Bucket::new(initial)),
             domains: Mutex::new(HashMap::new()),
+            task_list_rps: None,
+            task_lists: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Add Go's task-list stage (`MultiStageRateLimiter.taskListLimiters`),
+    /// consulted before the domain stage for requests that carry a task list.
+    pub fn with_task_list_rps(mut self, source: TaskListRpsSource) -> Self {
+        self.task_list_rps = Some(source);
+        self
     }
 
     /// Try to take one token from both stages; on failure return how long
@@ -68,6 +92,11 @@ impl TokenBucketPolicy {
         let now = Instant::now();
         let global_rps = (self.global_rps)();
         let domain_rps = (self.domain_rps)(&info.domain);
+        let task_list_rps = match (&self.task_list_rps, info.task_list.is_empty()) {
+            (Some(source), false) => Some(source(&info.domain, &info.task_list)),
+            _ => None,
+        };
+        let mut task_lists = self.task_lists.lock().unwrap_or_else(|e| e.into_inner());
         let mut global = self.global.lock().unwrap_or_else(|e| e.into_inner());
         let mut domains = self.domains.lock().unwrap_or_else(|e| e.into_inner());
         let domain = domains
@@ -75,9 +104,20 @@ impl TokenBucketPolicy {
             .or_insert_with(|| Bucket::new(domain_rps));
         global.refill(global_rps, now);
         domain.refill(domain_rps, now);
-        if global.tokens >= 1.0 && domain.tokens >= 1.0 {
+        let task_list = task_list_rps.map(|rps| {
+            let bucket = task_lists
+                .entry((info.domain.clone(), info.task_list.clone()))
+                .or_insert_with(|| Bucket::new(rps));
+            bucket.refill(rps, now);
+            (bucket, rps)
+        });
+        let task_list_ok = task_list.as_ref().is_none_or(|(b, _)| b.tokens >= 1.0);
+        if global.tokens >= 1.0 && domain.tokens >= 1.0 && task_list_ok {
             global.tokens -= 1.0;
             domain.tokens -= 1.0;
+            if let Some((bucket, _)) = task_list {
+                bucket.tokens -= 1.0;
+            }
             return Ok(());
         }
         let need = |tokens: f64, rps: f64| {
@@ -87,7 +127,10 @@ impl TokenBucketPolicy {
                 (1.0 - tokens) / rps
             }
         };
-        let seconds = need(global.tokens, global_rps).max(need(domain.tokens, domain_rps));
+        let task_list_need = task_list.as_ref().map_or(0.0, |(b, rps)| need(b.tokens, *rps));
+        let seconds = need(global.tokens, global_rps)
+            .max(need(domain.tokens, domain_rps))
+            .max(task_list_need);
         Err(Duration::from_secs_f64(seconds.max(0.001)))
     }
 }
@@ -114,16 +157,47 @@ impl Policy for TokenBucketPolicy {
     }
 }
 
-/// Go's default `quotas.CallerBypass`: no caller type is exempt.
+/// Go's `quotas.CallerBypass` over `system.rateLimiterBypassCallerTypes`:
+/// a denied request is still admitted when its caller type is listed.
+pub struct ConfiguredBypass {
+    caller_types: Arc<dyn Fn() -> Vec<String> + Send + Sync>,
+}
+
+impl ConfiguredBypass {
+    pub fn new(caller_types: Arc<dyn Fn() -> Vec<String> + Send + Sync>) -> Self {
+        Self { caller_types }
+    }
+}
+
+/// No caller type is exempt (Go with a nil bypass list).
 pub struct NoBypass;
 
 impl CallerBypass for NoBypass {
-    fn should_bypass(&self) -> bool {
+    fn should_bypass(&self, _: &QuotaInfo) -> bool {
         false
     }
 
     fn allow_policy(&self, policy: &dyn Policy, info: &QuotaInfo) -> bool {
         policy.allow(info)
+    }
+}
+
+impl CallerBypass for ConfiguredBypass {
+    fn should_bypass(&self, info: &QuotaInfo) -> bool {
+        // Go: ParseCallerType("") is CallerTypeUnknown ("unknown").
+        let caller = if info.caller_type.is_empty() {
+            "unknown"
+        } else {
+            info.caller_type.as_str()
+        };
+        (self.caller_types)().iter().any(|t| {
+            let t = if t.is_empty() { "unknown" } else { t.as_str() };
+            t == caller
+        })
+    }
+
+    fn allow_policy(&self, policy: &dyn Policy, info: &QuotaInfo) -> bool {
+        policy.allow(info) || self.should_bypass(info)
     }
 }
 
@@ -155,6 +229,7 @@ mod tests {
         QuotaInfo {
             domain: domain.to_owned(),
             task_list: String::new(),
+            caller_type: String::new(),
         }
     }
 
@@ -168,6 +243,42 @@ mod tests {
         assert!(policy.allow(&info("a")));
         assert!(!policy.allow(&info("a")));
         assert!(policy.allow(&info("b")));
+    }
+
+    #[test]
+    fn task_list_bucket_limits_only_that_task_list() {
+        let policy = TokenBucketPolicy::new(Arc::new(|| 1000.0), Arc::new(|_| 1000.0))
+            .with_task_list_rps(Arc::new(|_, tl| if tl == "hot" { 1.0 } else { 1000.0 }));
+        let on = |tl: &str| QuotaInfo {
+            domain: "a".into(),
+            task_list: tl.into(),
+            caller_type: String::new(),
+        };
+        assert!(policy.allow(&on("hot")));
+        assert!(!policy.allow(&on("hot")));
+        assert!(policy.allow(&on("cold")));
+        assert!(policy.allow(&info("a")));
+    }
+
+    #[test]
+    fn configured_bypass_admits_listed_caller_type() {
+        let deny = TokenBucketPolicy::new(Arc::new(|| 1.0), Arc::new(|_| 1.0));
+        let bypass = ConfiguredBypass::new(Arc::new(|| vec!["cli".to_owned()]));
+        let mut cli = info("a");
+        cli.caller_type = "cli".into();
+        assert!(bypass.allow_policy(&deny, &cli));
+        assert!(bypass.allow_policy(&deny, &cli));
+        let sdk = info("a");
+        assert!(!bypass.allow_policy(&deny, &sdk));
+    }
+
+    #[test]
+    fn per_member_matches_go() {
+        assert_eq!(per_member(0.0, 7.0, 3), 7.0);
+        assert_eq!(per_member(100.0, 7.0, 0), 7.0);
+        assert_eq!(per_member(100.0, 50.0, 4), 25.0);
+        assert_eq!(per_member(100.0, 10.0, 4), 10.0);
+        assert_eq!(per_member(2.0, 10.0, 4), 1.0);
     }
 
     #[test]
