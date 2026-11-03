@@ -127,7 +127,9 @@ impl TokenBucketPolicy {
                 (1.0 - tokens) / rps
             }
         };
-        let task_list_need = task_list.as_ref().map_or(0.0, |(b, rps)| need(b.tokens, *rps));
+        let task_list_need = task_list
+            .as_ref()
+            .map_or(0.0, |(b, rps)| need(b.tokens, *rps));
         let seconds = need(global.tokens, global_rps)
             .max(need(domain.tokens, domain_rps))
             .max(task_list_need);
