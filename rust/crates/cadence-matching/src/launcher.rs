@@ -1466,7 +1466,10 @@ async fn run_with_lifecycle(
             };
             // Go builds an HTTP inbound for every service whose `rpc.http` is set.
             let frontend_http_addr = if run_frontend {
-                frontend_rpc.map(rpc_http_listen_addr).transpose()?.flatten()
+                frontend_rpc
+                    .map(rpc_http_listen_addr)
+                    .transpose()?
+                    .flatten()
             } else {
                 None
             };
