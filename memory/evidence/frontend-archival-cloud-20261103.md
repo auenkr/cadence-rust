@@ -21,3 +21,10 @@ Branch `t3/frontend-archival-providers`, head `038fcc78cdb90d5286d94ef08437f9916
 
 ## Run history
 Provisioning and diagnostic runs 41619824271 to 41643624762 (see git log). 41643624762 and 41645252727 failed on the two bugs above.
+
+## Update: GCS gate lane (branch t3/frontend-gcs-gate, workflow head 92c125242; Rust unchanged)
+- Mixed gate (mysql, kafka=false, gcs=true), conclusion **success**, failures=0: https://github.com/auenkr/cadence-rust/actions/runs/41699370018
+  - Rust binary SHA256 `e5cb2b18bdff1e3fa6c0eef2010fd303a9ad024a3e008c4cbdf135ed4323d3bb`; fake-gcs-server `fsouza/fake-gcs-server:1.50.2` (docker, 512m/0.5 cpu), `STORAGE_EMULATOR_HOST` for Go and Rust.
+  - Steps passed: create bucket, register rejected (missing bucket, s3:// URI), register+describe, Go History writes visibility archives to GCS, `listarchived` through Rust (`CloseTime = '<ts>' AND SearchPrecision = 'Day' AND WorkflowType = ...`, Go gstorage requires a time + precision), archived-only history over tchannel and gRPC CLI, missing run rejected.
+  - Archived-only history is hand-built in Go multipart format; object names come from `tests/gates/gcs-seed` (built inside the Go module with go-farm fingerprint64).
+  - No Rust GCS reader bug found. Failed earlier runs 41695744088, 41697441559 were gate-script errors (query filter name, relative seed path).

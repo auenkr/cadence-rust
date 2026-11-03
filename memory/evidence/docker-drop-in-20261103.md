@@ -26,3 +26,7 @@ Known gaps: --auto-setup shells out to the Go binary (`cadence-server-go update-
   - frontend-mixed-gate mysql kafka two_history https://github.com/auenkr/cadence-rust/actions/runs/41691545289
   - frontend-mixed-gate postgres two_cluster https://github.com/auenkr/cadence-rust/actions/runs/41693547469
 - Not verified from artifacts: default-domain creation result (script logs to /tmp/default-domain.log in the container); the SDK smoke itself registers `smoke` domain.
+
+## Update: default domain assertion (branch t3/frontend-gcs-gate)
+- docker-drop-in (mysql + cassandra) conclusion **success**: https://github.com/auenkr/cadence-rust/actions/runs/41701067797, head 92c125242. New step runs `cadence domain describe --domain default` against the Rust frontend (retry 30x) and asserts it exists; mysql artifact shows `Name: default, Description: Example Domain`. Rust image binary SHA256 (mysql job) `a8c5deabfb06dba0c638a1e4b68d2c37876ddafe4dc03d033f39a2c0a26021e0`.
+- `/tmp/default-domain.log` is collected into artifacts when present; in the mysql artifact the copy reported "no default-domain.log" (`docker compose cp` found nothing), so the describe output is the real evidence.
