@@ -945,6 +945,16 @@ pub const METHODS: &[MethodDef] = &[
     },
     MethodDef {
         service: "AdminService",
+        method: "ResendReplicationTasks",
+        arg_type: "ResendReplicationTasksRequest",
+        exceptions: &[
+            ("BadRequestError", 1),
+            ("ServiceBusyError", 2),
+            ("EntityNotExistsError", 3),
+        ],
+    },
+    MethodDef {
+        service: "AdminService",
         method: "DescribeQueue",
         arg_type: "DescribeQueueRequest",
         exceptions: &[

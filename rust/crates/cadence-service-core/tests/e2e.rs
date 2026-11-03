@@ -2150,3 +2150,62 @@ async fn describe_task_list_reports_pollers() {
     let pollers = desc["pollers"].as_array().unwrap();
     assert!(pollers.iter().any(|p| p["identity"] == "worker-9"));
 }
+
+#[tokio::test]
+async fn delete_domain_rejects_domain_with_executions() {
+    let app = router(AppState::default());
+    setup_domain(app.clone()).await;
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/workflows/start",
+        start_body("del-1"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/domains/deprecate",
+        json!({"name": "e2e-domain"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = call(
+        app,
+        Method::POST,
+        "/api/v1/domains/delete",
+        json!({"name": "e2e-domain"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body.to_string().contains("Domain still have workflow execution history."));
+}
+
+#[tokio::test]
+async fn admin_refresh_tasks_delegates_to_history() {
+    // With a History channel configured the request must reach History
+    // (unreachable here -> InternalServiceError) instead of the in-memory store.
+    let mut state = AppState::default();
+    state.history_admin_channel = Some(
+        tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+    );
+    let app = router(state);
+    setup_domain(app.clone()).await;
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/workflows/start",
+        start_body("refresh-1"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        app,
+        Method::POST,
+        "/api/v1/admin/workflows/refresh-tasks",
+        json!({"domain": "e2e-domain", "workflowExecution": {"workflowId": "e2e-wf"}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+}
