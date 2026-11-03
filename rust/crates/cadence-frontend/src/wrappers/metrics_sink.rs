@@ -65,7 +65,10 @@ impl SinkMetrics {
             }
         };
         let mut out = BTreeMap::new();
-        out.insert("operation".to_owned(), scope_operation(operation).to_owned());
+        out.insert(
+            "operation".to_owned(),
+            scope_operation(operation).to_owned(),
+        );
         let mut domain = "";
         for tag in tags {
             match tag.key {
