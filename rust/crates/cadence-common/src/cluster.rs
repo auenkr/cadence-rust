@@ -33,6 +33,7 @@ pub struct GroupMetadata {
     pub cluster_information: BTreeMap<String, ClusterInformation>,
     pub enable_global_domain: bool,
     pub cluster_name_for_failover_version_increment: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cluster_redirection_policy: Option<ClusterRedirectionPolicy>,
 }
 
