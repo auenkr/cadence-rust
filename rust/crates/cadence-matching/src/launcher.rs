@@ -1,7 +1,7 @@
 use crate::{config, handlers, service};
 use cadence_service_core::cli::{Cli, Command};
 
-fn matching_http_addr(rpc: &config::RpcConfig) -> anyhow::Result<Option<std::net::SocketAddr>> {
+fn rpc_http_listen_addr(rpc: &config::RpcConfig) -> anyhow::Result<Option<std::net::SocketAddr>> {
     let Some(http) = rpc.http.as_ref() else {
         return Ok(None);
     };
@@ -1450,7 +1450,7 @@ async fn run_with_lifecycle(
             let matching_http_addr = if run_matching {
                 matching_rpc
                     .as_ref()
-                    .map(matching_http_addr)
+                    .map(rpc_http_listen_addr)
                     .transpose()?
                     .flatten()
             } else {
@@ -1466,7 +1466,7 @@ async fn run_with_lifecycle(
             };
             // Go builds an HTTP inbound for every service whose `rpc.http` is set.
             let frontend_http_addr = if run_frontend {
-                frontend_rpc.map(matching_http_addr).transpose()?.flatten()
+                frontend_rpc.map(rpc_http_listen_addr).transpose()?.flatten()
             } else {
                 None
             };
@@ -2997,14 +2997,14 @@ mod matching_http_listener_tests {
         let rpc: config::RpcConfig =
             serde_yaml::from_str("bindOnLocalHost: true\nhttp: {port: 8801}").unwrap();
         assert_eq!(
-            matching_http_addr(&rpc).unwrap().unwrap().to_string(),
+            rpc_http_listen_addr(&rpc).unwrap().unwrap().to_string(),
             "127.0.0.1:8801"
         );
     }
     #[tokio::test]
     async fn rejects_invalid_configuration_and_detects_enabled_tls() {
         let rpc: config::RpcConfig = serde_yaml::from_str("http: {port: 0}").unwrap();
-        assert!(matching_http_addr(&rpc)
+        assert!(rpc_http_listen_addr(&rpc)
             .unwrap_err()
             .to_string()
             .contains("HTTP port is not set"));
