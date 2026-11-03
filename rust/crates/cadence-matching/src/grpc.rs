@@ -491,6 +491,29 @@ impl Frontend {
                 }
             }
         }
+        if let (Some(operation), Some(api)) = (
+            schedule_operation(&method, path),
+            self.state.workflow_api.clone(),
+        ) {
+            // Go metered wrapper (innermost): only locally served calls count.
+            let request =
+                serde_json::to_value(input).map_err(|e| Status::internal(e.to_string()))?;
+            let start = std::time::Instant::now();
+            let result = self.legacy_router_call(method, path, input, headers).await;
+            let error = result.as_ref().err().map(|status| status.code() as i32);
+            api.observe_local(operation, &request, start.elapsed(), error);
+            return result;
+        }
+        self.legacy_router_call(method, path, input, headers).await
+    }
+
+    async fn legacy_router_call<T: Serialize, R: DeserializeOwned>(
+        &self,
+        method: Method,
+        path: &str,
+        input: &T,
+        headers: &[(&str, &str)],
+    ) -> Result<R, Status> {
         let body = if method == Method::GET {
             Vec::new()
         } else {

@@ -74,6 +74,17 @@ pub trait WorkflowApi: Send + Sync + std::fmt::Debug {
         request: serde_json::Value,
         ctx: CallerContext,
     ) -> ApiFuture<'a>;
+    /// Go metered wrapper for operations served outside `call` (schedule APIs
+    /// on the in-process router): `error` is the gRPC status code on failure.
+    fn observe_local(
+        &self,
+        operation: &str,
+        request: &serde_json::Value,
+        elapsed: std::time::Duration,
+        error: Option<i32>,
+    ) {
+        let _ = (operation, request, elapsed, error);
+    }
     /// Go cluster-redirection wrapper for operations this implementation does
     /// not serve (schedule APIs): `Some(response)` when the call was forwarded
     /// to a remote cluster, `None` to serve it locally.

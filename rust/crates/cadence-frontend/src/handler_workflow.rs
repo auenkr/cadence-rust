@@ -949,6 +949,38 @@ impl<B: WorkflowBackend> Handler<B> {
     /// Go resolves the metrics `domain` of token-based Respond*/heartbeat calls
     /// from the task token, and adds `signalName` when
     /// `frontend.emitSignalNameMetricsTag` is on for the domain.
+    /// Metered-wrapper emission for APIs served outside `dispatch_metered`
+    /// (schedule APIs): requests, latency, histogram and the typed error
+    /// counter derived from the gRPC status code.
+    pub fn observe_local(
+        &self,
+        operation: &str,
+        request: &Value,
+        elapsed: std::time::Duration,
+        error: Option<i32>,
+    ) {
+        use crate::wrappers::metered::Counter;
+        let tags = crate::wrappers::metered::request_tags(operation, request);
+        self.metrics.increment_requests_tagged(operation, &tags);
+        self.metrics.record_operation(operation, elapsed, &tags);
+        self.metrics
+            .record_latency_histogram_tagged(operation, elapsed, &tags);
+        if let Some(code) = error {
+            // tonic::Code: 3 InvalidArgument, 5 NotFound, 6 AlreadyExists,
+            // 8 ResourceExhausted, 4 DeadlineExceeded, 14 Unavailable.
+            let counter = match code {
+                3 => Counter::BadRequest,
+                5 => Counter::EntityNotExists,
+                6 => Counter::ExecutionAlreadyStarted,
+                8 => Counter::ServiceBusy,
+                4 => Counter::ContextTimeout,
+                14 => Counter::ServiceUnavailable,
+                _ => Counter::Failures,
+            };
+            self.metrics.increment_error(operation, &tags, counter);
+        }
+    }
+
     fn augment_metric_tags(
         &self,
         operation: WorkflowOperation,

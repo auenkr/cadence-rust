@@ -332,8 +332,14 @@ mod tests {
             .iter()
             .map(|op| op.name())
             .collect();
+        // Schedule APIs are metered by `Handler::observe_local` (served by the
+        // in-process router rather than `WorkflowOperation`).
+        let schedules = cadence_service_core::workflow_api::REDIRECTED_SCHEDULE_OPERATIONS;
         for (method, _) in GO_FRONTEND_SCOPES {
-            assert!(rust.contains(method), "missing Rust operation {method}");
+            assert!(
+                rust.contains(method) || schedules.contains(method),
+                "missing Rust operation {method}"
+            );
         }
     }
 
