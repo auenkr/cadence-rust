@@ -1749,6 +1749,7 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
             let _ = self.cache.delete(&name);
             return Err(error);
         }
+        eprintln!("Frontend: persisted domain {} id {} at notification version {}", name, record.info.uuid, version);
         self.write_audit(
             &record.info.uuid,
             crate::domain_audit::DOMAIN_AUDIT_OPERATION_TYPE_CREATE,

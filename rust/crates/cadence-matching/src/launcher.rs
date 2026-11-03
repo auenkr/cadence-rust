@@ -1662,6 +1662,7 @@ async fn run_with_lifecycle(
                     );
                 }
             }
+            eprintln!("Frontend startup: persisted domain manager configured={}", state.domain_metadata_persistence.is_some());
             if let Some(persistence) = state.domain_metadata_persistence.clone() {
                 state.domain_manager =
                     std::sync::Arc::new(cadence_persistence::PersistedFrontendDomainManager::new(
