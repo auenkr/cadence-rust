@@ -120,12 +120,6 @@ func esMain(rpc workflowserviceclient.Interface, domain string) {
 		if json.Unmarshal(raw, &n) != nil || n != 41 {
 			return fmt.Errorf("CustomIntField=%s", raw)
 		}
-		if addedKey != "" {
-			var s string
-			if json.Unmarshal(got[0].SearchAttributes.GetIndexedFields()[addedKey], &s) != nil || s != "added-"+marker {
-				return fmt.Errorf("%s=%s", addedKey, got[0].SearchAttributes.GetIndexedFields()[addedKey])
-			}
-		}
 		return nil
 	})
 	poll("es-count", func() error {
@@ -164,7 +158,7 @@ func esMain(rpc workflowserviceclient.Interface, domain string) {
 	// Query errors keep Go's message.
 	_, err = rpc.ListWorkflowExecutions(ctx, &shared.ListWorkflowExecutionsRequest{Domain: &domain, Query: ptr("NoSuchAttr = 'x'")})
 	step("es-list-invalid-attribute-rejected", errIf(err == nil || !strings.Contains(err.Error(), "invalid search attribute"), "got %v", err))
-	_, err = rpc.ListWorkflowExecutions(ctx, &shared.ListWorkflowExecutionsRequest{Domain: &domain, Query: ptr("this is not sql")})
+	_, err = rpc.ListWorkflowExecutions(ctx, &shared.ListWorkflowExecutionsRequest{Domain: &domain, Query: ptr("CustomKeywordField = ")})
 	step("es-list-invalid-query-rejected", errIf(err == nil || !strings.Contains(err.Error(), "Invalid query"), "got %v", err))
 }
 

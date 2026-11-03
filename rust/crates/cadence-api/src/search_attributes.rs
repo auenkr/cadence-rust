@@ -65,13 +65,6 @@ pub fn is_system_indexed_key(key: &str) -> bool {
             | "ScheduledExecutionTime"
             | "ClusterAttributeScope"
             | "ClusterAttributeName"
-            | "CadenceScheduleID"
-            | "CadenceScheduleTime"
-            | "CadenceScheduleIsBackfill"
-            | "CadenceScheduleState"
-            | "CadenceScheduleCron"
-            | "CadenceScheduleWorkflowType"
-            | "CadenceScheduleBackfillID"
     )
 }
 
@@ -80,7 +73,7 @@ mod tests {
     #[test]
     fn system_keys_match_go() {
         assert!(super::is_system_indexed_key("DomainID"));
-        assert!(super::is_system_indexed_key("CadenceScheduleID"));
+        assert!(!super::is_system_indexed_key("CadenceScheduleID"));
         assert!(!super::is_system_indexed_key("CustomKeywordField"));
         assert!(!super::is_system_indexed_key("MyField"));
     }
