@@ -20,7 +20,28 @@ macro_rules! cadence_enum {
         }
         impl<'de> Deserialize<'de> for $name {
             fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-                let v = i32::deserialize(d)?;
+                // Accept the numeric form (Thrift/REST) and the Go `MarshalText`
+                // string form (archived history blobs written by Go).
+                struct V;
+                impl<'de> serde::de::Visitor<'de> for V {
+                    type Value = i32;
+                    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                        f.write_str("an enum integer or name")
+                    }
+                    fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<i32, E> {
+                        i32::try_from(v).map_err(E::custom)
+                    }
+                    fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<i32, E> {
+                        i32::try_from(v).map_err(E::custom)
+                    }
+                    fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<i32, E> {
+                        $name::parse(v).map(|x| x as i32).ok_or_else(|| E::custom(format!(
+                            "unknown {} value {v}",
+                            stringify!($name),
+                        )))
+                    }
+                }
+                let v = d.deserialize_any(V)?;
                 Self::from_i32(v).ok_or_else(|| serde::de::Error::custom(format!(
                     "unknown {} value {v}",
                     stringify!($name),
