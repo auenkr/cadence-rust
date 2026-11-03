@@ -1,10 +1,5 @@
 name: Docker drop-in (Go image vs Rust image for frontend+matching)
 on:
-  # Temporary: a new workflow cannot be dispatched until it is on master; this branch
-  # push trigger lets it run from the branch. Remove after merge.
-  push:
-    branches: [t3/rust-docker-drop-in]
-    paths: [.github/workflows/docker-drop-in.yml, rust/Dockerfile, "rust/crates/**", tests/docker-drop-in/**]
   workflow_dispatch:
     inputs:
       rust_services:
