@@ -108,8 +108,7 @@ pub async fn call(
     let mut visibility = p::visibility_api_client::VisibilityApiClient::new(channel.clone());
     let mut worker = p::worker_api_client::WorkerApiClient::new(channel.clone());
     let mut schedule = p::schedule_api_client::ScheduleApiClient::new(channel);
-    let _ = &mut schedule;
-    // `forward!(client, rpc, RequestType, request_fn, response_fn)`: JSON -> typed
+        // `forward!(client, rpc, RequestType, request_fn, response_fn)`: JSON -> typed
     // request -> proto, then proto response -> typed -> JSON. `void` ignores the response.
     macro_rules! forward {
         ($client:ident, $rpc:ident, $ty:ty, fallible $out:expr, $inn:expr) => {{
@@ -300,6 +299,38 @@ pub async fn call(
             worker, record_activity_task_heartbeat_by_id, tk::RecordActivityTaskHeartbeatByIDRequest,
             c::heartbeat_by_id_request_out,
             |r: p::RecordActivityTaskHeartbeatByIdResponse| Ok::<_, tonic::Status>(tk::RecordActivityTaskHeartbeatResponse { cancel_requested: r.cancel_requested })
+        ),
+        "CreateSchedule" => forward!(
+            schedule, create_schedule, cadence_api::schedule::CreateScheduleRequest,
+            c::create_schedule_request_out, c::create_schedule_response_in
+        ),
+        "DescribeSchedule" => forward!(
+            schedule, describe_schedule, cadence_api::schedule::DescribeScheduleRequest,
+            c::describe_schedule_request_out, c::describe_schedule_response_in
+        ),
+        "ListSchedules" => forward!(
+            schedule, list_schedules, cadence_api::schedule::ListSchedulesRequest,
+            c::list_schedules_request_out, c::list_schedules_response_in
+        ),
+        "DeleteSchedule" => forward!(
+            schedule, delete_schedule, cadence_api::schedule::DeleteScheduleRequest,
+            c::delete_schedule_request_out, void
+        ),
+        "PauseSchedule" => forward!(
+            schedule, pause_schedule, cadence_api::schedule::PauseScheduleRequest,
+            c::pause_schedule_request_out, void
+        ),
+        "UnpauseSchedule" => forward!(
+            schedule, unpause_schedule, cadence_api::schedule::UnpauseScheduleRequest,
+            c::unpause_schedule_request_out, void
+        ),
+        "BackfillSchedule" => forward!(
+            schedule, backfill_schedule, cadence_api::schedule::BackfillScheduleRequest,
+            c::backfill_schedule_request_out, void
+        ),
+        "UpdateSchedule" => forward!(
+            schedule, update_schedule, cadence_api::schedule::UpdateScheduleRequest,
+            c::update_schedule_request_out, void
         ),
         other => Err(CadenceError::Internal(InternalServiceError::new(format!(
             "operation {other} is not supported over the gRPC remote Frontend transport"

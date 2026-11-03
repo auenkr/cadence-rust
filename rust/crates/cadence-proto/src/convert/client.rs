@@ -795,6 +795,153 @@ pub fn heartbeat_by_id_request_out(
     }
 }
 
+// ---- Schedule API (client direction) ----
+
+use cadence_api::schedule as sc;
+
+fn schedule_state_in(v: p::ScheduleState) -> sc::ScheduleState {
+    sc::ScheduleState {
+        paused: v.paused,
+        pause_info: v.pause_info.map(|i| sc::SchedulePauseInfo {
+            reason: i.reason,
+            paused_time_nano: nanos(i.paused_at),
+            paused_by: i.paused_by,
+        }),
+    }
+}
+
+fn schedule_info_in(v: p::ScheduleInfo) -> sc::ScheduleInfo {
+    sc::ScheduleInfo {
+        last_run_time_nano: nanos(v.last_run_time),
+        next_run_time_nano: nanos(v.next_run_time),
+        total_runs: v.total_runs,
+        create_time_nano: nanos(v.create_time),
+        last_update_time_nano: nanos(v.last_update_time),
+        ongoing_backfills: v
+            .ongoing_backfills
+            .into_iter()
+            .map(|b| sc::BackfillInfo {
+                backfill_id: b.backfill_id,
+                start_time_nano: nanos(b.start_time),
+                end_time_nano: nanos(b.end_time),
+                runs_completed: b.runs_completed,
+                runs_total: b.runs_total,
+            })
+            .collect(),
+        missed_runs: v.missed_runs,
+        skipped_runs: v.skipped_runs,
+        buffered_fire_count: v.buffered_fire_count,
+        running_workflow_count: v.running_workflow_count,
+    }
+}
+
+pub fn create_schedule_request_out(v: sc::CreateScheduleRequest) -> p::CreateScheduleRequest {
+    p::CreateScheduleRequest {
+        domain: v.domain,
+        schedule_id: v.schedule_id,
+        spec: v.spec.map(schedule_spec_out),
+        action: v.action.map(schedule_action_out),
+        policies: v.policies.map(schedule_policies_out),
+        memo: v.memo.map(memo),
+        search_attributes: v.search_attributes.map(search_attributes),
+        state: v.state.map(schedule_state_out),
+    }
+}
+
+pub fn create_schedule_response_in(v: p::CreateScheduleResponse) -> Result<sc::CreateScheduleResponse, Status> {
+    Ok(sc::CreateScheduleResponse { schedule_id: v.schedule_id })
+}
+
+pub fn describe_schedule_request_out(v: sc::DescribeScheduleRequest) -> p::DescribeScheduleRequest {
+    p::DescribeScheduleRequest { domain: v.domain, schedule_id: v.schedule_id }
+}
+
+pub fn describe_schedule_response_in(
+    v: p::DescribeScheduleResponse,
+) -> Result<sc::DescribeScheduleResponse, Status> {
+    Ok(sc::DescribeScheduleResponse {
+        spec: v.spec.map(schedule_spec_in),
+        action: v.action.map(schedule_action_in).transpose()?,
+        policies: v.policies.map(schedule_policies_in).transpose()?,
+        state: v.state.map(schedule_state_in),
+        info: v.info.map(schedule_info_in),
+        memo: v.memo.map(memo_in),
+        search_attributes: v.search_attributes.map(search_attributes_in),
+    })
+}
+
+pub fn list_schedules_request_out(v: sc::ListSchedulesRequest) -> p::ListSchedulesRequest {
+    p::ListSchedulesRequest {
+        domain: v.domain,
+        page_size: v.page_size,
+        next_page_token: v.next_page_token,
+    }
+}
+
+pub fn list_schedules_response_in(
+    v: p::ListSchedulesResponse,
+) -> Result<sc::ListSchedulesResponse, Status> {
+    Ok(sc::ListSchedulesResponse {
+        schedules: v
+            .schedules
+            .into_iter()
+            .map(|e| sc::ScheduleListEntry {
+                schedule_id: e.schedule_id,
+                workflow_type: e.workflow_type.map(|x| t::WorkflowType { name: x.name }),
+                state: e.state.map(schedule_state_in),
+                cron_expression: e.cron_expression,
+                memo: e.memo.map(memo_in),
+                search_attributes: e.search_attributes.map(search_attributes_in),
+            })
+            .collect(),
+        next_page_token: v.next_page_token,
+    })
+}
+
+pub fn delete_schedule_request_out(v: sc::DeleteScheduleRequest) -> p::DeleteScheduleRequest {
+    p::DeleteScheduleRequest { domain: v.domain, schedule_id: v.schedule_id }
+}
+
+pub fn pause_schedule_request_out(v: sc::PauseScheduleRequest) -> p::PauseScheduleRequest {
+    p::PauseScheduleRequest {
+        domain: v.domain,
+        schedule_id: v.schedule_id,
+        reason: v.reason,
+        identity: v.identity,
+    }
+}
+
+pub fn unpause_schedule_request_out(v: sc::UnpauseScheduleRequest) -> p::UnpauseScheduleRequest {
+    p::UnpauseScheduleRequest {
+        domain: v.domain,
+        schedule_id: v.schedule_id,
+        reason: v.reason,
+        catch_up_policy: v.catch_up_policy.map_or(0, |x| x as i32 + 1),
+    }
+}
+
+pub fn backfill_schedule_request_out(v: sc::BackfillScheduleRequest) -> p::BackfillScheduleRequest {
+    p::BackfillScheduleRequest {
+        domain: v.domain,
+        schedule_id: v.schedule_id,
+        start_time: v.start_time_nano.map(timestamp_from_nanos),
+        end_time: v.end_time_nano.map(timestamp_from_nanos),
+        overlap_policy: v.overlap_policy.map_or(0, |x| x as i32 + 1),
+        backfill_id: v.backfill_id,
+    }
+}
+
+pub fn update_schedule_request_out(v: sc::UpdateScheduleRequest) -> p::UpdateScheduleRequest {
+    p::UpdateScheduleRequest {
+        domain: v.domain,
+        schedule_id: v.schedule_id,
+        spec: v.spec.map(schedule_spec_out),
+        action: v.action.map(schedule_action_out),
+        policies: v.policies.map(schedule_policies_out),
+        search_attributes: v.search_attributes.map(search_attributes),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -990,5 +1137,76 @@ mod tests {
             ..Default::default()
         });
         assert!(reset.skip_signal_reapply && reset.decision_finish_event_id == 4);
+    }
+
+    #[test]
+    fn poll_decision_round_trip() {
+        let src = tk::PollForDecisionTaskResponse {
+            task_token: vec![1, 2],
+            workflow_execution: Some(exec()),
+            started_event_id: 3,
+            attempt: 2,
+            next_event_id: 9,
+            scheduled_timestamp: Some(1_500_000_000),
+            started_timestamp: Some(2_500_000_000),
+            query: Some(tk::WorkflowQuery { query_type: "q".into(), query_args: vec![7] }),
+            ..Default::default()
+        };
+        let back = poll_decision_response_in(poll_decision_response_out(src.clone()).unwrap()).unwrap();
+        assert_eq!(back.task_token, src.task_token);
+        assert_eq!(back.scheduled_timestamp, src.scheduled_timestamp);
+        assert_eq!(back.started_timestamp, src.started_timestamp);
+        assert_eq!(back.query, src.query);
+        assert_eq!(back.next_event_id, 9);
+    }
+
+    #[test]
+    fn activity_requests_out() {
+        let failed = respond_activity_failed_by_id_request_out(tk::RespondActivityTaskFailedByIDRequest {
+            domain: "d".into(),
+            workflow_id: "w".into(),
+            run_id: "r".into(),
+            activity_id: "a".into(),
+            reason: Some("boom".into()),
+            details: vec![1],
+            ..Default::default()
+        });
+        assert_eq!(failed.workflow_execution.unwrap().run_id, "r");
+        assert_eq!(failed.failure.unwrap().reason, "boom");
+        let hb = heartbeat_request_out(tk::RecordActivityTaskHeartbeatRequest {
+            task_token: vec![9],
+            details: vec![4],
+            identity: "i".into(),
+        });
+        assert_eq!(hb.details.unwrap().data, vec![4]);
+    }
+
+    #[test]
+    fn decision_completed_request_out_maps_sticky() {
+        let out = respond_decision_completed_request_out(tk::RespondDecisionTaskCompletedRequest {
+            task_token: vec![1],
+            sticky_attributes: Some(t::StickyExecutionAttributes {
+                worker_task_list: Some(t::TaskList { name: "s".into(), ..Default::default() }),
+                schedule_to_start_timeout_seconds: Some(5),
+            }),
+            ..Default::default()
+        })
+        .unwrap();
+        let sticky = out.sticky_attributes.unwrap();
+        assert_eq!(sticky.worker_task_list.unwrap().name, "s");
+        assert_eq!(sticky.schedule_to_start_timeout.unwrap().seconds, 5);
+    }
+
+    #[test]
+    fn schedule_describe_round_trip() {
+        let spec = sc::ScheduleSpec { cron_expression: "* * * * *".into(), start_time_nano: Some(5_000_000_001), ..Default::default() };
+        let proto = p::DescribeScheduleResponse {
+            spec: Some(schedule_spec_out(spec.clone())),
+            state: Some(schedule_state_out(sc::ScheduleState { paused: true, pause_info: None })),
+            ..Default::default()
+        };
+        let back = describe_schedule_response_in(proto).unwrap();
+        assert_eq!(back.spec.unwrap(), spec);
+        assert!(back.state.unwrap().paused);
     }
 }
