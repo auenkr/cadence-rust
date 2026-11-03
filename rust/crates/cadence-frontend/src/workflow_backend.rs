@@ -257,10 +257,6 @@ impl ProductionBackend {
             .unwrap_or_else(|| self.history_addr.clone()))
     }
 
-    pub(crate) fn matching_addr(&self) -> &str {
-        &self.matching_addr
-    }
-
     /// Matching owner of `task_list` from live membership; falls back to the
     /// configured address when no ring is available.
     pub(crate) fn matching_addr_for(&self, task_list: &str) -> String {
