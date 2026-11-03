@@ -4548,7 +4548,7 @@ mod tests {
             domain_id: "uuid:shop".into(),
             workflow_id: "wf".into(),
             run_id: "run".into(),
-            schedule_id: 0,
+            schedule_id: -23,
             activity_id: "activity".into(),
             ..Default::default()
         };
