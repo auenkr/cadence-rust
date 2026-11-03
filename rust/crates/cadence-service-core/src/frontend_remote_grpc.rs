@@ -172,13 +172,12 @@ pub async fn call(
     timeout: Duration,
 ) -> Result<Value, CadenceError> {
     let mut client = p::workflow_api_client::WorkflowApiClient::new(channel);
-    let wrap = |m| decorate(m, service, caller, forwarding_cluster, timeout);
     match operation {
         "StartWorkflowExecution" => {
             let typed: t::StartWorkflowExecutionRequest =
                 serde_json::from_value(request).map_err(bad)?;
             let response = client
-                .start_workflow_execution(wrap(start_request_out(typed)))
+                .start_workflow_execution(decorate(start_request_out(typed), service, caller, forwarding_cluster, timeout))
                 .await
                 .map_err(|s| error_from_status(&s))?
                 .into_inner();
@@ -191,7 +190,7 @@ pub async fn call(
             let typed: t::SignalWorkflowExecutionRequest =
                 serde_json::from_value(request).map_err(bad)?;
             client
-                .signal_workflow_execution(wrap(signal_request_out(typed)))
+                .signal_workflow_execution(decorate(signal_request_out(typed), service, caller, forwarding_cluster, timeout))
                 .await
                 .map_err(|s| error_from_status(&s))?;
             Ok(Value::Null)
@@ -200,7 +199,7 @@ pub async fn call(
             let typed: t::TerminateWorkflowExecutionRequest =
                 serde_json::from_value(request).map_err(bad)?;
             client
-                .terminate_workflow_execution(wrap(terminate_request_out(typed)))
+                .terminate_workflow_execution(decorate(terminate_request_out(typed), service, caller, forwarding_cluster, timeout))
                 .await
                 .map_err(|s| error_from_status(&s))?;
             Ok(Value::Null)
@@ -209,7 +208,7 @@ pub async fn call(
             let typed: cadence_api::service_types::RequestCancelWorkflowExecutionRequest =
                 serde_json::from_value(request).map_err(bad)?;
             client
-                .request_cancel_workflow_execution(wrap(cancel_request_out(typed)))
+                .request_cancel_workflow_execution(decorate(cancel_request_out(typed), service, caller, forwarding_cluster, timeout))
                 .await
                 .map_err(|s| error_from_status(&s))?;
             Ok(Value::Null)
