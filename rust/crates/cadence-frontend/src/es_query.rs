@@ -487,6 +487,24 @@ fn is_system_key(k: &str) -> bool {
     cadence_api::search_attributes::is_system_indexed_key(k)
 }
 
+fn is_union_select(clause: &str) -> bool {
+    let Ok(t) = tokenize(clause) else { return false };
+    let Some(u) = t.iter().position(|x| kw(x, "union")) else {
+        return false;
+    };
+    let mut j = u + 1;
+    if t.get(j).is_some_and(|x| kw(x, "all") || kw(x, "distinct")) {
+        j += 1;
+    }
+    t.get(j).is_some_and(|x| kw(x, "select"))
+        && parse_clause_prefix_ok(&t[..u])
+}
+
+fn parse_clause_prefix_ok(t: &[Tok]) -> bool {
+    let mut p = P { t: t.to_vec(), i: 0 };
+    p.expr().is_ok() && p.peek().is_none()
+}
+
 /// Port of `VisibilityQueryValidator.ValidateQuery`.
 pub fn validate_query<V>(
     clause: &str,
@@ -497,7 +515,15 @@ pub fn validate_query<V>(
     if clause.is_empty() {
         return Ok(String::new());
     }
-    let mut parsed = parse_clause(clause).map_err(|_| bad("Invalid query."))?;
+    let mut parsed = parse_clause(clause).map_err(|_| {
+        // Go's parser accepts `<where> UNION SELECT ...` as a Union statement,
+        // which the validator reports as "Invalid select query.".
+        if is_union_select(clause) {
+            bad("Invalid select query.")
+        } else {
+            bad("Invalid query.")
+        }
+    })?;
     let valid = |k: &str| !enable_validation || valid_attrs.contains_key(k);
     let mut buf = String::new();
     if let Some(w) = parsed.where_.as_mut() {
