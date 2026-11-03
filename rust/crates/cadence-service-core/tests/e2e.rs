@@ -1998,6 +1998,23 @@ async fn admin_and_visibility_routes() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(open.as_array().unwrap().len(), 1);
 
+    // Go DeleteDomain requires the Deprecated status first.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/domains/delete",
+        json!({"name": "e2e-domain"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/domains/deprecate",
+        json!({"name": "e2e-domain"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
     let (status, _) = call(
         app.clone(),
         Method::POST,

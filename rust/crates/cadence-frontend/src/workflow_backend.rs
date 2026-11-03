@@ -1324,6 +1324,9 @@ pub fn build_workflow_api(
             ..Default::default()
         },
         dynamic: None,
+        warn_sink: Some(crate::request_validator::WarnSink(
+            shared_metrics_sink.clone(),
+        )),
     }
     .with_dynamic_config(dynamic_overlay.clone());
     let handler = install_async_publisher(

@@ -51,8 +51,33 @@ impl Default for ValidationConfig {
     }
 }
 
+/// Metric sink for the `cadence_errors_*_exceeded_warn_limit` counters.
+#[derive(Clone)]
+pub struct WarnSink(pub Arc<dyn cadence_service_core::matching_metrics::MetricSink>);
+
+impl std::fmt::Debug for WarnSink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("WarnSink")
+    }
+}
+
+/// Go `metrics.CadenceErr*ExceededWarnLimit` metric names by ID kind.
+fn warn_counter_name(kind: &str) -> Option<&'static str> {
+    Some(match kind {
+        "DomainName" => "cadence_errors_domain_name_exceeded_warn_limit",
+        "Identity" => "cadence_errors_identity_exceeded_warn_limit",
+        "WorkflowID" => "cadence_errors_workflow_id_exceeded_warn_limit",
+        "SignalName" => "cadence_errors_signal_name_exceeded_warn_limit",
+        "WorkflowType" => "cadence_errors_workflow_type_exceeded_warn_limit",
+        "RequestID" => "cadence_errors_request_id_exceeded_warn_limit",
+        "TaskListName" => "cadence_errors_task_list_name_exceeded_warn_limit",
+        _ => return None,
+    })
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct RequestValidator {
+    pub warn_sink: Option<WarnSink>,
     pub config: ValidationConfig,
     /// Shared with Frontend's dynamic-config handlers. Read on every request,
     /// so admin updates and provider refreshes take effect without rebuilding
@@ -162,6 +187,19 @@ impl RequestValidator {
     ) -> bool {
         if id.len() > self.id_warn_length() {
             eprintln!("WARN ID length exceeds limit. domain={domain} idType={kind} name={id}");
+            // Go `scope.IncCounter(CadenceErr<Kind>ExceededWarnLimit)`.
+            if let (Some(sink), Some(name)) = (&self.warn_sink, warn_counter_name(kind)) {
+                let mut tags = std::collections::BTreeMap::new();
+                tags.insert("domain".to_owned(), domain.to_owned());
+                sink.0
+                    .record(cadence_service_core::matching_metrics::MetricEvent {
+                        name,
+                        kind: cadence_service_core::matching_metrics::MetricKind::Counter,
+                        value: cadence_service_core::matching_metrics::MetricValue::Count(1),
+                        tags,
+                        histogram: None,
+                    });
+            }
         }
         id.len() <= error_limit
     }

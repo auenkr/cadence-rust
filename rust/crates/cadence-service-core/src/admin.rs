@@ -836,14 +836,64 @@ pub async fn refresh_workflow_tasks(
     if let Some(e) = require_domain(&state, &domain).await {
         return e;
     }
-    let executions = match state.execution_store(&domain) {
-        Ok(store) => store,
-        Err(error) => return entity_not_exists(error),
-    };
     let execution = req.workflow_execution.clone().unwrap_or_default();
     if let Err(e) = validation::check_execution(Some(&execution)) {
         return bad_request(e);
     }
+    // Production Frontend delegates to History like Go (HistoryClient.RefreshWorkflowTasks
+    // with the domain UUID); the in-memory store is only for embedded service-core use.
+    if state.history_admin_channel.is_some() || state.admin.membership.get().is_some() {
+        let shard_id = (cadence_common::membership::fingerprint32(execution.workflow_id.as_bytes())
+            % shard_count(&state).max(1) as u32) as i32;
+        let domain_id = match state.domain_manager.domain_id(&domain) {
+            Ok(id) => id,
+            Err(error) => return entity_not_exists(error),
+        };
+        let channel = match history_channel_for(&state, shard_id, None) {
+            Ok(Some(channel)) => channel,
+            Ok(None) => {
+                return error_response(
+                    "InternalServiceError",
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "History client is not configured.".to_string(),
+                )
+            }
+            Err(error) => {
+                return error_response(
+                    "InternalServiceError",
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    error,
+                )
+            }
+        };
+        let request = cadence_proto::history::RefreshWorkflowTasksRequest {
+            domain_id,
+            domain: domain.clone(),
+            workflow_execution: Some(cadence_proto::api::WorkflowExecution {
+                workflow_id: execution.workflow_id,
+                run_id: execution.run_id,
+            }),
+        };
+        let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
+        return match client
+            .refresh_workflow_tasks(history_admin_request(request))
+            .await
+        {
+            Ok(_) => ok_json(cadence_api::admin::RefreshWorkflowTasksResponse {}),
+            Err(status) if status.code() == tonic::Code::NotFound => entity_not_exists(
+                cadence_api::errors::EntityNotExistsError::new(status.message().to_string()),
+            ),
+            Err(status) => error_response(
+                "InternalServiceError",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                status.message().to_string(),
+            ),
+        };
+    }
+    let executions = match state.execution_store(&domain) {
+        Ok(store) => store,
+        Err(error) => return entity_not_exists(error),
+    };
     match executions.refresh_tasks(&domain, &execution) {
         Ok(()) => ok_json(cadence_api::admin::RefreshWorkflowTasksResponse {}),
         Err(cadence_persistence::WorkflowMutationError::NotFound(e)) => entity_not_exists(e),

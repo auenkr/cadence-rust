@@ -196,6 +196,19 @@ async fn handle_delete_domain(state: &AppState, body: &Struct) -> HandlerResult 
             "Domain not set on request.".to_string(),
         ));
     }
+    // Go: DescribeDomain, then require the Deprecated status before deleting.
+    let current = state
+        .domain_manager
+        .describe(&DescribeDomainRequest {
+            name: Some(req.name.clone()),
+            uuid: None,
+        })
+        .map_err(|e| AppError::entity_not_exists(e.message))?;
+    if current.domain_info.as_ref().and_then(|info| info.status) != Some(cadence_api::enums::DomainStatus::Deprecated) {
+        return Err(AppError::bad_request(
+            "Domain is not in a deprecated state.".to_string(),
+        ));
+    }
     state
         .domain_manager
         .delete(&req.name)
@@ -2668,6 +2681,16 @@ pub async fn dispatch_with_headers(
                 body,
                 |req: cadence_api::admin::AdminDescribeWorkflowExecutionRequest| {
                     crate::admin::describe_workflow_execution_admin(State(shared()), Json(req))
+                },
+            )
+            .await
+        }
+        "RefreshWorkflowTasks" if admin => {
+            bridge_void(
+                method,
+                body,
+                |req: cadence_api::admin::RefreshWorkflowTasksRequest| {
+                    crate::admin::refresh_workflow_tasks(State(shared()), Json(req))
                 },
             )
             .await

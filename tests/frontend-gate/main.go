@@ -127,6 +127,10 @@ func main() {
 
 	// 1. start + complete
 	run, err := c.ExecuteWorkflow(ctx, opts(tl+"-echo"), EchoWorkflow, "hello")
+	var echoID, echoRunID string
+	if err == nil {
+		echoID, echoRunID = run.GetID(), run.GetRunID()
+	}
 	if step("start-echo", err) {
 		var out string
 		err = run.Get(ctx, &out)
@@ -206,6 +210,10 @@ func main() {
 		stopBackfill()
 		step("sched-backfill-completed", e)
 		step("sched-describe-after-backfill-grpc", cli("describe", "--sid", schedule))
+		step("sched-update-grpc", cli("update", "--sid", schedule, "--ce", "0 0 2 1 *"))
+		step("sched-pause-grpc", cli("pause", "--sid", schedule, "--reason", "gate"))
+		step("sched-unpause-grpc", cli("unpause", "--sid", schedule, "--reason", "gate"))
+		step("sched-list-grpc", cli("list"))
 		step("sched-delete-grpc", cli("delete", "--sid", schedule))
 	}
 
@@ -291,6 +299,9 @@ func main() {
 		closedErr = errors.New("closed executions not listed within 30s")
 	}
 	step("list-closed", closedErr)
+	if echoRunID != "" {
+		apiCoverage(ctx, rpc, domain, tl, echoID, echoRunID)
+	}
 	fmt.Printf("RESULT failures=%d\n", failures)
 	if failures > 0 {
 		os.Exit(1)

@@ -1179,6 +1179,7 @@ impl<B: WorkflowBackend> Handler<B> {
                 .restart_workflow_execution(request, target_cluster, caller)
                 .await;
         }
+        self.check_respond_identity(operation, &public_request)?;
         let (backend_operation, request, heartbeat_overflow) =
             self.prepare_activity_blob_request(operation, &public_request, request)?;
         let poll_guard = if matches!(
@@ -1212,6 +1213,58 @@ impl<B: WorkflowBackend> Handler<B> {
             WorkflowOperation::PollForDecisionTask => Ok(shape_decision_poll_response(response)),
             _ => Ok(response),
         }
+    }
+
+    /// Go checks `limit.identityLength` on every Respond*/heartbeat call
+    /// (`common.IsValidIDLength` -> `validate.ErrIdentityTooLong`) after the
+    /// domain is resolved from the task token (or the ByID request).
+    fn check_respond_identity(
+        &self,
+        operation: WorkflowOperation,
+        public_request: &Value,
+    ) -> Result<(), CadenceError> {
+        use WorkflowOperation as Op;
+        let by_id = matches!(
+            operation,
+            Op::RecordActivityTaskHeartbeatByID
+                | Op::RespondActivityTaskCompletedByID
+                | Op::RespondActivityTaskFailedByID
+                | Op::RespondActivityTaskCanceledByID
+        );
+        let by_token = matches!(
+            operation,
+            Op::RecordActivityTaskHeartbeat
+                | Op::RespondActivityTaskCompleted
+                | Op::RespondActivityTaskFailed
+                | Op::RespondActivityTaskCanceled
+                | Op::RespondDecisionTaskCompleted
+                | Op::RespondDecisionTaskFailed
+        );
+        if !by_id && !by_token {
+            return Ok(());
+        }
+        let identity = public_request
+            .get("identity")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let domain = if by_id {
+            public_request
+                .get("domain")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned()
+        } else {
+            let Some(domains) = &self.domain_lookup else {
+                return Ok(());
+            };
+            let token = decode_workflow_task_token(public_request)?;
+            match domains.domain_name(&token.domain_id)? {
+                Some(name) => name,
+                None => return Ok(()),
+            }
+        };
+        self.validator.check_identity(&domain, identity)?;
+        Ok(())
     }
 
     fn prepare_activity_blob_request(
@@ -2188,6 +2241,8 @@ fn prepare_by_id_task_request(
         workflow_id: request_string_any(&request, &["workflowID", "workflowId"]),
         run_id: request_string_any(&request, &["runID", "runId"]),
         activity_id: request_string_any(&request, &["activityID", "activityId"]),
+        // Go: ScheduleID is constants.EmptyEventID so History resolves by ActivityID.
+        schedule_id: -23,
         ..Default::default()
     };
     let token_bytes = cadence_api::tasktoken::JsonTaskTokenSerializer::serialize(&token)
@@ -4222,6 +4277,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn respond_calls_reject_identity_over_limit_like_go() {
+        let handler = Handler::new(CapturingBackend::default())
+            .with_domain_lookup(Arc::new(StaticDomainLookup))
+            .with_blob_size_policy(Arc::new(SmallQueryBlobLimit));
+        let token = cadence_api::tasktoken::JsonTaskTokenSerializer::serialize(
+            &cadence_api::tasktoken::TaskToken {
+                domain_id: "uuid:shop".into(),
+                workflow_id: "order-1".into(),
+                run_id: "run-1".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let long = "i".repeat(1001);
+        let err = handler
+            .dispatch(
+                "RespondActivityTaskFailed",
+                serde_json::json!({
+                    "taskToken": cadence_api::b64::encode_bytes(&token),
+                    "identity": long,
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Identity length exceeds limit."));
+        let err = handler
+            .dispatch(
+                "RespondActivityTaskCompletedByID",
+                serde_json::json!({
+                    "domain": "shop",
+                    "workflowID": "order-1",
+                    "activityID": "a1",
+                    "identity": "i".repeat(1001),
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Identity length exceeds limit."));
+        assert!(handler.backend.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn oversized_heartbeat_fails_activity_and_returns_cancel_requested() {
         let handler = Handler::new(CapturingBackend::default())
             .with_domain_lookup(Arc::new(StaticDomainLookup))
@@ -4328,6 +4425,7 @@ mod tests {
         .unwrap();
         assert_eq!(synthesized_token.workflow_id, "order-1");
         assert_eq!(synthesized_token.activity_id, "activity-1");
+        assert_eq!(synthesized_token.schedule_id, -23);
     }
 
     #[test]
@@ -4460,7 +4558,7 @@ mod tests {
             domain_id: "uuid:shop".into(),
             workflow_id: "wf".into(),
             run_id: "run".into(),
-            schedule_id: 0,
+            schedule_id: -23,
             activity_id: "activity".into(),
             ..Default::default()
         };

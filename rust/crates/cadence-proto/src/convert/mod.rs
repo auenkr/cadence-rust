@@ -544,7 +544,8 @@ pub fn describe_task_list_out(v: tk::DescribeTaskListResponse) -> p::DescribeTas
             .pollers
             .into_iter()
             .map(|x| p::PollerInfo {
-                last_access_time: x.last_access_time.map(timestamp),
+                // Internal PollerInfo.LastAccessTime is unix nanoseconds (Go mapper).
+                last_access_time: x.last_access_time.map(timestamp_nanos),
                 identity: x.identity,
                 rate_per_second: x.rate_per_second,
             })
@@ -667,7 +668,7 @@ fn poller_info_in(v: p::PollerInfo) -> t::PollerInfo {
     t::PollerInfo {
         last_access_time: v
             .last_access_time
-            .map(|ts| ts.seconds * 1000 + i64::from(ts.nanos) / 1_000_000),
+            .map(|ts| ts.seconds * 1_000_000_000 + i64::from(ts.nanos)),
         identity: v.identity,
         rate_per_second: v.rate_per_second,
     }
