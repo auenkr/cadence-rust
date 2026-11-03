@@ -20,10 +20,12 @@ KAFKA_PORT=${CADENCE_KAFKA_PORT:-19092}
 KAFKA_IMAGE=${CADENCE_KAFKA_IMAGE:-apache/kafka:3.8.0}
 KAFKA_TOPIC=${CADENCE_KAFKA_TOPIC:-cadence-async-gate}
 source "$ROOT/tests/gates/lib-es.sh"
+source "$ROOT/tests/gates/lib-s3.sh"
 cleanup() {
   local status=$?
   trap - EXIT INT TERM
   es_cleanup
+  s3_cleanup
   if [[ -n "$KAFKA_CONTAINER" ]]; then
     docker logs "$KAFKA_CONTAINER" > "$ARTIFACTS/kafka-container.log" 2>&1 || true
     docker rm --force "$KAFKA_CONTAINER" > "$ARTIFACTS/kafka-container-cleanup.txt" 2>&1 || true
@@ -79,9 +81,10 @@ if [[ "${CADENCE_GATE_KAFKA:-}" == "true" || "${CADENCE_GATE_KAFKA:-}" == "1" ]]
   KAFKA_ARGS=(--kafka-broker "127.0.0.1:${KAFKA_PORT}" --kafka-container "$KAFKA_CONTAINER" --kafka-topic "$KAFKA_TOPIC")
 fi
 es_start
+s3_start
 export CADENCE_MYSQL_ADDR="127.0.0.1:${PORT}" CADENCE_MYSQL_PASSWORD="$PASSWORD" CADENCE_MYSQL_DOCKER_CONTAINER="$CONTAINER"
 if [[ "${CADENCE_GATE_TWO_HISTORY:-}" == "true" ]]; then KAFKA_ARGS+=(--two-history); fi
-python3 "$ROOT/tests/gates/run-frontend-gate.py" --out "$ARTIFACTS/run" "${KAFKA_ARGS[@]}" "${ES_ARGS[@]}" "$@"
+python3 "$ROOT/tests/gates/run-frontend-gate.py" --out "$ARTIFACTS/run" "${KAFKA_ARGS[@]}" "${ES_ARGS[@]}" "${S3_ARGS[@]}" "$@"
 status=$?
 echo "$status" > "$ARTIFACTS/lane.exit"
 exit "$status"

@@ -27,7 +27,13 @@ ap.add_argument('--kafka-topic', default='cadence-async-gate')
 ap.add_argument('--es-url', help='http://host:port of Elasticsearch; enables advanced visibility (needs --kafka-broker for the Go indexer)')
 ap.add_argument('--es-index', default='cadence-visibility-dev')
 ap.add_argument('--es-version', default='v7')
+ap.add_argument('--s3-endpoint', help='http://host:port of MinIO; enables the S3 archival (s3store) steps')
+ap.add_argument('--s3-bucket', default='cadence-archival-gate')
 args = ap.parse_args()
+S3_KEY, S3_SECRET = 'cadencegate', 'cadencegate-secret'
+if args.s3_endpoint:
+    # Go History/Worker and the Rust Frontend read AWS credentials from the environment.
+    os.environ.update({'AWS_ACCESS_KEY_ID': S3_KEY, 'AWS_SECRET_ACCESS_KEY': S3_SECRET, 'AWS_REGION': 'us-east-1'})
 if args.es_url and not args.kafka_broker:
     ap.error('--es-url requires --kafka-broker')
 if args.es_url and args.database == 'cassandra':
@@ -79,6 +85,11 @@ text = text.replace('"config/dynamicconfig/development.yaml"', json.dumps(str(wo
 text = text.replace('/tmp/cadence_archival/development', str(work / 'history-archive'))
 text = text.replace('/tmp/cadence_vis_archival/development', str(work / 'visibility-archive'))
 text = text.replace('/tmp/blobstore', str(work / 'blobstore'))
+s3_provider = (f'      s3store:\n        region: us-east-1\n        endpoint: {json.dumps(args.s3_endpoint)}\n        s3ForcePathStyle: true\n'
+               if args.s3_endpoint else '')
+def add_s3(cfg):
+    return cfg.replace('        dirMode: "0766"\n', '        dirMode: "0766"\n' + s3_provider) if s3_provider else cfg
+text = add_s3(text)
 text = text.rstrip('\n') + '\n' + async_yaml
 (work / 'config/development.yaml').write_text(text)
 if args.two_history:
@@ -143,6 +154,7 @@ rt = rt.replace('localhost:7833', f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}')
 rt = rt.replace('/tmp/cadence_archival/development', str(work / 'history-archive'))
 rt = rt.replace('/tmp/cadence_vis_archival/development', str(work / 'visibility-archive'))
 rt = rt.replace('/tmp/blobstore', str(work / 'blobstore'))
+rt = add_s3(rt)
 _ms = socket.socket(); _ms.bind(('127.0.0.1', 0)); prom_port = _ms.getsockname()[1]; _ms.close()
 rt, n = re.subn(r'(?m)^(  frontend:\n(?:.*\n)*?    metrics:\n)      statsd:\n        hostPort: "127.0.0.1:8125"\n        prefix: "cadence"\n',
                 lambda m: m.group(1) + f'      prometheus:\n        timerType: histogram\n        listenAddress: "127.0.0.1:{prom_port}"\n', rt, count=1)
@@ -456,6 +468,97 @@ try:
         r = subprocess.run([*cli_t, '--domain', dom_off, 'workflow', 'listarchived', '--query', "WorkflowType = 'x'"], capture_output=True, text=True, timeout=60)
         record('archival-list-archived-domain-not-configured', r.returncode != 0 and 'Domain is not configured for visibility archival' in r.stdout + r.stderr, r.stdout + r.stderr)
         # Invalid status flag handled client-side by Go CLI; invalid cluster-state errors come from the frontend above.
+    # ---- S3 archival phase (MinIO): Go History/Worker archive to s3store, Rust Frontend reads/validates
+    if args.s3_endpoint:
+        import hashlib, hmac, urllib.request, urllib.error, urllib.parse, datetime, uuid
+        def s3_call(method, path, query='', body=b''):
+            u = urllib.parse.urlparse(args.s3_endpoint)
+            now = datetime.datetime.now(datetime.timezone.utc)
+            amz, day = now.strftime('%Y%m%dT%H%M%SZ'), now.strftime('%Y%m%d')
+            ph = hashlib.sha256(body).hexdigest()
+            canon_q = '&'.join(sorted(query.split('&'))) if query else ''
+            hdrs = f'host:{u.netloc}\nx-amz-content-sha256:{ph}\nx-amz-date:{amz}\n'
+            canon = f'{method}\n{urllib.parse.quote(path)}\n{canon_q}\n{hdrs}\nhost;x-amz-content-sha256;x-amz-date\n{ph}'
+            scope = f'{day}/us-east-1/s3/aws4_request'
+            sts = f'AWS4-HMAC-SHA256\n{amz}\n{scope}\n' + hashlib.sha256(canon.encode()).hexdigest()
+            k = ('AWS4' + S3_SECRET).encode()
+            for part in (day, 'us-east-1', 's3', 'aws4_request'):
+                k = hmac.new(k, part.encode(), hashlib.sha256).digest()
+            sig = hmac.new(k, sts.encode(), hashlib.sha256).hexdigest()
+            req = urllib.request.Request(args.s3_endpoint + path + ('?' + query if query else ''), data=body or None, method=method, headers={
+                'x-amz-date': amz, 'x-amz-content-sha256': ph,
+                'Authorization': f'AWS4-HMAC-SHA256 Credential={S3_KEY}/{scope}, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature={sig}'})
+            try:
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    return r.status, r.read().decode()
+            except urllib.error.HTTPError as e:
+                return e.code, e.read().decode()
+        bucket = args.s3_bucket
+        st, body = s3_call('PUT', f'/{bucket}')
+        record('s3-create-bucket', st == 200, f'{st} {body}')
+        s3_hist, s3_vis = f's3://{bucket}/gate-history', f's3://{bucket}/gate-visibility'
+        dom_s3 = 'fe-gate-s3-' + secrets.token_hex(3)
+        cli_s3 = lambda *a: [*cli_t, '--domain', dom_s3, *a]
+        r = subprocess.run(cli_s3('domain', 'register', '--retention', '1', '--history_archival_status', 'enabled',
+                                  '--history_uri', f's3://no-such-bucket-{secrets.token_hex(3)}/x', '--visibility_archival_status', 'disabled'),
+                           capture_output=True, text=True, timeout=60)
+        (work / 's3-register-missing-bucket.log').write_text(r.stdout + r.stderr)
+        record('s3-register-missing-bucket-rejected', r.returncode != 0 and 'bucket does not exist' in r.stdout + r.stderr, r.stdout + r.stderr)
+        r = subprocess.run(cli_s3('domain', 'register', '--retention', '1', '--history_archival_status', 'enabled', '--history_uri', 'gs://x/y',
+                                  '--visibility_archival_status', 'disabled'), capture_output=True, text=True, timeout=60)
+        (work / 's3-register-wrong-scheme.log').write_text(r.stdout + r.stderr)
+        record('s3-register-gcs-uri-rejected', r.returncode != 0, r.stdout + r.stderr)
+        ok_reg = run('s3-register-domain', cli_s3('domain', 'register', '--retention', '1', '--history_archival_status', 'enabled',
+                                                  '--history_uri', s3_hist, '--visibility_archival_status', 'enabled', '--visibility_uri', s3_vis))
+        if ok_reg:
+            time.sleep(12)  # domain cache refresh in Go History/Worker
+            d = subprocess.run(cli_s3('domain', 'describe'), capture_output=True, text=True, timeout=60)
+            (work / 's3-describe-domain.log').write_text(d.stdout + d.stderr)
+            record('s3-describe-domain', d.returncode == 0 and s3_hist in d.stdout and s3_vis in d.stdout, d.stdout + d.stderr)
+            m = re.search(r'UUID:\s*(\S+)', d.stdout)
+            wtype3, ids3 = 'S3GateType', []
+            for i in range(2):
+                wid = f's3-wf-{secrets.token_hex(3)}'
+                ids3.append(wid)
+                run(f's3-start-{i}', cli_s3('workflow', 'start', '--tl', 's3-gate-tl', '--wt', wtype3, '--wid', wid, '--et', '600', '--dt', '10'))
+                run(f's3-terminate-{i}', cli_s3('workflow', 'terminate', '--wid', wid, '--reason', 's3-gate'))
+            found3, out3 = False, ''
+            for _ in range(24):
+                r = subprocess.run(cli_s3('workflow', 'listarchived', '--query', f"WorkflowTypeName = '{wtype3}'", '--all'), capture_output=True, text=True, timeout=60)
+                out3 = r.stdout + r.stderr
+                if r.returncode == 0 and all(w in out3 for w in ids3):
+                    found3 = True
+                    break
+                time.sleep(5)
+            (work / 's3-listarchived.log').write_text(out3)
+            record('s3-list-archived-visibility', found3, out3)
+            st, listing = s3_call('GET', f'/{bucket}', 'list-type=2&prefix=gate-visibility%2F')
+            keys = re.findall(r'<Key>([^<]+)</Key>', listing)
+            (work / 's3-visibility-objects.log').write_text('\n'.join(keys))
+            record('s3-go-visibility-wrote-archive', st == 200 and len(keys) >= 2, '\n'.join(keys[:10]))
+            # Archived-only history: Go archives history at retention expiry (not reachable in a gate run), so a
+            # Go-format blob (header/body JSON at <path>/<domainID>/history/<wid>/<runID>/<version>/<batch>) is uploaded.
+            if m:
+                hwid, hrun = 's3-archived-' + secrets.token_hex(3), str(uuid.uuid4())
+                ev = lambda i, t, a: {'eventId': i, 'timestamp': 1700000000000000000 + i, 'eventType': t, 'version': 0, 'taskId': i, a[0]: a[1]}
+                started = ev(1, 'WorkflowExecutionStarted', ('workflowExecutionStartedEventAttributes',
+                    {'workflowType': {'name': 'S3Archived'}, 'taskList': {'name': 's3-gate-tl'}, 'executionStartToCloseTimeoutSeconds': 60,
+                     'taskStartToCloseTimeoutSeconds': 10, 'originalExecutionRunId': hrun, 'firstExecutionRunId': hrun,
+                     'initiator': 'CronSchedule', 'attempt': 0}))
+                closed = ev(2, 'WorkflowExecutionTerminated', ('workflowExecutionTerminatedEventAttributes', {'reason': 'archived-only'}))
+                for idx, (events, last) in enumerate([([started], False), ([closed], True)]):
+                    blob = json.dumps({'header': {'domain_name': dom_s3, 'domain_id': m.group(1), 'workflow_id': hwid, 'run_id': hrun,
+                                                  'current_event_batch_version': 0, 'close_failover_version': 0, 'is_last': last},
+                                       'body': [{'events': events}]}).encode()
+                    st, resp = s3_call('PUT', f'/{bucket}/gate-history/{m.group(1)}/history/{hwid}/{hrun}/0/{idx}', body=blob)
+                    record(f's3-upload-history-batch-{idx}', st == 200, f'{st} {resp}')
+                r = subprocess.run(cli_s3('workflow', 'show', '--wid', hwid, '--rid', hrun), capture_output=True, text=True, timeout=60)
+                (work / 's3-show-archived.log').write_text(r.stdout + r.stderr)
+                record('s3-archived-only-history', r.returncode == 0 and 'WorkflowExecutionStarted' in r.stdout and 'WorkflowExecutionTerminated' in r.stdout, r.stdout + r.stderr)
+                r = subprocess.run(cli_s3('workflow', 'show', '--wid', hwid, '--rid', str(uuid.uuid4())), capture_output=True, text=True, timeout=60)
+                record('s3-archived-history-missing-run', r.returncode != 0, r.stdout + r.stderr)
+            else:
+                record('s3-describe-has-uuid', False, d.stdout)
     # ---- durable dynamic config / search attribute phase (config-store insert_config on this lane)
     def dbq(stmt):
         c = os.environ.get(prefix + '_DOCKER_CONTAINER')

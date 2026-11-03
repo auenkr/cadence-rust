@@ -15,6 +15,10 @@ on:
         description: Also run the advanced visibility (Elasticsearch + Kafka + Go indexer) steps; mysql/postgres only, requires kafka
         type: boolean
         default: false
+      s3:
+        description: Also run the S3 archival (MinIO) steps; mysql only
+        type: boolean
+        default: false
       two_history:
         description: Run two Go History hosts and kill/restart one during SDK traffic
         type: boolean
@@ -72,6 +76,7 @@ jobs:
         env:
           CADENCE_GATE_KAFKA: ${{ inputs.kafka }}
           CADENCE_GATE_ES: ${{ inputs.es }}
+          CADENCE_GATE_S3: ${{ inputs.s3 }}
           CADENCE_GATE_TWO_HISTORY: ${{ inputs.two_history }}
         run: |
           set +e
