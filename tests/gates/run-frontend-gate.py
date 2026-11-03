@@ -552,6 +552,10 @@ try:
                                        'body': [{'events': events}]}).encode()
                     st, resp = s3_call('PUT', f'/{bucket}/gate-history/{m.group(1)}/history/{hwid}/{hrun}/0/{idx}', body=blob)
                     record(f's3-upload-history-batch-{idx}', st == 200, f'{st} {resp}')
+                pfx = urllib.parse.quote(f'gate-history/{m.group(1)}/history/{hwid}/{hrun}/', safe='')
+                for tag, extra in (('delim', '&delimiter=%2F'), ('plain', '')):
+                    st, listing = s3_call('GET', f'/{bucket}', f'list-type=2{extra}&prefix={pfx}')
+                    (work / f's3-history-list-{tag}.log').write_text(f'{st}\n{listing}')
                 r = subprocess.run(cli_s3('workflow', 'show', '--wid', hwid, '--rid', hrun), capture_output=True, text=True, timeout=60)
                 (work / 's3-show-archived.log').write_text(r.stdout + r.stderr)
                 record('s3-archived-only-history', r.returncode == 0 and 'WorkflowExecutionStarted' in r.stdout and 'WorkflowExecutionTerminated' in r.stdout, r.stdout + r.stderr)
