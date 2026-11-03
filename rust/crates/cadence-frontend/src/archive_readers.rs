@@ -321,7 +321,16 @@ impl ArchivedHistory {
         let mut events = Vec::new();
         for batch in response.history_batches {
             if let Some(list) = batch.get("events").and_then(Value::as_array) {
-                events.extend(list.iter().cloned());
+                for event in list {
+                    let mut event = event.clone();
+                    // Go archives event timestamps in nanoseconds; the Rust
+                    // HistoryEvent carries milliseconds (converted back to
+                    // nanoseconds on the Thrift wire).
+                    if let Some(ns) = event.get("timestamp").and_then(Value::as_i64) {
+                        event["timestamp"] = json!(ns / 1_000_000);
+                    }
+                    events.push(event);
+                }
             }
         }
         eprintln!(
