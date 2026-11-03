@@ -30,6 +30,8 @@ fn scalar_ok(v: &Value, t: IndexedValueType) -> bool {
         IndexedValueType::Datetime => v
             .as_str()
             .is_some_and(|s| chrono::DateTime::parse_from_rfc3339(s).is_ok()),
+        #[allow(unreachable_patterns)]
+        _ => false,
     }
 }
 
