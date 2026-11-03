@@ -845,7 +845,7 @@ fn process_sort(
             let f = a[0].as_object().and_then(|m| m.keys().next().cloned()).unwrap_or_default();
             let bare = f.trim_matches('`');
             let name = bare.strip_prefix("Attr.").unwrap_or(bare);
-            if attr_types(name) == Some(1) {
+            if attr_types(name) == Some(0) {
                 return Err(bad(
                     "Not able to sort by IndexedValueTypeString field, use IndexedValueTypeKeyword field",
                 ));
@@ -1080,7 +1080,7 @@ mod tests {
     #[test]
     fn sort_by_string_rejected() {
         let e = dsl_for_list("order by Attr.S desc", "d", 5, &PageToken::default(), &|n| {
-            if n == "S" { Some(1) } else { None }
+            if n == "S" { Some(0) } else { None }
         });
         assert!(matches!(e, Err(QueryError::BadRequest(m)) if m.contains("IndexedValueTypeString")));
     }

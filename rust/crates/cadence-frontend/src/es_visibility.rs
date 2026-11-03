@@ -90,7 +90,9 @@ pub fn source_to_info(src: &Value) -> st::WorkflowExecutionInfo {
                     .collect(),
             ),
         });
-    let enum_of = |k: &str| serde_json::from_value(Value::from(i64_of(src, k))).ok();
+    fn enum_of<T: serde::de::DeserializeOwned>(src: &Value, k: &str) -> Option<T> {
+        serde_json::from_value(Value::from(i64_of(src, k))).ok()
+    }
     let mut info = st::WorkflowExecutionInfo {
         execution: Some(ty::WorkflowExecution {
             workflow_id: src["WorkflowID"].as_str().unwrap_or("").to_string(),
@@ -110,14 +112,14 @@ pub fn source_to_info(src: &Value) -> st::WorkflowExecutionInfo {
         is_cron: src["IsCron"].as_bool().unwrap_or(false),
         cron_schedule: Some(src["CronSchedule"].as_str().unwrap_or("").to_string()),
         update_time: Some(i64_of(src, "UpdateTime")),
-        execution_status: enum_of("ExecutionStatus"),
+        execution_status: enum_of(src, "ExecutionStatus"),
         scheduled_execution_time: Some(i64_of(src, "ScheduledExecutionTime")),
         ..Default::default()
     };
     let close = i64_of(src, "CloseTime");
     if close != 0 {
         info.close_time = Some(close);
-        info.close_status = enum_of("CloseStatus");
+        info.close_status = enum_of(src, "CloseStatus");
         info.history_length = i64_of(src, "HistoryLength");
     }
     info

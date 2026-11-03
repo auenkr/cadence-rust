@@ -774,6 +774,48 @@ fn service_addr(
     format!("{host}:{port}")
 }
 
+/// Live `frontend.validSearchAttributes` + validator limits (Go `SearchAttributesValidator`).
+struct ProdSearchAttributes {
+    state: cadence_service_core::handlers::AppState,
+}
+
+impl crate::handler_workflow::SearchAttributeProvider for ProdSearchAttributes {
+    fn valid_search_attributes(
+        &self,
+    ) -> std::collections::HashMap<String, cadence_api::enums::IndexedValueType> {
+        cadence_service_core::admin::valid_search_attributes(&self.state.admin)
+    }
+
+    fn search_attribute_limits(&self, domain: &str) -> crate::search_attr_validator::Limits {
+        let d = crate::search_attr_validator::Limits::default();
+        let Ok(o) = self.state.admin.dynamic_config.lock() else {
+            return d;
+        };
+        let int = |key: &str, default: i64| {
+            cadence_persistence::dynamic_config::integer(
+                o.property_values(key),
+                Some(domain),
+                default,
+            )
+        };
+        crate::search_attr_validator::Limits {
+            number_of_keys: int("frontend.searchAttributesNumberOfKeysLimit", d.number_of_keys),
+            size_of_value: int("frontend.searchAttributesSizeOfValueLimit", d.size_of_value),
+            total_size: int("frontend.searchAttributesTotalSizeLimit", d.total_size),
+        }
+    }
+
+    fn validation_enabled(&self) -> bool {
+        self.state.admin.dynamic_config.lock().map_or(true, |o| {
+            cadence_persistence::dynamic_config::boolean(
+                o.property_values("frontend.enableQueryAttributeValidation"),
+                None,
+                true,
+            )
+        })
+    }
+}
+
 /// Build the production WorkflowService for the Frontend launcher.
 pub fn build_workflow_api(
     ctx: cadence_matching::launcher::FrontendHookContext,
@@ -966,6 +1008,9 @@ pub fn build_workflow_api(
     )
     .with_domain_lookup(lookup)
     .with_archived_history_reader(archived_history)
+    .with_search_attribute_provider(std::sync::Arc::new(ProdSearchAttributes {
+        state: ctx.state.clone(),
+    }))
     .with_archived_visibility_reader(archived_visibility)
     .with_metrics_sink(frontend_metrics_sink(&ctx.config))
     .with_rate_limit_policies(rate_limit)

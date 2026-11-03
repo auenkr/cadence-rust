@@ -485,6 +485,16 @@ pub trait WorkflowQueryPolicy: Send + Sync {
 /// GetSearchAttributes handler and visibility validators.
 pub trait SearchAttributeProvider: Send + Sync {
     fn valid_search_attributes(&self) -> HashMap<String, cadence_api::enums::IndexedValueType>;
+
+    /// `frontend.searchAttributes*Limit` for the domain.
+    fn search_attribute_limits(&self, _domain: &str) -> crate::search_attr_validator::Limits {
+        crate::search_attr_validator::Limits::default()
+    }
+
+    /// `frontend.enableQueryAttributeValidation`.
+    fn validation_enabled(&self) -> bool {
+        true
+    }
 }
 
 #[derive(Clone)]
@@ -1649,6 +1659,15 @@ impl<B: WorkflowBackend> Handler<B> {
                 Some(&request),
                 &cadence_api::validation::Limits::default(),
             )?;
+            if let Some(provider) = &self.search_attributes {
+                crate::search_attr_validator::validate(
+                    request.search_attributes.as_ref(),
+                    provider.search_attribute_limits(&request.domain),
+                    provider.validation_enabled(),
+                    &provider.valid_search_attributes(),
+                )
+                .map_err(|m| CadenceError::BadRequest(BadRequestError::new(m)))?;
+            }
             if matches!(
                 operation,
                 WorkflowOperation::SignalWithStartWorkflowExecution

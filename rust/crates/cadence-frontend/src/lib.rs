@@ -26,6 +26,7 @@ pub mod matching_client;
 pub mod matching_task_list_backend;
 pub mod oauth_authorizer;
 pub mod request_validator;
+pub mod search_attr_validator;
 pub mod workflow_backend;
 pub mod workflow_matching;
 pub mod workflow_visibility;
