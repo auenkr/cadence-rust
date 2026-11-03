@@ -10,13 +10,13 @@
 ARG GO_IMAGE=cadence-go:ci
 
 FROM rust:1-alpine AS builder
-RUN apk add --no-cache musl-dev gcc g++ make cmake perl git
+RUN apk add --no-cache musl-dev gcc g++ make cmake perl git pkgconf openssl-dev openssl-libs-static linux-headers
 WORKDIR /src
 COPY go/idls go/idls
 COPY go/proto go/proto
 COPY rust rust
 WORKDIR /src/rust
-ENV CARGO_PROFILE_RELEASE_DEBUG=0 CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
+ENV OPENSSL_STATIC=1 OPENSSL_DIR=/usr CARGO_PROFILE_RELEASE_DEBUG=0 CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
 RUN cargo build --release -p cadence-server -j2 \
     && sha256sum target/release/cadence-server > /cadence-server.sha256
 
