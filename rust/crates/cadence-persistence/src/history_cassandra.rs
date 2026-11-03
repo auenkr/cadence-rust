@@ -1,11 +1,33 @@
 //! Go Cassandra history_node reader. Unlike SQL, Cassandra stores transaction
 //! IDs unchanged and orders them DESC (go/schema/cassandra/cadence/schema.cql).
 use crate::cassandra::CassandraBlockingSession;
-use crate::history_reader::{HistoryNodeRow, HistoryNodeStore, HistoryReadError};
+use crate::history_reader::{CurrentExecutionRow, HistoryNodeRow, HistoryNodeStore, HistoryReadError};
+use scylla::value::CqlTimestamp;
+use scylla::DeserializeValue;
 use scylla::{response::PagingState, statement::Statement};
 use std::sync::Arc;
 
 const SELECT: &str = "SELECT node_id, txn_id, data, data_encoding FROM history_node WHERE tree_id = ? AND branch_id = ? AND node_id >= ? AND node_id < ?";
+
+/// Go `templateGetCurrentExecutionQuery`.
+const SELECT_CURRENT: &str = "SELECT current_run_id, execution FROM executions WHERE shard_id = ? and type = ? and domain_id = ? and workflow_id = ? and run_id = ? and visibility_ts = ? and task_id = ?";
+/// Go `templateGetActiveClusterSelectionPolicyQuery`.
+const SELECT_POLICY: &str = "SELECT data, data_encoding FROM executions WHERE shard_id = ? and type = ? and domain_id = ? and workflow_id = ? and run_id = ? and visibility_ts = ? and task_id = ?";
+/// Go constants.go: rowTypeExecution, rowTypeWorkflowActiveClusterSelectionPolicy.
+const ROW_TYPE_EXECUTION: i32 = 1;
+const ROW_TYPE_POLICY: i32 = 11;
+const ROW_TYPE_EXECUTION_TASK_ID: i64 = -10;
+const ROW_TYPE_POLICY_VERSION: i64 = -1001;
+/// Go `permanentRunID`.
+const PERMANENT_RUN_ID: uuid::Uuid = uuid::Uuid::from_u128(0x30000000_0000_f000_f000_000000000001);
+/// Go `defaultVisibilityTimestamp`: 2000-01-01T00:00:00Z in milliseconds.
+const DEFAULT_VISIBILITY_TS_MS: i64 = 946_684_800_000;
+
+/// The `state` field of Go's `workflow_execution` UDT; other fields are ignored.
+#[derive(Debug, DeserializeValue)]
+struct ExecutionStateUdt {
+    state: Option<i32>,
+}
 
 type Result<T> = std::result::Result<T, HistoryReadError>;
 type Page = (Vec<HistoryNodeRow>, Option<Vec<u8>>);
@@ -105,6 +127,73 @@ impl CassandraHistoryNodeStore {
 }
 
 impl HistoryNodeStore for CassandraHistoryNodeStore {
+    fn select_current_execution(
+        &self,
+        shard: i32,
+        domain_id: [u8; 16],
+        workflow_id: &str,
+    ) -> Result<Option<CurrentExecutionRow>> {
+        let mut statement = Statement::new(SELECT_CURRENT);
+        statement.set_consistency(self.driver.default_consistency());
+        let session = self.driver.session();
+        let result = self
+            .driver
+            .run(session.query_unpaged(
+                statement,
+                (
+                    shard,
+                    ROW_TYPE_EXECUTION,
+                    uuid::Uuid::from_bytes(domain_id),
+                    workflow_id,
+                    PERMANENT_RUN_ID,
+                    CqlTimestamp(DEFAULT_VISIBILITY_TS_MS),
+                    ROW_TYPE_EXECUTION_TASK_ID,
+                ),
+            ))
+            .map_err(internal)?;
+        let row = result
+            .into_rows_result()
+            .map_err(internal)?
+            .maybe_first_row::<(uuid::Uuid, Option<ExecutionStateUdt>)>()
+            .map_err(internal)?;
+        Ok(row.map(|(run_id, udt)| CurrentExecutionRow {
+            run_id: *run_id.as_bytes(),
+            state: udt.and_then(|u| u.state).unwrap_or(0),
+        }))
+    }
+
+    fn select_active_cluster_policy(
+        &self,
+        shard: i32,
+        domain_id: [u8; 16],
+        workflow_id: &str,
+        run_id: [u8; 16],
+    ) -> Result<Option<(Vec<u8>, String)>> {
+        let mut statement = Statement::new(SELECT_POLICY);
+        statement.set_consistency(self.driver.default_consistency());
+        let session = self.driver.session();
+        let result = self
+            .driver
+            .run(session.query_unpaged(
+                statement,
+                (
+                    shard,
+                    ROW_TYPE_POLICY,
+                    uuid::Uuid::from_bytes(domain_id),
+                    workflow_id,
+                    uuid::Uuid::from_bytes(run_id),
+                    CqlTimestamp(DEFAULT_VISIBILITY_TS_MS),
+                    ROW_TYPE_POLICY_VERSION,
+                ),
+            ))
+            .map_err(internal)?;
+        result
+            .into_rows_result()
+            .map_err(internal)?
+            .maybe_first_row::<(Vec<u8>, String)>()
+            .map_err(internal)
+    }
+
     fn select_nodes(
         &self,
         shard: i32,
@@ -135,6 +224,13 @@ impl HistoryNodeStore for CassandraHistoryNodeStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn go_execution_row_constants() {
+        assert_eq!(PERMANENT_RUN_ID.to_string(), "30000000-0000-f000-f000-000000000001");
+        assert_eq!(DEFAULT_VISIBILITY_TS_MS, 946_684_800_000);
+        assert!(SELECT_POLICY.starts_with("SELECT data, data_encoding FROM executions"));
+    }
 
     #[test]
     fn keys_and_opaque_page_state_preserve_go_query() {

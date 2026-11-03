@@ -2,9 +2,10 @@
 //! (`wrappers/clusterredirection`): request->domain resolver, config-driven
 //! runtime knobs, metrics and the remote-Frontend forwarding backend.
 //!
-//! Not ported (documented gaps): active-active per-workflow policy lookups
-//! (execution store), strong-consistency auto-forwarding header
-//! (always eventual).
+//! Active-active per-workflow policy lookups read the execution tables via
+//! `HistoryNodeStore`. The requested consistency level comes from the inbound
+//! `cadence-client-feature-flags` header (Go `getRequestedConsistencyLevelFromContext`);
+//! Go never sends a consistency header outbound, only `cadence-forwarding-cluster`.
 
 #![allow(clippy::result_large_err)]
 
@@ -15,6 +16,10 @@ use std::time::Duration;
 use cadence_api::errors::{CadenceError, InternalServiceError};
 use cadence_api::service_types::DescribeDomainRequest;
 use cadence_common::cluster::GroupMetadata;
+use cadence_persistence::history_reader::{
+    decode_active_cluster_selection_policy, is_workflow_running, ClusterSelectionPolicy,
+    HistoryNodeStore,
+};
 use cadence_persistence::FrontendDomainManager;
 use cadence_service_core::frontend_remote::{RemoteFrontendClient, DEFAULT_REMOTE_TIMEOUT};
 use cadence_service_core::matching_metrics::{
@@ -262,18 +267,76 @@ fn requested_cluster_attribute(operation: &str, request: &Value) -> Option<Strin
 
 /// Go `activecluster.Manager` backed by the domain cache entry. Cluster
 /// attribute lookups follow `DomainCacheEntry.GetActiveClusterInfoByClusterAttribute`.
-/// Per-workflow policy lookups need the execution store, which the Rust
-/// Frontend does not read yet: workflow lookups use the empty-policy path and
-/// current-workflow lookups fail, so Go's policy routes to the current cluster
-/// (documented gap).
+/// Per-workflow policy lookups read the execution tables through the
+/// persistence store (`with_executions`), as Go's `ExecutionManager` does.
 pub struct DomainActiveClusterManager {
     manager: Arc<dyn FrontendDomainManager>,
+    executions: Option<(Arc<dyn HistoryNodeStore>, i32)>,
 }
 
 impl DomainActiveClusterManager {
     pub fn new(manager: Arc<dyn FrontendDomainManager>) -> Self {
-        Self { manager }
+        Self {
+            manager,
+            executions: None,
+        }
     }
+
+    /// Execution store + `numHistoryShards` for persisted policy reads.
+    pub fn with_executions(mut self, store: Arc<dyn HistoryNodeStore>, num_shards: i32) -> Self {
+        self.executions = Some((store, num_shards));
+        self
+    }
+
+    /// Go `getClusterSelectionPolicy`. `Ok(None)` is Go's EntityNotExistsError
+    /// (the caller treats it as an empty policy).
+    fn cluster_selection_policy(
+        &self,
+        domain_id: &str,
+        workflow_id: &str,
+        run_id: &str,
+    ) -> Result<Option<ClusterSelectionPolicy>, String> {
+        let Some((store, num_shards)) = &self.executions else {
+            // No execution store configured: behave like Go's
+            // EntityNotExists (empty policy).
+            return Ok(None);
+        };
+        let domain = parse_uuid(domain_id)?;
+        let shard = crate::workflow_matching::workflow_id_to_history_shard(workflow_id, *num_shards);
+        let run = if run_id.is_empty() {
+            match store
+                .select_current_execution(shard, domain, workflow_id)
+                .map_err(|e| e.to_string())?
+            {
+                Some(current) => current.run_id,
+                None => return Ok(None),
+            }
+        } else {
+            parse_uuid(run_id)?
+        };
+        match store
+            .select_active_cluster_policy(shard, domain, workflow_id, run)
+            .map_err(|e| e.to_string())?
+        {
+            None => Ok(None),
+            Some((data, encoding)) => decode_active_cluster_selection_policy(&data, &encoding)
+                .map(Some)
+                .map_err(|e| e.to_string()),
+        }
+    }
+}
+
+fn parse_uuid(value: &str) -> Result<[u8; 16], String> {
+    uuid::Uuid::parse_str(value)
+        .map(|u| *u.as_bytes())
+        .map_err(|e| format!("invalid uuid {value}: {e}"))
+}
+
+fn policy_attribute(policy: Option<&ClusterSelectionPolicy>) -> String {
+    policy
+        .and_then(|p| p.cluster_attribute.as_ref())
+        .map(|(scope, name)| encode_cluster_attribute(scope, name))
+        .unwrap_or_default()
 }
 
 /// Go `GetActiveClusterInfoByClusterAttribute` on a domain's replication config.
@@ -299,8 +362,8 @@ impl ActiveClusterManager for DomainActiveClusterManager {
     fn active_cluster_for_workflow(
         &self,
         domain_id: &str,
-        _workflow_id: &str,
-        _run_id: &str,
+        workflow_id: &str,
+        run_id: &str,
     ) -> Result<String, String> {
         let described = self
             .manager
@@ -314,16 +377,13 @@ impl ActiveClusterManager for DomainActiveClusterManager {
             // Go: not active-active, ActiveClusterName from the domain entry.
             return Ok(replication.active_cluster_name);
         }
-        // Go `GetActiveClusterInfoByWorkflow`: when the execution store has no
-        // selection policy for the run (EntityNotExists), the policy is empty and
-        // `GetActiveClusterInfoByClusterAttribute(nil)` yields the domain's
-        // active cluster. The Rust Frontend has no persisted per-run policy
-        // reader (Go History owns the execution tables), so every run takes
-        // this documented path.
+        // Go `GetActiveClusterInfoByWorkflow`: EntityNotExists from the
+        // execution store yields an empty policy (domain active cluster).
+        let policy = self.cluster_selection_policy(domain_id, workflow_id, run_id)?;
         active_cluster_for_attribute(
             &replication.active_cluster_name,
             replication.active_clusters.as_ref(),
-            "",
+            &policy_attribute(policy.as_ref()),
         )
     }
 
@@ -350,7 +410,7 @@ impl ActiveClusterManager for DomainActiveClusterManager {
     fn current_workflow_selection(
         &self,
         domain_id: &str,
-        _workflow_id: &str,
+        workflow_id: &str,
     ) -> Result<(bool, Option<String>), String> {
         let described = self
             .manager
@@ -364,7 +424,25 @@ impl ActiveClusterManager for DomainActiveClusterManager {
             // Go: not active-active returns (nil, false, nil).
             return Ok((false, None));
         }
-        Err("current workflow policy lookup is not ported".into())
+        // Go `GetActiveClusterSelectionPolicyForCurrentWorkflow`.
+        let Some((store, num_shards)) = &self.executions else {
+            return Err("execution store is not configured".into());
+        };
+        let shard = crate::workflow_matching::workflow_id_to_history_shard(workflow_id, *num_shards);
+        let domain = parse_uuid(domain_id)?;
+        let current = store
+            .select_current_execution(shard, domain, workflow_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("Workflow execution not found.  WorkflowId: {workflow_id}"))?;
+        if !is_workflow_running(current.state) {
+            return Ok((false, None));
+        }
+        let run = uuid::Uuid::from_bytes(current.run_id).to_string();
+        // Go returns an error when the policy row is missing here.
+        let policy = self
+            .cluster_selection_policy(domain_id, workflow_id, &run)?
+            .ok_or_else(|| "active cluster selection policy not found".to_string())?;
+        Ok((true, Some(policy_attribute(Some(&policy)))))
     }
 }
 
@@ -502,6 +580,10 @@ impl RemoteFrontends {
                         info.tls
                             .clone()
                             .and_then(|tls| serde_json::from_value(tls).ok()),
+                    )
+                    .with_authorization_provider_if(
+                        info.authorization_provider.enable,
+                        &info.authorization_provider.private_key,
                     ),
                 )
             })
@@ -670,6 +752,120 @@ mod tests {
                 },
             )])),
         }
+    }
+
+    /// Thriftrw `ActiveClusterSelectionPolicy{clusterAttribute{scope:"region",name:"us"}}`.
+    fn policy_blob() -> Vec<u8> {
+        let mut blob = vec![0x0c, 0x00, 0x01];
+        for (id, text) in [(1u8, "region"), (2u8, "us")] {
+            blob.extend([0x0b, 0x00, id]);
+            blob.extend((text.len() as u32).to_be_bytes());
+            blob.extend(text.as_bytes());
+        }
+        blob.extend([0x00, 0x00]);
+        blob
+    }
+
+    #[derive(Debug, Default)]
+    struct FakeExecutions {
+        current: Option<cadence_persistence::history_reader::CurrentExecutionRow>,
+        policy: Option<(Vec<u8>, String)>,
+        calls: Mutex<Vec<String>>,
+    }
+    impl HistoryNodeStore for FakeExecutions {
+        fn select_nodes(
+            &self,
+            _: i32,
+            _: [u8; 16],
+            _: [u8; 16],
+            _: i64,
+            _: i64,
+            _: i64,
+        ) -> Result<
+            Vec<cadence_persistence::history_reader::HistoryNodeRow>,
+            cadence_persistence::history_reader::HistoryReadError,
+        > {
+            Ok(vec![])
+        }
+        fn select_current_execution(
+            &self,
+            shard: i32,
+            _: [u8; 16],
+            workflow_id: &str,
+        ) -> Result<
+            Option<cadence_persistence::history_reader::CurrentExecutionRow>,
+            cadence_persistence::history_reader::HistoryReadError,
+        > {
+            self.calls.lock().unwrap().push(format!("current {workflow_id} {shard}"));
+            Ok(self.current.clone())
+        }
+        fn select_active_cluster_policy(
+            &self,
+            _: i32,
+            _: [u8; 16],
+            workflow_id: &str,
+            run_id: [u8; 16],
+        ) -> Result<Option<(Vec<u8>, String)>, cadence_persistence::history_reader::HistoryReadError>
+        {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("policy {workflow_id} {}", uuid::Uuid::from_bytes(run_id)));
+            Ok(self.policy.clone())
+        }
+    }
+
+    fn manager_with(store: FakeExecutions) -> DomainActiveClusterManager {
+        DomainActiveClusterManager::new(Arc::new(
+            cadence_persistence::domains::InMemoryDomainStore::default(),
+        ))
+        .with_executions(Arc::new(store), 4)
+    }
+
+    const DOMAIN: &str = "11111111-1111-1111-1111-111111111111";
+    const RUN: &str = "22222222-2222-2222-2222-222222222222";
+
+    #[test]
+    fn persisted_policy_is_decoded_for_explicit_run() {
+        let manager = manager_with(FakeExecutions {
+            policy: Some((policy_blob(), "thriftrw".into())),
+            ..Default::default()
+        });
+        let policy = manager.cluster_selection_policy(DOMAIN, "wf", RUN).unwrap();
+        assert_eq!(policy_attribute(policy.as_ref()), "region:us");
+    }
+
+    #[test]
+    fn empty_run_id_resolves_current_run_first_and_missing_rows_are_empty_policy() {
+        let current_run = *uuid::Uuid::parse_str(RUN).unwrap().as_bytes();
+        let store = FakeExecutions {
+            current: Some(cadence_persistence::history_reader::CurrentExecutionRow {
+                run_id: current_run,
+                state: 1,
+            }),
+            policy: None,
+            ..Default::default()
+        };
+        let manager = manager_with(store);
+        // Missing policy row == Go EntityNotExists == empty attribute.
+        let policy = manager.cluster_selection_policy(DOMAIN, "wf", "").unwrap();
+        assert_eq!(policy_attribute(policy.as_ref()), "");
+        let none = manager_with(FakeExecutions::default());
+        assert!(none.cluster_selection_policy(DOMAIN, "wf", "").unwrap().is_none());
+    }
+
+    #[test]
+    fn snappy_policy_blob_and_bad_encoding() {
+        let compressed = snap::raw::Encoder::new().compress_vec(&policy_blob()).unwrap();
+        let decoded = decode_active_cluster_selection_policy(&compressed, "thriftrw_snappy").unwrap();
+        assert_eq!(
+            decoded.cluster_attribute,
+            Some(("region".to_owned(), "us".to_owned()))
+        );
+        assert!(decode_active_cluster_selection_policy(&policy_blob(), "json").is_err());
+        // Nil attribute -> empty policy.
+        let empty = decode_active_cluster_selection_policy(&[0x00], "thriftrw").unwrap();
+        assert!(empty.cluster_attribute.is_none());
     }
 
     #[test]

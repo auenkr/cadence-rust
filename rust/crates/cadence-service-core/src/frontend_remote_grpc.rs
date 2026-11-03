@@ -72,6 +72,7 @@ fn decorate<M>(
     service: &str,
     caller: &str,
     forwarding_cluster: &str,
+    authorization: Option<&str>,
     timeout: Duration,
 ) -> tonic::Request<M> {
     let mut request = tonic::Request::new(message);
@@ -84,6 +85,14 @@ fn decorate<M>(
     ] {
         if let Ok(value) = tonic::metadata::MetadataValue::try_from(value) {
             request.metadata_mut().insert(key, value);
+        }
+    }
+    // Go `authOutboundMiddleware`: `cadence-authorization` JWT header.
+    if let Some(token) = authorization {
+        if let Ok(value) = tonic::metadata::MetadataValue::try_from(token) {
+            request
+                .metadata_mut()
+                .insert(crate::outbound_auth::AUTHORIZATION_HEADER, value);
         }
     }
     request
@@ -100,6 +109,7 @@ pub async fn call(
     service: &str,
     caller: &str,
     forwarding_cluster: &str,
+    authorization: Option<&str>,
     operation: &str,
     request: Value,
     timeout: Duration,
@@ -115,7 +125,7 @@ pub async fn call(
             let typed: $ty = serde_json::from_value(request).map_err(bad)?;
             let proto_request = $out(typed).map_err(internal)?;
             let response = $client
-                .$rpc(decorate(proto_request, service, caller, forwarding_cluster, timeout))
+                .$rpc(decorate(proto_request, service, caller, forwarding_cluster, authorization, timeout))
                 .await
                 .map_err(|s| error_from_status(&s))?
                 .into_inner();
@@ -125,7 +135,7 @@ pub async fn call(
         ($client:ident, $rpc:ident, $ty:ty, $out:expr, void) => {{
             let typed: $ty = serde_json::from_value(request).map_err(bad)?;
             $client
-                .$rpc(decorate($out(typed), service, caller, forwarding_cluster, timeout))
+                .$rpc(decorate($out(typed), service, caller, forwarding_cluster, authorization, timeout))
                 .await
                 .map_err(|s| error_from_status(&s))?;
             Ok(Value::Null)
@@ -133,7 +143,7 @@ pub async fn call(
         ($client:ident, $rpc:ident, $ty:ty, $out:expr, $inn:expr) => {{
             let typed: $ty = serde_json::from_value(request).map_err(bad)?;
             let response = $client
-                .$rpc(decorate($out(typed), service, caller, forwarding_cluster, timeout))
+                .$rpc(decorate($out(typed), service, caller, forwarding_cluster, authorization, timeout))
                 .await
                 .map_err(|s| error_from_status(&s))?
                 .into_inner();
@@ -421,5 +431,19 @@ mod tests {
             error_from_status(&tonic::Status::unavailable("x")),
             CadenceError::Internal(_)
         ));
+    }
+}
+
+#[cfg(test)]
+mod authorization_tests {
+    use super::*;
+
+    #[test]
+    fn decorate_adds_authorization_header_only_when_present() {
+        let with = decorate((), "svc", "caller", "a", Some("tok"), Duration::from_secs(1));
+        assert_eq!(with.metadata().get("cadence-authorization").unwrap(), "tok");
+        assert_eq!(with.metadata().get("rpc-service").unwrap(), "svc");
+        let without = decorate((), "svc", "caller", "a", None, Duration::from_secs(1));
+        assert!(without.metadata().get("cadence-authorization").is_none());
     }
 }
