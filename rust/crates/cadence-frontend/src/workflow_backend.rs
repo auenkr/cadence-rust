@@ -636,6 +636,7 @@ pub struct HandlerApi {
         crate::wrappers::redirection_runtime::ForwardingBackend<ProductionBackend>,
     >,
     admin_auth: AdminAccessControl,
+    schedule_redirect: Option<crate::wrappers::redirection_runtime::ScheduleRedirect>,
 }
 
 /// Go `accesscontrolled.NewAdminHandler`: every Admin method needs
@@ -745,6 +746,20 @@ impl cadence_service_core::workflow_api::WorkflowApi for HandlerApi {
             self.handler
                 .dispatch_with_metadata(operation, request, &caller)
                 .await
+        })
+    }
+
+    fn redirect<'a>(
+        &'a self,
+        operation: &'a str,
+        request: &'a serde_json::Value,
+        ctx: &'a cadence_service_core::workflow_api::CallerContext,
+    ) -> cadence_service_core::workflow_api::RedirectFuture<'a> {
+        Box::pin(async move {
+            match &self.schedule_redirect {
+                Some(redirect) => redirect.route(operation, request, &ctx.headers).await,
+                None => Ok(None),
+            }
         })
     }
 }
@@ -1041,47 +1056,57 @@ pub fn build_workflow_api(
         version_check_enabled,
         std::sync::Arc::new(crate::wrappers::versioncheck::GoVersionChecker),
     );
-    let handler =
-        if redirection_policy == crate::wrappers::clusterredirection::ForwardingPolicy::Noop {
-            handler
-        } else {
-            let overlay = ctx.state.admin.dynamic_config.clone();
-            let config = crate::wrappers::redirection_runtime::FnRuntimeConfig(
-                std::sync::Arc::new(move |domain: &str| {
-                    overlay.lock().map_or(true, |o| {
-                        cadence_persistence::dynamic_config::boolean(
-                            o.property_values("system.enableDomainNotActiveAutoForwarding"),
-                            Some(domain),
-                            true,
-                        )
-                    })
-                }),
-            );
-            handler.with_cluster_redirection(std::sync::Arc::new(
-                crate::wrappers::clusterredirection::WorkflowRedirector {
-                    policy: redirection_policy,
-                    current_cluster: metadata.current_cluster_name.clone(),
-                    configured_target: metadata
-                        .cluster_redirection_policy
-                        .as_ref()
-                        .map(|p| p.all_domain_apis_forwarding_target_cluster.clone())
-                        .unwrap_or_default(),
-                    config,
-                    manager: crate::wrappers::redirection_runtime::UnsupportedActiveClusterManager,
-                    metrics: std::sync::Arc::new(
-                        crate::wrappers::redirection_runtime::SinkRedirectMetrics::new(
-                            shared_metrics_sink.clone(),
-                        ),
+    let (handler, schedule_redirect) = if redirection_policy
+        == crate::wrappers::clusterredirection::ForwardingPolicy::Noop
+    {
+        (handler, None)
+    } else {
+        let overlay = ctx.state.admin.dynamic_config.clone();
+        let config = crate::wrappers::redirection_runtime::FnRuntimeConfig(std::sync::Arc::new(
+            move |domain: &str| {
+                overlay.lock().map_or(true, |o| {
+                    cadence_persistence::dynamic_config::boolean(
+                        o.property_values("system.enableDomainNotActiveAutoForwarding"),
+                        Some(domain),
+                        true,
+                    )
+                })
+            },
+        ));
+        let redirector =
+            std::sync::Arc::new(crate::wrappers::clusterredirection::WorkflowRedirector {
+                policy: redirection_policy,
+                current_cluster: metadata.current_cluster_name.clone(),
+                configured_target: metadata
+                    .cluster_redirection_policy
+                    .as_ref()
+                    .map(|p| p.all_domain_apis_forwarding_target_cluster.clone())
+                    .unwrap_or_default(),
+                config,
+                manager: crate::wrappers::redirection_runtime::UnsupportedActiveClusterManager,
+                metrics: std::sync::Arc::new(
+                    crate::wrappers::redirection_runtime::SinkRedirectMetrics::new(
+                        shared_metrics_sink.clone(),
                     ),
-                    requests: crate::wrappers::redirection_runtime::DomainCacheResolver::new(
-                        ctx.state.domain_manager.clone(),
-                    ),
-                },
-            ))
+                ),
+                requests: crate::wrappers::redirection_runtime::DomainCacheResolver::new(
+                    ctx.state.domain_manager.clone(),
+                ),
+            });
+        let schedule_redirect = crate::wrappers::redirection_runtime::ScheduleRedirect {
+            redirector: redirector.clone(),
+            remotes: crate::wrappers::redirection_runtime::RemoteFrontends::from_metadata(metadata),
+            timeout: cadence_service_core::frontend_remote::DEFAULT_REMOTE_TIMEOUT,
         };
+        (
+            handler.with_cluster_redirection(redirector),
+            Some(schedule_redirect),
+        )
+    };
     Ok(std::sync::Arc::new(HandlerApi {
         handler,
         admin_auth: AdminAccessControl(selected_authorizer),
+        schedule_redirect,
     }))
 }
 

@@ -293,6 +293,20 @@ pub trait RequestRedirector: Send + Sync {
         request: &'a Value,
         next: WorkflowNext<'a>,
     ) -> WorkflowFuture<'a>;
+
+    /// Like `invoke`, with the caller's inbound headers (lower-cased names) so
+    /// the redirector can read Go's `cadence-client-feature-flags`
+    /// autoforwarding flag (strong consistency).
+    fn invoke_with_headers<'a>(
+        &'a self,
+        operation: WorkflowOperation,
+        request: &'a Value,
+        headers: &'a std::collections::HashMap<String, String>,
+        next: WorkflowNext<'a>,
+    ) -> WorkflowFuture<'a> {
+        let _ = headers;
+        self.invoke(operation, request, next)
+    }
 }
 
 /// Temporary compatibility constructor retained for the independent domain,
@@ -828,7 +842,12 @@ impl<B: WorkflowBackend> Handler<B> {
                 self.dispatch_metered(operation, request.clone(), caller, target_cluster)
             };
             return redirector
-                .invoke(operation, &redirect_request, Box::new(next))
+                .invoke_with_headers(
+                    operation,
+                    &redirect_request,
+                    &caller.original_headers,
+                    Box::new(next),
+                )
                 .await;
         }
         self.dispatch_metered(operation, request, caller, None)

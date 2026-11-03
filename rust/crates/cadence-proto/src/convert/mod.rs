@@ -1,6 +1,7 @@
 //! Conversions mirror go/common/types/mapper/proto. Thrift enums start at
 //! zero; protobuf enums reserve zero for INVALID. Time in the current Rust
 //! engine is milliseconds; protobuf Timestamp is seconds plus nanoseconds.
+pub mod cross_cluster;
 pub mod decisions;
 pub mod history;
 
