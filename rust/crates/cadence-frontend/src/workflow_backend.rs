@@ -933,6 +933,7 @@ fn build_archive_readers(
             domains,
         )),
     ))
+}
 
 /// Builds the Frontend metrics sink from `services.frontend.metrics` using the
 /// shared exporter runtime (StatsD/M3/Prometheus). An absent/empty reporter is
