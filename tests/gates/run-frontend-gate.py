@@ -334,7 +334,7 @@ try:
                 time.sleep(5)
         (work / 'archival-listarchived.log').write_text(out)
         record('archival-list-archived-visibility', found, out)
-        r = subprocess.run(cli_ar(True, 'workflow', 'listarchived', '--query', f"WorkflowType = '{wtype}'", '--ps', '1'), capture_output=True, text=True, timeout=60)
+        r = subprocess.run(cli_ar(True, 'workflow', 'listarchived', '--query', f"WorkflowType = '{wtype}'", '--ps', '1'), input='q\n', capture_output=True, text=True, timeout=60)
         record('archival-list-archived-paged', r.returncode == 0 and any(w in r.stdout for w in arch_ids), r.stdout + r.stderr)
         # Go archives visibility at close; history is archived at retention expiry (not reachable in a gate run).
         files = sorted(str(f.relative_to(work)) for f in (work / 'visibility-archive').rglob('*') if f.is_file()) if (work / 'visibility-archive').exists() else []

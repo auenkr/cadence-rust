@@ -212,7 +212,7 @@ fn decode_token(v: Option<&Value>) -> Result<Vec<u8>, CadenceError> {
 
 fn b64_token(token: &[u8]) -> Value {
     if token.is_empty() {
-        Value::Null
+        Value::String(String::new())
     } else {
         Value::String(cadence_api::b64::encode_bytes(token))
     }
@@ -531,7 +531,7 @@ mod tests {
         let resp = r.get("dom".into(), req.clone()).await.unwrap().unwrap();
         assert_eq!(resp["archived"], true);
         assert_eq!(resp["history"]["events"].as_array().unwrap().len(), 3);
-        assert!(resp["nextPageToken"].is_null());
+        assert_eq!(resp["nextPageToken"], "");
         // live workflow: no archive read
         assert!(reader(true, &archival.history_uri)
             .get("dom".into(), req.clone())
@@ -584,7 +584,7 @@ mod tests {
             .unwrap();
         assert_eq!(resp["executions"][0]["execution"]["runId"], "r1");
         assert_eq!(resp["executions"][0]["closeStatus"], 0);
-        assert!(resp["nextPageToken"].is_null());
+        assert_eq!(resp["nextPageToken"], "");
         let e = mk(cfg("disabled", true), archival.clone())
             .list(req.clone())
             .await

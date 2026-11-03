@@ -3067,7 +3067,8 @@ mod tests {
     async fn handler_serves_archived_history_through_real_filestore_reader() {
         use cadence_api::enums::ArchivalStatus;
         let root = archive_tmp("hist");
-        let name = cadence_common::archiver::history_filename("uuid:archived", "wf-a", ARCHIVE_RUN, 2);
+        let name =
+            cadence_common::archiver::history_filename("uuid:archived", "wf-a", ARCHIVE_RUN, 2);
         std::fs::write(
             root.join(name),
             br#"[{"events":[{"eventId":1},{"eventId":2}]},{"events":[{"eventId":3}]}]"#,
