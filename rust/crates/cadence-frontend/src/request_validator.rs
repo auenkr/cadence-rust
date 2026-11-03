@@ -191,13 +191,14 @@ impl RequestValidator {
             if let (Some(sink), Some(name)) = (&self.warn_sink, warn_counter_name(kind)) {
                 let mut tags = std::collections::BTreeMap::new();
                 tags.insert("domain".to_owned(), domain.to_owned());
-                sink.0.record(cadence_service_core::matching_metrics::MetricEvent {
-                    name,
-                    kind: cadence_service_core::matching_metrics::MetricKind::Counter,
-                    value: cadence_service_core::matching_metrics::MetricValue::Count(1),
-                    tags,
-                    histogram: None,
-                });
+                sink.0
+                    .record(cadence_service_core::matching_metrics::MetricEvent {
+                        name,
+                        kind: cadence_service_core::matching_metrics::MetricKind::Counter,
+                        value: cadence_service_core::matching_metrics::MetricValue::Count(1),
+                        tags,
+                        histogram: None,
+                    });
             }
         }
         id.len() <= error_limit
