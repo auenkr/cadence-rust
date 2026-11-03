@@ -80,7 +80,8 @@ def go_config(dirname, prefix, db, vis, seeds, current):
     for k, v in ren.items():
         text = re.sub(r'\$\{' + k + r':\d+\}', P.get(v, '1'), text)
     text = text.replace('"127.0.0.1:7933", "127.0.0.1:7934", "127.0.0.1:7935"', seeds)
-    text = text.replace('name: cadence\n', f'name: cadence-{prefix.lower().strip("_")}\n', 1)
+    if prefix == 'B_':
+        text = text.replace('name: cadence\n', 'name: cadence-b\n', 1)
     text = text.replace('"config/dynamicconfig/development.yaml"', json.dumps(str(work / 'dynamic-config.yaml')))
     text = re.sub(r'(?ms)^clusterGroupMetadata:.*?(?=^archival:)', group_block(current, 'grpc', 'grpc', 'noop'), text, count=1)
     text = text.replace('/tmp/cadence_archival/development', str(work / 'arch-h')).replace('/tmp/cadence_vis_archival/development', str(work / 'arch-v')).replace('/tmp/blobstore', str(work / 'blob'))
