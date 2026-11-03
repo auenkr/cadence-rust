@@ -919,7 +919,10 @@ mod tests {
         assert!(matches!(c.acquire("d"), Decision::Decided(Err(_))));
         let g = c.global_limiter("d");
         let (usage, _, _) = g.collect();
-        assert!(usage.allowed + usage.rejected >= 2, "global shadow saw the calls");
+        assert!(
+            usage.allowed + usage.rejected >= 2,
+            "global shadow saw the calls"
+        );
     }
 
     #[test]
