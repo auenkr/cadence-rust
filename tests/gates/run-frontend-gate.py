@@ -977,6 +977,20 @@ try:
         time.sleep(5)
         busy, last = burst_busy(tag)
         record(f'global-ratelimiter-{mode}-enforces-service-busy', ok and busy, last)
+    # Disruptive admin APIs run last (CloseShard/ResetQueue make History re-acquire shards).
+    # Success or a typed server error is accepted; routing failures/panics are not.
+    time.sleep(3)
+    for transport, cli in (('tchannel', cli_t), ('grpc', cli_g)):
+        for nm, extra in (('queue-reset-timer', ['queue', 'reset', '--shard_id', '0', '--cluster', 'test', '--queue_type', '3']),
+                          ('shard-remove-task', ['shard', 'removeTask', '--shard_id', '0', '--task_id', '999999999', '--task_type', '2']),
+                          ('shard-close', ['shard', 'closeShard', '--shard_id', '0'])):
+            r = subprocess.run([*cli, '--domain', dom_t, 'admin', *extra], capture_output=True, text=True, timeout=90)
+            o = (r.stdout + r.stderr)
+            low = o.lower()
+            bad = any(b in low for b in ('unknown method', 'unimplemented', 'not implemented', 'unsupported', 'panic', 'internalservice'))
+            record(f'admin-{nm}-{transport}', not bad and (r.returncode == 0 or 'error' in low), o.strip()[:300])
+            if nm == 'shard-close':
+                time.sleep(5)
 
 except SystemExit:
     pass

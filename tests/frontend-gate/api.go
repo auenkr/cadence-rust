@@ -354,17 +354,12 @@ func adminCLI(ctx context.Context, domain, wid, rid string) {
 		check("dlq-merge-history", "", true, "admin", "dlq", "merge", "--dlq_type", "history", "--shards", "0", "--source_cluster", cluster, "--last_message_id", "0")
 		check("queue-describe-transfer", "", true, "admin", "queue", "describe", "--shard_id", "0", "--cluster", cluster, "--queue_type", "2")
 		check("queue-describe-timer", "", true, "admin", "queue", "describe", "--shard_id", "0", "--cluster", cluster, "--queue_type", "3")
-		check("queue-reset-timer", "", true, "admin", "queue", "reset", "--shard_id", "0", "--cluster", cluster, "--queue_type", "3")
 		check("queue-describe-no-cluster-rejected", "", true, "admin", "queue", "describe", "--shard_id", "0", "--queue_type", "2")
-		check("shard-close", "", true, "admin", "shard", "closeShard", "--shard_id", "0")
-		check("shard-remove-task", "", true, "admin", "shard", "removeTask", "--shard_id", "0", "--task_id", "999999999", "--task_type", "2")
 		check("workflow-fix-corruption", "", true, "admin", "workflow", "fix_corruption", "--wid", "gate-no-such-wf-"+rid[:8])
 		check("workflow-delete-remote", "", true, "admin", "workflow", "delete", "--remote", "--wid", "gate-no-such-wf-"+rid[:8], "--rid", rid)
 		check("dynconfig-operational-list", "", false, "admin", "config", "listall")
 		check("dynconfig-operational-get", "", true, "admin", "config", "operational-get", "--name", "frontend.visibilityMaxPageSize")
 		check("dynconfig-operational-list-values", "", true, "admin", "config", "operational-list")
 	}
-	// CloseShard/ResetQueue disturb shard ownership; let History re-acquire before later gate phases.
-	time.Sleep(20 * time.Second)
 	// Schedule update/pause/unpause/list run in the schedule block (gRPC CLI).
 }
