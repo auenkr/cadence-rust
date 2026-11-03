@@ -104,6 +104,7 @@ fn internal(status: tonic::Status) -> CadenceError {
 }
 
 /// Forward one call over gRPC and return the JSON response.
+#[allow(clippy::too_many_arguments)]
 pub async fn call(
     channel: Channel,
     service: &str,
