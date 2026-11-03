@@ -1409,9 +1409,9 @@ pub fn build_workflow_api(
         version_check_enabled,
         std::sync::Arc::new(crate::wrappers::versioncheck::GoVersionChecker),
     );
-    let (handler, schedule_redirect) = if redirection_policy
-        == crate::wrappers::clusterredirection::ForwardingPolicy::Noop
-    {
+    let redirection_is_noop =
+        redirection_policy == crate::wrappers::clusterredirection::ForwardingPolicy::Noop;
+    let (handler, schedule_redirect) = if redirection_is_noop {
         (handler, None)
     } else {
         let overlay = ctx.state.admin.dynamic_config.clone();
