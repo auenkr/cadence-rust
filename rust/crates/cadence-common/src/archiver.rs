@@ -7,7 +7,12 @@
 
 use std::collections::BTreeSet;
 use std::path::Path;
+use std::sync::Arc;
 
+use crate::cloud_archiver::{
+    gcs_get_history, gcs_query_visibility, gcs_validate_uri, s3_get_history, s3_query_visibility,
+    s3_validate_uri, CloudBackends, ObjectStore, S3_ACCESS_POINT_SCHEME,
+};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -166,6 +171,7 @@ pub fn parse_uri(s: &str) -> Result<ArchiverUri, String> {
 #[derive(Debug, Clone, Default)]
 pub struct ArchiverProvider {
     configured_keys: BTreeSet<String>,
+    cloud: CloudBackends,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -187,6 +193,7 @@ impl ArchiverProvider {
     pub fn new(configured_keys: impl IntoIterator<Item = String>) -> Self {
         Self {
             configured_keys: configured_keys.into_iter().collect(),
+            cloud: CloudBackends::default(),
         }
     }
 
@@ -196,7 +203,7 @@ impl ArchiverProvider {
     fn resolve(&self, kind: Kind, scheme: &str) -> Result<(), ArchiverError> {
         let key = match scheme {
             FILESTORE_SCHEME => FILESTORE_CONFIG_KEY,
-            S3_SCHEME => S3_CONFIG_KEY,
+            S3_SCHEME | S3_ACCESS_POINT_SCHEME => S3_CONFIG_KEY,
             GCLOUD_SCHEME => GCLOUD_CONFIG_KEY,
             _ => {
                 return Err(ArchiverError::Other(format!(
@@ -214,15 +221,34 @@ impl ArchiverProvider {
                 go_quote(key)
             )));
         }
-        if scheme != FILESTORE_SCHEME {
-            return Err(ArchiverError::Other(format!(
-                "{}: {} archiver for scheme {} is not implemented in the Rust port",
-                ERR_NOT_SUPPORTED,
-                kind.name(),
-                go_quote(scheme)
-            )));
-        }
         Ok(())
+    }
+
+    /// Attach the s3store / gstorage backends built from the server config.
+    pub fn with_cloud(mut self, cloud: CloudBackends) -> Self {
+        self.cloud = cloud;
+        self
+    }
+
+    fn missing_backend(kind: Kind, scheme: &str) -> ArchiverError {
+        ArchiverError::Other(format!(
+            "{}: {} archiver for scheme {} is not configured",
+            ERR_NOT_SUPPORTED,
+            kind.name(),
+            go_quote(scheme)
+        ))
+    }
+
+    fn s3_store(&self, kind: Kind, scheme: &str) -> Result<Arc<dyn ObjectStore>, ArchiverError> {
+        self.cloud
+            .s3_store()
+            .unwrap_or_else(|| Err(Self::missing_backend(kind, scheme)))
+    }
+
+    fn gcs_store(&self, kind: Kind, scheme: &str) -> Result<Arc<dyn ObjectStore>, ArchiverError> {
+        self.cloud
+            .gcs_store()
+            .unwrap_or_else(|| Err(Self::missing_backend(kind, scheme)))
     }
 
     /// Go `validateHistoryArchivalURI` in `common/domain/handler.go`.
@@ -238,7 +264,17 @@ impl ArchiverProvider {
     fn validate_uri(&self, kind: Kind, uri: &str) -> Result<(), ArchiverError> {
         let parsed = parse_uri(uri).map_err(ArchiverError::Other)?;
         self.resolve(kind, &parsed.scheme)?;
-        filestore_validate_uri(&parsed)
+        match parsed.scheme.as_str() {
+            S3_SCHEME | S3_ACCESS_POINT_SCHEME => {
+                let store = self.s3_store(kind, &parsed.scheme)?;
+                s3_validate_uri(store.as_ref(), &self.cloud.s3_region, &parsed)
+            }
+            GCLOUD_SCHEME => {
+                let store = self.gcs_store(kind, &parsed.scheme)?;
+                gcs_validate_uri(store.as_ref(), &parsed)
+            }
+            _ => filestore_validate_uri(&parsed),
+        }
     }
 
     pub fn get_history(
@@ -248,7 +284,17 @@ impl ArchiverProvider {
     ) -> Result<GetHistoryResponse, ArchiverError> {
         let parsed = parse_uri(uri).map_err(ArchiverError::Other)?;
         self.resolve(Kind::History, &parsed.scheme)?;
-        filestore_get_history(&parsed, request)
+        match parsed.scheme.as_str() {
+            S3_SCHEME | S3_ACCESS_POINT_SCHEME => {
+                let store = self.s3_store(Kind::History, &parsed.scheme)?;
+                s3_get_history(store.as_ref(), &self.cloud.s3_region, &parsed, request)
+            }
+            GCLOUD_SCHEME => {
+                let store = self.gcs_store(Kind::History, &parsed.scheme)?;
+                gcs_get_history(store.as_ref(), &parsed, request)
+            }
+            _ => filestore_get_history(&parsed, request),
+        }
     }
 
     pub fn query_visibility(
@@ -258,7 +304,17 @@ impl ArchiverProvider {
     ) -> Result<QueryVisibilityResponse, ArchiverError> {
         let parsed = parse_uri(uri).map_err(ArchiverError::Other)?;
         self.resolve(Kind::Visibility, &parsed.scheme)?;
-        filestore_query_visibility(&parsed, request)
+        match parsed.scheme.as_str() {
+            S3_SCHEME | S3_ACCESS_POINT_SCHEME => {
+                let store = self.s3_store(Kind::Visibility, &parsed.scheme)?;
+                s3_query_visibility(store.as_ref(), &self.cloud.s3_region, &parsed, request)
+            }
+            GCLOUD_SCHEME => {
+                let store = self.gcs_store(Kind::Visibility, &parsed.scheme)?;
+                gcs_query_visibility(store.as_ref(), &parsed, request)
+            }
+            _ => filestore_query_visibility(&parsed, request),
+        }
     }
 }
 
@@ -621,8 +677,29 @@ struct Parser {
     pos: usize,
 }
 
+/// Receives each `column op value` comparison: (column, operator, value, quoted).
+type Visitor<'a> = dyn FnMut(&str, &str, &str, bool) -> Result<(), String> + 'a;
+
+/// Walks a Go-style `where` clause (comparisons joined by `and`, parentheses
+/// allowed), calling `visit` for each comparison left to right.
+pub fn walk_where(
+    query: &str,
+    mut visit: impl FnMut(&str, &str, &str, bool) -> Result<(), String>,
+) -> Result<(), String> {
+    let toks = tokenize(query)?;
+    if toks.is_empty() {
+        return Err("syntax error at position 1".into());
+    }
+    let mut parser = Parser { toks, pos: 0 };
+    parser.expr(&mut visit)?;
+    if parser.pos != parser.toks.len() {
+        return Err("syntax error".into());
+    }
+    Ok(())
+}
+
 impl Parser {
-    fn expr(&mut self, q: &mut ParsedQuery) -> Result<(), String> {
+    fn expr(&mut self, q: &mut Visitor<'_>) -> Result<(), String> {
         self.term(q)?;
         while let Some(Tok::Ident(w)) = self.toks.get(self.pos) {
             if w.eq_ignore_ascii_case("and") {
@@ -637,7 +714,7 @@ impl Parser {
         Ok(())
     }
 
-    fn term(&mut self, q: &mut ParsedQuery) -> Result<(), String> {
+    fn term(&mut self, q: &mut Visitor<'_>) -> Result<(), String> {
         match self.toks.get(self.pos).cloned() {
             Some(Tok::LParen) => {
                 self.pos += 1;
@@ -661,7 +738,7 @@ impl Parser {
                     _ => return Err("syntax error".into()),
                 };
                 self.pos += 1;
-                apply_comparison(&col, &op, &val, quoted, q)
+                q(&col, &op, &val, quoted)
             }
             _ => Err("only comparison and \"and\" expression is supported".into()),
         }
@@ -795,15 +872,9 @@ fn parse_query(query: &str) -> Result<ParsedQuery, String> {
         latest_close_time: now,
         ..Default::default()
     };
-    let toks = tokenize(query)?;
-    if toks.is_empty() {
-        return Err("syntax error at position 1".into());
-    }
-    let mut parser = Parser { toks, pos: 0 };
-    parser.expr(&mut parsed)?;
-    if parser.pos != parser.toks.len() {
-        return Err("syntax error".into());
-    }
+    walk_where(query, |col, op, val, quoted| {
+        apply_comparison(col, op, val, quoted, &mut parsed)
+    })?;
     Ok(parsed)
 }
 
