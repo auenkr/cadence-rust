@@ -2933,7 +2933,7 @@ mod schedule_dispatch_tests {
         };
         dispatch_with_headers(
             &state,
-            "WorkflowService::ListArchivedWorkflowExecutions",
+            "ListArchivedWorkflowExecutions",
             &args,
             Instant::now() + Duration::from_secs(5),
             HashMap::new(),
