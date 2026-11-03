@@ -493,7 +493,6 @@ pub fn describe_response_in(
                     maximum_attempts: a.maximum_attempts,
                     schedule_id: a.schedule_id,
                     last_failure_reason: a.last_failure.map(|f| f.reason),
-                    ..Default::default()
                 })
             })
             .collect::<Result<_, _>>()?,
@@ -572,7 +571,6 @@ mod tests {
             query_result: payload(b"ans".to_vec()),
             query_rejected: Some(p::QueryRejected {
                 close_status: 2,
-                ..Default::default()
             }),
         })
         .unwrap();

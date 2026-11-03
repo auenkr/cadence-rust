@@ -10,7 +10,7 @@ fn millis(t: prost_types::Timestamp) -> i64 { t.seconds.saturating_mul(1_000_000
 fn secs64(v: Option<prost_types::Duration>) -> Result<Option<i64>, Status> { Ok(seconds(v)?.map(i64::from)) }
 fn workflow_execution_started_event_attributes(v: p::WorkflowExecutionStartedEventAttributes) -> Result<st::WorkflowExecutionStartedEventAttributes, Status> {
     let parent = v.parent_execution_info;
-    let (r_continued_failure, d_continued_failure, o_continued_failure) = failure_in(v.continued_failure)?;
+    let (r_continued_failure, d_continued_failure, _o_continued_failure) = failure_in(v.continued_failure)?;
     Ok(st::WorkflowExecutionStartedEventAttributes {
         workflow_type: v.workflow_type.map(|x| t::WorkflowType { name: x.name }),
         parent_workflow_domain: parent.as_ref().map(|x| x.domain_name.clone()),
@@ -51,7 +51,7 @@ fn workflow_execution_completed_event_attributes(v: p::WorkflowExecutionComplete
     })
 }
 fn workflow_execution_failed_event_attributes(v: p::WorkflowExecutionFailedEventAttributes) -> Result<tasks::WorkflowExecutionFailedEventAttributes, Status> {
-    let (r_failure, d_failure, o_failure) = failure_in(v.failure)?;
+    let (r_failure, d_failure, _o_failure) = failure_in(v.failure)?;
     Ok(tasks::WorkflowExecutionFailedEventAttributes {
         reason: r_failure,
         details: d_failure,
@@ -106,7 +106,7 @@ fn decision_task_timed_out_event_attributes(v: p::DecisionTaskTimedOutEventAttri
     })
 }
 fn decision_task_failed_event_attributes(v: p::DecisionTaskFailedEventAttributes) -> Result<tasks::DecisionTaskFailedEventAttributes, Status> {
-    let (r_failure, d_failure, o_failure) = failure_in(v.failure)?;
+    let (r_failure, d_failure, _o_failure) = failure_in(v.failure)?;
     Ok(tasks::DecisionTaskFailedEventAttributes {
         scheduled_event_id: v.scheduled_event_id,
         started_event_id: v.started_event_id,
@@ -233,7 +233,7 @@ fn cancel_timer_failed_event_attributes(v: p::CancelTimerFailedEventAttributes) 
     })
 }
 fn workflow_execution_continued_as_new_event_attributes(v: p::WorkflowExecutionContinuedAsNewEventAttributes) -> Result<tasks::WorkflowExecutionContinuedAsNewEventAttributes, Status> {
-    let (r_failure, d_failure, o_failure) = failure_in(v.failure)?;
+    let (r_failure, d_failure, _o_failure) = failure_in(v.failure)?;
     Ok(tasks::WorkflowExecutionContinuedAsNewEventAttributes {
         new_execution_run_id: v.new_execution_run_id,
         workflow_type: v.workflow_type.map(|x| t::WorkflowType { name: x.name }),
@@ -424,7 +424,7 @@ fn child_workflow_execution_completed_event_attributes(v: p::ChildWorkflowExecut
     })
 }
 fn child_workflow_execution_failed_event_attributes(v: p::ChildWorkflowExecutionFailedEventAttributes) -> Result<tasks::ChildWorkflowExecutionFailedEventAttributes, Status> {
-    let (r_failure, d_failure, o_failure) = failure_in(v.failure)?;
+    let (r_failure, d_failure, _o_failure) = failure_in(v.failure)?;
     Ok(tasks::ChildWorkflowExecutionFailedEventAttributes {
         domain: v.domain,
         workflow_execution: v.workflow_execution.map(execution),

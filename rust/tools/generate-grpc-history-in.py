@@ -56,7 +56,7 @@ for name, body in messages.items():
                 reason, details = 'failure_reason', 'failure_details'
             options = prefix + 'options' if prefix else 'failure_options'
             if reason in fields:
-                pre.append(f'let (r_{field}, d_{field}, o_{field}) = failure_in(v.{field})?;')
+                pre.append(f'let (r_{field}, d_{field}, {"" if options in fields else "_"}o_{field}) = failure_in(v.{field})?;')
                 lines.append(f'{reason}: ' + (f'r_{field}' if fields[reason].startswith('Option') else f'r_{field}.unwrap_or_default()') + ',')
                 if details in fields:
                     lines.append(f'{details}: d_{field},')
