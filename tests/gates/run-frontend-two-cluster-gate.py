@@ -255,6 +255,16 @@ try:
         poll('grpc-forward-workflow-lives-on-B', on_b, 60)
         rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'signal', '--wid', wid5, '--name', 'sig', '--input', '"x"')
         record('grpc-forward-signal', rc == 0, out)
+        # Further APIs the Rust Frontend on A routes over gRPC when B is the target
+        # (describe / history / list / query); success means the converters decode B's reply.
+        rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'describe', '--wid', wid5)
+        record('grpc-forward-describe', rc == 0 and wid5 in out, out)
+        rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'show', '--wid', wid5)
+        record('grpc-forward-history', rc == 0 and 'WorkflowExecutionSignaled' in out, out)
+        rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'list', '--open')
+        record('grpc-forward-list', rc == 0 and wid5 in out, out)
+        rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'query', '--wid', wid5, '--qt', '__stack_trace')
+        record('grpc-forward-query-reaches-B', 'not supported' not in out.lower(), out)
         rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'terminate', '--wid', wid5, '--reason', 'gate')
         record('grpc-forward-terminate', rc == 0, out)
         def terminated():

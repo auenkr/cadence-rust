@@ -263,8 +263,9 @@ fn requested_cluster_attribute(operation: &str, request: &Value) -> Option<Strin
 /// Go `activecluster.Manager` backed by the domain cache entry. Cluster
 /// attribute lookups follow `DomainCacheEntry.GetActiveClusterInfoByClusterAttribute`.
 /// Per-workflow policy lookups need the execution store, which the Rust
-/// Frontend does not read yet; they fail and Go's policy then routes to the
-/// current cluster (documented gap).
+/// Frontend does not read yet: workflow lookups use the empty-policy path and
+/// current-workflow lookups fail, so Go's policy routes to the current cluster
+/// (documented gap).
 pub struct DomainActiveClusterManager {
     manager: Arc<dyn FrontendDomainManager>,
 }
@@ -313,7 +314,17 @@ impl ActiveClusterManager for DomainActiveClusterManager {
             // Go: not active-active, ActiveClusterName from the domain entry.
             return Ok(replication.active_cluster_name);
         }
-        Err("workflow active cluster selection policy lookup is not ported".into())
+        // Go `GetActiveClusterInfoByWorkflow`: when the execution store has no
+        // selection policy for the run (EntityNotExists), the policy is empty and
+        // `GetActiveClusterInfoByClusterAttribute(nil)` yields the domain's
+        // active cluster. The Rust Frontend has no persisted per-run policy
+        // reader (Go History owns the execution tables), so every run takes
+        // this documented path.
+        active_cluster_for_attribute(
+            &replication.active_cluster_name,
+            replication.active_clusters.as_ref(),
+            "",
+        )
     }
 
     fn active_cluster_for_cluster_attribute(
