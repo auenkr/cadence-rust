@@ -2022,9 +2022,10 @@ async fn admin_and_visibility_routes() {
         json!({"name": "e2e-domain"}),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    // Go rejects deleting a deprecated domain that still has executions.
+    assert_eq!(status, StatusCode::BAD_REQUEST);
     let (status, _) = get(app.clone(), "/api/v1/domains/describe?name=e2e-domain").await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(status, StatusCode::OK);
 }
 
 #[tokio::test]
@@ -2159,7 +2160,7 @@ async fn delete_domain_rejects_domain_with_executions() {
         app.clone(),
         Method::POST,
         "/api/v1/workflows/start",
-        start_body("del-1"),
+        start_body("123e4567-e89b-12d3-a456-426614174031"),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -2198,7 +2199,7 @@ async fn admin_refresh_tasks_delegates_to_history() {
         app.clone(),
         Method::POST,
         "/api/v1/workflows/start",
-        start_body("refresh-1"),
+        start_body("123e4567-e89b-12d3-a456-426614174032"),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
