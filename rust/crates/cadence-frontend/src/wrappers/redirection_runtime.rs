@@ -112,12 +112,15 @@ struct EncodedToken {
     task_token: Vec<u8>,
 }
 
+/// Per-domain feature flag lookup.
+pub type ClusterSelectionFlag = Arc<dyn Fn(&str) -> bool + Send + Sync>;
+
 /// Go `DomainCache` lookups backed by the persistence domain manager.
 pub struct DomainCacheResolver {
     manager: Arc<dyn FrontendDomainManager>,
     /// Go `frontend.enableActiveClusterSelectionPolicyInStartWorkflow`; when
     /// off the requested policy is dropped (`sp1.ActiveClusterSelectionPolicy = nil`).
-    cluster_selection_enabled: Option<Arc<dyn Fn(&str) -> bool + Send + Sync>>,
+    cluster_selection_enabled: Option<ClusterSelectionFlag>,
 }
 
 impl DomainCacheResolver {
@@ -196,7 +199,7 @@ impl RedirectRequestResolver for DomainCacheResolver {
         let selection_enabled = self
             .cluster_selection_enabled
             .as_ref()
-            .map_or(true, |flag| flag(&info.name));
+            .is_none_or(|flag| flag(&info.name));
         let domain = DomainState {
             id: info.uuid,
             name: info.name,
