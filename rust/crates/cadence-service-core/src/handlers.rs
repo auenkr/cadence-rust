@@ -2109,7 +2109,7 @@ async fn delete_domain(
             "Cluster is not primary cluster, cannot do domain registration or domain update.",
         ));
     }
-    if current.status != Some(DomainStatus::Deprecated) {
+    if current.domain_info.as_ref().and_then(|info| info.status) != Some(DomainStatus::Deprecated) {
         return bad_request(BadRequestError::new("Domain is not in a deprecated state."));
     }
     match state.domain_manager.delete(&req.name) {

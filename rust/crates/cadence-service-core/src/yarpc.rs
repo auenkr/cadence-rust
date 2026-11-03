@@ -204,7 +204,7 @@ async fn handle_delete_domain(state: &AppState, body: &Struct) -> HandlerResult 
             uuid: None,
         })
         .map_err(|e| AppError::entity_not_exists(e.message))?;
-    if current.status != Some(cadence_api::enums::DomainStatus::Deprecated) {
+    if current.domain_info.as_ref().and_then(|info| info.status) != Some(cadence_api::enums::DomainStatus::Deprecated) {
         return Err(AppError::bad_request(
             "Domain is not in a deprecated state.".to_string(),
         ));
