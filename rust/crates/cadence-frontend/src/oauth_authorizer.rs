@@ -12,7 +12,9 @@ use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use serde_json::Value;
 
 use crate::wrappers::accesscontrolled::{Attributes, Authorizer, Decision, Permission};
-use cadence_service_core::config::{AuthorizationConfig, OAuthAuthorizerConfig, OAuthProviderConfig};
+use cadence_service_core::config::{
+    AuthorizationConfig, OAuthAuthorizerConfig, OAuthProviderConfig,
+};
 
 const GROUP_SEPARATOR: char = ' ';
 const JWT_INTERNAL_ISSUER: &str = "internal-jwt";
@@ -43,7 +45,10 @@ fn unverified_claims(token: &str) -> Result<Value, String> {
     serde_json::from_slice(&bytes).map_err(|e| e.to_string())
 }
 
-fn jmespath_search(expression: &str, data: &Value) -> Result<std::rc::Rc<jmespath::Variable>, String> {
+fn jmespath_search(
+    expression: &str,
+    data: &Value,
+) -> Result<std::rc::Rc<jmespath::Variable>, String> {
     jmespath::compile(expression)
         .map_err(|e| e.to_string())?
         .search(data)
