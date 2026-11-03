@@ -2685,6 +2685,16 @@ pub async fn dispatch_with_headers(
             )
             .await
         }
+        "RefreshWorkflowTasks" if admin => {
+            bridge_void(
+                method,
+                body,
+                |req: cadence_api::admin::RefreshWorkflowTasksRequest| {
+                    crate::admin::refresh_workflow_tasks(State(shared()), Json(req))
+                },
+            )
+            .await
+        }
         "DescribeHistoryHost" => {
             bridge_value::<_, cadence_api::admin::DescribeHistoryHostResponse, _, _>(
                 method,
