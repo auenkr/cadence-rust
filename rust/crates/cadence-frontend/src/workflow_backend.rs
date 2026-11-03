@@ -808,7 +808,12 @@ pub fn build_workflow_api(
         std::sync::Arc::new(backend.clone());
     let (archived_history, archived_visibility) =
         build_archive_readers(&ctx, probe).map_err(anyhow::Error::msg)?;
-    let metadata = &ctx.config.cluster_metadata;
+    let default_metadata = cadence_common::cluster::GroupMetadata::default();
+    let metadata = ctx
+        .config
+        .cluster_metadata
+        .as_ref()
+        .unwrap_or(&default_metadata);
     let redirection_policy = {
         let name = metadata
             .cluster_redirection_policy
