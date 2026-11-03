@@ -281,7 +281,7 @@ try:
             ('latency-start', 'cadence_latency', ('operation="StartWorkflowExecution"', dom)),
             ('latency-ns-start', 'cadence_latency_ns', ('operation="StartWorkflowExecution"', dom)),
         ]:
-            record('metrics-' + nm, has(pre, *must), '' if has(pre, *must) else '\n'.join(l for l in body.splitlines() if l.startswith('cadence_'))[:1500])
+            record('metrics-' + nm, has(pre, *must), '' if has(pre, *must) else f'want domain {dom_t}; ' + ' | '.join(l[:200] for l in body.splitlines() if l.startswith(pre) and 'operation="' + must[0].split('"')[1] + '"' in l)[:1500] + f' || names={sorted({l.split("{")[0].split(" ")[0] for l in body.splitlines() if l and l[0] != "#"})[:40]}')
     except Exception as e:
         record('metrics-scrape', False, repr(e))
     if args.kafka_broker:

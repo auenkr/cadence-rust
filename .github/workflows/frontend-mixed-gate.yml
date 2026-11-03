@@ -83,7 +83,7 @@ jobs:
           fi
           echo $? > out/gate.exit
           grep -E '^(GATE|STEP|SDK|---|RESULT|panic)' out/gate.log | cut -c1-400
-          mkdir -p out/logs; cp -r out/gate/run/*.log out/gate/run/*.json out/gate/run/*.cmd out/gate/run/*.yaml out/gate/run/*.sha256 out/logs/ 2>/dev/null || true
+          mkdir -p out/logs; cp -r out/gate/run/*.log out/gate/run/*.json out/gate/run/*.cmd out/gate/run/*.yaml out/gate/run/*.sha256 out/gate/run/*.prom out/logs/ 2>/dev/null || true
           exit "$(cat out/gate.exit)"
       - name: Upload
         if: always()

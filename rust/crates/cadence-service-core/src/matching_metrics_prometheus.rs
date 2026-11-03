@@ -222,7 +222,13 @@ impl PrometheusMetricSink {
                 .collect()
         };
         let mut root_tags = root_tags;
-        root_tags.insert(CADENCE_SERVICE_TAG.to_owned(), MATCHING_SERVICE.to_owned());
+        // Go labels the series with the owning service (`cadence_matching`,
+        // `cadence_frontend`, ...); the runtime passes the role with dashes.
+        let service = root_tags
+            .get(CADENCE_SERVICE_TAG)
+            .map(|role| role.replace('-', "_"))
+            .unwrap_or_else(|| MATCHING_SERVICE.to_owned());
+        root_tags.insert(CADENCE_SERVICE_TAG.to_owned(), service);
         let mut sink_config = config;
         sink_config.handler_path = handler_path;
 
