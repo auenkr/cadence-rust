@@ -45,6 +45,10 @@ pub struct Config {
     pub cluster_metadata: Option<ClusterMetadata>,
     #[serde(default, rename = "clusterMetadata")]
     pub legacy_cluster_metadata: Option<ClusterMetadata>,
+    /// Deprecated Go `dcRedirectionPolicy`; copied into
+    /// `clusterGroupMetadata.clusterRedirectionPolicy` when that is unset.
+    #[serde(default, rename = "dcRedirectionPolicy")]
+    pub dc_redirection_policy: Option<cadence_common::cluster::ClusterRedirectionPolicy>,
     /// Ringpop peer discovery options used by Matching. These are parsed here
     /// for Go-compatible configuration; runtime wiring is intentionally separate.
     #[serde(default)]
@@ -1058,6 +1062,11 @@ impl Config {
         }
         if let Some(metadata) = self.cluster_metadata.as_mut() {
             metadata.fill_defaults();
+            if metadata.cluster_redirection_policy.is_none() {
+                metadata
+                    .cluster_redirection_policy
+                    .clone_from(&self.dc_redirection_policy);
+            }
         }
         self.persistence.fill_defaults();
         self

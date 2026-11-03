@@ -7,6 +7,7 @@ pub mod config;
 pub mod frontend_lifecycle;
 #[allow(clippy::result_large_err)]
 pub mod grpc_shard;
+pub mod frontend_remote;
 pub mod grpc_tls;
 pub mod handlers;
 pub mod matching_metrics;
