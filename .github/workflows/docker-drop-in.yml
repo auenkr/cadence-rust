@@ -10,6 +10,11 @@ concurrency:
   cancel-in-progress: true
 jobs:
   drop-in:
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        db: [mysql, cassandra]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -50,7 +55,7 @@ jobs:
           (cd tests/frontend-gate && go build -o "$GITHUB_WORKSPACE/out/frontend-gate-driver" .)
       - name: Start cluster, only image names differ
         run: |
-          export COMPOSE_FILE=tests/docker-drop-in/docker-compose.split.yml
+          export COMPOSE_FILE=tests/docker-drop-in/docker-compose.${{ matrix.db == 'mysql' && 'split' || 'cassandra' }}.yml
           for s in $(echo "${{ inputs.rust_services || 'frontend,matching' }}" | tr ',' ' '); do
             S=$(echo $s | tr a-z A-Z); export CADENCE_IMAGE_$S=cadence-rust:ci
           done
@@ -78,6 +83,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: docker-drop-in-out
+          name: docker-drop-in-out-${{ matrix.db }}
           path: out
           retention-days: 3

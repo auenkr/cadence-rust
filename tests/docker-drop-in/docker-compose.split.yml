@@ -13,6 +13,10 @@ services:
   mysql:
     image: mysql:8.0
     environment: { MYSQL_ROOT_PASSWORD: root }
+    mem_limit: 1800m
+    memswap_limit: 1800m
+    cpus: 1.5
+    pids_limit: 2048
     healthcheck: { test: ["CMD", "mysqladmin", "ping", "-proot", "-h", "127.0.0.1"], interval: 5s, retries: 40 }
   history:
     image: ${CADENCE_IMAGE_HISTORY:-cadence-go:ci}

@@ -2,8 +2,8 @@
 # user, ENV, EXPOSE, ENTRYPOINT (/docker-entrypoint.sh), CMD (/start-cadence.sh),
 # dockerize template, config_template.yaml, dynamicconfig and schema are identical.
 # Only /usr/local/bin/cadence-server is replaced (musl build so it runs on alpine).
-# The Go binary is kept as cadence-server-go and used as the schema helper for
-# --auto-setup until the schema updater is ported.
+# --auto-setup runs cadence-auto-setup.sh (cadence-sql-tool/cadence-cassandra-tool from
+# the base image); the Go cadence-server binary is removed.
 # Build (context = repo root):
 #   docker build -f go/Dockerfile --target cadence-auto-setup -t cadence-go:ci go
 #   docker build -f rust/Dockerfile --build-arg GO_IMAGE=cadence-go:ci -t cadence-rust:ci .
@@ -22,8 +22,8 @@ RUN cargo build --release -p cadence-server -j2 \
 
 FROM ${GO_IMAGE} AS final
 USER root
-RUN mv /usr/local/bin/cadence-server /usr/local/bin/cadence-server-go
 COPY --from=builder --chown=cadence:cadence /src/rust/target/release/cadence-server /usr/local/bin/cadence-server
 COPY --from=builder /cadence-server.sha256 /etc/cadence/cadence-server.sha256
-ENV CADENCE_SCHEMA_HELPER=cadence-server-go
+COPY --chown=cadence:cadence rust/docker/cadence-auto-setup.sh /usr/local/bin/cadence-auto-setup.sh
+ENV CADENCE_SCHEMA_HELPER=/usr/local/bin/cadence-auto-setup.sh
 USER cadence

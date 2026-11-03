@@ -1820,12 +1820,17 @@ shard-distributor-matching:
             ttl_shard_nanos: 0,
             ttl_report_nanos: 0,
         }];
-        assert!(
-            cfg.validate().is_err(),
-            "configured namespace requires client address"
-        );
+        // Go: without a shard-distributor client the spectator is not started and
+        // Matching keeps hash-ring ownership, so this is valid but inactive.
+        cfg.validate().unwrap();
+        assert!(!cfg
+            .shard_distributor_matching
+            .active(&cfg.shard_distributor_client));
         cfg.shard_distributor_client.host_port = "localhost:7943".into();
         cfg.validate().unwrap();
+        assert!(cfg
+            .shard_distributor_matching
+            .active(&cfg.shard_distributor_client));
         assert_eq!(
             cfg.shard_distributor_matching.report_ttl_nanos(),
             60_000_000_000
