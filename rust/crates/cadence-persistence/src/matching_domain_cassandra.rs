@@ -363,8 +363,17 @@ impl CassandraDomainMetadataPersistence {
     ) -> Result<Vec<u8>, String> {
         let mut writer = Writer::new();
         write_struct(&mut writer, &value.to_thrift());
+        Self::finish_blob(writer.into_bytes(), encoding)
+    }
+
+    /// Go `ThriftRWEncoder.Encode` prefixes the payload with version byte
+    /// 0x59 before the optional snappy wrapper compresses it.
+    fn finish_blob(payload: Vec<u8>, encoding: BlobEncoding) -> Result<Vec<u8>, String> {
+        let mut versioned = Vec::with_capacity(payload.len() + 1);
+        versioned.push(0x59);
+        versioned.extend_from_slice(&payload);
         encoding
-            .encode(&writer.into_bytes())
+            .encode(&versioned)
             .map_err(|error| error.to_string())
     }
 
@@ -756,6 +765,20 @@ impl DomainMetadataPersistence for CassandraDomainMetadataPersistence {
 mod tests {
     use super::*;
     use cadence_api::types::{DomainConfiguration, DomainInfo, DomainReplicationConfiguration};
+
+    #[test]
+    fn domain_blobs_carry_go_thriftrw_version_preamble() {
+        let plain = CassandraDomainMetadataPersistence::finish_blob(vec![0x0c, 0x00], BlobEncoding::ThriftRW)
+            .expect("plain");
+        assert_eq!(plain, vec![0x59, 0x0c, 0x00]);
+        let snappy =
+            CassandraDomainMetadataPersistence::finish_blob(vec![0x0c, 0x00], BlobEncoding::ThriftRWSnappy)
+                .expect("snappy");
+        let raw = snap::raw::Decoder::new()
+            .decompress_vec(&snappy)
+            .expect("decompress");
+        assert_eq!(raw, vec![0x59, 0x0c, 0x00]);
+    }
 
     #[test]
     fn cql_statements_keep_go_table_names_and_metadata_cas() {
