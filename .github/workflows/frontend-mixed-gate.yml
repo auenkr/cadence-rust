@@ -11,6 +11,10 @@ on:
         description: Also run the async workflow (Kafka) acceptance steps
         type: boolean
         default: true
+      es:
+        description: Also run the advanced visibility (Elasticsearch + Kafka + Go indexer) steps; mysql/postgres only, requires kafka
+        type: boolean
+        default: false
       two_history:
         description: Run two Go History hosts and kill/restart one during SDK traffic
         type: boolean
@@ -67,6 +71,7 @@ jobs:
       - name: Gate (SDK child, completed backfill, API coverage, IPv6 gRPC)
         env:
           CADENCE_GATE_KAFKA: ${{ inputs.kafka }}
+          CADENCE_GATE_ES: ${{ inputs.es }}
           CADENCE_GATE_TWO_HISTORY: ${{ inputs.two_history }}
         run: |
           set +e

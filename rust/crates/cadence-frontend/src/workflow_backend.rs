@@ -27,6 +27,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use crate::handler_workflow::{WorkflowBackend, WorkflowOperation};
+use crate::workflow_visibility::EsOp;
 
 const HISTORY_SERVICE: &str = "cadence-history";
 const CALLER: &str = "cadence-frontend";
@@ -46,6 +47,7 @@ pub struct ProductionBackend {
     pub(crate) domains: Option<std::sync::Arc<dyn crate::handler_workflow::WorkflowDomainLookup>>,
     pub(crate) visibility:
         Option<std::sync::Arc<dyn cadence_persistence::visibility_reader::VisibilityStore>>,
+    pub(crate) es: Option<crate::workflow_visibility::EsBinding>,
 }
 
 impl std::fmt::Debug for ProductionBackend {
@@ -207,6 +209,7 @@ impl ProductionBackend {
             num_history_shards: 4,
             history_access: None,
             visibility: None,
+            es: None,
             domains: None,
         }
     }
@@ -560,9 +563,9 @@ impl ProductionBackend {
             Op::GetWorkflowExecutionHistory => self.get_workflow_execution_history(request).await,
             Op::ListOpenWorkflowExecutions => self.list_visibility(&request, false).await,
             Op::ListClosedWorkflowExecutions => self.list_visibility(&request, true).await,
-            Op::ListWorkflowExecutions
-            | Op::ScanWorkflowExecutions
-            | Op::CountWorkflowExecutions => Err(crate::workflow_visibility::not_supported()),
+            Op::ListWorkflowExecutions => self.es_query_op(&request, EsOp::List).await,
+            Op::ScanWorkflowExecutions => self.es_query_op(&request, EsOp::Scan).await,
+            Op::CountWorkflowExecutions => self.es_query_op(&request, EsOp::Count).await,
             other => Err(crate::handler_workflow::unimplemented_operation(other.name()).into()),
         }
     }
@@ -771,6 +774,51 @@ fn service_addr(
     format!("{host}:{port}")
 }
 
+/// Live `frontend.validSearchAttributes` + validator limits (Go `SearchAttributesValidator`).
+struct ProdSearchAttributes {
+    state: cadence_service_core::handlers::AppState,
+}
+
+impl crate::handler_workflow::SearchAttributeProvider for ProdSearchAttributes {
+    fn valid_search_attributes(
+        &self,
+    ) -> std::collections::HashMap<String, cadence_api::enums::IndexedValueType> {
+        cadence_service_core::admin::valid_search_attributes(&self.state.admin)
+    }
+
+    fn search_attribute_limits(&self, domain: &str) -> crate::search_attr_validator::Limits {
+        let d = crate::search_attr_validator::Limits::default();
+        let Ok(o) = self.state.admin.dynamic_config.lock() else {
+            return d;
+        };
+        let int = |key: &str, default: i64| {
+            cadence_persistence::dynamic_config::integer(
+                o.property_values(key),
+                Some(domain),
+                default,
+            )
+        };
+        crate::search_attr_validator::Limits {
+            number_of_keys: int(
+                "frontend.searchAttributesNumberOfKeysLimit",
+                d.number_of_keys,
+            ),
+            size_of_value: int("frontend.searchAttributesSizeOfValueLimit", d.size_of_value),
+            total_size: int("frontend.searchAttributesTotalSizeLimit", d.total_size),
+        }
+    }
+
+    fn validation_enabled(&self) -> bool {
+        self.state.admin.dynamic_config.lock().map_or(true, |o| {
+            cadence_persistence::dynamic_config::boolean(
+                o.property_values("frontend.enableQueryAttributeValidation"),
+                None,
+                true,
+            )
+        })
+    }
+}
+
 /// Build the production WorkflowService for the Frontend launcher.
 pub fn build_workflow_api(
     ctx: cadence_matching::launcher::FrontendHookContext,
@@ -807,6 +855,42 @@ pub fn build_workflow_api(
     }
     if let Some(store) = ctx.state.visibility_store.clone() {
         backend = backend.with_visibility_store(store);
+    }
+    match cadence_service_core::es_mapping::search_client_from_persistence(&ctx.config.persistence)
+    {
+        Ok(Some((client, index))) => {
+            let state = ctx.state.clone();
+            let overlay = ctx.state.admin.dynamic_config.clone();
+            let window = overlay.lock().map_or(10000, |o| {
+                cadence_persistence::dynamic_config::integer(
+                    o.property_values("frontend.esIndexMaxResultWindow"),
+                    None,
+                    10000,
+                )
+            });
+            let validate_overlay = overlay.clone();
+            backend = backend.with_es_visibility(crate::workflow_visibility::EsBinding {
+                es: std::sync::Arc::new(crate::es_visibility::EsVisibility::new(
+                    std::sync::Arc::new(client),
+                    index,
+                    window,
+                )),
+                attrs: std::sync::Arc::new(move || {
+                    cadence_service_core::admin::valid_search_attributes(&state.admin)
+                }),
+                validate: std::sync::Arc::new(move || {
+                    validate_overlay.lock().map_or(true, |o| {
+                        cadence_persistence::dynamic_config::boolean(
+                            o.property_values("frontend.enableQueryAttributeValidation"),
+                            None,
+                            true,
+                        )
+                    })
+                }),
+            });
+        }
+        Ok(None) => {}
+        Err(e) => return Err(anyhow::anyhow!(e)),
     }
     let version_check_enabled = {
         let overlay = ctx.state.admin.dynamic_config.clone();
@@ -928,6 +1012,9 @@ pub fn build_workflow_api(
     )
     .with_domain_lookup(lookup)
     .with_archived_history_reader(archived_history)
+    .with_search_attribute_provider(std::sync::Arc::new(ProdSearchAttributes {
+        state: ctx.state.clone(),
+    }))
     .with_archived_visibility_reader(archived_visibility)
     .with_metrics_sink(shared_metrics_sink.clone())
     .with_rate_limit_policies(rate_limit)

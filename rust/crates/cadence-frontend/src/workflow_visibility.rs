@@ -78,7 +78,172 @@ fn time_us(value: &serde_json::Value, key: &str) -> i64 {
         / 1000
 }
 
+/// Advanced-visibility (Elasticsearch/OpenSearch) read binding.
+#[derive(Clone)]
+pub struct EsBinding {
+    pub es: Arc<crate::es_visibility::EsVisibility>,
+    pub attrs: Arc<
+        dyn Fn() -> std::collections::HashMap<String, cadence_api::enums::IndexedValueType>
+            + Send
+            + Sync,
+    >,
+    pub validate: Arc<dyn Fn() -> bool + Send + Sync>,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum EsOp {
+    List,
+    Scan,
+    Count,
+}
+
+fn map_query_error(e: crate::es_query::QueryError) -> CadenceError {
+    match e {
+        crate::es_query::QueryError::BadRequest(m) => bad_request(m),
+        crate::es_query::QueryError::Internal(m) => internal(m),
+    }
+}
+
+fn token_bytes(request: &serde_json::Value) -> Result<Vec<u8>, CadenceError> {
+    match request.get("nextPageToken") {
+        Some(v @ serde_json::Value::String(s)) if !s.is_empty() => {
+            cadence_api::b64::deserialize_bytes(v.clone())
+                .map_err(|e| bad_request(format!("invalid token: {e}")))
+        }
+        _ => Ok(Vec::new()),
+    }
+}
+
 impl ProductionBackend {
+    pub fn with_es_visibility(mut self, binding: EsBinding) -> Self {
+        self.es = Some(binding);
+        self
+    }
+
+    /// `ListWorkflowExecutions` / `ScanWorkflowExecutions` / `CountWorkflowExecutions`.
+    pub(crate) async fn es_query_op(
+        &self,
+        request: &serde_json::Value,
+        op: EsOp,
+    ) -> Result<serde_json::Value, CadenceError> {
+        let Some(binding) = self.es.clone() else {
+            return Err(not_supported());
+        };
+        let domain_id = str_field(request, "domainUUID").unwrap_or_default();
+        let raw_query = str_field(request, "query").unwrap_or_default();
+        let page_size = request
+            .get("pageSize")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0);
+        let token = token_bytes(request)?;
+        tokio::task::spawn_blocking(move || -> Result<serde_json::Value, CadenceError> {
+            let attrs = (binding.attrs)();
+            let query = crate::es_query::validate_query(&raw_query, &attrs, (binding.validate)())
+                .map_err(map_query_error)?;
+            match op {
+                EsOp::Count => {
+                    let count = binding
+                        .es
+                        .count(&domain_id, &query)
+                        .map_err(map_query_error)?;
+                    to_json(&st::CountWorkflowExecutionsResponse { count })
+                }
+                EsOp::List | EsOp::Scan => {
+                    let (executions, next_page_token) = if matches!(op, EsOp::List) {
+                        let types = |n: &str| attrs.get(n).map(|t| t.value());
+                        binding
+                            .es
+                            .list(&domain_id, &query, page_size, &token, &types)
+                    } else {
+                        binding.es.scan(&domain_id, &query, page_size, &token)
+                    }
+                    .map_err(map_query_error)?;
+                    to_json(&st::ListWorkflowExecutionsResponse {
+                        executions,
+                        next_page_token,
+                    })
+                }
+            }
+        })
+        .await
+        .map_err(|e| internal(e.to_string()))?
+    }
+
+    /// ES-backed `ListOpen/ListClosed(+ByID/ByType/ByStatus)`.
+    pub(crate) async fn es_open_closed(
+        &self,
+        request: &serde_json::Value,
+        closed: bool,
+    ) -> Result<serde_json::Value, CadenceError> {
+        let Some(binding) = self.es.clone() else {
+            return Err(not_supported());
+        };
+        let domain_id = str_field(request, "domainUUID").unwrap_or_default();
+        let page_size = request
+            .get("pageSize")
+            .or_else(|| request.get("maximumPageSize"))
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0);
+        let token = token_bytes(request)?;
+        let earliest = request
+            .get("earliestTime")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0);
+        let latest = request
+            .get("latestTime")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(i64::MAX);
+        let (name, matcher) = {
+            let status = request.get("status").filter(|v| !v.is_null());
+            if closed {
+                if let Some(v) = status {
+                    let st: WorkflowExecutionCloseStatus = serde_json::from_value(v.clone())
+                        .map_err(|e| bad_request(format!("invalid close status: {e}")))?;
+                    (
+                        "ListClosedWorkflowExecutionsByStatus",
+                        Some(("CloseStatus".to_string(), serde_json::json!(st as i32))),
+                    )
+                } else if let Some(t) = str_field(request, "workflowTypeName") {
+                    (
+                        "ListClosedWorkflowExecutionsByType",
+                        Some(("WorkflowType".to_string(), serde_json::json!(t))),
+                    )
+                } else if let Some(w) = str_field(request, "workflowId") {
+                    (
+                        "ListClosedWorkflowExecutionsByWorkflowID",
+                        Some(("WorkflowID".to_string(), serde_json::json!(w))),
+                    )
+                } else {
+                    ("ListClosedWorkflowExecutions", None)
+                }
+            } else if let Some(t) = str_field(request, "workflowTypeName") {
+                (
+                    "ListOpenWorkflowExecutionsByType",
+                    Some(("WorkflowType".to_string(), serde_json::json!(t))),
+                )
+            } else if let Some(w) = str_field(request, "workflowId") {
+                (
+                    "ListOpenWorkflowExecutionsByWorkflowID",
+                    Some(("WorkflowID".to_string(), serde_json::json!(w))),
+                )
+            } else {
+                ("ListOpenWorkflowExecutions", None)
+            }
+        };
+        let (executions, next_page_token) = tokio::task::spawn_blocking(move || {
+            binding.es.list_open_closed(
+                name, &domain_id, !closed, earliest, latest, page_size, &token, matcher,
+            )
+        })
+        .await
+        .map_err(|e| internal(e.to_string()))?
+        .map_err(map_query_error)?;
+        to_json(&st::ListOpenWorkflowExecutionsResponse {
+            executions,
+            next_page_token,
+        })
+    }
+
     pub fn with_visibility_store(mut self, store: Arc<dyn VisibilityStore>) -> Self {
         self.visibility = Some(store);
         self
@@ -94,6 +259,9 @@ impl ProductionBackend {
         request: &serde_json::Value,
         closed: bool,
     ) -> Result<serde_json::Value, CadenceError> {
+        if self.es.is_some() {
+            return self.es_open_closed(request, closed).await;
+        }
         let store = self.visibility_store()?.clone();
         let close_status = match request.get("status") {
             Some(v) if !v.is_null() => {
