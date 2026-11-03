@@ -12,6 +12,14 @@ pub struct ClusterInformation {
     pub rpc_transport: String,
 }
 
+/// Go `config.ClusterRedirectionPolicy` (clusterGroupMetadata.clusterRedirectionPolicy).
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ClusterRedirectionPolicy {
+    pub policy: String,
+    pub all_domain_apis_forwarding_target_cluster: String,
+}
+
 /// Configuration/defaulting from Go common/config/cluster.go. Deprecated
 /// fields remain distinct because canonical and legacy keys may coexist.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -25,6 +33,8 @@ pub struct GroupMetadata {
     pub cluster_information: BTreeMap<String, ClusterInformation>,
     pub enable_global_domain: bool,
     pub cluster_name_for_failover_version_increment: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cluster_redirection_policy: Option<ClusterRedirectionPolicy>,
 }
 
 impl GroupMetadata {

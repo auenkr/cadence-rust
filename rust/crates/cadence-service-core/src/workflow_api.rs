@@ -48,9 +48,45 @@ pub type SharedWorkflowApi = Arc<dyn WorkflowApi>;
 type Decode = fn(&Struct) -> Result<serde_json::Value, String>;
 type Encode = fn(serde_json::Value) -> Result<Struct, String>;
 
+type ClientEncode = fn(serde_json::Value) -> Result<Struct, String>;
+type ClientDecode = fn(&Struct) -> Result<serde_json::Value, String>;
+
 struct Codec {
     decode: Decode,
     encode: Encode,
+    /// Client direction (remote Frontend calls): request JSON -> Thrift args,
+    /// Thrift result struct -> response JSON.
+    client_encode: ClientEncode,
+    client_decode: ClientDecode,
+}
+
+fn client_encode_args<T: DeserializeOwned + ToThrift>(
+    request: serde_json::Value,
+) -> Result<Struct, String> {
+    let typed: T = serde_json::from_value(request).map_err(|e| e.to_string())?;
+    Ok(Struct {
+        fields: vec![(1, Value::Struct(typed.to_thrift()))],
+    })
+}
+
+fn client_encode_none(_: serde_json::Value) -> Result<Struct, String> {
+    Ok(Struct { fields: vec![] })
+}
+
+fn client_decode_result<T: FromThrift + Serialize>(
+    result: &Struct,
+) -> Result<serde_json::Value, String> {
+    match result.get(0) {
+        Some(Value::Struct(s)) => {
+            let typed = T::from_thrift(s).map_err(|e| e.to_string())?;
+            serde_json::to_value(typed).map_err(|e| e.to_string())
+        }
+        _ => Err("missing result field 0".to_string()),
+    }
+}
+
+fn client_decode_void(_: &Struct) -> Result<serde_json::Value, String> {
+    Ok(serde_json::Value::Null)
 }
 
 fn decode_req<T: FromThrift + Serialize>(args: &Struct) -> Result<serde_json::Value, String> {
@@ -99,12 +135,16 @@ macro_rules! op {
         Codec {
             decode: decode_req::<$req>,
             encode: encode_void,
+            client_encode: client_encode_args::<$req>,
+            client_decode: client_decode_void,
         }
     };
     ($req:ty, $resp:ty) => {
         Codec {
             decode: decode_req::<$req>,
             encode: encode_resp::<$resp>,
+            client_encode: client_encode_args::<$req>,
+            client_decode: client_decode_result::<$resp>,
         }
     };
 }
@@ -223,13 +263,120 @@ fn codec(method: &str) -> Option<Codec> {
         "GetSearchAttributes" => Codec {
             decode: decode_none,
             encode: encode_resp::<tk::GetSearchAttributesResponse>,
+            client_encode: client_encode_none,
+            client_decode: client_decode_result::<tk::GetSearchAttributesResponse>,
         },
         "GetClusterInfo" => Codec {
             decode: decode_none,
             encode: encode_cluster_info,
+            client_encode: client_encode_none,
+            client_decode: client_decode_void,
         },
         _ => return None,
     })
+}
+
+/// Encode a WorkflowService request as the strict Thrift args struct bytes
+/// used for a TChannel call to a remote Frontend.
+pub fn encode_client_request(
+    method: &str,
+    request: serde_json::Value,
+) -> Result<Vec<u8>, String> {
+    let codec = codec(method).ok_or_else(|| format!("unsupported remote method {method}"))?;
+    let args = (codec.client_encode)(request)?;
+    let mut writer = cadence_thrift::protocol::Writer::new();
+    cadence_thrift::value::write_struct(&mut writer, &args);
+    Ok(writer.into_bytes())
+}
+
+/// Decode a remote Frontend Thrift result. Declared exceptions are mapped back
+/// to the matching typed `CadenceError`.
+pub fn decode_client_response(
+    method: &str,
+    application_error: bool,
+    body: &[u8],
+) -> Result<serde_json::Value, CadenceError> {
+    let codec =
+        codec(method).ok_or_else(|| CadenceError::Unknown(format!("unsupported method {method}")))?;
+    let mut reader = cadence_thrift::protocol::Reader::new(body);
+    let result = cadence_thrift::value::read_struct(&mut reader)
+        .map_err(|e| CadenceError::Unknown(format!("invalid remote Thrift result: {e}")))?;
+    if !application_error {
+        return (codec.client_decode)(&result).map_err(CadenceError::Unknown);
+    }
+    let def = find_method(&format!("WorkflowService::{method}"));
+    for (field, value) in &result.fields {
+        if let Value::Struct(exception) = value {
+            let name = def
+                .and_then(|d| d.exceptions.iter().find(|(_, id)| id == field))
+                .map_or("", |(name, _)| *name);
+            return Err(exception_from_thrift(name, exception));
+        }
+    }
+    Err(CadenceError::Unknown(
+        "remote application error without exception".to_string(),
+    ))
+}
+
+/// Typed error from a Thrift exception struct (inverse of `error_to_thrift`).
+pub fn exception_from_thrift(name: &str, exception: &Struct) -> CadenceError {
+    use cadence_api::errors as e;
+    let message = exception
+        .opt_string(1)
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let unknown = || CadenceError::Unknown(format!("{name}: {message}"));
+    let from_message = |ctor: fn(serde_json::Value) -> Option<CadenceError>| {
+        ctor(serde_json::json!({ "message": message })).unwrap_or_else(unknown)
+    };
+    match name {
+        "DomainNotActiveError" => e::DomainNotActiveError::from_thrift(exception)
+            .map_or_else(|_| unknown(), CadenceError::DomainNotActive),
+        "EntityNotExistsError" => e::EntityNotExistsError::from_thrift(exception)
+            .map_or_else(|_| unknown(), CadenceError::EntityNotExists),
+        "ServiceBusyError" => e::ServiceBusyError::from_thrift(exception)
+            .map_or_else(|_| unknown(), CadenceError::ServiceBusy),
+        "ClientVersionNotSupportedError" => {
+            e::ClientVersionNotSupportedError::from_thrift(exception)
+                .map_or_else(|_| unknown(), CadenceError::ClientVersionNotSupported)
+        }
+        "WorkflowExecutionAlreadyStartedError" => {
+            e::WorkflowExecutionAlreadyStartedError::from_thrift(exception)
+                .map_or_else(|_| unknown(), CadenceError::WorkflowAlreadyStarted)
+        }
+        "BadRequestError" => CadenceError::BadRequest(e::BadRequestError::new(message.clone())),
+        "InternalServiceError" => {
+            CadenceError::Internal(e::InternalServiceError::new(message.clone()))
+        }
+        "AccessDeniedError" => from_message(|v| {
+            serde_json::from_value(v).ok().map(CadenceError::AccessDenied)
+        }),
+        "WorkflowExecutionAlreadyCompletedError" => from_message(|v| {
+            serde_json::from_value(v)
+                .ok()
+                .map(CadenceError::WorkflowAlreadyCompleted)
+        }),
+        "DomainAlreadyExistsError" => from_message(|v| {
+            serde_json::from_value(v)
+                .ok()
+                .map(CadenceError::DomainAlreadyExists)
+        }),
+        "CancellationAlreadyRequestedError" => from_message(|v| {
+            serde_json::from_value(v)
+                .ok()
+                .map(CadenceError::CancellationAlreadyRequested)
+        }),
+        "QueryFailedError" => from_message(|v| {
+            serde_json::from_value(v).ok().map(CadenceError::QueryFailed)
+        }),
+        "LimitExceededError" => from_message(|v| {
+            serde_json::from_value(v)
+                .ok()
+                .map(CadenceError::LimitExceeded)
+        }),
+        _ => unknown(),
+    }
 }
 
 /// True when `method` has a Thrift codec in this table.

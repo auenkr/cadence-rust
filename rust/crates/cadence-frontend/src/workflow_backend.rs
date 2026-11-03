@@ -635,7 +635,9 @@ impl WorkflowBackend for ProductionBackend {
 /// `WorkflowApi` installed into the shared transports: the ported Go
 /// `WorkflowHandler` over the production History/Matching backend.
 pub struct HandlerApi {
-    handler: crate::handler_workflow::Handler<ProductionBackend>,
+    handler: crate::handler_workflow::Handler<
+        crate::wrappers::redirection_runtime::ForwardingBackend<ProductionBackend>,
+    >,
 }
 
 impl std::fmt::Debug for HandlerApi {
@@ -806,8 +808,27 @@ pub fn build_workflow_api(
         std::sync::Arc::new(backend.clone());
     let (archived_history, archived_visibility) =
         build_archive_readers(&ctx, probe).map_err(anyhow::Error::msg)?;
+    let default_metadata = cadence_common::cluster::GroupMetadata::default();
+    let metadata = ctx
+        .config
+        .cluster_metadata
+        .as_ref()
+        .unwrap_or(&default_metadata);
+    let redirection_policy = {
+        let name = metadata
+            .cluster_redirection_policy
+            .as_ref()
+            .map_or("", |p| p.policy.as_str());
+        crate::wrappers::clusterredirection::ForwardingPolicy::from_name(name)
+            .ok_or_else(|| anyhow::anyhow!("unknown cluster redirection policy {name:?}"))?
+    };
+    let forwarding_backend = crate::wrappers::redirection_runtime::ForwardingBackend::new(
+        backend,
+        metadata.current_cluster_name.clone(),
+        crate::wrappers::redirection_runtime::RemoteFrontends::from_metadata(metadata),
+    );
     let handler = install_async_publisher(
-        crate::handler_workflow::Handler::new(backend),
+        crate::handler_workflow::Handler::new(forwarding_backend),
         async_domains,
         ctx.config.async_workflow_queues.clone(),
     )
@@ -826,6 +847,44 @@ pub fn build_workflow_api(
         version_check_enabled,
         std::sync::Arc::new(crate::wrappers::versioncheck::GoVersionChecker),
     );
+    let handler =
+        if redirection_policy == crate::wrappers::clusterredirection::ForwardingPolicy::Noop {
+            handler
+        } else {
+            let overlay = ctx.state.admin.dynamic_config.clone();
+            let config = crate::wrappers::redirection_runtime::FnRuntimeConfig(
+                std::sync::Arc::new(move |domain: &str| {
+                    overlay.lock().map_or(true, |o| {
+                        cadence_persistence::dynamic_config::boolean(
+                            o.property_values("system.enableDomainNotActiveAutoForwarding"),
+                            Some(domain),
+                            true,
+                        )
+                    })
+                }),
+            );
+            handler.with_cluster_redirection(std::sync::Arc::new(
+                crate::wrappers::clusterredirection::WorkflowRedirector {
+                    policy: redirection_policy,
+                    current_cluster: metadata.current_cluster_name.clone(),
+                    configured_target: metadata
+                        .cluster_redirection_policy
+                        .as_ref()
+                        .map(|p| p.all_domain_apis_forwarding_target_cluster.clone())
+                        .unwrap_or_default(),
+                    config,
+                    manager: crate::wrappers::redirection_runtime::UnsupportedActiveClusterManager,
+                    metrics: std::sync::Arc::new(
+                        crate::wrappers::redirection_runtime::SinkRedirectMetrics::new(
+                            frontend_metrics_sink(&ctx.config),
+                        ),
+                    ),
+                    requests: crate::wrappers::redirection_runtime::DomainCacheResolver::new(
+                        ctx.state.domain_manager.clone(),
+                    ),
+                },
+            ))
+        };
     Ok(std::sync::Arc::new(HandlerApi { handler }))
 }
 

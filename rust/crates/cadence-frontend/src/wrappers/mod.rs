@@ -6,5 +6,6 @@ pub mod metered;
 pub mod metrics_sink;
 pub mod quota_policy;
 pub mod ratelimited;
+pub mod redirection_runtime;
 pub mod thrift;
 pub mod versioncheck;
