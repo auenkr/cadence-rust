@@ -33,4 +33,4 @@ CI evidence (head 81f54af1480b12f8d603d00903cb7fe43b0ef659):
 - frontend-mixed-gate (mysql, kafka=false): https://github.com/auenkr/cadence-rust/actions/runs/41594417872 success, all oauth steps ok
 - Rust binary SHA256 f340e8c0b836378a5bfa4ea58d45d148e3164ea26a8e75834e1dc335b75a470d (cadence-server)
 - Earlier: rust-ci 41592413541 success (ba9cad1); gate 41593096606 failed on 11 oauth steps (TChannel Admin + DescribeDomain unauthenticated), fixed here.
-- Full-workspace rust-ci not run (service-core and matching were touched); dispatched below.
+- Full-workspace rust-ci (fmt+clippy+workspace tests) at f84c3e95: https://github.com/auenkr/cadence-rust/actions/runs/41595554763 success
