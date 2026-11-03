@@ -22,3 +22,7 @@
 
 ## Item 2 — archived-only GetWorkflowExecutionHistory: documented infeasible in a gate
 Go archives history only when the retention timer fires (retention is whole days, minimum 1 day, plus deletion jitter), so a mixed-gate run cannot produce an archived-only history through Go History. Not attempted: pre-populating a filestore archive by hand would test only our own file layout. The archive fallback remains covered by Handler tests against the real filestore reader; row stays `partial`.
+
+## Final full rust-ci
+- https://github.com/auenkr/cadence-rust/actions/runs/41589768181 — success, head 4d5164796494a047bbd7c3a3df25423bb00ac413 (includes merge of origin/master with the oauth authorizer).
+- Mixed gate 41588409434 ran on 0e16557 (before the master merge and audit docs; code in rust/ differs only by the merged oauth authorizer).
