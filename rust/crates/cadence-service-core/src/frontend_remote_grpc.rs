@@ -63,6 +63,10 @@ pub fn error_from_status(status: &tonic::Status) -> CadenceError {
     }
 }
 
+fn bad(error: serde_json::Error) -> CadenceError {
+    CadenceError::BadRequest(BadRequestError::new(error.to_string()))
+}
+
 fn decorate<M>(
     message: M,
     service: &str,
