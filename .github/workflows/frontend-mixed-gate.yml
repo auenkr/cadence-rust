@@ -20,7 +20,7 @@ on:
         default: fe-integ
 
 concurrency:
-  group: frontend-mixed-gate-${{ github.ref }}
+  group: frontend-mixed-gate-${{ github.ref }}-${{ inputs.database }}
   cancel-in-progress: true
 
 jobs:
