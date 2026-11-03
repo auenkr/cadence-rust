@@ -2952,6 +2952,8 @@ mod tests {
         assert_eq!(response["nextPageToken"], "AQI=");
     }
 
+    const ARCHIVE_RUN: &str = "6f1f9a2e-5b6c-4d1e-9c1a-0a1b2c3d4e5f";
+
     struct ArchiveDomains(crate::archive_readers::DomainArchival);
 
     impl crate::archive_readers::ArchivalDomainConfig for ArchiveDomains {
@@ -3036,7 +3038,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response["executions"][0]["execution"]["workflowId"], "wf-a");
-        assert_eq!(response["executions"][0]["closeStatus"], "COMPLETED");
+        assert_eq!(response["executions"][0]["closeStatus"], 0);
         // Go falls back to the start time when the archived execution time is zero.
         assert_eq!(response["executions"][0]["executionTime"], 5);
         let err = make(archive_config("disabled", true), archival.clone())
@@ -3065,7 +3067,7 @@ mod tests {
     async fn handler_serves_archived_history_through_real_filestore_reader() {
         use cadence_api::enums::ArchivalStatus;
         let root = archive_tmp("hist");
-        let name = cadence_common::archiver::history_filename("uuid:archived", "wf-a", "run-a", 2);
+        let name = cadence_common::archiver::history_filename("uuid:archived", "wf-a", ARCHIVE_RUN, 2);
         std::fs::write(
             root.join(name),
             br#"[{"events":[{"eventId":1},{"eventId":2}]},{"events":[{"eventId":3}]}]"#,
@@ -3090,7 +3092,7 @@ mod tests {
         };
         let request = serde_json::json!({
             "domain": "archived",
-            "execution": {"workflowId": "wf-a", "runId": "run-a"},
+            "execution": {"workflowId": "wf-a", "runId": ARCHIVE_RUN},
             "maximumPageSize": 10,
             "waitForNewEvent": false
         });

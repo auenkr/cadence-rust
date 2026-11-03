@@ -377,12 +377,12 @@ impl ArchivedVisibility {
             .into_iter()
             .map(|r| {
                 let status = match close_status_ordinal(&r.close_status) {
-                    Some(0) => json!("COMPLETED"),
-                    Some(1) => json!("FAILED"),
-                    Some(2) => json!("CANCELED"),
-                    Some(3) => json!("TERMINATED"),
-                    Some(4) => json!("CONTINUED_AS_NEW"),
-                    Some(5) => json!("TIMED_OUT"),
+                    Some(0) => json!(0),
+                    Some(1) => json!(1),
+                    Some(2) => json!(2),
+                    Some(3) => json!(3),
+                    Some(4) => json!(4),
+                    Some(5) => json!(5),
                     _ => Value::Null,
                 };
                 let indexed: serde_json::Map<String, Value> = r
@@ -583,7 +583,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp["executions"][0]["execution"]["runId"], "r1");
-        assert_eq!(resp["executions"][0]["closeStatus"], "COMPLETED");
+        assert_eq!(resp["executions"][0]["closeStatus"], 0);
         assert!(resp["nextPageToken"].is_null());
         let e = mk(cfg("disabled", true), archival.clone())
             .list(req.clone())

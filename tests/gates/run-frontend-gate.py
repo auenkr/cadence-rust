@@ -307,7 +307,7 @@ try:
         time.sleep(12)  # domain cache refresh in Go History/Worker
         d = subprocess.run(cli_ar(True, 'domain', 'describe'), capture_output=True, text=True, timeout=60)
         (work / 'archival-describe-domain.log').write_text(d.stdout + d.stderr)
-        record('archival-describe-domain', d.returncode == 0 and hist_uri in d.stdout and vis_uri in d.stdout and d.stdout.count('Enabled') >= 2, d.stdout + d.stderr)
+        record('archival-describe-domain', d.returncode == 0 and hist_uri in d.stdout and vis_uri in d.stdout and d.stdout.count('ENABLED') >= 2, d.stdout + d.stderr)
         d = subprocess.run(cli_ar(False, 'domain', 'describe'), capture_output=True, text=True, timeout=60)
         record('archival-describe-domain-grpc', d.returncode == 0 and hist_uri in d.stdout and vis_uri in d.stdout, d.stdout + d.stderr)
         wtype = 'ArchGateType'
@@ -336,8 +336,9 @@ try:
         record('archival-list-archived-visibility', found, out)
         r = subprocess.run(cli_ar(True, 'workflow', 'listarchived', '--query', f"WorkflowType = '{wtype}'", '--ps', '1'), capture_output=True, text=True, timeout=60)
         record('archival-list-archived-paged', r.returncode == 0 and any(w in r.stdout for w in arch_ids), r.stdout + r.stderr)
-        files = sorted(str(f.relative_to(work)) for f in (work / 'history-archive').rglob('*') if f.is_file()) if (work / 'history-archive').exists() else []
-        record('archival-go-history-wrote-archive', len(files) >= 1, str(files[:10]))
+        # Go archives visibility at close; history is archived at retention expiry (not reachable in a gate run).
+        files = sorted(str(f.relative_to(work)) for f in (work / 'visibility-archive').rglob('*') if f.is_file()) if (work / 'visibility-archive').exists() else []
+        record('archival-go-visibility-wrote-archive', len(files) >= 2, str(files[:10]))
         # Domain update validation errors must match Go (state machine in Rust Frontend).
         r = subprocess.run(cli_ar(True, 'domain', 'update', '--history_uri', f'file://{work / "other-archive"}'), capture_output=True, text=True, timeout=60)
         (work / 'archival-update-uri.log').write_text(r.stdout + r.stderr)
@@ -345,7 +346,7 @@ try:
         r = subprocess.run(cli_ar(True, 'domain', 'update', '--history_archival_status', 'disabled'), capture_output=True, text=True, timeout=60)
         record('archival-update-disable-history', r.returncode == 0, r.stdout + r.stderr)
         r = subprocess.run(cli_ar(True, 'domain', 'describe'), capture_output=True, text=True, timeout=60)
-        record('archival-describe-after-disable', r.returncode == 0 and 'Disabled' in r.stdout and vis_uri in r.stdout, r.stdout + r.stderr)
+        record('archival-describe-after-disable', r.returncode == 0 and 'HistoryArchivalStatus: DISABLED' in r.stdout and 'VisibilityArchivalStatus: ENABLED' in r.stdout and vis_uri in r.stdout, r.stdout + r.stderr)
         # Domain without archival: ListArchived must fail with Go's domain gating error.
         dom_off = 'fe-gate-noarch-' + secrets.token_hex(3)
         run('archival-register-disabled-domain', [*cli_t, '--domain', dom_off, 'domain', 'register', '--retention', '1',
