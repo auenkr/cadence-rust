@@ -564,6 +564,14 @@ pub struct RemoteFrontends {
 
 impl RemoteFrontends {
     pub fn from_metadata(metadata: &GroupMetadata) -> Self {
+        Self::from_metadata_with_rules(metadata, Default::default())
+    }
+
+    /// Go applies `HeaderForwardingMiddleware` to every outbound, including remote frontends.
+    pub fn from_metadata_with_rules(
+        metadata: &GroupMetadata,
+        rules: Arc<Vec<cadence_service_core::header_forwarding::HeaderRule>>,
+    ) -> Self {
         let current = &metadata.current_cluster_name;
         let clients = metadata
             .cluster_group
@@ -586,7 +594,8 @@ impl RemoteFrontends {
                     .with_authorization_provider_if(
                         info.authorization_provider.enable,
                         &info.authorization_provider.private_key,
-                    ),
+                    )
+                    .with_header_rules(rules.clone()),
                 )
             })
             .collect();

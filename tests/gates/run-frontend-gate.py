@@ -849,6 +849,37 @@ try:
                 break
     record('ratelimit-frontend-rps-service-busy', busy, (outs[-1] if outs else '')[:500])
 
+    # ---- global ratelimiter modes (Go common/quotas/global) via dynamic config
+    def burst_busy(tag):
+        outs, busy = [], False
+        with concurrent.futures.ThreadPoolExecutor(8) as pool:
+            for _ in range(4):
+                futs = [pool.submit(subprocess.run, [*cli_t, '--domain', dom_t, 'workflow', 'start', '--tl', f'grl-{tag}', '--wt', 'GrlProbe', '--et', '60', '--dt', '10'], capture_output=True, text=True, timeout=60) for _ in range(8)]
+                for f in futs:
+                    r = f.result()
+                    outs.append(r.stdout + r.stderr)
+                if any('Too many outstanding requests to the cadence service' in o for o in outs):
+                    busy = True
+                    break
+        return busy, (outs[-1] if outs else '')[:500]
+    def set_grl(extra):
+        base = re.sub(r'(?m)^frontend\.(globalRatelimiterMode|globalDomainrps|domainrps):\n(?:[- ].*\n?)*', '', dyn)
+        (work / 'rust-dynamic-config.yaml').write_text(
+            base + f'\nsystem.enableGRPCOutbound:\n  - value: {str(args.rust_outbound == "grpc").lower()}\n' + extra)
+        return restart_frontend(work / 'rust-ratelimit.yaml')
+    for mode, limit_key in (('global', 'frontend.globalDomainrps'), ('local-shadow-global', 'frontend.domainrps'), ('global-shadow-local', 'frontend.globalDomainrps')):
+        tag = mode.replace('-', '')
+        # generous limit: requests still served
+        ok = set_grl(f'frontend.globalRatelimiterMode:\n  - value: {mode}\n{limit_key}:\n  - value: 100000\n')
+        time.sleep(5)
+        r = subprocess.run([*cli_t, '--domain', dom_t, 'workflow', 'start', '--tl', f'grl-ok-{tag}', '--wt', 'GrlProbe', '--et', '60', '--dt', '10'], capture_output=True, text=True, timeout=60)
+        record(f'global-ratelimiter-{mode}-serves-requests', ok and r.returncode == 0, (r.stdout + r.stderr)[:300])
+        # low limit: ServiceBusy enforced
+        ok = set_grl(f'frontend.globalRatelimiterMode:\n  - value: {mode}\n{limit_key}:\n  - value: 1\n')
+        time.sleep(5)
+        busy, last = burst_busy(tag)
+        record(f'global-ratelimiter-{mode}-enforces-service-busy', ok and busy, last)
+
 except SystemExit:
     pass
 except Exception as e:

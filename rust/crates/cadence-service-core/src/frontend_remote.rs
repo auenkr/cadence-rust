@@ -31,6 +31,8 @@ pub struct RemoteFrontendClient {
     /// Go `ClusterInformation.AuthorizationProvider` (outbound JWT middleware).
     authorization: Option<crate::outbound_auth::AdminJwtProvider>,
     channel: std::sync::Arc<tokio::sync::OnceCell<tonic::transport::Channel>>,
+    /// Go `HeaderForwardingMiddleware` rules (outbound middleware on every dispatcher).
+    header_rules: std::sync::Arc<Vec<crate::header_forwarding::HeaderRule>>,
 }
 
 impl RemoteFrontendClient {
@@ -54,7 +56,22 @@ impl RemoteFrontendClient {
             tls,
             authorization: None,
             channel: Default::default(),
+            header_rules: Default::default(),
         }
+    }
+
+    #[must_use]
+    pub fn with_header_rules(
+        mut self,
+        rules: std::sync::Arc<Vec<crate::header_forwarding::HeaderRule>>,
+    ) -> Self {
+        self.header_rules = rules;
+        self
+    }
+
+    /// Inbound headers to forward on this call (existing outbound names win).
+    fn forwarded(&self, existing: &[(String, String)]) -> Vec<(String, String)> {
+        crate::header_forwarding::forward_for_current_call(&self.header_rules, existing)
     }
 
     /// Go `NewCrossDCOutbounds` with `authorizationProvider.enable`: every call
@@ -118,12 +135,21 @@ impl RemoteFrontendClient {
             .await?
             .clone();
         let token = self.authorization_token()?;
+        let mut existing: Vec<(String, String)> = ["rpc-service", "rpc-caller", "rpc-encoding", AUTOFORWARDING_CLUSTER_HEADER]
+            .iter()
+            .map(|k| ((*k).to_owned(), String::new()))
+            .collect();
+        if token.is_some() {
+            existing.push((crate::outbound_auth::AUTHORIZATION_HEADER.to_owned(), String::new()));
+        }
+        let extra = self.forwarded(&existing);
         crate::frontend_remote_grpc::call(
             channel,
             &self.service,
             &self.caller,
             &self.forwarding_cluster,
             token.as_deref(),
+            &extra,
             operation,
             request,
             timeout,
@@ -156,6 +182,8 @@ impl RemoteFrontendClient {
         if let Some(token) = self.authorization_token()? {
             headers.push((crate::outbound_auth::AUTHORIZATION_HEADER.to_owned(), token));
         }
+        let extra = self.forwarded(&headers);
+        headers.extend(extra);
         let response = call_thrift(
             &self.address,
             &self.service,
@@ -306,5 +334,24 @@ mod tests {
             }
             other => panic!("unexpected {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn forwards_inbound_headers_per_rules_without_overwriting() {
+        use crate::header_forwarding::{default_dynamic_rules, INBOUND_HEADERS};
+        let c = RemoteFrontendClient::new("b".into(), "x".into(), "s".into(), "tchannel".into(), "c".into(), "a".into(), None)
+            .with_header_rules(std::sync::Arc::new(default_dynamic_rules()));
+        let inbound: std::collections::HashMap<String, String> = [
+            ("x-trace", "1"),
+            ("grpc-timeout", "5"),
+            (AUTOFORWARDING_CLUSTER_HEADER, "zzz"),
+        ]
+        .iter()
+        .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+        .collect();
+        let existing = vec![(AUTOFORWARDING_CLUSTER_HEADER.to_owned(), "a".to_owned())];
+        let got = INBOUND_HEADERS.scope(inbound, async { c.forwarded(&existing) }).await;
+        assert_eq!(got, vec![("x-trace".to_owned(), "1".to_owned())]);
+        assert!(c.forwarded(&existing).is_empty());
     }
 }

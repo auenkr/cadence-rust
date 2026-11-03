@@ -131,6 +131,73 @@ pub trait AggregatorClient: Send + Sync {
 
 // ---- limiters -------------------------------------------------------------
 
+/// Go `clock.Reservation`: the token is taken at reserve time; `used(false)`
+/// returns it, `used(true)` keeps it.
+pub struct Reservation {
+    pub ok: bool,
+    pub retry_after: Duration,
+    used: Box<dyn FnOnce(bool) + Send>,
+}
+
+impl Reservation {
+    pub fn used(self, was_used: bool) {
+        (self.used)(was_used)
+    }
+}
+
+/// Raw `rate.Limiter` reservation over a bucket.
+fn raw_reserve(bucket: &Arc<Mutex<Bucket>>) -> Reservation {
+    let mut b = bucket.lock().unwrap_or_else(|e| e.into_inner());
+    let ok = b.take();
+    let retry_after = if ok { Duration::ZERO } else { b.wait_time() };
+    drop(b);
+    let bucket = bucket.clone();
+    Reservation {
+        ok,
+        retry_after,
+        used: Box::new(move |was_used| {
+            if ok && !was_used {
+                bucket.lock().unwrap_or_else(|e| e.into_inner()).give_back();
+            }
+        }),
+    }
+}
+
+/// Go `internal.NewShadowedLimiter(primary, shadow).Reserve()`.
+fn shadowed(primary: Reservation, shadow: Reservation) -> Reservation {
+    let (ok, retry_after) = (primary.ok, primary.retry_after);
+    Reservation {
+        ok,
+        retry_after,
+        used: Box::new(move |was_used| {
+            primary.used(was_used);
+            // Shadow keeps consuming when the primary rejected it directly.
+            shadow.used(if ok { was_used } else { true });
+        }),
+    }
+}
+
+/// Go `countedReservation`.
+fn counted(inner: Reservation, usage: &Arc<AtomicUsage>) -> Reservation {
+    let (ok, retry_after) = (inner.ok, inner.retry_after);
+    let usage = usage.clone();
+    Reservation {
+        ok,
+        retry_after,
+        used: Box::new(move |was_used| {
+            inner.used(was_used);
+            usage.idle.store(0, Ordering::Relaxed);
+            if ok {
+                if was_used {
+                    usage.count(true);
+                }
+            } else {
+                usage.count(false);
+            }
+        }),
+    }
+}
+
 struct Bucket {
     rps: f64,
     tokens: f64,
@@ -160,6 +227,10 @@ impl Bucket {
         } else {
             false
         }
+    }
+    /// Go `rate.Reservation.Cancel`: return an unused token.
+    fn give_back(&mut self) {
+        self.tokens = (self.tokens + 1.0).min(self.rps.max(1.0));
     }
     fn wait_time(&self) -> Duration {
         let need = ((1.0 - self.tokens) / self.rps.max(1e-9)).max(0.001);
@@ -207,9 +278,9 @@ impl AtomicUsage {
 /// plus a fallback (per-member) bucket used at startup and after failures.
 pub struct FallbackLimiter {
     failed_updates: AtomicI64,
-    usage: AtomicUsage,
-    primary: Mutex<Bucket>,
-    fallback: Mutex<Bucket>,
+    usage: Arc<AtomicUsage>,
+    primary: Arc<Mutex<Bucket>>,
+    fallback: Arc<Mutex<Bucket>>,
     fallback_rps: Arc<dyn Fn() -> f64 + Send + Sync>,
 }
 
@@ -218,9 +289,9 @@ impl FallbackLimiter {
         let initial = fallback_rps();
         Self {
             failed_updates: AtomicI64::new(INITIAL_FAILED_UPDATES),
-            usage: AtomicUsage::default(),
-            primary: Mutex::new(Bucket::new(0.0)),
-            fallback: Mutex::new(Bucket::new(initial)),
+            usage: Arc::new(AtomicUsage::default()),
+            primary: Arc::new(Mutex::new(Bucket::new(0.0))),
+            fallback: Arc::new(Mutex::new(Bucket::new(initial))),
             fallback_rps,
         }
     }
@@ -254,71 +325,63 @@ impl FallbackLimiter {
             .saturating_add(1)
     }
 
-    /// Go `both()`: shadowed(primary, shadow); the shadow always consumes.
-    fn try_take(&self) -> bool {
+    /// Go `FallbackLimiter.Reserve()` (`both()` wrapped in `countedReservation`).
+    pub fn reserve(&self) -> Reservation {
         let fallback_rps = (self.fallback_rps)();
-        let mut fb = self.fallback.lock().unwrap_or_else(|e| e.into_inner());
-        fb.set_rps(fallback_rps);
+        self.fallback
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .set_rps(fallback_rps);
         let (starting, failing) = self.mode();
-        if starting {
-            return fb.take();
-        }
-        let mut p = self.primary.lock().unwrap_or_else(|e| e.into_inner());
-        let (a, b) = (fb.take(), p.take());
-        if failing {
-            a
+        let inner = if starting {
+            // don't touch the primary until an update occurs.
+            raw_reserve(&self.fallback)
+        } else if failing {
+            let (p, sh) = (raw_reserve(&self.fallback), raw_reserve(&self.primary));
+            shadowed(p, sh)
         } else {
-            b
-        }
+            let (p, sh) = (raw_reserve(&self.primary), raw_reserve(&self.fallback));
+            shadowed(p, sh)
+        };
+        counted(inner, &self.usage)
     }
 
     pub fn allow(&self) -> bool {
-        let ok = self.try_take();
-        self.usage.count(ok);
+        let r = self.reserve();
+        let ok = r.ok;
+        r.used(ok);
         ok
-    }
-
-    pub fn retry_after(&self) -> Duration {
-        let (starting, failing) = self.mode();
-        let fb = self.fallback.lock().unwrap_or_else(|e| e.into_inner());
-        if starting || failing {
-            return fb.wait_time();
-        }
-        self.primary
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .wait_time()
     }
 }
 
-/// Go `internal.CountedLimiter` over the local per-member limiter.
+// Go `internal.CountedLimiter` over the local per-member limiter.
 pub struct CountedLimiter {
-    bucket: Mutex<Bucket>,
+    bucket: Arc<Mutex<Bucket>>,
     rps: Arc<dyn Fn() -> f64 + Send + Sync>,
-    usage: AtomicUsage,
+    usage: Arc<AtomicUsage>,
 }
 
 impl CountedLimiter {
     pub fn new(rps: Arc<dyn Fn() -> f64 + Send + Sync>) -> Self {
         let initial = rps();
         Self {
-            bucket: Mutex::new(Bucket::new(initial)),
+            bucket: Arc::new(Mutex::new(Bucket::new(initial))),
             rps,
-            usage: AtomicUsage::default(),
+            usage: Arc::new(AtomicUsage::default()),
         }
     }
-    pub fn allow(&self) -> bool {
-        let mut b = self.bucket.lock().unwrap_or_else(|e| e.into_inner());
-        b.set_rps((self.rps)());
-        let ok = b.take();
-        self.usage.count(ok);
-        ok
-    }
-    pub fn retry_after(&self) -> Duration {
+    pub fn reserve(&self) -> Reservation {
         self.bucket
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .wait_time()
+            .set_rps((self.rps)());
+        counted(raw_reserve(&self.bucket), &self.usage)
+    }
+    pub fn allow(&self) -> bool {
+        let r = self.reserve();
+        let ok = r.ok;
+        r.used(ok);
+        ok
     }
     pub fn collect(&self) -> UsageMetrics {
         self.usage.collect()
@@ -429,44 +492,34 @@ impl Collection {
             .clone()
     }
 
-    /// Go `Collection.For(key)` + one `Allow`.
-    pub fn acquire(&self, key: &str) -> Decision {
-        let run = |primary: Result<(), Duration>| Decision::Decided(primary);
-        match self.mode(key) {
-            KeyMode::Disabled => Decision::Disabled,
-            KeyMode::Local => {
-                let l = self.local_limiter(key);
-                run(if l.allow() {
-                    Ok(())
-                } else {
-                    Err(l.retry_after())
-                })
-            }
-            KeyMode::Global => {
-                let g = self.global_limiter(key);
-                run(if g.allow() {
-                    Ok(())
-                } else {
-                    Err(g.retry_after())
-                })
-            }
+    /// Go `Collection.For(key).Reserve()`: `None` when the key is disabled.
+    /// Mirrors Go's `shadowedLimiter` (shadow reserved/consumed alongside the primary).
+    pub fn reserve(&self, key: &str) -> Option<Reservation> {
+        Some(match self.mode(key) {
+            KeyMode::Disabled => return None,
+            KeyMode::Local => self.local_limiter(key).reserve(),
+            KeyMode::Global => self.global_limiter(key).reserve(),
             KeyMode::LocalShadowGlobal => {
                 let (l, g) = (self.local_limiter(key), self.global_limiter(key));
-                let _ = g.allow();
-                run(if l.allow() {
-                    Ok(())
-                } else {
-                    Err(l.retry_after())
-                })
+                let (p, sh) = (l.reserve(), g.reserve());
+                shadowed(p, sh)
             }
             KeyMode::GlobalShadowLocal => {
                 let (l, g) = (self.local_limiter(key), self.global_limiter(key));
-                let _ = l.allow();
-                run(if g.allow() {
-                    Ok(())
-                } else {
-                    Err(g.retry_after())
-                })
+                let (p, sh) = (g.reserve(), l.reserve());
+                shadowed(p, sh)
+            }
+        })
+    }
+
+    /// Go `Collection.For(key)` + one `Allow`.
+    pub fn acquire(&self, key: &str) -> Decision {
+        match self.reserve(key) {
+            None => Decision::Disabled,
+            Some(r) => {
+                let (ok, retry) = (r.ok, r.retry_after);
+                r.used(ok);
+                Decision::Decided(if ok { Ok(()) } else { Err(retry) })
             }
         }
     }
@@ -830,5 +883,57 @@ mod tests {
         c.tick(Duration::from_secs(1)).await;
         let g = c.global_limiter("d");
         assert!(!g.collect().1, "weights applied, no longer starting up");
+    }
+
+    fn mode_collection(mode: &'static str, rps: f64) -> Arc<Collection> {
+        Collection::new(
+            "user",
+            Arc::new(|| Duration::from_secs(1)),
+            Arc::new(|_| 100.0),
+            Arc::new(move |_| rps),
+            Arc::new(move |_| mode.into()),
+            Arc::new(NoAggs),
+        )
+    }
+
+    #[test]
+    fn unused_reservation_returns_token_like_go() {
+        let c = mode_collection("local", 1.0);
+        let r = c.reserve("d").unwrap();
+        assert!(r.ok);
+        r.used(false); // a later stage rejected: token comes back
+        let r = c.reserve("d").unwrap();
+        assert!(r.ok, "token was returned");
+        r.used(true);
+        assert!(!c.reserve("d").unwrap().ok, "consumed token stays consumed");
+    }
+
+    #[test]
+    fn shadow_consumes_even_when_primary_rejects() {
+        // global-shadow-local: the local shadow keeps consuming (Used(true)) when
+        // the global primary rejects; local-shadow-global likewise for global.
+        let c = mode_collection("local-shadow-global", 2.0);
+        for _ in 0..2 {
+            c.acquire("d");
+        }
+        assert!(matches!(c.acquire("d"), Decision::Decided(Err(_))));
+        let g = c.global_limiter("d");
+        let (usage, _, _) = g.collect();
+        assert!(
+            usage.allowed + usage.rejected >= 2,
+            "global shadow saw the calls"
+        );
+    }
+
+    #[test]
+    fn shadow_token_returned_when_primary_ok_and_later_stage_rejects() {
+        let c = mode_collection("local-shadow-global", 1.0);
+        let r = c.reserve("d").unwrap();
+        assert!(r.ok);
+        r.used(false);
+        // both primary(local) and shadow(global fallback) tokens were returned
+        let r = c.reserve("d").unwrap();
+        assert!(r.ok);
+        r.used(true);
     }
 }
