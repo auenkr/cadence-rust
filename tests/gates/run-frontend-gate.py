@@ -677,7 +677,7 @@ try:
         dyn + f'\nsystem.enableGRPCOutbound:\n  - value: {str(args.rust_outbound == "grpc").lower()}\n'
         'frontend.rps:\n  - value: 1\n')
     http_cfg, n = re.subn(r'(?m)^(  frontend:\n(?:.*\n)*?      grpcMaxMsgSize: \d+\n)',
-                          lambda m: m.group(1) + f'      http:\n        port: {http_port}\n        procedures:\n          - "WorkflowService::Health"\n', rt, count=1)
+                          lambda m: m.group(1) + f'      http:\n        port: {http_port}\n        procedures:\n          - "WorkflowService::GetSearchAttributes"\n', rt, count=1)
     record('ratelimit-http-config-generated', n == 1)
     (work / 'rust-ratelimit.yaml').write_text(http_cfg)
     record('ratelimit-http-restart', restart_frontend(work / 'rust-ratelimit.yaml') and wait_port(http_port, 30, 'rust-frontend'))
@@ -691,7 +691,7 @@ try:
                 return resp.status, resp.read()
         except urllib.error.HTTPError as e:
             return e.code, e.read()
-    st, body = http_call('WorkflowService::Health')
+    st, body = http_call('WorkflowService::GetSearchAttributes')
     record('rpc-http-allowed-procedure', st == 200, f'{st} {body[:200]!r}')
     st, body = http_call('WorkflowService::DescribeDomain')
     record('rpc-http-disallowed-procedure-rejected', st == 404, f'{st} {body[:200]!r}')
@@ -699,7 +699,7 @@ try:
     outs = []
     with concurrent.futures.ThreadPoolExecutor(8) as pool:
         for _ in range(4):
-            futs = [pool.submit(subprocess.run, [*cli_t, '--domain', dom_t, 'domain', 'describe'], capture_output=True, text=True, timeout=60) for _ in range(8)]
+            futs = [pool.submit(subprocess.run, [*cli_t, '--domain', dom_t, 'workflow', 'start', '--tl', 'rl-tl', '--wt', 'RlProbe', '--et', '60', '--dt', '10'], capture_output=True, text=True, timeout=60) for _ in range(8)]
             for f in futs:
                 r = f.result()
                 outs.append(r.stdout + r.stderr)
