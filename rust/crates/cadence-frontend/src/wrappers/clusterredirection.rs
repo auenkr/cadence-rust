@@ -449,28 +449,105 @@ where
         &'a self,
         operation: crate::handler_workflow::WorkflowOperation,
         request: &'a serde_json::Value,
-        mut next: crate::handler_workflow::WorkflowNext<'a>,
+        next: crate::handler_workflow::WorkflowNext<'a>,
+    ) -> crate::handler_workflow::WorkflowFuture<'a> {
+        Box::pin(async move { self.route(operation.name(), request, None, next).await })
+    }
+
+    fn invoke_with_headers<'a>(
+        &'a self,
+        operation: crate::handler_workflow::WorkflowOperation,
+        request: &'a serde_json::Value,
+        headers: &'a std::collections::HashMap<String, String>,
+        next: crate::handler_workflow::WorkflowNext<'a>,
     ) -> crate::handler_workflow::WorkflowFuture<'a> {
         Box::pin(async move {
-            let Some(route) = self.requests.resolve(operation.name(), request)? else {
-                return next(None).await;
-            };
-            redirect_async(
-                self.policy,
-                &self.current_cluster,
-                &self.configured_target,
-                &route.domain,
-                route.execution.as_ref(),
-                route.requested_cluster_attribute.as_deref(),
+            self.route(
                 operation.name(),
-                route.consistency,
-                &self.config,
-                &self.manager,
-                self.metrics.as_ref(),
-                |cluster| next(Some(cluster)),
+                request,
+                Some(consistency_from_headers(headers)),
+                next,
             )
             .await
         })
+    }
+}
+
+impl<C, M, R> WorkflowRedirector<C, M, R>
+where
+    C: RuntimeConfig,
+    M: ActiveClusterManager,
+    R: RedirectRequestResolver,
+{
+    /// Resolve and run `call` on the selected cluster. `None` from the
+    /// resolver means the API is not redirected and `call` runs with `None`.
+    /// `consistency` overrides the resolver's level when the caller headers
+    /// are known.
+    pub async fn route<T, F, Fut>(
+        &self,
+        operation: &str,
+        request: &serde_json::Value,
+        consistency: Option<Consistency>,
+        mut call: F,
+    ) -> Result<T, CadenceError>
+    where
+        F: FnMut(Option<String>) -> Fut,
+        Fut: Future<Output = Result<T, CadenceError>>,
+    {
+        let Some(route) = self.requests.resolve(operation, request)? else {
+            return call(None).await;
+        };
+        redirect_async(
+            self.policy,
+            &self.current_cluster,
+            &self.configured_target,
+            &route.domain,
+            route.execution.as_ref(),
+            route.requested_cluster_attribute.as_deref(),
+            operation,
+            consistency.unwrap_or(route.consistency),
+            &self.config,
+            &self.manager,
+            self.metrics.as_ref(),
+            |cluster| call(Some(cluster)),
+        )
+        .await
+    }
+}
+
+/// Go `client.GetFeatureFlagsFromHeader` + `getRequestedConsistencyLevelFromContext`:
+/// `cadence-client-feature-flags` is a jsonpb `FeatureFlags`; a set
+/// `autoforwardingEnabled` means strong consistency. Unparseable values fail
+/// open to empty flags (eventual).
+pub fn consistency_from_headers(
+    headers: &std::collections::HashMap<String, String>,
+) -> Consistency {
+    let Some(raw) = headers.get("cadence-client-feature-flags") else {
+        return Consistency::Eventual;
+    };
+    let Ok(serde_json::Value::Object(fields)) = serde_json::from_str::<serde_json::Value>(raw)
+    else {
+        return Consistency::Eventual;
+    };
+    let mut autoforwarding = false;
+    for (key, value) in &fields {
+        let flag = match value {
+            serde_json::Value::Bool(flag) => *flag,
+            serde_json::Value::Null => false,
+            _ => return Consistency::Eventual,
+        };
+        match key.as_str() {
+            "autoforwardingEnabled" | "autoforwarding_enabled" => autoforwarding = flag,
+            "WorkflowExecutionAlreadyCompletedErrorEnabled"
+            | "workflow_execution_already_completed_error_enabled"
+            | "workflowExecutionAlreadyCompletedErrorEnabled" => {}
+            _ => return Consistency::Eventual,
+        }
+    }
+    if autoforwarding {
+        Consistency::Strong
+    } else {
+        Consistency::Eventual
     }
 }
 
@@ -531,6 +608,41 @@ fn active_active_target<M: ActiveClusterManager>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn autoforwarding_feature_flag_selects_strong_consistency() {
+        let h = |v: &str| {
+            std::collections::HashMap::from([(
+                "cadence-client-feature-flags".to_string(),
+                v.to_string(),
+            )])
+        };
+        let none = std::collections::HashMap::new();
+        assert_eq!(consistency_from_headers(&none), Consistency::Eventual);
+        assert_eq!(
+            consistency_from_headers(&h(r#"{"autoforwardingEnabled":true}"#)),
+            Consistency::Strong
+        );
+        assert_eq!(
+            consistency_from_headers(&h(
+                r#"{"autoforwarding_enabled":true,"WorkflowExecutionAlreadyCompletedErrorEnabled":true}"#
+            )),
+            Consistency::Strong
+        );
+        assert_eq!(
+            consistency_from_headers(&h(r#"{"autoforwardingEnabled":false}"#)),
+            Consistency::Eventual
+        );
+        // jsonpb rejects unknown fields and non-bool values: fail open.
+        assert_eq!(
+            consistency_from_headers(&h(r#"{"autoforwardingEnabled":true,"x":1}"#)),
+            Consistency::Eventual
+        );
+        assert_eq!(
+            consistency_from_headers(&h("garbage")),
+            Consistency::Eventual
+        );
+    }
     use std::sync::Mutex;
 
     struct Config(bool);

@@ -220,6 +220,23 @@ fn percent_decode(value: &str) -> String {
 
 /// Map a legacy in-process route to the Frontend hook operation name and, for
 /// GET routes, the request JSON built from the query string.
+fn schedule_operation(method: &Method, path: &str) -> Option<&'static str> {
+    if method != Method::POST {
+        return None;
+    }
+    Some(match path {
+        "/api/v1/schedules/create" => "CreateSchedule",
+        "/api/v1/schedules/describe" => "DescribeSchedule",
+        "/api/v1/schedules/list" => "ListSchedules",
+        "/api/v1/schedules/delete" => "DeleteSchedule",
+        "/api/v1/schedules/pause" => "PauseSchedule",
+        "/api/v1/schedules/unpause" => "UnpauseSchedule",
+        "/api/v1/schedules/backfill" => "BackfillSchedule",
+        "/api/v1/schedules/update" => "UpdateSchedule",
+        _ => return None,
+    })
+}
+
 fn hook_operation(
     method: &Method,
     path: &str,
@@ -420,6 +437,33 @@ impl Frontend {
         headers: &[(&str, &str)],
     ) -> Result<R, Status> {
         if let Some(api) = self.state.workflow_api.clone() {
+            if let Some(operation) = schedule_operation(&method, path) {
+                // Go clusterRedirectionHandler wraps schedule APIs with Redirect.
+                let request =
+                    serde_json::to_value(input).map_err(|e| Status::internal(e.to_string()))?;
+                let (mut caller_headers, deadline) = GRPC_CALLER
+                    .try_with(|(headers, deadline)| (headers.clone(), *deadline))
+                    .unwrap_or_default();
+                for (name, value) in headers {
+                    caller_headers.insert(name.to_ascii_lowercase(), (*value).to_owned());
+                }
+                let ctx = cadence_service_core::workflow_api::CallerContext {
+                    deadline,
+                    headers: caller_headers,
+                };
+                let forwarded = api
+                    .redirect(operation, &request, &ctx)
+                    .await
+                    .map_err(|error| {
+                        let (name, _, message) =
+                            cadence_service_core::workflow_api::error_to_thrift(&error);
+                        status_from_error_type(name, &message)
+                    })?;
+                if let Some(value) = forwarded {
+                    return serde_json::from_value(value)
+                        .map_err(|e| Status::internal(e.to_string()));
+                }
+            }
             if let Some((operation, override_request)) = hook_operation(&method, path) {
                 if api.serves(operation) {
                     let request = match override_request {

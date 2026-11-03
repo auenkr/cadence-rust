@@ -27,11 +27,10 @@ ap.add_argument('--kafka-topic', default='cadence-async-gate')
 ap.add_argument('--es-url', help='http://host:port of Elasticsearch; enables advanced visibility (needs --kafka-broker for the Go indexer)')
 ap.add_argument('--es-index', default='cadence-visibility-dev')
 ap.add_argument('--es-version', default='v7')
+ap.add_argument('--es-container', help='docker container of the ES/OpenSearch node; enables the restart-resilience steps')
 args = ap.parse_args()
 if args.es_url and not args.kafka_broker:
     ap.error('--es-url requires --kafka-broker')
-if args.es_url and args.database == 'cassandra':
-    ap.error('--es-url is supported on the SQL lanes only')
 if args.kafka_broker and not args.kafka_container:
     ap.error('--kafka-broker requires --kafka-container')
 ASYNC_QUEUE = 'gate-async-queue'
@@ -180,6 +179,29 @@ def record(name, ok, detail=''):
     steps.append({'step': name, 'ok': ok, 'detail': detail[-3000:]})
     print(f'GATE {"ok  " if ok else "FAIL"} {name} {detail[-300:] if not ok else ""}', flush=True)
     (work / 'steps.json').write_text(json.dumps(steps, indent=2))
+def dump_domain_rows(tag):
+    """Diagnostics: persisted domain rows + notification version as Go History sees them."""
+    try:
+        c = os.environ.get(prefix + '_DOCKER_CONTAINER')
+        if not c:
+            return
+        if plugin == 'mysql':
+            stmts = ["SELECT HEX(id), name, shard_id FROM cadence.domains", "SELECT * FROM cadence.domain_metadata"]
+            cmds = [['docker', 'exec', c, 'mysql', '-uroot', f'-p{my_pass}', '-h127.0.0.1', '-N', '-B', '-e', q] for q in stmts]
+        elif plugin == 'postgres':
+            stmts = ["SELECT encode(id,'hex'), name, shard_id FROM domains", "SELECT * FROM domain_metadata"]
+            cmds = [['docker', 'exec', c, 'psql', '-U', my_user, '-d', 'cadence', '-At', '-c', q] for q in stmts]
+        else:
+            stmts = ["SELECT * FROM domains_by_name_v2 LIMIT 50", "SELECT * FROM domains LIMIT 50"]
+            cmds = [['docker', 'exec', c, 'cqlsh', '-k', cassandra_keyspace, '-e', q] for q in stmts]
+        out = ''
+        for cmd in cmds:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            out += r.stdout + r.stderr + '\n'
+        (work / f'db-domains-{tag}.log').write_text(out)
+    except Exception as e:
+        (work / f'db-domains-{tag}.log').write_text(repr(e))
+
 def record_services_alive(phase):
     for name in ['go-history-worker', 'rust-matching', 'rust-frontend'] + (['go-history-2'] if args.two_history else []):
         exit_code = procs[name].poll()
@@ -247,6 +269,7 @@ try:
     time.sleep(12)  # domain cache refresh in Go History/Worker
     run('cli-describe-domain-tchannel', [*cli_t, '--domain', dom_t, 'domain', 'describe'])
     run('cli-describe-domain-grpc', [*cli_g, '--domain', dom_g, 'domain', 'describe'])
+    dump_domain_rows('before-sdk')
     record_services_alive('before-sdk')
     marks = work / 'marks'; marks.mkdir(exist_ok=True)
     env = {**os.environ, **({'FE_CHURN': '1'} if args.two_history else {}), 'FE_TCHANNEL': f'127.0.0.1:{ports["FRONTEND_PORT"]}', 'FE_DOMAIN': dom_t, 'FE_MARK_DIR': str(marks), 'FE_CLI': str(args.go_cli), 'FE_GRPC': f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}'}
@@ -283,6 +306,7 @@ try:
             time.sleep(15)
             (marks / 'restart-done').write_text('x')
         time.sleep(1)
+    dump_domain_rows('after-sdk')
     for line in (work / 'sdk.log').read_text().splitlines():
         m = re.match(r'STEP (\S+) (ok|FAIL)\s*(.*)', line)
         if m:
@@ -395,6 +419,48 @@ try:
         except Exception as e:
             record('es-index-has-documents', False, repr(e))
         record_services_alive('after-es-sdk')
+        if args.es_container:
+            # ---- ES restart resilience: visibility reads error while ES is down and recover after it is back.
+            probes = {'list': [*cli_t, '--domain', dom_es, 'workflow', 'list', '--open'],
+                      'count': [*cli_t, '--domain', dom_es, 'workflow', 'count'],
+                      'scan': [*cli_t, '--domain', dom_es, 'workflow', 'scan'],
+                      'list-grpc': [*cli_g, '--domain', dom_es, 'workflow', 'list', '--open']}
+            def probe(n):
+                r = subprocess.run(probes[n], capture_output=True, text=True, timeout=90)
+                return r.returncode == 0, (r.stdout + r.stderr).strip()
+            for n in probes:
+                ok, out = probe(n)
+                record(f'es-restart-before-{n}', ok, out[:300])
+            r = subprocess.run(['docker', 'stop', '--time', '5', args.es_container], capture_output=True, text=True, timeout=120)
+            record('es-restart-stop', r.returncode == 0, r.stdout + r.stderr)
+            for n in probes:
+                ok, out = probe(n)
+                (work / f'es-restart-down-{n}.log').write_text(out)
+                record(f'es-restart-down-{n}-errors', not ok, out[:300])
+            record_services_alive('es-down')
+            r = subprocess.run(['docker', 'start', args.es_container], capture_output=True, text=True, timeout=120)
+            record('es-restart-start', r.returncode == 0, r.stdout + r.stderr)
+            healthy = False
+            for _ in range(60):
+                try:
+                    es_get('/_cluster/health?wait_for_status=yellow&timeout=5s'); healthy = True; break
+                except Exception:
+                    time.sleep(5)
+            record('es-restart-healthy', healthy, '')
+            for n in probes:
+                ok, out = False, ''
+                for _ in range(24):
+                    ok, out = probe(n)
+                    if ok: break
+                    time.sleep(5)
+                (work / f'es-restart-after-{n}.log').write_text(out)
+                record(f'es-restart-after-{n}-recovers', ok, out[:300])
+            try:
+                cnt = json.loads(es_get(f'/{args.es_index}/_count')).get('count', 0)
+                record('es-restart-data-retained', cnt >= 2, str(cnt))
+            except Exception as e:
+                record('es-restart-data-retained', False, repr(e))
+            record_services_alive('after-es-restart')
     run('cli-list-workflows-grpc', [*cli_g, '--domain', dom_t, 'workflow', 'list', '--open'])
     run('cli-list-workflows-tchannel', [*cli_t, '--domain', dom_t, 'workflow', 'list', '--open'])
     # ---- archival phase: Go History/Worker archive (filestore), Rust Frontend registers/reads

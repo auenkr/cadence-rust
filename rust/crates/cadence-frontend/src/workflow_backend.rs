@@ -642,6 +642,7 @@ pub struct HandlerApi {
         crate::wrappers::redirection_runtime::ForwardingBackend<ProductionBackend>,
     >,
     admin_auth: AdminAccessControl,
+    schedule_redirect: Option<crate::wrappers::redirection_runtime::ScheduleRedirect>,
 }
 
 /// Go `accesscontrolled.NewAdminHandler`: every Admin method needs
@@ -753,6 +754,20 @@ impl cadence_service_core::workflow_api::WorkflowApi for HandlerApi {
                 .await
         })
     }
+
+    fn redirect<'a>(
+        &'a self,
+        operation: &'a str,
+        request: &'a serde_json::Value,
+        ctx: &'a cadence_service_core::workflow_api::CallerContext,
+    ) -> cadence_service_core::workflow_api::RedirectFuture<'a> {
+        Box::pin(async move {
+            match &self.schedule_redirect {
+                Some(redirect) => redirect.route(operation, request, &ctx.headers).await,
+                None => Ok(None),
+            }
+        })
+    }
 }
 
 fn service_addr(
@@ -822,6 +837,74 @@ impl crate::handler_workflow::SearchAttributeProvider for ProdSearchAttributes {
                 true,
             )
         })
+    }
+}
+
+type SharedOverlay =
+    std::sync::Arc<std::sync::Mutex<cadence_service_core::admin::DynamicConfigOverlay>>;
+
+fn overlay_integer(overlay: &SharedOverlay, key: &str, domain: &str, default: i64) -> i64 {
+    overlay.lock().map_or(default, |o| {
+        cadence_persistence::dynamic_config::integer(o.property_values(key), Some(domain), default)
+    })
+}
+
+/// Go `limit.blobSize.error` (2 MiB) / `limit.blobSize.warn` (256 KiB)
+/// with the warning log of `common.CheckEventBlobSizeLimit`.
+struct DynamicBlobSizePolicy(SharedOverlay);
+
+impl crate::handler_workflow::WorkflowBlobSizePolicy for DynamicBlobSizePolicy {
+    fn error_limit(&self, domain: &str) -> usize {
+        overlay_integer(&self.0, "limit.blobSize.error", domain, 2 * 1024 * 1024).max(0) as usize
+    }
+
+    fn warning_limit(&self, domain: &str) -> usize {
+        overlay_integer(&self.0, "limit.blobSize.warn", domain, 256 * 1024).max(0) as usize
+    }
+
+    fn observe(&self, m: crate::handler_workflow::WorkflowBlobSizeMeasurement) {
+        use crate::handler_workflow::BlobSizeOutcome;
+        if m.configured_warning_above_error {
+            eprintln!(
+                "WARN Error limit is less than warn limit. domain={} domainID={}",
+                m.domain, m.domain_id
+            );
+        }
+        match m.outcome {
+            BlobSizeOutcome::WithinWarningLimit => {}
+            BlobSizeOutcome::Warning => eprintln!(
+                "WARN Blob size exceeds limit. operation={} domain={} domainID={} workflowID={} runID={} size={} limit={}",
+                m.operation, m.domain, m.domain_id, m.workflow_id, m.run_id, m.actual_size, m.warning_limit
+            ),
+            BlobSizeOutcome::Exceeded => eprintln!(
+                "ERROR Blob size exceeds limit. operation={} domain={} domainID={} workflowID={} runID={} size={} limit={}",
+                m.operation, m.domain, m.domain_id, m.workflow_id, m.run_id, m.actual_size, m.error_limit
+            ),
+        }
+    }
+}
+
+/// Go `system.disallowQuery` (domain filtered).
+struct DynamicQueryPolicy(SharedOverlay);
+
+impl crate::handler_workflow::WorkflowQueryPolicy for DynamicQueryPolicy {
+    fn query_disallowed(&self, domain: &str) -> bool {
+        self.0.lock().is_ok_and(|o| {
+            cadence_persistence::dynamic_config::boolean(
+                o.property_values("system.disallowQuery"),
+                Some(domain),
+                false,
+            )
+        })
+    }
+}
+
+/// Go `frontend.historyMaxPageSize` (domain filtered, default 1000).
+struct DynamicHistoryPageSize(SharedOverlay);
+
+impl crate::handler_workflow::HistoryPageSizePolicy for DynamicHistoryPageSize {
+    fn maximum_page_size(&self, domain: &str) -> i32 {
+        overlay_integer(&self.0, "frontend.historyMaxPageSize", domain, 1000) as i32
     }
 }
 
@@ -1024,12 +1107,30 @@ pub fn build_workflow_api(
         crate::wrappers::redirection_runtime::RemoteFrontends::from_metadata(metadata),
     );
     let shared_metrics_sink = frontend_metrics_sink(&ctx.config);
+    let dynamic_overlay = ctx.state.admin.dynamic_config.clone();
+    let validator = crate::request_validator::RequestValidator {
+        config: crate::request_validator::ValidationConfig {
+            advanced_visibility_store: !ctx.config.persistence.advanced_visibility_store.is_empty(),
+            ..Default::default()
+        },
+        dynamic: None,
+    }
+    .with_dynamic_config(dynamic_overlay.clone());
     let handler = install_async_publisher(
-        crate::handler_workflow::Handler::new(forwarding_backend),
+        crate::handler_workflow::Handler::with_validator(forwarding_backend, validator),
         async_domains,
         ctx.config.async_workflow_queues.clone(),
     )
     .with_domain_lookup(lookup)
+    .with_blob_size_policy(std::sync::Arc::new(DynamicBlobSizePolicy(
+        dynamic_overlay.clone(),
+    )))
+    .with_workflow_query_policy(std::sync::Arc::new(DynamicQueryPolicy(
+        dynamic_overlay.clone(),
+    )))
+    .with_history_page_size_policy(std::sync::Arc::new(DynamicHistoryPageSize(
+        dynamic_overlay.clone(),
+    )))
     .with_archived_history_reader(archived_history)
     .with_search_attribute_provider(std::sync::Arc::new(ProdSearchAttributes {
         state: ctx.state.clone(),
@@ -1047,47 +1148,67 @@ pub fn build_workflow_api(
         version_check_enabled,
         std::sync::Arc::new(crate::wrappers::versioncheck::GoVersionChecker),
     );
-    let handler =
-        if redirection_policy == crate::wrappers::clusterredirection::ForwardingPolicy::Noop {
-            handler
-        } else {
-            let overlay = ctx.state.admin.dynamic_config.clone();
-            let config = crate::wrappers::redirection_runtime::FnRuntimeConfig(
-                std::sync::Arc::new(move |domain: &str| {
-                    overlay.lock().map_or(true, |o| {
-                        cadence_persistence::dynamic_config::boolean(
-                            o.property_values("system.enableDomainNotActiveAutoForwarding"),
-                            Some(domain),
-                            true,
-                        )
-                    })
-                }),
-            );
-            handler.with_cluster_redirection(std::sync::Arc::new(
-                crate::wrappers::clusterredirection::WorkflowRedirector {
-                    policy: redirection_policy,
-                    current_cluster: metadata.current_cluster_name.clone(),
-                    configured_target: metadata
-                        .cluster_redirection_policy
-                        .as_ref()
-                        .map(|p| p.all_domain_apis_forwarding_target_cluster.clone())
-                        .unwrap_or_default(),
-                    config,
-                    manager: crate::wrappers::redirection_runtime::UnsupportedActiveClusterManager,
-                    metrics: std::sync::Arc::new(
-                        crate::wrappers::redirection_runtime::SinkRedirectMetrics::new(
-                            shared_metrics_sink.clone(),
-                        ),
-                    ),
-                    requests: crate::wrappers::redirection_runtime::DomainCacheResolver::new(
-                        ctx.state.domain_manager.clone(),
-                    ),
+    let (handler, schedule_redirect) = if redirection_policy
+        == crate::wrappers::clusterredirection::ForwardingPolicy::Noop
+    {
+        (handler, None)
+    } else {
+        let overlay = ctx.state.admin.dynamic_config.clone();
+        let config = crate::wrappers::redirection_runtime::FnRuntimeConfig(std::sync::Arc::new(
+            move |domain: &str| {
+                overlay.lock().map_or(true, |o| {
+                    cadence_persistence::dynamic_config::boolean(
+                        o.property_values("system.enableDomainNotActiveAutoForwarding"),
+                        Some(domain),
+                        true,
+                    )
+                })
+            },
+        ));
+        let redirector =
+            std::sync::Arc::new(crate::wrappers::clusterredirection::WorkflowRedirector {
+                policy: redirection_policy,
+                current_cluster: metadata.current_cluster_name.clone(),
+                configured_target: metadata
+                    .cluster_redirection_policy
+                    .as_ref()
+                    .map(|p| p.all_domain_apis_forwarding_target_cluster.clone())
+                    .unwrap_or_default(),
+                config,
+                manager: {
+                    let manager =
+                        crate::wrappers::redirection_runtime::DomainActiveClusterManager::new(
+                            ctx.state.domain_manager.clone(),
+                        );
+                    match ctx.state.history_node_store.clone() {
+                        Some(store) => manager
+                            .with_executions(store, ctx.config.persistence.num_history_shards),
+                        None => manager,
+                    }
                 },
-            ))
+                metrics: std::sync::Arc::new(
+                    crate::wrappers::redirection_runtime::SinkRedirectMetrics::new(
+                        shared_metrics_sink.clone(),
+                    ),
+                ),
+                requests: crate::wrappers::redirection_runtime::DomainCacheResolver::new(
+                    ctx.state.domain_manager.clone(),
+                ),
+            });
+        let schedule_redirect = crate::wrappers::redirection_runtime::ScheduleRedirect {
+            redirector: redirector.clone(),
+            remotes: crate::wrappers::redirection_runtime::RemoteFrontends::from_metadata(metadata),
+            timeout: cadence_service_core::frontend_remote::DEFAULT_REMOTE_TIMEOUT,
         };
+        (
+            handler.with_cluster_redirection(redirector),
+            Some(schedule_redirect),
+        )
+    };
     Ok(std::sync::Arc::new(HandlerApi {
         handler,
         admin_auth: AdminAccessControl(selected_authorizer),
+        schedule_redirect,
     }))
 }
 

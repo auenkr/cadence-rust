@@ -1269,6 +1269,76 @@ impl crate::history_reader::HistoryNodeStore for PostgresTaskStore {
             })
             .collect()
     }
+
+    fn select_current_execution(
+        &self,
+        shard_id: i32,
+        domain_id: [u8; 16],
+        workflow_id: &str,
+    ) -> std::result::Result<
+        Option<crate::history_reader::CurrentExecutionRow>,
+        crate::history_reader::HistoryReadError,
+    > {
+        use crate::history_reader::{CurrentExecutionRow, HistoryReadError};
+        let index = database_index(shard_id.max(0) as usize, self.use_multiple_databases);
+        let mut client = self.pools[index]
+            .checkout()
+            .map_err(|e| HistoryReadError::Internal(format!("{e:?}")))?;
+        let domain = domain_id.as_slice();
+        let params: &[&(dyn ToSql + Sync)] = &[&shard_id, &domain, &workflow_id];
+        let rows = client
+            .query(
+                "SELECT run_id, state FROM current_executions WHERE shard_id = $1 AND domain_id = $2 AND workflow_id = $3",
+                params,
+            )
+            .map_err(|error| {
+                client.poison_if_closed(&error);
+                HistoryReadError::Internal(format!("{:?}", normalize_postgres_error(error)))
+            })?;
+        let Some(row) = rows.into_iter().next() else {
+            return Ok(None);
+        };
+        let get = |e: postgres::Error| HistoryReadError::Internal(e.to_string());
+        let run: Vec<u8> = row.try_get(0).map_err(get)?;
+        let run_id: [u8; 16] = run.as_slice().try_into().map_err(|_| {
+            HistoryReadError::DataInconsistency("invalid current run_id length".into())
+        })?;
+        Ok(Some(CurrentExecutionRow {
+            run_id,
+            state: row.try_get(1).map_err(get)?,
+        }))
+    }
+
+    fn select_active_cluster_policy(
+        &self,
+        shard_id: i32,
+        domain_id: [u8; 16],
+        workflow_id: &str,
+        run_id: [u8; 16],
+    ) -> std::result::Result<Option<(Vec<u8>, String)>, crate::history_reader::HistoryReadError> {
+        use crate::history_reader::HistoryReadError;
+        let index = database_index(shard_id.max(0) as usize, self.use_multiple_databases);
+        let mut client = self.pools[index]
+            .checkout()
+            .map_err(|e| HistoryReadError::Internal(format!("{e:?}")))?;
+        let domain = domain_id.as_slice();
+        let run = run_id.as_slice();
+        let params: &[&(dyn ToSql + Sync)] = &[&shard_id, &domain, &workflow_id, &run];
+        let rows = client
+            .query(
+                "SELECT data, data_encoding FROM active_cluster_selection_policy WHERE shard_id = $1 AND domain_id = $2 AND workflow_id = $3 AND run_id = $4",
+                params,
+            )
+            .map_err(|error| {
+                client.poison_if_closed(&error);
+                HistoryReadError::Internal(format!("{:?}", normalize_postgres_error(error)))
+            })?;
+        let get = |e: postgres::Error| HistoryReadError::Internal(e.to_string());
+        rows.into_iter()
+            .next()
+            .map(|row| Ok((row.try_get(0).map_err(get)?, row.try_get(1).map_err(get)?)))
+            .transpose()
+    }
 }
 
 impl crate::visibility_reader::VisibilityStore for PostgresTaskStore {

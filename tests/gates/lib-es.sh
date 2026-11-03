@@ -7,7 +7,14 @@
 ES_CONTAINER=""
 ES_ARGS=()
 ES_PORT=${CADENCE_ES_PORT:-19200}
-ES_IMAGE=${CADENCE_ES_IMAGE:-docker.elastic.co/elasticsearch/elasticsearch:7.17.10}
+ES_FLAVOR=${CADENCE_GATE_ES_FLAVOR:-elasticsearch}   # elasticsearch (7.17, Go "v7") | opensearch (2.x, Go "os2")
+if [[ "$ES_FLAVOR" == "opensearch" ]]; then
+  ES_IMAGE=${CADENCE_ES_IMAGE:-opensearchproject/opensearch:2.13.0}
+  ES_VERSION_ARG=os2
+else
+  ES_IMAGE=${CADENCE_ES_IMAGE:-docker.elastic.co/elasticsearch/elasticsearch:7.17.10}
+  ES_VERSION_ARG=v7
+fi
 ES_INDEX=${CADENCE_ES_INDEX:-cadence-visibility-dev}
 
 es_cleanup() {
@@ -23,20 +30,25 @@ es_start() {
   if [[ "${CADENCE_GATE_ES:-}" == "true" || "${CADENCE_GATE_ES:-}" == "1" ]]; then
     [[ -n "$KAFKA_CONTAINER" ]] || { echo "CADENCE_GATE_ES requires CADENCE_GATE_KAFKA" >&2; exit 8; }
     ES_CONTAINER="cadence-rust-gate-es-$RUN_ID"
+    local flavor_env=(--env xpack.security.enabled=false --env ES_JAVA_OPTS="-Xms512m -Xmx512m")
+    if [[ "$ES_FLAVOR" == "opensearch" ]]; then
+      flavor_env=(--env DISABLE_SECURITY_PLUGIN=true --env DISABLE_INSTALL_DEMO_CONFIG=true --env OPENSEARCH_JAVA_OPTS="-Xms512m -Xmx512m")
+    fi
     docker run --detach --name "$ES_CONTAINER" --label "cadence-rust-gate-run=$RUN_ID" \
       --memory 1800m --memory-swap 1800m --cpus 1.5 --pids-limit 2048 \
       --publish "127.0.0.1:${ES_PORT}:9200" \
-      --env discovery.type=single-node --env xpack.security.enabled=false \
-      --env ES_JAVA_OPTS="-Xms512m -Xmx512m" \
+      --env discovery.type=single-node "${flavor_env[@]}" \
       "$ES_IMAGE" > "$ARTIFACTS/es-container-id.txt" || exit 9
     for attempt in $(seq 1 60); do
       curl -sf "http://127.0.0.1:${ES_PORT}/_cluster/health?wait_for_status=yellow&timeout=5s" > "$ARTIFACTS/es-health.json" 2>&1 && break
       (( attempt == 60 )) && { echo "Elasticsearch not ready after 5 minutes" >&2; exit 10; }
       sleep 5
     done
-    # Go's own template + index (go/schema/elasticsearch/v7/visibility).
-    curl -sf -XPUT "http://127.0.0.1:${ES_PORT}/_template/cadence-visibility-template" -H 'Content-Type: application/json' \
-      --data-binary "@$ROOT/go/schema/elasticsearch/v7/visibility/index_template.json" > "$ARTIFACTS/es-template.json" 2>&1 \
+    # Go's own template + index (go/schema/elasticsearch/{v7,os2}/visibility).
+    local tmpl_path=_template tmpl_dir=v7
+    if [[ "$ES_FLAVOR" == "opensearch" ]]; then tmpl_path=_index_template; tmpl_dir=os2; fi
+    curl -sf -XPUT "http://127.0.0.1:${ES_PORT}/${tmpl_path}/cadence-visibility-template" -H 'Content-Type: application/json' \
+      --data-binary "@$ROOT/go/schema/elasticsearch/${tmpl_dir}/visibility/index_template.json" > "$ARTIFACTS/es-template.json" 2>&1 \
       || { cat "$ARTIFACTS/es-template.json" >&2; exit 11; }
     curl -sf -XPUT "http://127.0.0.1:${ES_PORT}/${ES_INDEX}" > "$ARTIFACTS/es-index.json" 2>&1 \
       || { cat "$ARTIFACTS/es-index.json" >&2; exit 12; }
@@ -45,6 +57,6 @@ es_start() {
         --create --if-not-exists --topic "$topic" --partitions 1 --replication-factor 1 \
         >> "$ARTIFACTS/kafka-es-topics.txt" 2>&1 || exit 13
     done
-    ES_ARGS=(--es-url "http://127.0.0.1:${ES_PORT}" --es-index "$ES_INDEX")
+    ES_ARGS=(--es-url "http://127.0.0.1:${ES_PORT}" --es-index "$ES_INDEX" --es-version "$ES_VERSION_ARG" --es-container "$ES_CONTAINER")
   fi
 }

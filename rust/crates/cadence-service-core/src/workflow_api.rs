@@ -74,7 +74,40 @@ pub trait WorkflowApi: Send + Sync + std::fmt::Debug {
         request: serde_json::Value,
         ctx: CallerContext,
     ) -> ApiFuture<'a>;
+    /// Go cluster-redirection wrapper for operations this implementation does
+    /// not serve (schedule APIs): `Some(response)` when the call was forwarded
+    /// to a remote cluster, `None` to serve it locally.
+    fn redirect<'a>(
+        &'a self,
+        operation: &'a str,
+        request: &'a serde_json::Value,
+        ctx: &'a CallerContext,
+    ) -> RedirectFuture<'a> {
+        let _ = (operation, request, ctx);
+        Box::pin(async { Ok(None) })
+    }
 }
+
+pub type RedirectFuture<'a> = std::pin::Pin<
+    Box<
+        dyn std::future::Future<Output = Result<Option<serde_json::Value>, CadenceError>>
+            + Send
+            + 'a,
+    >,
+>;
+
+/// Operations served by the core schedule handlers that Go's
+/// `clusterRedirectionHandler` still wraps with `Redirect`.
+pub const REDIRECTED_SCHEDULE_OPERATIONS: &[&str] = &[
+    "BackfillSchedule",
+    "CreateSchedule",
+    "DeleteSchedule",
+    "DescribeSchedule",
+    "ListSchedules",
+    "PauseSchedule",
+    "UnpauseSchedule",
+    "UpdateSchedule",
+];
 
 pub type SharedWorkflowApi = Arc<dyn WorkflowApi>;
 
@@ -186,7 +219,16 @@ fn codec(method: &str) -> Option<Codec> {
     use cadence_api::service_types as st;
     use cadence_api::tasks as tk;
     use cadence_api::types as ty;
+    use cadence_api::schedule as sc;
     Some(match method {
+        "CreateSchedule" => op!(sc::CreateScheduleRequest, sc::CreateScheduleResponse),
+        "DescribeSchedule" => op!(sc::DescribeScheduleRequest, sc::DescribeScheduleResponse),
+        "ListSchedules" => op!(sc::ListSchedulesRequest, sc::ListSchedulesResponse),
+        "DeleteSchedule" => op!(sc::DeleteScheduleRequest, sc::DeleteScheduleResponse),
+        "PauseSchedule" => op!(sc::PauseScheduleRequest, sc::PauseScheduleResponse),
+        "UnpauseSchedule" => op!(sc::UnpauseScheduleRequest, sc::UnpauseScheduleResponse),
+        "BackfillSchedule" => op!(sc::BackfillScheduleRequest, sc::BackfillScheduleResponse),
+        "UpdateSchedule" => op!(sc::UpdateScheduleRequest, sc::UpdateScheduleResponse),
         "StartWorkflowExecution" => op!(
             ty::StartWorkflowExecutionRequest,
             ty::StartWorkflowExecutionResponse
@@ -476,7 +518,11 @@ pub async fn dispatch_thrift(
     args: &Struct,
     ctx: CallerContext,
 ) -> Result<Option<ThriftReply>, String> {
-    if !api.serves(method) {
+    let name = method.rsplit("::").next().unwrap_or(method);
+    let redirected = !method.starts_with("AdminService::")
+        && REDIRECTED_SCHEDULE_OPERATIONS.contains(&name)
+        && !api.serves(method);
+    if !redirected && !api.serves(method) {
         return Ok(None);
     }
     let Some(codec) = codec(method) else {
@@ -484,7 +530,16 @@ pub async fn dispatch_thrift(
     };
     let def = find_method(method).ok_or_else(|| format!("unknown method {method}"))?;
     let request = (codec.decode)(args)?;
-    match api.call(method, request, ctx).await {
+    let result = if redirected {
+        match api.redirect(name, &request, &ctx).await {
+            Ok(None) => return Ok(None),
+            Ok(Some(response)) => Ok(response),
+            Err(error) => Err(error),
+        }
+    } else {
+        api.call(method, request, ctx).await
+    };
+    match result {
         Ok(response) => Ok(Some(((codec.encode)(response)?, None))),
         Err(error) => {
             let (mut name, mut value, message) = error_to_thrift(&error);

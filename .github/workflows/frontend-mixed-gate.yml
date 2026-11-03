@@ -12,9 +12,14 @@ on:
         type: boolean
         default: true
       es:
-        description: Also run the advanced visibility (Elasticsearch + Kafka + Go indexer) steps; mysql/postgres only, requires kafka
+        description: Also run the advanced visibility (Elasticsearch + Kafka + Go indexer) steps; requires kafka
         type: boolean
         default: false
+      es_flavor:
+        description: Search backend for es=true
+        type: choice
+        options: [elasticsearch, opensearch]
+        default: elasticsearch
       two_history:
         description: Run two Go History hosts and kill/restart one during SDK traffic
         type: boolean
@@ -25,10 +30,10 @@ on:
         default: false
       rust_ref:
         description: branch/ref of the Rust sources to build cadence-server from
-        default: fe-integ
+        default: ""
 
 concurrency:
-  group: frontend-mixed-gate-${{ github.ref }}-${{ inputs.database }}
+  group: frontend-mixed-gate-${{ github.ref }}-${{ inputs.database }}-${{ inputs.es_flavor }}-${{ inputs.es }}
   cancel-in-progress: true
 
 jobs:
@@ -42,7 +47,7 @@ jobs:
       - name: Checkout Rust sources
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.rust_ref }}
+          ref: ${{ inputs.rust_ref || github.ref_name }}
           path: rustsrc
           submodules: true
       - name: IDL submodule
@@ -57,7 +62,7 @@ jobs:
       - name: Build Rust cadence-server (fresh target dir)
         run: |
           mkdir -p out
-          echo "rust_ref=${{ inputs.rust_ref }} head=$(git -C rustsrc rev-parse HEAD) gate_head=$(git rev-parse HEAD)" | tee out/commit.txt
+          echo "rust_ref=${{ inputs.rust_ref || github.ref_name }} head=$(git -C rustsrc rev-parse HEAD) gate_head=$(git rev-parse HEAD)" | tee out/commit.txt
           set +e
           cargo build --manifest-path rustsrc/rust/Cargo.toml -p cadence-server -j2 > out/cargo-build.log 2>&1; echo $? > out/cargo-build.exit
           set -e
@@ -72,6 +77,7 @@ jobs:
         env:
           CADENCE_GATE_KAFKA: ${{ inputs.kafka }}
           CADENCE_GATE_ES: ${{ inputs.es }}
+          CADENCE_GATE_ES_FLAVOR: ${{ inputs.es_flavor || 'elasticsearch' }}
           CADENCE_GATE_TWO_HISTORY: ${{ inputs.two_history }}
         run: |
           set +e

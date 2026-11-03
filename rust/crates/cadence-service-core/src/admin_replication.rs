@@ -8,6 +8,7 @@ use cadence_proto::history::history_api_client::HistoryApiClient;
 use crate::admin::history_admin_request;
 use crate::handlers::AppState;
 use crate::replication_convert as convert;
+use cadence_proto::convert::cross_cluster as xc;
 
 /// Go `constants.ReadDLQMessagesPageSize`.
 const READ_DLQ_PAGE_SIZE: i32 = 1_000;
@@ -397,14 +398,12 @@ pub async fn merge_dlq_messages(
     })
 }
 
-/// Go `GetCrossClusterTasks`: validate then forward to History. The Rust API
-/// model carries no cross-cluster task payloads, so a non-empty
-/// `tasksByShard` from History is reported as an Internal error rather than
-/// silently dropped; failure causes are forwarded.
+/// Go `GetCrossClusterTasks`: validate then forward to History; task payloads
+/// and failure causes are converted to the API model.
 pub async fn get_cross_cluster_tasks(
     state: &AppState,
     request: api_admin::GetCrossClusterTasksRequest,
-) -> Result<serde_json::Value, ProxyError> {
+) -> Result<api_admin::GetCrossClusterTasksResponse, ProxyError> {
     if request.target_cluster.is_empty() {
         return Err(ProxyError::BadRequest(
             "Target cluster is not set on request.".to_string(),
@@ -419,35 +418,17 @@ pub async fn get_cross_cluster_tasks(
         .await
         .map_err(internal)?
         .into_inner();
-    cross_cluster_tasks_json(response)
+    cross_cluster_tasks_in(response)
 }
 
-fn cross_cluster_tasks_json(
+fn cross_cluster_tasks_in(
     response: ph::GetCrossClusterTasksResponse,
-) -> Result<serde_json::Value, ProxyError> {
-    if response
-        .tasks_by_shard
-        .values()
-        .any(|tasks| !tasks.task_requests.is_empty())
-    {
-        return Err(ProxyError::Internal(
-            "cross-cluster task payload conversion is not supported".to_string(),
-        ));
-    }
-    let causes: std::collections::BTreeMap<String, serde_json::Value> = response
-        .failed_cause_by_shard
-        .into_iter()
-        .map(|(shard, cause)| {
-            let name = match cause {
-                1 => "SERVICE_BUSY",
-                2 => "TIMEOUT",
-                3 => "SHARD_OWNERSHIP_LOST",
-                _ => "UNCATEGORIZED",
-            };
-            (shard.to_string(), serde_json::json!(name))
-        })
-        .collect();
-    Ok(serde_json::json!({ "tasksByShard": {}, "failedCauseByShard": causes }))
+) -> Result<api_admin::GetCrossClusterTasksResponse, ProxyError> {
+    Ok(api_admin::GetCrossClusterTasksResponse {
+        tasks_by_shard: xc::tasks_by_shard_in(response.tasks_by_shard).map_err(internal)?,
+        failed_cause_by_shard: xc::failed_causes_in(response.failed_cause_by_shard)
+            .map_err(internal)?,
+    })
 }
 
 /// Go `RespondCrossClusterTasksCompleted`: validate then forward to History.
@@ -461,18 +442,25 @@ pub async fn respond_cross_cluster_tasks_completed(
         ));
     }
     let mut history = client(state)?;
-    history
+    let response = history
         .respond_cross_cluster_tasks_completed(history_admin_request(
             ph::RespondCrossClusterTasksCompletedRequest {
                 shard_id: request.shard_id,
                 target_cluster: request.target_cluster,
-                task_responses: vec![],
+                task_responses: request
+                    .task_responses
+                    .into_iter()
+                    .map(xc::task_response_out)
+                    .collect(),
                 fetch_new_tasks: request.fetch_new_tasks,
             },
         ))
         .await
-        .map_err(internal)?;
-    Ok(api_admin::RespondCrossClusterTasksCompletedResponse {})
+        .map_err(internal)?
+        .into_inner();
+    Ok(api_admin::RespondCrossClusterTasksCompletedResponse {
+        tasks: xc::task_requests_in(response.tasks).map_err(internal)?,
+    })
 }
 
 #[cfg(test)]
@@ -501,11 +489,37 @@ mod tests {
     }
 
     #[test]
-    fn cross_cluster_failed_causes_are_named() {
+    fn cross_cluster_payloads_are_converted() {
         let mut response = ph::GetCrossClusterTasksResponse::default();
         response.failed_cause_by_shard.insert(7, 3);
-        let value = cross_cluster_tasks_json(response).unwrap();
-        assert_eq!(value["failedCauseByShard"]["7"], "SHARD_OWNERSHIP_LOST");
+        response.tasks_by_shard.insert(
+            7,
+            cadence_proto::admin::CrossClusterTaskRequests {
+                task_requests: vec![cadence_proto::admin::CrossClusterTaskRequest {
+                    task_info: Some(cadence_proto::admin::CrossClusterTaskInfo {
+                        domain_id: "d".into(),
+                        task_id: 5,
+                        task_type: 3,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }],
+            },
+        );
+        let value = cross_cluster_tasks_in(response).unwrap();
+        assert_eq!(
+            value.failed_cause_by_shard[&7],
+            cadence_api::enums::GetTaskFailedCause::ShardOwnershipLost
+        );
+        let info = value.tasks_by_shard[&7][0].task_info.clone().unwrap();
+        assert_eq!(info.task_id, 5);
+        assert_eq!(
+            info.task_type,
+            Some(cadence_api::enums::CrossClusterTaskType::SignalExecution)
+        );
+        let json = serde_json::to_value(&value).unwrap();
+        assert_eq!(json["failedCauseByShard"]["7"], 2);
+        assert_eq!(json["tasksByShard"]["7"][0]["taskInfo"]["taskID"], 5);
     }
 
     #[tokio::test]

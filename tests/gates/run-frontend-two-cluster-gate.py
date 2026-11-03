@@ -9,6 +9,7 @@ registered on B (active cluster1) and replicated to A by A's Go worker.
 
 Phases (A's Rust Frontend is restarted with a different config for each):
   forward-selected : selected-apis-forwarding -> request on A is forwarded to B
+                     (workflow start/signal and schedule create/pause)
   forward-all      : all-domain-apis-forwarding (target cluster1)
   noop             : DomainNotActiveError with Go's message
   failover         : domain made active in A (updated on B, replicated to A) -> runs locally
@@ -48,6 +49,8 @@ for s in socks:
 _ms = socket.socket(); _ms.bind(('127.0.0.1', 0)); prom_port = _ms.getsockname()[1]; _ms.close()
 
 dyn = (root / 'go/config/dynamicconfig/development.yaml').read_text()
+if 'worker.enableScheduler' not in dyn:
+    dyn += '\nworker.enableScheduler:\n  - value: true\n'
 (work / 'dynamic-config.yaml').write_text(dyn)
 (work / 'rust-dynamic-config.yaml').write_text(dyn + '\nsystem.enableGRPCOutbound:\n  - value: true\n')
 
@@ -215,6 +218,23 @@ try:
            ' | '.join(l for l in body.splitlines() if 'redirection' in l or 'forwarding_policy' in l)[:800])
     rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'signal', '--wid', wid, '--name', 'sig', '--input', '"x"')
     record('selected-forward-signal', rc == 0, out)
+    # Schedule writes go through Redirect too (Go api_generated.go); reads
+    # (DescribeSchedule) stay local under selected-apis-forwarding.
+    # The Go CLI schedule commands dial gRPC only.
+    sid = 'tc-sched-' + secrets.token_hex(3)
+    rc, out = cli(A_G, 'grpc', '--domain', dom, 'schedule', 'create', '--sid', sid, '--ce', '0 0 1 1 *',
+                  '--wt', 'TcType', '--tl', 'tc-tl', '--et', '600')
+    record('selected-forward-schedule-create-on-A', rc == 0, out)
+    def b_has_schedule():
+        rc, out = cli(B_G, 'grpc', '--domain', dom, 'schedule', 'describe', '--sid', sid)
+        return rc == 0 and '0 0 1 1 *' in out, out
+    poll('selected-forward-schedule-lives-on-B', b_has_schedule, 60)
+    rc, out = cli(A_G, 'grpc', '--domain', dom, 'schedule', 'pause', '--sid', sid, '--reason', 'gate')
+    record('selected-forward-schedule-pause-on-A', rc == 0, out)
+    def b_paused():
+        rc, out = cli(B_G, 'grpc', '--domain', dom, 'schedule', 'describe', '--sid', sid)
+        return rc == 0 and re.search(r'paused', out, re.I) is not None, out
+    poll('selected-forward-schedule-paused-on-B', b_paused, 60)
     # (a2) all-domain-apis-forwarding
     if start_rust_frontend('forward-all', 'all-domain-apis-forwarding', 'cluster1', 'tchannel'):
         rc, out, wid2, rid2 = start_wf('all')
@@ -224,6 +244,43 @@ try:
         record('all-domain-forward-workflow-lives-on-B', rc == 0 and wid2 in out, out)
         rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'list', '--open')
         record('all-domain-forward-list-sees-B-workflow', rc == 0 and wid2 in out, out)
+    # (a3) forwarding over gRPC: cluster B is configured with rpcTransport grpc
+    if start_rust_frontend('forward-grpc', 'selected-apis-forwarding', '', 'grpc'):
+        rc, out, wid5, rid5 = start_wf('grpc')
+        record('grpc-forward-start-on-A', rc == 0, out)
+        wids['grpc'] = (wid5, rid5)
+        def on_b():
+            rc, out = cli(B_T, 'tchannel', '--domain', dom, 'workflow', 'describe', '--wid', wid5)
+            return rc == 0 and wid5 in out, out
+        poll('grpc-forward-workflow-lives-on-B', on_b, 60)
+        rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'signal', '--wid', wid5, '--name', 'sig', '--input', '"x"')
+        record('grpc-forward-signal', rc == 0, out)
+        rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'terminate', '--wid', wid5, '--reason', 'gate')
+        record('grpc-forward-terminate', rc == 0, out)
+        def terminated():
+            rc, out = cli(B_T, 'tchannel', '--domain', dom, 'workflow', 'describe', '--wid', wid5)
+            return rc == 0 and 'terminated' in out.lower(), out
+        poll('grpc-forward-terminated-on-B', terminated, 60)
+    # (a3b) all-domain-apis-forwarding over gRPC: read APIs go to B and the converters decode its replies
+    if start_rust_frontend('forward-all-grpc', 'all-domain-apis-forwarding', 'cluster1', 'grpc'):
+        rc, out, wid6, rid6 = start_wf('allgrpc')
+        record('grpc-all-start-on-A', rc == 0, out)
+        wids['allgrpc'] = (wid6, rid6)
+        def sig6():
+            rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'signal', '--wid', wid6, '--name', 'sig', '--input', '"x"')
+            return rc == 0, out
+        poll('grpc-all-signal', sig6, 60)
+        # Further APIs the Rust Frontend on A routes over gRPC when B is the target
+        # (describe / history / list / query); success means the converters decode B's reply.
+        rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'describe', '--wid', wid6)
+        record('grpc-forward-describe', rc == 0 and wid6 in out, out)
+        rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'show', '--wid', wid6)
+        record('grpc-forward-history', rc == 0 and 'WorkflowExecutionSignaled' in out, out)
+        rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'list', '--open')
+        record('grpc-forward-list', rc == 0 and wid6 in out, out)
+        rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'query', '--wid', wid6, '--qt', '__stack_trace')
+        record('grpc-forward-query-reaches-B', 'not supported' not in out.lower(), out)
+
     # (b) noop
     if start_rust_frontend('noop', 'noop', '', 'tchannel'):
         rc, out, wid3, _ = start_wf('noop')
@@ -262,6 +319,11 @@ try:
         record('resend-history-visible-on-A', rc == 0 and 'WorkflowExecutionStarted' in out, out)
         rc, out = cli(A_G, 'grpc', 'admin', 'kafka', 'rereplicate', '--source_cluster', 'no-such-cluster', '--domain_id', domain_id, '--wid', wid, '--rid', rid)
         record('resend-unknown-cluster-fails', rc != 0, out)
+        # Thrift/TChannel admin ResendReplicationTasks (was "unknown method" before the yarpc arm)
+        rc, out = cli(A_T, 'tchannel', 'admin', 'kafka', 'rereplicate', '--source_cluster', 'cluster1', '--domain_id', domain_id, '--wid', wid, '--rid', rid)
+        record('resend-replication-tasks-thrift-remote', rc == 0 and 'unknown method' not in out.lower(), out)
+        rc, out = cli(A_T, 'tchannel', 'admin', 'kafka', 'rereplicate', '--source_cluster', 'no-such-cluster', '--domain_id', domain_id, '--wid', wid, '--rid', rid)
+        record('resend-unknown-cluster-fails-thrift', rc != 0 and 'unknown method' not in out.lower(), out)
     for n in ['go-b', 'go-a-history-worker', 'rust-matching', 'rust-frontend']:
         record(f'{n}-alive-at-end', procs[n].poll() is None, f'exit={procs[n].poll()}')
 except SystemExit:
