@@ -556,11 +556,13 @@ try:
                 for tag, extra in (('delim', '&delimiter=%2F'), ('plain', '')):
                     st, listing = s3_call('GET', f'/{bucket}', f'list-type=2{extra}&prefix={pfx}')
                     (work / f's3-history-list-{tag}.log').write_text(f'{st}\n{listing}')
-                r = subprocess.run(cli_s3('workflow', 'show', '--wid', hwid, '--rid', hrun), capture_output=True, text=True, timeout=60)
+                hist_out = work / 's3-archived-history.json'
+                r = subprocess.run(cli_s3('workflow', 'show', '--wid', hwid, '--rid', hrun, '--output_filename', str(hist_out)), capture_output=True, text=True, timeout=60)
                 (work / 's3-show-archived.log').write_text(r.stdout + r.stderr)
-                # The CLI prints the history, then calls DescribeWorkflowExecution (which Go also fails for an
-                # archived-only run), so success is judged on the printed events, not the exit code.
-                record('s3-archived-only-history', 'WorkflowExecutionStarted' in r.stdout and 'WorkflowExecutionTerminated' in r.stdout, r.stdout + r.stderr)
+                # The CLI writes the fetched history, then calls DescribeWorkflowExecution (which Go also fails for an
+                # archived-only run), so success is judged on the exported events, not the exit code.
+                exported = hist_out.read_text() if hist_out.exists() else ''
+                record('s3-archived-only-history', 'WorkflowExecutionStarted' in exported and 'WorkflowExecutionTerminated' in exported, exported + r.stdout + r.stderr)
                 r = subprocess.run(cli_s3('workflow', 'show', '--wid', hwid, '--rid', str(uuid.uuid4())), capture_output=True, text=True, timeout=60)
                 record('s3-archived-history-missing-run', r.returncode != 0, r.stdout + r.stderr)
             else:
