@@ -225,6 +225,12 @@ impl ProductionBackend {
         self
     }
 
+    pub fn header_rules(
+        &self,
+    ) -> std::sync::Arc<Vec<cadence_service_core::header_forwarding::HeaderRule>> {
+        self.header_rules.clone()
+    }
+
     pub fn with_history_access(mut self, access: crate::workflow_matching::HistoryAccess) -> Self {
         self.history_access = Some(access);
         self
@@ -1300,10 +1306,15 @@ pub fn build_workflow_api(
         crate::wrappers::clusterredirection::ForwardingPolicy::from_name(name)
             .ok_or_else(|| anyhow::anyhow!("unknown cluster redirection policy {name:?}"))?
     };
+    let remote_rules = backend.header_rules();
+    let remotes = crate::wrappers::redirection_runtime::RemoteFrontends::from_metadata_with_rules(
+        metadata,
+        remote_rules,
+    );
     let forwarding_backend = crate::wrappers::redirection_runtime::ForwardingBackend::new(
         backend,
         metadata.current_cluster_name.clone(),
-        crate::wrappers::redirection_runtime::RemoteFrontends::from_metadata(metadata),
+        remotes.clone(),
     );
     let shared_metrics_sink = frontend_metrics_sink(&ctx.config);
     let dynamic_overlay = ctx.state.admin.dynamic_config.clone();
@@ -1396,7 +1407,7 @@ pub fn build_workflow_api(
             });
         let schedule_redirect = crate::wrappers::redirection_runtime::ScheduleRedirect {
             redirector: redirector.clone(),
-            remotes: crate::wrappers::redirection_runtime::RemoteFrontends::from_metadata(metadata),
+            remotes,
             timeout: cadence_service_core::frontend_remote::DEFAULT_REMOTE_TIMEOUT,
         };
         (

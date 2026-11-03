@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use cadence_api::errors::CadenceError;
 
 use super::ratelimited::{CallerBypass, DomainNameLookup, Policy, QuotaInfo, WaitFailure};
-use crate::global_ratelimit::{Collection, Decision};
+use crate::global_ratelimit::Collection;
 
 /// Go's `quotas.UnlimitedRPS`.
 pub const UNLIMITED_RPS: f64 = 100_000.0;
@@ -104,22 +104,45 @@ impl TokenBucketPolicy {
     /// Try to take one token from both stages; on failure return how long
     /// until both would have a token.
     fn reserve(&self, info: &QuotaInfo) -> Result<(), Duration> {
+        // Go `MultiStageRateLimiter.Allow`: collection reservations are held
+        // across later stages and returned (`Used(false)`) when any rejects.
+        let mut held = Vec::new();
+        let result = self.reserve_stages(info, &mut held);
+        let allowed = result.is_ok();
+        while let Some(r) = held.pop() {
+            r.used(allowed);
+        }
+        result
+    }
+
+    fn reserve_stages(
+        &self,
+        info: &QuotaInfo,
+        held: &mut Vec<crate::global_ratelimit::Reservation>,
+    ) -> Result<(), Duration> {
         let now = Instant::now();
         let (mut domain_external, mut task_list_external) = (false, false);
         if let Some((domain_coll, tl_coll)) = &self.collections {
             if !info.task_list.is_empty() {
                 if let Some(tl_coll) = tl_coll {
-                    match tl_coll.acquire(&format!("{}/{}", info.domain, info.task_list)) {
-                        Decision::Decided(Err(d)) => return Err(d),
-                        Decision::Decided(Ok(())) => task_list_external = true,
-                        Decision::Disabled => {}
+                    if let Some(r) = tl_coll.reserve(&format!("{}/{}", info.domain, info.task_list))
+                    {
+                        let (ok, retry) = (r.ok, r.retry_after);
+                        held.push(r);
+                        if !ok {
+                            return Err(retry);
+                        }
+                        task_list_external = true;
                     }
                 }
             }
-            match domain_coll.acquire(&info.domain) {
-                Decision::Decided(Err(d)) => return Err(d),
-                Decision::Decided(Ok(())) => domain_external = true,
-                Decision::Disabled => {}
+            if let Some(r) = domain_coll.reserve(&info.domain) {
+                let (ok, retry) = (r.ok, r.retry_after);
+                held.push(r);
+                if !ok {
+                    return Err(retry);
+                }
+                domain_external = true;
             }
         }
         let global_rps = (self.global_rps)();

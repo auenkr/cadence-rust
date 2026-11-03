@@ -73,6 +73,7 @@ fn decorate<M>(
     caller: &str,
     forwarding_cluster: &str,
     authorization: Option<&str>,
+    extra: &[(String, String)],
     timeout: Duration,
 ) -> tonic::Request<M> {
     let mut request = tonic::Request::new(message);
@@ -95,6 +96,17 @@ fn decorate<M>(
                 .insert(crate::outbound_auth::AUTHORIZATION_HEADER, value);
         }
     }
+    // Go `HeaderForwardingMiddleware`: forwarded inbound headers (never overwrite).
+    for (key, value) in extra {
+        if let (Ok(key), Ok(value)) = (
+            tonic::metadata::MetadataKey::from_bytes(key.to_ascii_lowercase().as_bytes()),
+            tonic::metadata::MetadataValue::try_from(value.as_str()),
+        ) {
+            if !request.metadata().contains_key(&key) {
+                request.metadata_mut().insert(key, value);
+            }
+        }
+    }
     request
 }
 
@@ -111,6 +123,7 @@ pub async fn call(
     caller: &str,
     forwarding_cluster: &str,
     authorization: Option<&str>,
+    extra: &[(String, String)],
     operation: &str,
     request: Value,
     timeout: Duration,
@@ -126,7 +139,7 @@ pub async fn call(
             let typed: $ty = serde_json::from_value(request).map_err(bad)?;
             let proto_request = $out(typed).map_err(internal)?;
             let response = $client
-                .$rpc(decorate(proto_request, service, caller, forwarding_cluster, authorization, timeout))
+                .$rpc(decorate(proto_request, service, caller, forwarding_cluster, authorization, extra, timeout))
                 .await
                 .map_err(|s| error_from_status(&s))?
                 .into_inner();
@@ -136,7 +149,7 @@ pub async fn call(
         ($client:ident, $rpc:ident, $ty:ty, $out:expr, void) => {{
             let typed: $ty = serde_json::from_value(request).map_err(bad)?;
             $client
-                .$rpc(decorate($out(typed), service, caller, forwarding_cluster, authorization, timeout))
+                .$rpc(decorate($out(typed), service, caller, forwarding_cluster, authorization, extra, timeout))
                 .await
                 .map_err(|s| error_from_status(&s))?;
             Ok(Value::Null)
@@ -144,7 +157,7 @@ pub async fn call(
         ($client:ident, $rpc:ident, $ty:ty, $out:expr, $inn:expr) => {{
             let typed: $ty = serde_json::from_value(request).map_err(bad)?;
             let response = $client
-                .$rpc(decorate($out(typed), service, caller, forwarding_cluster, authorization, timeout))
+                .$rpc(decorate($out(typed), service, caller, forwarding_cluster, authorization, extra, timeout))
                 .await
                 .map_err(|s| error_from_status(&s))?
                 .into_inner();
@@ -441,10 +454,21 @@ mod authorization_tests {
 
     #[test]
     fn decorate_adds_authorization_header_only_when_present() {
-        let with = decorate((), "svc", "caller", "a", Some("tok"), Duration::from_secs(1));
+        let with = decorate((), "svc", "caller", "a", Some("tok"), &[], Duration::from_secs(1));
         assert_eq!(with.metadata().get("cadence-authorization").unwrap(), "tok");
         assert_eq!(with.metadata().get("rpc-service").unwrap(), "svc");
-        let without = decorate((), "svc", "caller", "a", None, Duration::from_secs(1));
+        let without = decorate((), "svc", "caller", "a", None, &[], Duration::from_secs(1));
         assert!(without.metadata().get("cadence-authorization").is_none());
+    }
+
+    #[test]
+    fn decorate_adds_forwarded_headers_without_overwriting() {
+        let extra = vec![
+            ("X-Trace".to_owned(), "t1".to_owned()),
+            ("rpc-caller".to_owned(), "evil".to_owned()),
+        ];
+        let r = decorate((), "svc", "caller", "a", None, &extra, Duration::from_secs(1));
+        assert_eq!(r.metadata().get("x-trace").unwrap(), "t1");
+        assert_eq!(r.metadata().get("rpc-caller").unwrap(), "caller");
     }
 }
