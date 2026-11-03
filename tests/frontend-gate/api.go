@@ -311,6 +311,58 @@ func adminCLI(ctx context.Context, domain, wid, rid string) {
 		run("isolation-groups-get-global", "admin", "isolation-groups", "get-global")
 		run("isolation-groups-get-domain", "admin", "isolation-groups", "get-domain")
 		run("tasklist-list", "admin", "tasklist", "list")
+
+		// Admin coverage: assert real output where state allows. `want` must appear in
+		// output on success; when state-dependent a typed server error is tolerated
+		// (anything but routing failures / internal panics).
+		cluster := os.Getenv("FE_CLUSTER")
+		if cluster == "" {
+			cluster = "test"
+		}
+		check := func(name, want string, tolerate bool, args ...string) {
+			base := []string{"--address", tr.addr, "--transport", tr.name, "--domain", domain}
+			c, cancel := context.WithTimeout(ctx, 60*time.Second)
+			defer cancel()
+			out, e := exec.CommandContext(c, cli, append(base, args...)...).CombinedOutput()
+			s := string(out)
+			var err error
+			switch {
+			case e == nil && want != "" && !strings.Contains(s, want):
+				err = fmt.Errorf("output missing %q: %s", want, strings.ReplaceAll(strings.TrimSpace(s), "\n", " | "))
+			case e != nil && !tolerate:
+				err = fmt.Errorf("%v: %s", e, strings.ReplaceAll(strings.TrimSpace(s), "\n", " | "))
+			case e != nil:
+				low := strings.ToLower(s)
+				for _, bad := range []string{"unknown method", "unimplemented", "not implemented", "unsupported", "panic", "internalservice", "internal service"} {
+					if strings.Contains(low, bad) {
+						err = fmt.Errorf("%v: %s", e, strings.ReplaceAll(strings.TrimSpace(s), "\n", " | "))
+						break
+					}
+				}
+			}
+			step("api-admin-"+name+"-"+tr.name, err)
+		}
+		check("shard-list", "Total Number of Shards", false, "admin", "shard", "list")
+		check("shard-list-page", "Number of Shards Returned: 2", false, "admin", "shard", "list", "--pagesize", "2")
+		check("dlq-count-history", "", false, "admin", "dlq", "count", "--dlq_type", "history")
+		check("dlq-count-domain", "", false, "admin", "dlq", "count", "--dlq_type", "domain")
+		check("dlq-read-domain", "", true, "admin", "dlq", "read", "--dlq_type", "domain", "--max_message_count", "5")
+		check("dlq-read-history", "", true, "admin", "dlq", "read", "--dlq_type", "history", "--shards", "0", "--source_cluster", cluster, "--max_message_count", "5")
+		check("dlq-purge-domain", "", true, "admin", "dlq", "purge", "--dlq_type", "domain", "--last_message_id", "0")
+		check("dlq-purge-history", "", true, "admin", "dlq", "purge", "--dlq_type", "history", "--shards", "0", "--source_cluster", cluster, "--last_message_id", "0")
+		check("dlq-merge-domain", "", true, "admin", "dlq", "merge", "--dlq_type", "domain", "--last_message_id", "0")
+		check("dlq-merge-history", "", true, "admin", "dlq", "merge", "--dlq_type", "history", "--shards", "0", "--source_cluster", cluster, "--last_message_id", "0")
+		check("queue-describe-transfer", "", true, "admin", "queue", "describe", "--shard_id", "0", "--cluster", cluster, "--queue_type", "2")
+		check("queue-describe-timer", "", true, "admin", "queue", "describe", "--shard_id", "0", "--cluster", cluster, "--queue_type", "3")
+		check("queue-reset-timer", "", true, "admin", "queue", "reset", "--shard_id", "0", "--cluster", cluster, "--queue_type", "3")
+		check("queue-describe-no-cluster-rejected", "", true, "admin", "queue", "describe", "--shard_id", "0", "--queue_type", "2")
+		check("shard-close", "", true, "admin", "shard", "closeShard", "--shard_id", "0")
+		check("shard-remove-task", "", true, "admin", "shard", "removeTask", "--shard_id", "0", "--task_id", "999999999", "--task_type", "2")
+		check("workflow-fix-corruption", "", true, "admin", "workflow", "fix_corruption", "--wid", "gate-no-such-wf-"+rid[:8])
+		check("workflow-delete-remote", "", true, "admin", "workflow", "delete", "--remote", "--wid", "gate-no-such-wf-"+rid[:8], "--rid", rid)
+		check("dynconfig-operational-list", "", false, "admin", "config", "listall")
+		check("dynconfig-operational-get", "", true, "admin", "config", "operational-get", "--name", "frontend.visibilityMaxPageSize")
+		check("dynconfig-operational-list-values", "", true, "admin", "config", "operational-list")
 	}
 	// Schedule update/pause/unpause/list run in the schedule block (gRPC CLI).
 }
