@@ -1387,7 +1387,7 @@ mod nanosecond_timestamp_tests {
             ..Default::default()
         })
         .unwrap();
-        assert_eq!(resp.scheduled_time, Some(expected.clone()));
+        assert_eq!(resp.scheduled_time, Some(expected));
         assert_eq!(resp.started_time, Some(expected));
     }
 }
