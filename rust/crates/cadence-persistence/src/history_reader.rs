@@ -182,6 +182,8 @@ pub struct ReadHistoryBranchRequest {
 #[derive(Debug, Clone, Default)]
 pub struct ReadHistoryBranchResponse {
     pub batches: Vec<Vec<HistoryEvent>>,
+    /// Go `ReadRawHistoryBranch` blobs: the stored ThriftRW bytes of each accepted batch.
+    pub raw_blobs: Vec<Vec<u8>>,
     pub next_page_token: Vec<u8>,
     pub size: i64,
     pub last_first_event_id: i64,
@@ -384,6 +386,7 @@ pub fn read_history_branch(
     token.last_transaction_id = last_txn_id;
 
     let mut batches = Vec::new();
+    let mut raw_blobs = Vec::new();
     let mut last_first_event_id = -23i64;
     for blob in &blobs {
         let events = decode_batch(blob)?;
@@ -413,6 +416,7 @@ pub fn read_history_branch(
         token.last_event_version = first.version;
         token.last_event_id = last.event_id;
         last_first_event_id = first.event_id;
+        raw_blobs.push(blob.data.clone());
         batches.push(events);
     }
     // Go `serializeToken`.
@@ -428,6 +432,7 @@ pub fn read_history_branch(
     };
     Ok(ReadHistoryBranchResponse {
         batches,
+        raw_blobs,
         next_page_token,
         size,
         last_first_event_id,

@@ -68,6 +68,21 @@ impl VersionChecker for GoVersionChecker {
     }
 }
 
+/// Go `versionChecker.SupportsRawHistoryQuery`: true when the client
+/// implementation/version supports raw history blobs (uber-go >=1.6.0,
+/// uber-java >=1.3.0, cli >=1.6.0). Missing impl or version means unsupported.
+pub fn supports_raw_history_query(client_impl: &str, feature_version: &str) -> bool {
+    if client_impl.is_empty() || feature_version.is_empty() {
+        return false;
+    }
+    let minimum = match client_impl {
+        "uber-go" | "cli" => (1, 6, 0),
+        "uber-java" => (1, 3, 0),
+        _ => return false,
+    };
+    parse_semver(feature_version).is_some_and(|version| version >= minimum)
+}
+
 pub fn check(
     operation: &str,
     enabled: bool,
@@ -121,5 +136,18 @@ mod tests {
     #[test]
     fn disabled_version_check_preserves_checker_contract() {
         assert!(check("StartWorkflowExecution", false, "", "", &Checker).is_ok());
+    }
+
+    #[test]
+    fn raw_history_query_support_matches_go_table() {
+        assert!(!supports_raw_history_query("", "1.7.0"));
+        assert!(!supports_raw_history_query("uber-go", ""));
+        assert!(!supports_raw_history_query("uber-go", "1.5.9"));
+        assert!(supports_raw_history_query("uber-go", "1.6.0"));
+        assert!(!supports_raw_history_query("uber-java", "1.2.9"));
+        assert!(supports_raw_history_query("uber-java", "1.3.0"));
+        assert!(supports_raw_history_query("cli", "1.7.0"));
+        assert!(!supports_raw_history_query("unknown", "9.0.0"));
+        assert!(!supports_raw_history_query("uber-go", "not-a-version"));
     }
 }

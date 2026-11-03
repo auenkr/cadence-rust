@@ -111,6 +111,95 @@ impl HistoryAccess {
         }
     }
 
+    /// Go `WorkflowHandler.getRawHistory`: one `ReadRawHistoryBranch` page; the
+    /// transient decision is appended as a separate ThriftRW blob.
+    #[allow(clippy::too_many_arguments)]
+    async fn get_raw_history(
+        &self,
+        execution: &ty::WorkflowExecution,
+        first_event_id: i64,
+        next_event_id: i64,
+        page_size: i32,
+        next_page_token: Vec<u8>,
+        transient: Option<&TransientDecision>,
+        branch_token: &[u8],
+    ) -> Result<(Vec<ty::DataBlob>, Vec<u8>), CadenceError> {
+        let shard_id = workflow_id_to_history_shard(&execution.workflow_id, self.num_shards);
+        let store = self.store.clone();
+        let request = ReadHistoryBranchRequest {
+            branch_token: branch_token.to_vec(),
+            min_event_id: first_event_id,
+            max_event_id: next_event_id,
+            page_size: i64::from(page_size),
+            next_page_token,
+            shard_id,
+        };
+        let response = tokio::task::spawn_blocking(move || read_history_branch(store.as_ref(), &request))
+            .await
+            .map_err(|e| internal(format!("history read task failed: {e}")))?
+            .map_err(read_error)?;
+        let mut blobs: Vec<ty::DataBlob> = response
+            .raw_blobs
+            .into_iter()
+            .map(|data| ty::DataBlob {
+                encoding_type: Some(cadence_api::enums::EncodingType::ThriftRW),
+                data,
+            })
+            .collect();
+        if response.next_page_token.is_empty() {
+            if let Some(transient) = transient {
+                blobs.push(cadence_thrift::history_blob::encode(vec![
+                    transient.scheduled.clone(),
+                    transient.started.clone(),
+                ]));
+            }
+        }
+        Ok((blobs, response.next_page_token))
+    }
+
+    /// Go `getHistory` closure of `GetWorkflowExecutionHistory`: raw blobs when
+    /// `raw` is set (events stay empty), decoded events otherwise.
+    #[allow(clippy::too_many_arguments)]
+    async fn get_history_or_raw(
+        &self,
+        raw: bool,
+        execution: &ty::WorkflowExecution,
+        first_event_id: i64,
+        next_event_id: i64,
+        page_size: i32,
+        next_page_token: Vec<u8>,
+        transient: Option<&TransientDecision>,
+        branch_token: &[u8],
+    ) -> Result<(st::History, Vec<ty::DataBlob>, Vec<u8>), CadenceError> {
+        if raw {
+            let (blobs, token) = self
+                .get_raw_history(
+                    execution,
+                    first_event_id,
+                    next_event_id,
+                    page_size,
+                    next_page_token,
+                    transient,
+                    branch_token,
+                )
+                .await?;
+            Ok((st::History { events: vec![] }, blobs, token))
+        } else {
+            let (history, token) = self
+                .get_history(
+                    execution,
+                    first_event_id,
+                    next_event_id,
+                    page_size,
+                    next_page_token,
+                    transient,
+                    branch_token,
+                )
+                .await?;
+            Ok((history, Vec::new(), token))
+        }
+    }
+
     /// Go `WorkflowHandler.getHistory`.
     #[allow(clippy::too_many_arguments)]
     async fn get_history(
@@ -677,6 +766,10 @@ impl ProductionBackend {
         &self,
         request: serde_json::Value,
     ) -> Result<serde_json::Value, CadenceError> {
+        let raw_enabled = request
+            .get("__rawHistory")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
         let req: st::GetWorkflowExecutionHistoryRequest = serde_json::from_value(request)
             .map_err(|e| bad_request(format!("invalid request: {e}")))?;
         let domain_id = self.domain_id(&req.domain)?;
@@ -759,12 +852,14 @@ impl ProductionBackend {
             .and_then(TransientDecision::from_value);
         let branch_token = token.branch_token.clone().unwrap_or_default();
         let mut history = st::History { events: vec![] };
+        let mut raw_history: Vec<ty::DataBlob> = Vec::new();
         let mut token_out = Some(token);
 
         if close_event_only {
             if !running {
-                let (h, _) = access
-                    .get_history(
+                let (h, blobs, _) = access
+                    .get_history_or_raw(
+                        raw_enabled,
                         &execution,
                         last_first_event_id,
                         next_event_id,
@@ -775,7 +870,12 @@ impl ProductionBackend {
                     )
                     .await?;
                 history = h;
-                if history.events.len() > 1 {
+                raw_history = blobs;
+                if raw_enabled {
+                    if raw_history.len() > 1 {
+                        raw_history = raw_history.split_off(raw_history.len() - 1);
+                    }
+                } else if history.events.len() > 1 {
                     history.events = history.events.split_off(history.events.len() - 1);
                 }
                 token_out = None;
@@ -793,8 +893,9 @@ impl ProductionBackend {
                     token_out = None;
                 }
             } else {
-                let (h, persistence_token) = access
-                    .get_history(
+                let (h, blobs, persistence_token) = access
+                    .get_history_or_raw(
+                        raw_enabled,
                         &execution,
                         t.first_event_id,
                         t.next_event_id,
@@ -805,6 +906,7 @@ impl ProductionBackend {
                     )
                     .await?;
                 history = h;
+                raw_history = blobs;
                 let exhausted = persistence_token.is_empty();
                 t.persistence_token = if exhausted {
                     None
@@ -822,7 +924,7 @@ impl ProductionBackend {
             .unwrap_or_default();
         to_json(&st::GetWorkflowExecutionHistoryResponse {
             history: Some(history),
-            raw_history: Vec::new(),
+            raw_history,
             next_page_token,
             archived: false,
         })
