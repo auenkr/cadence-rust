@@ -563,6 +563,11 @@ try:
                 # archived-only run), so success is judged on the exported events, not the exit code.
                 exported = hist_out.read_text() if hist_out.exists() else ''
                 record('s3-archived-only-history', 'WorkflowExecutionStarted' in exported and 'WorkflowExecutionTerminated' in exported, exported + r.stdout + r.stderr)
+                hist_out_g = work / 's3-archived-history-grpc.json'
+                rg = subprocess.run([*cli_g, '--domain', dom_s3, 'workflow', 'show', '--wid', hwid, '--rid', hrun, '--output_filename', str(hist_out_g)], capture_output=True, text=True, timeout=60)
+                (work / 's3-show-archived-grpc.log').write_text(rg.stdout + rg.stderr)
+                exported_g = hist_out_g.read_text() if hist_out_g.exists() else ''
+                record('s3-archived-only-history-grpc', 'WorkflowExecutionStarted' in exported_g and 'WorkflowExecutionTerminated' in exported_g, exported_g + rg.stdout + rg.stderr)
                 r = subprocess.run(cli_s3('workflow', 'show', '--wid', hwid, '--rid', str(uuid.uuid4())), capture_output=True, text=True, timeout=60)
                 record('s3-archived-history-missing-run', r.returncode != 0, r.stdout + r.stderr)
             else:
