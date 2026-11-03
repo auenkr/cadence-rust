@@ -1915,7 +1915,9 @@ async fn run_with_lifecycle(
             // settings cannot be activated in this mode.
             if run_matching
                 && !embedded_development
-                && !cfg.shard_distributor_matching.namespaces.is_empty()
+                && cfg
+                    .shard_distributor_matching
+                    .active(&cfg.shard_distributor_client)
             {
                 let membership = matching_membership.clone().ok_or_else(|| {
                     anyhow::anyhow!(
@@ -1956,7 +1958,11 @@ async fn run_with_lifecycle(
                 );
             }
             // Go `setupExecutor` with no namespaces installs the no-op executor.
-            if run_matching && cfg.shard_distributor_matching.namespaces.is_empty() {
+            if run_matching
+                && !cfg
+                    .shard_distributor_matching
+                    .active(&cfg.shard_distributor_client)
+            {
                 if let Some(membership) = matching_membership.clone() {
                     if let Some(runtime) = matching_runtime.take() {
                         matching_runtime = Some(runtime.with_noop_shard_distributor(

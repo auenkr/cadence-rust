@@ -224,6 +224,13 @@ impl ShardDistributorMatchingConfig {
             .unwrap_or(Self::DEFAULT_REPORT_TTL_NANOS)
     }
 
+    /// Whether shard-distributor ownership is active: namespaces configured and a
+    /// client host:port present; otherwise Matching falls back to the hash ring.
+    #[must_use]
+    pub fn active(&self, client: &ShardDistributorClientConfig) -> bool {
+        !self.namespaces.is_empty() && !client.host_port.trim().is_empty()
+    }
+
     pub fn validate_for_matching(
         &self,
         client: &ShardDistributorClientConfig,
@@ -245,11 +252,11 @@ impl ShardDistributorMatchingConfig {
                 );
             }
         }
-        if !self.namespaces.is_empty() && client.host_port.trim().is_empty() {
-            anyhow::bail!(
-                "shardDistributorClient.hostPort is required when Matching shard-distributor namespaces are configured"
-            );
-        }
+        // Go (server.go createShardDistributorClient): without a shard-distributor
+        // client the spectator is not started and Matching keeps hash-ring ownership;
+        // the Docker config template always renders a namespace block, so an empty
+        // hostPort is not an error (see `ShardDistributorMatchingConfig::active`).
+        let _ = client;
         Ok(())
     }
 }
