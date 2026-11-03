@@ -290,8 +290,8 @@ pub fn decision_task(
         attempt: v.attempt,
         backlog_count_hint: v.backlog_count_hint,
         next_event_id: v.next_event_id,
-        scheduled_time: v.scheduled_timestamp.map(timestamp),
-        started_time: v.started_timestamp.map(timestamp),
+        scheduled_time: v.scheduled_timestamp.map(timestamp_nanos),
+        started_time: v.started_timestamp.map(timestamp_nanos),
         history: v.history.map(history).transpose()?,
         next_page_token: v.next_page_token,
         workflow_execution_task_list: v.workflow_execution_task_list.map(task_list_out),
@@ -323,15 +323,15 @@ pub fn activity_task(
         activity_id: v.activity_id,
         activity_type: v.activity_type.map(|t| p::ActivityType { name: t.name }),
         input: payload(v.input),
-        scheduled_time: v.scheduled_timestamp.map(timestamp),
-        started_time: v.started_timestamp.map(timestamp),
+        scheduled_time: v.scheduled_timestamp.map(timestamp_nanos),
+        started_time: v.started_timestamp.map(timestamp_nanos),
         schedule_to_close_timeout: v
             .schedule_to_close_timeout_seconds
             .map(|s| duration(s.into())),
         start_to_close_timeout: v.start_to_close_timeout_seconds.map(|s| duration(s.into())),
         heartbeat_timeout: v.heartbeat_timeout_seconds.map(|s| duration(s.into())),
         attempt: v.attempt,
-        scheduled_time_of_this_attempt: v.scheduled_timestamp_of_this_attempt.map(timestamp),
+        scheduled_time_of_this_attempt: v.scheduled_timestamp_of_this_attempt.map(timestamp_nanos),
         heartbeat_details: payload(v.heartbeat_details),
         workflow_type: v.workflow_type.map(|t| p::WorkflowType { name: t.name }),
         workflow_domain: v.workflow_domain,
@@ -1366,5 +1366,28 @@ pub fn search_attributes_in(v: p::SearchAttributes) -> t::SearchAttributes {
 pub fn header_in(v: p::Header) -> t::Header {
     t::Header {
         fields: Some(v.fields.into_iter().map(|(k, v)| (k, v.data)).collect()),
+    }
+}
+
+#[cfg(test)]
+mod nanosecond_timestamp_tests {
+    use super::*;
+
+    /// Go `unixNanoToTime`: the mixed-gate Go worker panicked with
+    /// "timestamp after 10000-01-01" when ns were treated as ms.
+    #[test]
+    fn decision_task_and_history_event_times_are_nanoseconds() {
+        let ns = 1_793_743_359_616_951_114_i64;
+        let expected = timestamp_nanos(ns);
+        assert_eq!(expected.seconds, 1_793_743_359);
+        assert_eq!(expected.nanos, 616_951_114);
+        let resp = decision_task(cadence_api::tasks::PollForDecisionTaskResponse {
+            scheduled_timestamp: Some(ns),
+            started_timestamp: Some(ns),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(resp.scheduled_time, Some(expected.clone()));
+        assert_eq!(resp.started_time, Some(expected));
     }
 }
