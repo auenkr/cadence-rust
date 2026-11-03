@@ -923,8 +923,8 @@ pub fn open_closed_body(
 ) -> String {
     let field = if is_open { "StartTime" } else { "CloseTime" };
     // Go: earliest-1µs .. latest+1µs, stringified, clamped on overflow.
-    let lo = earliest_nanos.checked_sub(1000).unwrap_or(i64::MIN);
-    let hi = latest_nanos.checked_add(1000).unwrap_or(i64::MAX);
+    let lo = earliest_nanos.saturating_sub(1000);
+    let hi = latest_nanos.saturating_add(1000);
     let mut must = vec![json!({"match": {"DomainID": {"query": domain_id}}})];
     if let Some((k, v)) = match_query {
         must.push(json!({"match": { k: {"query": v}}}));
