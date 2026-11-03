@@ -1,9 +1,14 @@
 //! Conversions mirror go/common/types/mapper/proto. Thrift enums start at
 //! zero; protobuf enums reserve zero for INVALID. Time in the current Rust
 //! engine is milliseconds; protobuf Timestamp is seconds plus nanoseconds.
+pub mod client;
 pub mod cross_cluster;
 pub mod decisions;
 pub mod history;
+#[rustfmt::skip]
+pub mod decisions_out;
+#[rustfmt::skip]
+pub mod history_in;
 
 use crate::api as p;
 use cadence_api::{
@@ -1338,5 +1343,27 @@ mod reverse_tests {
         let decision = mapped.decision_task_list_map.unwrap();
         assert_eq!(decision["dtl"].task_list.as_ref().unwrap().name, "dtl");
         assert!(mapped.activity_task_list_map.unwrap().is_empty());
+    }
+}
+
+// Client-direction (proto -> internal) helpers for the remote Frontend gRPC client.
+pub fn memo_in(v: p::Memo) -> t::Memo {
+    t::Memo {
+        fields: Some(v.fields.into_iter().map(|(k, v)| (k, v.data)).collect()),
+    }
+}
+pub fn search_attributes_in(v: p::SearchAttributes) -> t::SearchAttributes {
+    t::SearchAttributes {
+        indexed_fields: Some(
+            v.indexed_fields
+                .into_iter()
+                .map(|(k, v)| (k, v.data))
+                .collect(),
+        ),
+    }
+}
+pub fn header_in(v: p::Header) -> t::Header {
+    t::Header {
+        fields: Some(v.fields.into_iter().map(|(k, v)| (k, v.data)).collect()),
     }
 }
