@@ -217,9 +217,116 @@ pub async fn merge_dlq_messages(
     })
 }
 
+/// Go `GetCrossClusterTasks`: validate then forward to History. The Rust API
+/// model carries no cross-cluster task payloads, so a non-empty
+/// `tasksByShard` from History is reported as an Internal error rather than
+/// silently dropped; failure causes are forwarded.
+pub async fn get_cross_cluster_tasks(
+    state: &AppState,
+    request: api_admin::GetCrossClusterTasksRequest,
+) -> Result<serde_json::Value, ProxyError> {
+    if request.target_cluster.is_empty() {
+        return Err(ProxyError::BadRequest(
+            "Target cluster is not set on request.".to_string(),
+        ));
+    }
+    let mut history = client(state)?;
+    let response = history
+        .get_cross_cluster_tasks(history_admin_request(ph::GetCrossClusterTasksRequest {
+            shard_ids: request.shard_ids,
+            target_cluster: request.target_cluster,
+        }))
+        .await
+        .map_err(internal)?
+        .into_inner();
+    cross_cluster_tasks_json(response)
+}
+
+fn cross_cluster_tasks_json(
+    response: ph::GetCrossClusterTasksResponse,
+) -> Result<serde_json::Value, ProxyError> {
+    if response
+        .tasks_by_shard
+        .values()
+        .any(|tasks| !tasks.task_requests.is_empty())
+    {
+        return Err(ProxyError::Internal(
+            "cross-cluster task payload conversion is not supported".to_string(),
+        ));
+    }
+    let causes: std::collections::BTreeMap<String, serde_json::Value> = response
+        .failed_cause_by_shard
+        .into_iter()
+        .map(|(shard, cause)| {
+            let name = match cause {
+                1 => "SERVICE_BUSY",
+                2 => "TIMEOUT",
+                3 => "SHARD_OWNERSHIP_LOST",
+                _ => "UNCATEGORIZED",
+            };
+            (shard.to_string(), serde_json::json!(name))
+        })
+        .collect();
+    Ok(serde_json::json!({ "tasksByShard": {}, "failedCauseByShard": causes }))
+}
+
+/// Go `RespondCrossClusterTasksCompleted`: validate then forward to History.
+pub async fn respond_cross_cluster_tasks_completed(
+    state: &AppState,
+    request: api_admin::RespondCrossClusterTasksCompletedRequest,
+) -> Result<api_admin::RespondCrossClusterTasksCompletedResponse, ProxyError> {
+    if request.target_cluster.is_empty() {
+        return Err(ProxyError::BadRequest(
+            "Target cluster is not set on request.".to_string(),
+        ));
+    }
+    let mut history = client(state)?;
+    history
+        .respond_cross_cluster_tasks_completed(history_admin_request(
+            ph::RespondCrossClusterTasksCompletedRequest {
+                shard_id: request.shard_id,
+                target_cluster: request.target_cluster,
+                task_responses: vec![],
+                fetch_new_tasks: request.fetch_new_tasks,
+            },
+        ))
+        .await
+        .map_err(internal)?;
+    Ok(api_admin::RespondCrossClusterTasksCompletedResponse {})
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn cross_cluster_requests_validate_then_need_history() {
+        let state = AppState::default();
+        assert_eq!(
+            get_cross_cluster_tasks(&state, Default::default())
+                .await
+                .unwrap_err(),
+            ProxyError::BadRequest("Target cluster is not set on request.".into())
+        );
+        let req = api_admin::RespondCrossClusterTasksCompletedRequest {
+            target_cluster: "c".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            respond_cross_cluster_tasks_completed(&state, req)
+                .await
+                .unwrap_err(),
+            ProxyError::Internal("History client is not configured.".into())
+        );
+    }
+
+    #[test]
+    fn cross_cluster_failed_causes_are_named() {
+        let mut response = ph::GetCrossClusterTasksResponse::default();
+        response.failed_cause_by_shard.insert(7, 3);
+        let value = cross_cluster_tasks_json(response).unwrap();
+        assert_eq!(value["failedCauseByShard"]["7"], "SHARD_OWNERSHIP_LOST");
+    }
 
     #[tokio::test]
     async fn requests_are_validated_before_history_is_needed() {

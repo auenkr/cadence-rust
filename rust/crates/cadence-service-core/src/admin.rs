@@ -1613,7 +1613,7 @@ pub async fn resend_replication_tasks(
 
 /// Single-host cross-cluster surface: no cross-cluster tasks exist.
 pub async fn get_cross_cluster_tasks(
-    State(_state): State<StdArc<AppState>>,
+    State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::GetCrossClusterTasksRequest>,
 ) -> Response {
     if req.target_cluster.is_empty() {
@@ -1621,12 +1621,18 @@ pub async fn get_cross_cluster_tasks(
             "Target cluster is not set on request.",
         ));
     }
-    ok_json(serde_json::json!({ "tasksByShard": {}, "failedCauseByShard": {} }))
+    if state.history_admin_channel.is_none() {
+        return ok_json(serde_json::json!({ "tasksByShard": {}, "failedCauseByShard": {} }));
+    }
+    match crate::admin_replication::get_cross_cluster_tasks(&state, req).await {
+        Ok(value) => ok_json(value),
+        Err(error) => proxy_error_response(error),
+    }
 }
 
 /// Acknowledge cross-cluster tasks. Single host holds none.
 pub async fn respond_cross_cluster_tasks_completed(
-    State(_state): State<StdArc<AppState>>,
+    State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::RespondCrossClusterTasksCompletedRequest>,
 ) -> Response {
     if req.target_cluster.is_empty() {
@@ -1634,7 +1640,13 @@ pub async fn respond_cross_cluster_tasks_completed(
             "Target cluster is not set on request.",
         ));
     }
-    ok_json(cadence_api::admin::RespondCrossClusterTasksCompletedResponse {})
+    if state.history_admin_channel.is_none() {
+        return ok_json(cadence_api::admin::RespondCrossClusterTasksCompletedResponse {});
+    }
+    match crate::admin_replication::respond_cross_cluster_tasks_completed(&state, req).await {
+        Ok(response) => ok_json(response),
+        Err(error) => proxy_error_response(error),
+    }
 }
 
 fn shard_count(state: &AppState) -> i32 {
