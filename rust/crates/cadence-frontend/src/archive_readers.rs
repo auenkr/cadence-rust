@@ -265,6 +265,7 @@ impl ArchivedHistory {
 
     async fn get(&self, domain_id: String, request: Value) -> Result<Option<Value>, CadenceError> {
         if !self.config.read_enabled() {
+            eprintln!("FE-ARCHIVE history read disabled by config");
             return Ok(None);
         }
         let field = |v: &Value, k: &str| {
@@ -288,7 +289,10 @@ impl ArchivedHistory {
         // Only an EntityNotExists from History means "archived".
         match self.probe.exists(&domain_id, &workflow_id, &run_id).await {
             Ok(false) => {}
-            _ => return Ok(None),
+            other => {
+                eprintln!("FE-ARCHIVE history probe domain={domain_id} wf={workflow_id} run={run_id}: not archived ({other:?})");
+                return Ok(None);
+            }
         }
         let archival = self.domains.archival(&domain_id)?;
         if archival.history_uri.is_empty() {
@@ -309,7 +313,10 @@ impl ArchivedHistory {
             tokio::task::spawn_blocking(move || provider.get_history(&uri, &get_request))
                 .await
                 .map_err(|e| CadenceError::from(InternalServiceError::new(e.to_string())))?
-                .map_err(map_archiver_error)?;
+                .map_err(|e| {
+                    eprintln!("FE-ARCHIVE history get failed: {e:?}");
+                    map_archiver_error(e)
+                })?;
         let mut events = Vec::new();
         for batch in response.history_batches {
             if let Some(list) = batch.get("events").and_then(Value::as_array) {
