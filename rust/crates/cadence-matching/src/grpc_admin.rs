@@ -239,7 +239,8 @@ impl a::admin_api_server::AdminApi for Admin {
                     .map(|(k, v)| {
                         (
                             k,
-                            cadence_api::enums::IndexedValueType::from_i32(v)
+                            // proto: INVALID=0, STRING=1 ... DATETIME=6; thrift: STRING=0 ... DATETIME=5.
+                            cadence_api::enums::IndexedValueType::from_i32(v - 1)
                                 .unwrap_or(cadence_api::enums::IndexedValueType::String),
                         )
                     })
