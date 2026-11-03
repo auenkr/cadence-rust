@@ -17,6 +17,7 @@ gcs_cleanup() {
 
 gcs_start() {
   if [[ "${CADENCE_GATE_GCS:-}" == "true" || "${CADENCE_GATE_GCS:-}" == "1" ]]; then
+    ARTIFACTS="$(cd "$ARTIFACTS" && pwd)"
     GCS_CONTAINER="cadence-gate-gcs-$$"
     docker run -d --name "$GCS_CONTAINER" --memory 512m --memory-swap 512m --cpus 0.5 --pids-limit 512 \
       -p "127.0.0.1:${GCS_PORT}:4443" fsouza/fake-gcs-server:1.50.2 \

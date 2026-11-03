@@ -686,9 +686,20 @@ try:
                 idsg.append(wid)
                 run(f'gcs-start-{i}', cli_gc('workflow', 'start', '--tl', 'gcs-gate-tl', '--wt', wtypeg, '--wid', wid, '--et', '600', '--dt', '10'))
                 run(f'gcs-terminate-{i}', cli_gc('workflow', 'terminate', '--wid', wid, '--reason', 'gcs-gate'))
-            foundg, outg = False, ''
+            foundg, outg, names = False, '', []
             for _ in range(24):
-                r = subprocess.run(cli_gc('workflow', 'listarchived', '--query', f"WorkflowType = '{wtypeg}'", '--all'), capture_output=True, text=True, timeout=60)
+                st, listing = gcs_call('GET', f'/storage/v1/b/{gb}/o?prefix=' + urllib.parse.quote('gate-visibility/', safe=''))
+                names = [o['name'] for o in json.loads(listing).get('items', [])] if st == 200 else []
+                if len([n for n in names if '/close' in n]) >= 2:
+                    break
+                time.sleep(5)
+            (work / 'gcs-visibility-objects.log').write_text('\n'.join(names))
+            record('gcs-go-visibility-wrote-archive', len(names) >= 2, '\n'.join(names[:10]))
+            tm = next((re.search(r'_(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)_', n) for n in names if '/close' in n), None)
+            ts = tm.group(1) if tm else '1970-01-01T00:00:00Z'
+            # Go gstorage queries need CloseTime/StartTime (=) and SearchPrecision; the timestamp comes from the object names.
+            for _ in range(6):
+                r = subprocess.run(cli_gc('workflow', 'listarchived', '--query', f"CloseTime = '{ts}' AND SearchPrecision = 'Day' AND WorkflowType = '{wtypeg}'", '--all'), capture_output=True, text=True, timeout=60)
                 outg = r.stdout + r.stderr
                 if r.returncode == 0 and all(w in outg for w in idsg):
                     foundg = True
@@ -696,10 +707,6 @@ try:
                 time.sleep(5)
             (work / 'gcs-listarchived.log').write_text(outg)
             record('gcs-list-archived-visibility', foundg, outg)
-            st, listing = gcs_call('GET', f'/storage/v1/b/{gb}/o?prefix=' + urllib.parse.quote('gate-visibility/', safe=''))
-            names = [o['name'] for o in json.loads(listing).get('items', [])] if st == 200 else []
-            (work / 'gcs-visibility-objects.log').write_text('\n'.join(names))
-            record('gcs-go-visibility-wrote-archive', len(names) >= 2, '\n'.join(names[:10]))
             # Archived-only history: Go archives history at retention expiry (not reachable here), so Go-format
             # multipart files (<fingerprint hashes>_<version>_<part>.history, JSON array of batches) are uploaded.
             if m and args.gcs_seed:
