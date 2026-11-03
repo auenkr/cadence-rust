@@ -1704,12 +1704,13 @@ async fn run_with_lifecycle(
                 }
             }
             if let Some(persistence) = state.domain_metadata_persistence.clone() {
-                state.domain_manager =
-                    std::sync::Arc::new(cadence_persistence::PersistedFrontendDomainManager::new(
+                state.domain_manager = std::sync::Arc::new(
+                    cadence_persistence::PersistedFrontendDomainManager::new(
                         state.domains.clone(),
                         persistence,
                         serialization_encoding,
-                    ).with_audit_logging({
+                    )
+                    .with_audit_logging({
                         let overlay = state.admin.dynamic_config.clone();
                         std::sync::Arc::new(move || {
                             let overlay = overlay.lock().expect("admin lock");
@@ -1719,7 +1720,8 @@ async fn run_with_lifecycle(
                                 false,
                             )
                         })
-                    }));
+                    }),
+                );
             }
             // Go adminHandler.Start: the domain failover watcher runs only
             // when system.enableGracefulFailover (default true) is set.
@@ -1748,10 +1750,15 @@ async fn run_with_lifecycle(
                             )
                             .max(1_000_000) as u64;
                             let jitter = cadence_persistence::dynamic_config::float(
-                                o.property_values("frontend.domainFailoverRefreshTimerJitterCoefficient"),
+                                o.property_values(
+                                    "frontend.domainFailoverRefreshTimerJitterCoefficient",
+                                ),
                                 0.1,
                             );
-                            (std::time::Duration::from_nanos(interval), jitter.clamp(0.0, 0.999))
+                            (
+                                std::time::Duration::from_nanos(interval),
+                                jitter.clamp(0.0, 0.999),
+                            )
                         }),
                         state.background_shutdown.subscribe(),
                     );
