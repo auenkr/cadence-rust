@@ -507,8 +507,13 @@ mod tests {
 
     #[test]
     fn redirected_list_matches_go_generated_wrapper_count() {
-        assert_eq!(REDIRECTED.len(), 36);
-        for operation in TOKEN_OPERATIONS.iter().chain(EXECUTION_OPERATIONS) {
+        // 44 `redirectionPolicy.Redirect(` call sites in Go api_generated.go.
+        assert_eq!(REDIRECTED.len(), 44);
+        for operation in TOKEN_OPERATIONS
+            .iter()
+            .chain(EXECUTION_OPERATIONS)
+            .chain(cadence_service_core::workflow_api::REDIRECTED_SCHEDULE_OPERATIONS)
+        {
             assert!(REDIRECTED.contains(operation), "{operation}");
         }
     }
