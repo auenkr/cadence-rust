@@ -93,6 +93,8 @@ pub struct ArchivalSection {
     pub visibility_status: String,
     pub visibility_enable_read: bool,
     pub provider_keys: Vec<String>,
+    pub s3: Option<cadence_common::cloud_archiver::S3Config>,
+    pub gcs: Option<cadence_common::cloud_archiver::GcsConfig>,
 }
 
 impl ArchivalSection {
@@ -130,6 +132,27 @@ impl ArchivalSection {
                     if !out.provider_keys.iter().any(|k| k == key) {
                         out.provider_keys.push(key.to_owned());
                     }
+                }
+                let s = |n: &serde_yaml::Value, k: &str| {
+                    n.get(k)
+                        .and_then(serde_yaml::Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned()
+                };
+                if let Some(n) = map.get("s3store").filter(|_| out.s3.is_none()) {
+                    out.s3 = Some(cadence_common::cloud_archiver::S3Config {
+                        region: s(n, "region"),
+                        endpoint: Some(s(n, "endpoint")).filter(|e| !e.is_empty()),
+                        force_path_style: n
+                            .get("s3ForcePathStyle")
+                            .and_then(serde_yaml::Value::as_bool)
+                            .unwrap_or(false),
+                    });
+                }
+                if let Some(n) = map.get("gstorage").filter(|_| out.gcs.is_none()) {
+                    out.gcs = Some(cadence_common::cloud_archiver::GcsConfig {
+                        credentials_path: s(n, "credentialsPath"),
+                    });
                 }
             }
         }
@@ -271,19 +294,20 @@ impl ArchivedHistory {
         if archival.history_uri.is_empty() {
             return Err(BadRequestError::new(HISTORY_NOT_FOUND).into());
         }
-        let response = self
-            .provider
-            .get_history(
-                &archival.history_uri,
-                &GetHistoryRequest {
-                    domain_id,
-                    workflow_id,
-                    run_id,
-                    close_failover_version: None,
-                    next_page_token: token,
-                    page_size,
-                },
-            )
+        let provider = self.provider.clone();
+        let uri = archival.history_uri;
+        let get_request = GetHistoryRequest {
+            domain_id,
+            workflow_id,
+            run_id,
+            close_failover_version: None,
+            next_page_token: token,
+            page_size,
+        };
+        // Cloud stores use blocking HTTP: keep it off the async workers.
+        let response = tokio::task::spawn_blocking(move || provider.get_history(&uri, &get_request))
+            .await
+            .map_err(|e| CadenceError::from(InternalServiceError::new(e.to_string())))?
             .map_err(map_archiver_error)?;
         let mut events = Vec::new();
         for batch in response.history_batches {
@@ -352,26 +376,27 @@ impl ArchivedVisibility {
             );
         }
         let token = decode_token(request.get("nextPageToken"))?;
-        let response = self
-            .provider
-            .query_visibility(
-                &archival.visibility_uri,
-                &QueryVisibilityRequest {
-                    domain_id,
-                    page_size: request
-                        .get("pageSize")
-                        .and_then(Value::as_i64)
-                        .and_then(|n| i32::try_from(n).ok())
-                        .unwrap_or_default(),
-                    next_page_token: token,
-                    query: request
-                        .get("query")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_owned(),
-                },
-            )
-            .map_err(map_archiver_error)?;
+        let provider = self.provider.clone();
+        let uri = archival.visibility_uri;
+        let query_request = QueryVisibilityRequest {
+            domain_id,
+            page_size: request
+                .get("pageSize")
+                .and_then(Value::as_i64)
+                .and_then(|n| i32::try_from(n).ok())
+                .unwrap_or_default(),
+            next_page_token: token,
+            query: request
+                .get("query")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+        };
+        let response =
+            tokio::task::spawn_blocking(move || provider.query_visibility(&uri, &query_request))
+                .await
+                .map_err(|e| CadenceError::from(InternalServiceError::new(e.to_string())))?
+                .map_err(map_archiver_error)?;
         let executions: Vec<Value> = response
             .records
             .into_iter()

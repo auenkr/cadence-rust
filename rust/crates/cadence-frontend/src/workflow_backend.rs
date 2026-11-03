@@ -1115,7 +1115,12 @@ fn build_archive_readers(
         section.visibility_enable_read,
         read("system.enableReadFromVisibilityArchival"),
     )?;
-    let provider = cadence_common::archiver::ArchiverProvider::new(section.provider_keys.clone());
+    let provider = cadence_common::archiver::ArchiverProvider::new(section.provider_keys.clone())
+        .with_cloud(cadence_common::cloud_archiver::CloudBackends::new(
+            section.s3.clone(),
+            section.gcs.clone(),
+            &crate::cloud_store::HttpStoreFactory,
+        ));
     let defaults = |kind: &str| {
         let node = ctx
             .config
