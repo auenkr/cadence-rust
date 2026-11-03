@@ -237,6 +237,21 @@ fn schedule_operation(method: &Method, path: &str) -> Option<&'static str> {
     })
 }
 
+/// Domain and semaphore routes served locally by the legacy router; Go's
+/// metered wrapper counts these under the matching Frontend scope.
+fn local_operation(method: &Method, path: &str) -> Option<&'static str> {
+    Some(match (method.as_str(), path) {
+        ("PUT", "/api/v1/domains/update") => "UpdateDomain",
+        ("POST", "/api/v1/domains/register") => "RegisterDomain",
+        ("POST", "/api/v1/domains/failover") => "FailoverDomain",
+        ("POST", "/api/v1/domains/failover-history") => "ListFailoverHistory",
+        ("POST", "/api/v1/domains/deprecate") => "DeprecateDomain",
+        ("POST", "/api/v1/domains/delete") => "DeleteDomain",
+        ("POST", "/api/v1/semaphores/create") => "CreateSemaphore",
+        _ => return None,
+    })
+}
+
 fn hook_operation(
     method: &Method,
     path: &str,
@@ -492,7 +507,7 @@ impl Frontend {
             }
         }
         if let (Some(operation), Some(api)) = (
-            schedule_operation(&method, path),
+            schedule_operation(&method, path).or_else(|| local_operation(&method, path)),
             self.state.workflow_api.clone(),
         ) {
             // Go metered wrapper (innermost): only locally served calls count.
@@ -902,11 +917,21 @@ impl p::domain_api_server::DomainApi for Frontend {
             },
             None => return Err(Status::invalid_argument("Domain is not set on request.")),
         };
+        let observed = (
+            self.state.workflow_api.clone(),
+            serde_json::to_value(&input).unwrap_or_default(),
+            std::time::Instant::now(),
+        );
         let result = self
             .state
             .domain_manager
             .describe(&input)
-            .map_err(|e| Status::not_found(e.message))?;
+            .map_err(|e| Status::not_found(e.message));
+        if let (Some(api), request, start) = observed {
+            let code = result.as_ref().err().map(|s| s.code() as i32);
+            api.observe_local("DescribeDomain", &request, start.elapsed(), code);
+        }
+        let result = result?;
         Ok(Response::new(p::DescribeDomainResponse {
             domain: Some(domain_response(result)),
         }))
@@ -916,14 +941,25 @@ impl p::domain_api_server::DomainApi for Frontend {
         request: tonic::Request<p::ListDomainsRequest>,
     ) -> Result<Response<p::ListDomainsResponse>, Status> {
         let r = request.into_inner();
-        let v = self
+        let list_request = st::ListDomainsRequest {
+            page_size: r.page_size,
+            next_page_token: r.next_page_token,
+        };
+        let observed = (
+            self.state.workflow_api.clone(),
+            serde_json::to_value(&list_request).unwrap_or_default(),
+            std::time::Instant::now(),
+        );
+        let listed = self
             .state
             .domain_manager
-            .list_page(&st::ListDomainsRequest {
-                page_size: r.page_size,
-                next_page_token: r.next_page_token,
-            })
-            .map_err(|e| Status::invalid_argument(e.message))?;
+            .list_page(&list_request)
+            .map_err(|e| Status::invalid_argument(e.message));
+        if let (Some(api), request, start) = observed {
+            let code = listed.as_ref().err().map(|s| s.code() as i32);
+            api.observe_local("ListDomains", &request, start.elapsed(), code);
+        }
+        let v = listed?;
         Ok(Response::new(p::ListDomainsResponse {
             domains: v.domains.into_iter().map(domain_response).collect(),
             next_page_token: v.next_page_token,

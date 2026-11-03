@@ -335,9 +335,21 @@ mod tests {
         // Schedule APIs are metered by `Handler::observe_local` (served by the
         // in-process router rather than `WorkflowOperation`).
         let schedules = cadence_service_core::workflow_api::REDIRECTED_SCHEDULE_OPERATIONS;
+        // Domain and semaphore APIs are metered the same way (grpc.rs).
+        let local = [
+            "RegisterDomain",
+            "DescribeDomain",
+            "ListDomains",
+            "UpdateDomain",
+            "FailoverDomain",
+            "DeprecateDomain",
+            "DeleteDomain",
+            "ListFailoverHistory",
+            "CreateSemaphore",
+        ];
         for (method, _) in GO_FRONTEND_SCOPES {
             assert!(
-                rust.contains(method) || schedules.contains(method),
+                rust.contains(method) || schedules.contains(method) || local.contains(method),
                 "missing Rust operation {method}"
             );
         }
