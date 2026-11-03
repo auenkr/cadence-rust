@@ -20,11 +20,17 @@ s3_cleanup() {
 s3_start() {
   if [[ "${CADENCE_GATE_S3:-}" == "true" || "${CADENCE_GATE_S3:-}" == "1" ]]; then
     S3_CONTAINER="cadence-rust-gate-minio-$RUN_ID"
+    local img chosen=""
+    for img in "$S3_IMAGE" quay.io/minio/minio:latest minio/minio:latest docker.io/bitnami/minio:latest; do
+      if docker pull "$img" >> "$ARTIFACTS/minio-pull.log" 2>&1; then chosen="$img"; break; fi
+    done
+    [[ -n "$chosen" ]] || { echo "no MinIO image could be pulled" >&2; exit 14; }
+    echo "$chosen" > "$ARTIFACTS/minio-image.txt"
     docker run --detach --name "$S3_CONTAINER" --label "cadence-rust-gate-run=$RUN_ID" \
       --memory 1g --memory-swap 1g --cpus 1 --pids-limit 2048 \
       --publish "127.0.0.1:${S3_PORT}:9000" \
       --env MINIO_ROOT_USER=cadencegate --env MINIO_ROOT_PASSWORD=cadencegate-secret \
-      "$S3_IMAGE" server /data > "$ARTIFACTS/minio-container-id.txt" || exit 14
+      "$chosen" server /data > "$ARTIFACTS/minio-container-id.txt" 2> "$ARTIFACTS/minio-docker-run.err" || exit 14
     for attempt in $(seq 1 30); do
       curl -sf "http://127.0.0.1:${S3_PORT}/minio/health/ready" > /dev/null 2>&1 && break
       (( attempt == 30 )) && { echo "MinIO not ready" >&2; exit 15; }
