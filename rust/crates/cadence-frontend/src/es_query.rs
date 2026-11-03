@@ -34,6 +34,7 @@ enum Tok {
     RParen,
     Comma,
     Star,
+    Arith,
 }
 
 fn tokenize(s: &str) -> Result<Vec<Tok>, ()> {
@@ -128,6 +129,9 @@ fn tokenize(s: &str) -> Result<Vec<Tok>, ()> {
             i += 1;
         } else if ch == '*' {
             out.push(Tok::Star);
+            i += 1;
+        } else if matches!(ch, '+' | '-' | '/' | '%') {
+            out.push(Tok::Arith);
             i += 1;
         } else if matches!(ch, '=' | '!' | '<' | '>') {
             let mut op = String::from(ch);
@@ -243,7 +247,18 @@ impl P {
         }
         self.cond()
     }
+    /// Arithmetic on operands parses as a binary expression in Go's parser,
+    /// which the validator then rejects as a non-column left side.
     fn operand(&mut self) -> Result<Operand, ()> {
+        let mut o = self.operand_base()?;
+        while matches!(self.peek(), Some(Tok::Arith | Tok::Star)) {
+            self.i += 1;
+            self.operand_base()?;
+            o = Operand::Other("expr".into());
+        }
+        Ok(o)
+    }
+    fn operand_base(&mut self) -> Result<Operand, ()> {
         match self.peek().cloned() {
             Some(Tok::Back(s)) => {
                 self.i += 1;
@@ -348,6 +363,17 @@ impl P {
             self.i += 1;
             let r = self.operand()?;
             return Ok(Expr::Cmp(l, op, r));
+        }
+        // A bare operand is valid SQL for Go's parser; the validator then
+        // rejects it as "invalid where clause".
+        if self.peek().is_none()
+            || matches!(self.peek(), Some(Tok::RParen))
+            || self.peek_kw("and")
+            || self.peek_kw("or")
+            || self.peek_kw("order")
+            || self.peek_kw("limit")
+        {
+            return Ok(Expr::Is);
         }
         Err(())
     }
@@ -476,6 +502,28 @@ fn is_system_key(k: &str) -> bool {
     cadence_api::search_attributes::is_system_indexed_key(k)
 }
 
+fn is_union_select(clause: &str) -> bool {
+    let Ok(t) = tokenize(clause) else {
+        return false;
+    };
+    let Some(u) = t.iter().position(|x| kw(x, "union")) else {
+        return false;
+    };
+    let mut j = u + 1;
+    if t.get(j).is_some_and(|x| kw(x, "all") || kw(x, "distinct")) {
+        j += 1;
+    }
+    t.get(j).is_some_and(|x| kw(x, "select")) && parse_clause_prefix_ok(&t[..u])
+}
+
+fn parse_clause_prefix_ok(t: &[Tok]) -> bool {
+    let mut p = P {
+        t: t.to_vec(),
+        i: 0,
+    };
+    p.expr().is_ok() && p.peek().is_none()
+}
+
 /// Port of `VisibilityQueryValidator.ValidateQuery`.
 pub fn validate_query<V>(
     clause: &str,
@@ -486,7 +534,15 @@ pub fn validate_query<V>(
     if clause.is_empty() {
         return Ok(String::new());
     }
-    let mut parsed = parse_clause(clause).map_err(|_| bad("Invalid query."))?;
+    let mut parsed = parse_clause(clause).map_err(|_| {
+        // Go's parser accepts `<where> UNION SELECT ...` as a Union statement,
+        // which the validator reports as "Invalid select query.".
+        if is_union_select(clause) {
+            bad("Invalid select query.")
+        } else {
+            bad("Invalid query.")
+        }
+    })?;
     let valid = |k: &str| !enable_validation || valid_attrs.contains_key(k);
     let mut buf = String::new();
     if let Some(w) = parsed.where_.as_mut() {
@@ -531,7 +587,8 @@ fn validate_where(e: &mut Expr, valid: &dyn Fn(&str) -> bool) -> Result<(), Quer
 
 fn prefix_col(l: &mut Operand, valid: &dyn Fn(&str) -> bool, msg: &str) -> Result<(), QueryError> {
     let name = match l {
-        Operand::Col(n, _) => n.clone(),
+        // Go's ColName splits `qualifier.name`; validation uses the name only.
+        Operand::Col(n, _) => n.rsplit('.').next().unwrap_or(n).to_owned(),
         _ => return Err(bad(msg)),
     };
     if !valid(&name) {
@@ -1255,5 +1312,46 @@ mod tests {
         let v: Value = serde_json::from_str(&c).unwrap();
         assert_eq!(v["query"]["bool"]["must"].as_array().unwrap().len(), 3);
         assert_eq!(v["sort"][0], json!({"CloseTime": {"order": "desc"}}));
+    }
+
+    /// Mirrors go/common/elasticsearch/validator TestValidateQuery.
+    #[test]
+    #[rustfmt::skip]
+    fn go_validate_query_table() {
+        let mut a: HashMap<String, i32> = cadence_api::search_attributes::default_indexed_keys()
+            .into_keys()
+            .map(|k| (k, 0))
+            .collect();
+        for k in ["Custom_Field", "Custom_0", "Custom.Field", "Custom-Field"] {
+            a.insert(k.to_string(), 0);
+        }
+        let cases: &[(&str, Result<&str, &str>)] = &[
+            ("", Ok("")),
+            ("WorkflowID = 'wid'", Ok("WorkflowID = 'wid'")),
+            ("CustomStringField = 'custom'", Ok("`Attr.CustomStringField` = 'custom'")),
+            ("Invalid SQL", Err("Invalid query.")),
+            ("InvalidWhereExpr", Err("invalid where clause")),
+            ("WorkflowID = 'wid' and 1 < 2", Err("invalid comparison expression")),
+            ("1 between 1 and 2 or WorkflowID = 'wid'", Err("invalid range expression")),
+            ("Invalid = 'a' and 1 < 2", Err("invalid search attribute \"Invalid\"")),
+            ("Invalid between 1 and 2 or WorkflowID = 'wid'", Err("invalid search attribute \"Invalid\"")),
+            ("order by InvalidField desc", Err("invalid order by attribute")),
+            ("order by 123", Err("invalid order by expression")),
+            ("WorkflowID = 'wid'; SELECT * FROM important_table;", Err("Invalid query.")),
+            ("WorkflowID = 'wid' and (RunID = 'rid' or 1 = 1)", Err("invalid comparison expression")),
+            ("WorkflowID = 'wid' union select * from dummy", Err("Invalid select query.")),
+            ("Custom_Field = 'value'", Ok("`Attr.Custom_Field` = 'value'")),
+            ("Custom_0 = 'value'", Ok("`Attr.Custom_0` = 'value'")),
+            ("Custom.Field = 'value'", Err("invalid search attribute \"Field\"")),
+            ("Custom-Field = 'value'", Err("invalid comparison expression")),
+            ("CustomStringField not like 'value'", Ok("`Attr.CustomStringField` not like 'value'")),
+        ];
+        for (q, want) in cases {
+            let got = validate_query(q, &a, true);
+            match want {
+                Ok(v) => assert_eq!(got, Ok(v.to_string()), "{q}"),
+                Err(m) => assert_eq!(got, Err(bad(*m)), "{q}"),
+            }
+        }
     }
 }
