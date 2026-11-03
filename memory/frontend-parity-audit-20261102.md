@@ -245,3 +245,42 @@ Filestore archival readers, domain archival state machine and production wiring 
 Branch `frontend-archival-gate`: ListArchivedWorkflowExecutions is `ported` for the filestore provider (see memory/evidence/frontend-archival-gate-20261103.md). GetWorkflowExecutionHistory archive fallback stays `partial` (Handler test only: Go archives history at retention expiry, not reachable in a gate run). Row 156 stays `partial`.
 ## 2026-11-03 Kafka/archival/ES update
 Postgres and Cassandra gates with Kafka and archival steps pass on 49f3ec988 (runs 41573628343, 41573623671); see memory/evidence/frontend-kafka-archival-es-20261103.md. Cassandra domain-blob 0x59 preamble bug fixed.
+
+## FINAL STATUS 2026-11-03 (branch frontend-final-audit) — supersedes the tables above where it differs
+Rule: a row keeps the status in its original table row unless it is listed here. "gate" = asserted by a mixed-gate step (Rust Frontend+Matching vs Go History/Worker) in run 41588409434 (MySQL, kafka, two_history; 131/131 steps; memory/evidence/frontend-final-audit-41588409434-steps.json; binary sha256 959a17b3c5fbc50e48cdf0a2fff11c43fb2db0c279e4eebc4418d910a9fa9634). Postgres and Cassandra lanes passed earlier on 49f3ec988 (runs 41573628343, 41573623671, memory/evidence/frontend-kafka-archival-es-20261103.md); they were NOT re-run on the final head.
+
+### Workflow API
+| API | Final | Evidence |
+|---|---|---|
+| DescribeTaskList | ported | gate `sdk-describe-task-list` |
+| ListTaskListPartitions | ported | gate `sdk-list-task-list-partitions` |
+| GetTaskListsByDomain | ported | gate `sdk-get-task-lists-by-domain` |
+| RefreshWorkflowTasks | ported | gate `sdk-refresh-workflow-tasks` |
+| ResetStickyTaskList | ported | gate `sdk-reset-sticky-task-list` |
+| RequestCancelWorkflowExecution | ported | gate `sdk-cancel-workflow-execution` |
+| TerminateWorkflowExecution | ported | gate `sdk-terminate-workflow-execution`, `archival-terminate-*` |
+| RespondActivityTaskCompleted | ported | gate `sdk-complete-echo` (activity executed by SDK worker) |
+| GetWorkflowExecutionHistory | partial | live history: gate `sdk-complete-*`; archived-only fallback has Handler tests only — not gate-provable (Go archives at retention expiry, min 1 day; see memory/frontend-final-audit-20261103.md "Item 2") |
+| StartWorkflowExecutionAsync / SignalWithStartWorkflowExecutionAsync | ported | gate `sdk-async-*` with Kafka (accept, execute, invalid, disabled domain, broker down/up, Frontend restart mid-traffic with no lost messages); TLS/SASL config parsing unit-tested (`async_kafka_tls.rs`, `async_kafka.rs`) |
+| Frontend metrics (cross-cutting) | ported | gate `metrics-*` steps scrape Prometheus: `cadence_requests`, `cadence_latency`, `cadence_latency_ns` with `operation`+`domain`+`cadence_service="cadence_frontend"` |
+| Remaining `partial` Workflow rows (DeleteDomain, DiagnoseWorkflowExecution, GetSearchAttributes, Record*Heartbeat*, Respond* other than Completed, RespondDecisionTaskFailed, Restart/Reset, SignalWithStart sync, FailoverDomain, ListFailoverHistory, UpdateSchedule, CreateSemaphore) | partial | handler/unit coverage only, no gate step |
+
+### Admin API
+| API | Final | Evidence |
+|---|---|---|
+| Get/UpdateDomainAsyncWorkflowConfiguraton | ported | gate `cli-admin-async-config-update-grpc` / `-get` |
+| ResendReplicationTasks | ported (unit; no two-cluster gate) | `admin_replication.rs::resend_replication_tasks` + `resend_tests`, rust-ci 41587752247; remote must be gRPC, no remote TLS |
+| GetDomainReplicationMessages | ported | re-checked line-by-line against Go handler.go:945-1001 (memory/frontend-final-audit-20261103.md) |
+| GetCrossClusterTasks / RespondCrossClusterTasksCompleted | partial | validation + History proxy done; non-empty payload types NOT ported (return Internal error). Go cross-cluster queue is experimental/off by default |
+| Other Admin `partial` rows (replication/DLQ proxies, raw history, queue/shard/host describe, Operational dynamic config, isolation groups, DeleteWorkflow, MaintainCorruptWorkflow, UpdateTaskListPartitionConfig, CloseShard, RemoveTask, ResetQueue, ReapplyEvents) | partial | implemented per earlier audit rows; no mixed-gate assertion on this head |
+
+### Non-API
+| Area | Final | Evidence |
+|---|---|---|
+| Metrics | ported | see above |
+| Archival (visibility, filestore) | ported | gate `archival-*` steps; history archive read: partial (above) |
+| Async queue | ported | gate `sdk-async-*`, `kafka-broker-*` |
+| MySQL / Postgres / Cassandra persistence | ported for the exercised paths | MySQL on final head; Postgres/Cassandra earlier head (see above) |
+| IPv6 bind | ported | gate `cli-describe-domain-grpc-ipv6` |
+| Multi-History churn | ported | gate `go-history-2-killed` / `sdk-history-churn-*` |
+| History shard routing, Ringpop multi-node, domain replication remote consumption | partial | see rows above; unchanged |
