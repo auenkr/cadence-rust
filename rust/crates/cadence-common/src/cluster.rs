@@ -10,6 +10,10 @@ pub struct ClusterInformation {
     pub rpc_name: String,
     pub rpc_address: String,
     pub rpc_transport: String,
+    /// Go `ClusterInformation.TLS` (an `rpc.tls`-shaped block); parsed by the
+    /// gRPC remote Frontend client.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tls: Option<serde_json::Value>,
 }
 
 /// Go `config.ClusterRedirectionPolicy` (clusterGroupMetadata.clusterRedirectionPolicy).

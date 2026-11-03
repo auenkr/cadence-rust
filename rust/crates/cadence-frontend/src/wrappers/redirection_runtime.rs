@@ -481,14 +481,17 @@ impl RemoteFrontends {
             .map(|(name, info)| {
                 (
                     name.clone(),
-                    RemoteFrontendClient {
-                        cluster: name.clone(),
-                        address: info.rpc_address.clone(),
-                        service: info.rpc_name.clone(),
-                        transport: info.rpc_transport.clone(),
-                        caller: "cadence-frontend".to_owned(),
-                        forwarding_cluster: current.clone(),
-                    },
+                    RemoteFrontendClient::new(
+                        name.clone(),
+                        info.rpc_address.clone(),
+                        info.rpc_name.clone(),
+                        info.rpc_transport.clone(),
+                        "cadence-frontend".to_owned(),
+                        current.clone(),
+                        info.tls
+                            .clone()
+                            .and_then(|tls| serde_json::from_value(tls).ok()),
+                    ),
                 )
             })
             .collect();
