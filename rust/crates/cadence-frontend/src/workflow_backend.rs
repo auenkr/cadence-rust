@@ -819,9 +819,8 @@ pub fn build_workflow_api(
             .cluster_redirection_policy
             .as_ref()
             .map_or("", |p| p.policy.as_str());
-        crate::wrappers::clusterredirection::ForwardingPolicy::from_name(name).ok_or_else(|| {
-            anyhow::anyhow!("unknown cluster redirection policy {name:?}")
-        })?
+        crate::wrappers::clusterredirection::ForwardingPolicy::from_name(name)
+            .ok_or_else(|| anyhow::anyhow!("unknown cluster redirection policy {name:?}"))?
     };
     let forwarding_backend = crate::wrappers::redirection_runtime::ForwardingBackend::new(
         backend,
@@ -848,45 +847,44 @@ pub fn build_workflow_api(
         version_check_enabled,
         std::sync::Arc::new(crate::wrappers::versioncheck::GoVersionChecker),
     );
-    let handler = if redirection_policy
-        == crate::wrappers::clusterredirection::ForwardingPolicy::Noop
-    {
-        handler
-    } else {
-        let overlay = ctx.state.admin.dynamic_config.clone();
-        let config = crate::wrappers::redirection_runtime::FnRuntimeConfig(std::sync::Arc::new(
-            move |domain: &str| {
-                overlay.lock().map_or(true, |o| {
-                    cadence_persistence::dynamic_config::boolean(
-                        o.property_values("system.enableDomainNotActiveAutoForwarding"),
-                        Some(domain),
-                        true,
-                    )
-                })
-            },
-        ));
-        handler.with_cluster_redirection(std::sync::Arc::new(
-            crate::wrappers::clusterredirection::WorkflowRedirector {
-                policy: redirection_policy,
-                current_cluster: metadata.current_cluster_name.clone(),
-                configured_target: metadata
-                    .cluster_redirection_policy
-                    .as_ref()
-                    .map(|p| p.all_domain_apis_forwarding_target_cluster.clone())
-                    .unwrap_or_default(),
-                config,
-                manager: crate::wrappers::redirection_runtime::UnsupportedActiveClusterManager,
-                metrics: std::sync::Arc::new(
-                    crate::wrappers::redirection_runtime::SinkRedirectMetrics::new(
-                        frontend_metrics_sink(&ctx.config),
+    let handler =
+        if redirection_policy == crate::wrappers::clusterredirection::ForwardingPolicy::Noop {
+            handler
+        } else {
+            let overlay = ctx.state.admin.dynamic_config.clone();
+            let config = crate::wrappers::redirection_runtime::FnRuntimeConfig(
+                std::sync::Arc::new(move |domain: &str| {
+                    overlay.lock().map_or(true, |o| {
+                        cadence_persistence::dynamic_config::boolean(
+                            o.property_values("system.enableDomainNotActiveAutoForwarding"),
+                            Some(domain),
+                            true,
+                        )
+                    })
+                }),
+            );
+            handler.with_cluster_redirection(std::sync::Arc::new(
+                crate::wrappers::clusterredirection::WorkflowRedirector {
+                    policy: redirection_policy,
+                    current_cluster: metadata.current_cluster_name.clone(),
+                    configured_target: metadata
+                        .cluster_redirection_policy
+                        .as_ref()
+                        .map(|p| p.all_domain_apis_forwarding_target_cluster.clone())
+                        .unwrap_or_default(),
+                    config,
+                    manager: crate::wrappers::redirection_runtime::UnsupportedActiveClusterManager,
+                    metrics: std::sync::Arc::new(
+                        crate::wrappers::redirection_runtime::SinkRedirectMetrics::new(
+                            frontend_metrics_sink(&ctx.config),
+                        ),
                     ),
-                ),
-                requests: crate::wrappers::redirection_runtime::DomainCacheResolver::new(
-                    ctx.state.domain_manager.clone(),
-                ),
-            },
-        ))
-    };
+                    requests: crate::wrappers::redirection_runtime::DomainCacheResolver::new(
+                        ctx.state.domain_manager.clone(),
+                    ),
+                },
+            ))
+        };
     Ok(std::sync::Arc::new(HandlerApi { handler }))
 }
 

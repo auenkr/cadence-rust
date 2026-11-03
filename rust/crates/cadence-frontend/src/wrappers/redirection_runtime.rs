@@ -158,7 +158,10 @@ impl RedirectRequestResolver for DomainCacheResolver {
                 uuid: None,
             }
         };
-        let described = self.manager.describe(&lookup).map_err(CadenceError::EntityNotExists)?;
+        let described = self
+            .manager
+            .describe(&lookup)
+            .map_err(CadenceError::EntityNotExists)?;
         let info = described.domain_info.unwrap_or_default();
         let replication = described.replication_configuration.unwrap_or_default();
         let deprecated_or_deleted = info
@@ -173,10 +176,12 @@ impl RedirectRequestResolver for DomainCacheResolver {
             active_active: false,
         };
         let execution = if EXECUTION_OPERATIONS.contains(&operation) {
-            fields.get("workflowExecution").map(|execution| WorkflowRef {
-                workflow_id: str_field(execution, "workflowId").to_owned(),
-                run_id: str_field(execution, "runId").to_owned(),
-            })
+            fields
+                .get("workflowExecution")
+                .map(|execution| WorkflowRef {
+                    workflow_id: str_field(execution, "workflowId").to_owned(),
+                    run_id: str_field(execution, "runId").to_owned(),
+                })
         } else if matches!(
             operation,
             "SignalWithStartWorkflowExecution" | "SignalWithStartWorkflowExecutionAsync"
@@ -258,7 +263,10 @@ impl SinkRedirectMetrics {
 impl RedirectMetrics for SinkRedirectMetrics {
     fn record_forward(&self, record: &ForwardRecord) {
         let mut policy_tags = std::collections::BTreeMap::new();
-        policy_tags.insert("operation".to_owned(), "DCRedirectionForwardingPolicy".to_owned());
+        policy_tags.insert(
+            "operation".to_owned(),
+            "DCRedirectionForwardingPolicy".to_owned(),
+        );
         policy_tags.insert("cadence_role".to_owned(), "dc_redirection".to_owned());
         policy_tags.insert("domain".to_owned(), record.domain.clone());
         policy_tags.insert("source_cluster".to_owned(), record.source_cluster.clone());
@@ -269,7 +277,12 @@ impl RedirectMetrics for SinkRedirectMetrics {
         );
         policy_tags.insert(
             "query_consistency_level".to_owned(),
-            if record.strong_consistency { "strong" } else { "eventual" }.to_owned(),
+            if record.strong_consistency {
+                "strong"
+            } else {
+                "eventual"
+            }
+            .to_owned(),
         );
         if let Some(active) = &record.active_cluster {
             policy_tags.insert("active_cluster".to_owned(), active.clone());
@@ -290,7 +303,8 @@ impl RedirectMetrics for SinkRedirectMetrics {
         tags.insert("cadence_role".to_owned(), "dc_redirection".to_owned());
         tags.insert("domain".to_owned(), record.domain.clone());
         tags.insert("target_cluster".to_owned(), record.target_cluster.clone());
-        let elapsed = Duration::from_micros(u64::try_from(record.elapsed_micros).unwrap_or(u64::MAX));
+        let elapsed =
+            Duration::from_micros(u64::try_from(record.elapsed_micros).unwrap_or(u64::MAX));
         self.emit(
             "cadence_client_requests_redirection",
             MetricKind::Counter,
@@ -493,7 +507,9 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("Cannot find remote Frontend client"));
+        assert!(err
+            .to_string()
+            .contains("Cannot find remote Frontend client"));
         assert_eq!(calls.lock().unwrap().len(), 1);
     }
 
@@ -579,7 +595,9 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("remote Frontend client for cluster b"));
+        assert!(err
+            .to_string()
+            .contains("remote Frontend client for cluster b"));
         assert!(calls.lock().unwrap().is_empty());
     }
 }
