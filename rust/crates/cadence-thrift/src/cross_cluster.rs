@@ -609,7 +609,8 @@ mod tests {
                         initiated_event_id: 3,
                         completion_event: Some(cadence_api::service_types::HistoryEvent {
                             event_id: 12,
-                            timestamp: Some(1),
+                            // HistoryEvent thrift timestamps are not symmetric (ms out, ns in).
+                            timestamp: None,
                             event_type: Some(EventType::WorkflowExecutionCompleted),
                             version: 1,
                             task_id: 2,
