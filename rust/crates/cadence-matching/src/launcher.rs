@@ -1709,7 +1709,53 @@ async fn run_with_lifecycle(
                         state.domains.clone(),
                         persistence,
                         serialization_encoding,
-                    ));
+                    ).with_audit_logging({
+                        let overlay = state.admin.dynamic_config.clone();
+                        std::sync::Arc::new(move || {
+                            let overlay = overlay.lock().expect("admin lock");
+                            cadence_persistence::dynamic_config::boolean(
+                                overlay.property_values("system.enableDomainAuditLogging"),
+                                None,
+                                false,
+                            )
+                        })
+                    }));
+            }
+            // Go adminHandler.Start: the domain failover watcher runs only
+            // when system.enableGracefulFailover (default true) is set.
+            if run_frontend {
+                let overlay = state.admin.dynamic_config.clone();
+                let enabled = {
+                    let o = overlay.lock().expect("admin lock");
+                    cadence_persistence::dynamic_config::boolean(
+                        o.property_values("system.enableGracefulFailover"),
+                        None,
+                        true,
+                    )
+                };
+                if enabled {
+                    let interval_overlay = overlay.clone();
+                    cadence_service_core::domain_failover_watcher::spawn(
+                        state.domain_manager.clone(),
+                        state.cluster_metadata.clone(),
+                        matching_metric_sink.clone(),
+                        std::sync::Arc::new(move || {
+                            let o = interval_overlay.lock().expect("admin lock");
+                            let interval = cadence_persistence::dynamic_config::duration(
+                                o.property_values("frontend.domainFailoverRefreshInterval"),
+                                None,
+                                10_000_000_000,
+                            )
+                            .max(1_000_000) as u64;
+                            let jitter = cadence_persistence::dynamic_config::float(
+                                o.property_values("frontend.domainFailoverRefreshTimerJitterCoefficient"),
+                                0.1,
+                            );
+                            (std::time::Duration::from_nanos(interval), jitter.clamp(0.0, 0.999))
+                        }),
+                        state.background_shutdown.subscribe(),
+                    );
+                }
             }
             // The transport states and legacy router above were cloned before the
             // configured stores and the persisted domain manager were installed

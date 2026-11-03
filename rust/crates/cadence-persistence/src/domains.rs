@@ -258,6 +258,17 @@ pub struct InMemoryDomainStore {
     failover_notifications: Arc<std::sync::Mutex<HashMap<String, tokio::sync::watch::Sender<u64>>>>,
 }
 
+/// Snapshot of a pending-active (graceful failover in progress) domain.
+#[derive(Debug, Clone)]
+pub struct PendingActiveDomain {
+    pub id: String,
+    pub name: String,
+    pub failover_version: i64,
+    pub previous_failover_version: i64,
+    pub failover_end_time_nanos: i64,
+    pub active_cluster_name: String,
+}
+
 /// Frontend's domain operations behind the persistence-manager boundary.
 /// Production adapters may keep an `InMemoryDomainStore` as the shared domain
 /// cache while committing every write through Go's configured domain store.
@@ -305,6 +316,23 @@ pub trait FrontendDomainManager: std::fmt::Debug + Send + Sync {
     fn deprecate(&self, request: &DeprecateDomainRequest) -> Result<(), FrontendDomainError>;
 
     fn delete(&self, name: &str) -> Result<(), FrontendDomainError>;
+
+    /// Go `DomainCache.GetAllDomain` filtered to `IsDomainPendingActive`
+    /// (global domain with a failover end time) for the failover watcher.
+    fn pending_active_domains(&self) -> Vec<PendingActiveDomain> {
+        Vec::new()
+    }
+
+    /// Go `domain.CleanPendingActiveState`: clear `failover_end_time` only when
+    /// the domain is still global, pending-active and at `failover_version`.
+    /// Returns whether the row was modified.
+    fn clean_pending_active(
+        &self,
+        _domain_id: &str,
+        _failover_version: i64,
+    ) -> Result<bool, FrontendDomainError> {
+        Ok(false)
+    }
 
     /// Apply one incoming global-domain replication task. DLQ merge and the
     /// live replication consumer share the same version-aware mutation path.
@@ -443,7 +471,7 @@ fn merge_active_clusters(
 }
 
 impl InMemoryDomainStore {
-    fn restore_record(&self, record: DomainRecord) {
+    pub fn restore_record(&self, record: DomainRecord) {
         let mut inner = self.inner.write().expect("domain store lock");
         if let Some(old_name) = inner
             .by_id
@@ -1315,6 +1343,31 @@ impl InMemoryDomainStore {
     }
 
     #[must_use]
+    /// Pending-active (graceful failover in progress) global domains.
+    pub fn pending_active_list(&self) -> Vec<PendingActiveDomain> {
+        self
+            .list()
+            .domains
+            .into_iter()
+            .filter_map(|d| {
+                let name = d.domain_info.as_ref()?.name.clone();
+                let r = self.record_by_name(&name).ok()?;
+                let end = r.failover_end_time?;
+                if !r.is_global_domain {
+                    return None;
+                }
+                Some(PendingActiveDomain {
+                    id: r.info.uuid.clone(),
+                    name,
+                    failover_version: r.failover_version,
+                    previous_failover_version: r.previous_failover_version,
+                    failover_end_time_nanos: end,
+                    active_cluster_name: r.replication.active_cluster_name.clone(),
+                })
+            })
+            .collect()
+    }
+
     pub fn list(&self) -> ListDomainsResponse {
         let inner = self.inner.read().expect("domain store lock");
         let mut domains: Vec<DescribeDomainResponse> = inner
@@ -1427,6 +1480,29 @@ impl InMemoryDomainStore {
 }
 
 impl FrontendDomainManager for InMemoryDomainStore {
+    fn pending_active_domains(&self) -> Vec<PendingActiveDomain> {
+        self.pending_active_list()
+    }
+
+    fn clean_pending_active(
+        &self,
+        domain_id: &str,
+        failover_version: i64,
+    ) -> Result<bool, FrontendDomainError> {
+        let old = self.record_by_id(domain_id)?;
+        if !(old.is_global_domain
+            && old.failover_end_time.is_some()
+            && old.failover_version == failover_version)
+        {
+            return Ok(false);
+        }
+        let mut updated = old;
+        updated.failover_end_time = None;
+        updated.last_updated_time_nanos = now_nanos();
+        self.restore_record(updated);
+        Ok(true)
+    }
+
     fn async_workflow_config(
         &self,
         name: &str,
@@ -1542,6 +1618,8 @@ pub struct PersistedFrontendDomainManager {
     persistence: Arc<dyn crate::matching_domain_metadata::DomainMetadataPersistence>,
     serialization_encoding: Arc<dyn Fn() -> String + Send + Sync>,
     mutation_lock: std::sync::Mutex<()>,
+    /// Go `EnableDomainAuditLogging` (system.enableDomainAuditLogging).
+    audit_logging: Arc<dyn Fn() -> bool + Send + Sync>,
 }
 
 impl std::fmt::Debug for PersistedFrontendDomainManager {
@@ -1562,7 +1640,14 @@ impl PersistedFrontendDomainManager {
             persistence,
             serialization_encoding,
             mutation_lock: std::sync::Mutex::new(()),
+            audit_logging: Arc::new(|| true),
         }
+    }
+
+    /// Gate audit-row writes on the dynamic property (Go default false).
+    pub fn with_audit_logging(mut self, enabled: Arc<dyn Fn() -> bool + Send + Sync>) -> Self {
+        self.audit_logging = enabled;
+        self
     }
 
     fn current_metadata_version(&self) -> Result<i64, FrontendDomainError> {
@@ -1636,7 +1721,7 @@ impl PersistedFrontendDomainManager {
         after: Option<&crate::domain_audit::DomainAuditState>,
     ) {
         use crate::domain_audit::{encode_domain_state, new_event_id, DomainAuditLog};
-        if !self.persistence.supports_domain_audit_log() {
+        if !(self.audit_logging)() || !self.persistence.supports_domain_audit_log() {
             return;
         }
         let empty = crate::domain_audit::DomainAuditState::default();
@@ -1935,6 +2020,35 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
         );
         self.publish_replication_task(&updated, cadence_api::enums::DomainOperation::Update)?;
         Ok(())
+    }
+
+    fn pending_active_domains(&self) -> Vec<PendingActiveDomain> {
+        self.cache.pending_active_list()
+    }
+
+    fn clean_pending_active(
+        &self,
+        domain_id: &str,
+        failover_version: i64,
+    ) -> Result<bool, FrontendDomainError> {
+        let _guard = self.mutation_lock.lock().expect("domain manager lock");
+        let old = self.cache.record_by_id(domain_id)?;
+        if !(old.is_global_domain
+            && old.failover_end_time.is_some()
+            && old.failover_version == failover_version)
+        {
+            return Ok(false);
+        }
+        let version = self.current_metadata_version()?;
+        let mut updated = old.clone();
+        updated.failover_end_time = None;
+        updated.last_updated_time_nanos = now_nanos();
+        self.cache.restore_record(updated.clone());
+        if let Err(error) = self.persist_record(&updated, version, false) {
+            self.cache.restore_record(old);
+            return Err(error);
+        }
+        Ok(true)
     }
 
     fn delete(&self, name: &str) -> Result<(), FrontendDomainError> {
