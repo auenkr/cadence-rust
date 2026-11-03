@@ -272,6 +272,29 @@ impl cadence_service_core::admin::ClusterMembership for RingpopClusterMembership
         Ok(Some(host))
     }
 
+    fn matching_owner(
+        &self,
+        key: &str,
+    ) -> Result<Option<cadence_common::membership::Host>, String> {
+        use cadence_common::membership::Ring;
+        let snapshot = self.0.snapshot();
+        let ring = Ring::new(
+            snapshot
+                .members
+                .iter()
+                .filter_map(|m| m.matching_host("cadence-matching")),
+        );
+        let Some(mut host) = ring.lookup(key).cloned() else {
+            return Ok(None);
+        };
+        if let Some(member) = snapshot.members.iter().find(|m| m.address == host.address) {
+            host.address = member
+                .tchannel_address()
+                .ok_or("Matching member has no TChannel port")?;
+        }
+        Ok(Some(host))
+    }
+
     fn who_am_i(&self) -> Result<String, String> {
         Ok(self.0.local_identity().to_owned())
     }

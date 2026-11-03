@@ -261,6 +261,16 @@ impl ProductionBackend {
         &self.matching_addr
     }
 
+    /// Matching owner of `task_list` from live membership; falls back to the
+    /// configured address when no ring is available.
+    pub(crate) fn matching_addr_for(&self, task_list: &str) -> String {
+        self.membership
+            .get()
+            .and_then(|resolver| resolver.matching_owner(task_list).ok().flatten())
+            .map(|host| host.address)
+            .unwrap_or_else(|| self.matching_addr.clone())
+    }
+
     /// One History call: `envelope` is the single IDL argument. Returns the
     /// success struct (empty for `void` methods).
     pub(crate) async fn history(
