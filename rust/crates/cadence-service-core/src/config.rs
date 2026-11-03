@@ -243,6 +243,13 @@ impl ShardDistributorMatchingConfig {
             .unwrap_or(Self::DEFAULT_REPORT_TTL_NANOS)
     }
 
+    /// Whether shard-distributor ownership is active: namespaces configured and a
+    /// client host:port present; otherwise Matching falls back to the hash ring.
+    #[must_use]
+    pub fn active(&self, client: &ShardDistributorClientConfig) -> bool {
+        !self.namespaces.is_empty() && !client.host_port.trim().is_empty()
+    }
+
     pub fn validate_for_matching(
         &self,
         client: &ShardDistributorClientConfig,
@@ -264,11 +271,11 @@ impl ShardDistributorMatchingConfig {
                 );
             }
         }
-        if !self.namespaces.is_empty() && client.host_port.trim().is_empty() {
-            anyhow::bail!(
-                "shardDistributorClient.hostPort is required when Matching shard-distributor namespaces are configured"
-            );
-        }
+        // Go (server.go createShardDistributorClient): without a shard-distributor
+        // client the spectator is not started and Matching keeps hash-ring ownership;
+        // the Docker config template always renders a namespace block, so an empty
+        // hostPort is not an error (see `ShardDistributorMatchingConfig::active`).
+        let _ = client;
         Ok(())
     }
 }
@@ -503,6 +510,26 @@ pub(crate) fn de_go_duration<'de, D: Deserializer<'de>>(d: D) -> Result<i64, D::
             .ok_or_else(|| Error::custom(format!("invalid duration {n:?}"))),
         serde_yaml::Value::String(s) => parse_go_duration(&s).map_err(Error::custom),
         other => Err(Error::custom(format!("invalid duration {other:?}"))),
+    }
+}
+
+/// Go's YAML decoder leaves a field at its zero value for an empty (`key:`) or
+/// `null` entry; serde rejects a unit where a string is expected. The Docker config
+/// template renders many empty values (`user:`, `password:`, `broadcastAddress:`),
+/// so drop null mapping entries before deserializing.
+fn strip_null_values(value: serde_yaml::Value) -> serde_yaml::Value {
+    use serde_yaml::Value;
+    match value {
+        Value::Mapping(map) => Value::Mapping(
+            map.into_iter()
+                .filter(|(_, v)| !v.is_null())
+                .map(|(k, v)| (k, strip_null_values(v)))
+                .collect(),
+        ),
+        Value::Sequence(items) => {
+            Value::Sequence(items.into_iter().map(strip_null_values).collect())
+        }
+        other => other,
     }
 }
 
@@ -1110,7 +1137,9 @@ impl Config {
     }
 
     pub fn from_yaml(text: &str) -> anyhow::Result<Self> {
-        let config: Self = serde_yaml::from_str(&expand_env(text).map_err(anyhow::Error::msg)?)?;
+        let value: serde_yaml::Value =
+            serde_yaml::from_str(&expand_env(text).map_err(anyhow::Error::msg)?)?;
+        let config: Self = serde_yaml::from_value(strip_null_values(value))?;
         let config = config.finish();
         config.validate_metric_migrations()?;
         Ok(config)
@@ -1146,7 +1175,7 @@ impl Config {
                 merged = merge_yaml(merged, layer);
             }
         }
-        let config: Self = serde_yaml::from_value(merged)?;
+        let config: Self = serde_yaml::from_value(strip_null_values(merged))?;
         let config = config.finish();
         config.validate_metric_migrations()?;
         Ok(config)
@@ -1347,6 +1376,14 @@ mod tests {
                 .find(|(key, _)| *key == name)
                 .map(|(_, value)| (*value).to_owned())
         }
+    }
+
+    #[test]
+    fn empty_yaml_values_are_zero_values_like_go() {
+        let cfg = Config::from_yaml(
+            "persistence:\n  defaultStore: default\n  numHistoryShards: 4\n  datastores:\n    default:\n      sql:\n        pluginName: mysql\n        user:\n        password:\nringpop:\n  name: cadence\n  broadcastAddress:\n",
+        );
+        assert!(cfg.is_ok(), "{:?}", cfg.err());
     }
 
     #[test]
@@ -1802,12 +1839,17 @@ shard-distributor-matching:
             ttl_shard_nanos: 0,
             ttl_report_nanos: 0,
         }];
-        assert!(
-            cfg.validate().is_err(),
-            "configured namespace requires client address"
-        );
+        // Go: without a shard-distributor client the spectator is not started and
+        // Matching keeps hash-ring ownership, so this is valid but inactive.
+        cfg.validate().unwrap();
+        assert!(!cfg
+            .shard_distributor_matching
+            .active(&cfg.shard_distributor_client));
         cfg.shard_distributor_client.host_port = "localhost:7943".into();
         cfg.validate().unwrap();
+        assert!(cfg
+            .shard_distributor_matching
+            .active(&cfg.shard_distributor_client));
         assert_eq!(
             cfg.shard_distributor_matching.report_ttl_nanos(),
             60_000_000_000

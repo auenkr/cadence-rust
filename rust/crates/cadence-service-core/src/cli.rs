@@ -60,6 +60,13 @@ pub enum Command {
         /// Enables restart durability; omitted means purely in-memory.
         #[arg(long)]
         data_dir: Option<String>,
+        /// Go `--auto-setup` / `CADENCE_AUTO_SETUP`: apply the persistence schema
+        /// before starting (delegated to the Go schema helper, see launcher).
+        #[arg(long, env = "CADENCE_AUTO_SETUP")]
+        auto_setup: bool,
+        /// Go `--setup-option key=value` (repeatable); forwarded to the schema helper.
+        #[arg(long)]
+        setup_option: Vec<String>,
     },
     /// Print API compatibility info.
     Version,

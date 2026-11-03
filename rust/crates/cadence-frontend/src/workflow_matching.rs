@@ -294,8 +294,19 @@ impl ProductionBackend {
         envelope: Struct,
         timeout: Duration,
     ) -> Result<Struct, CadenceError> {
+        self.matching_for("", method, envelope, timeout).await
+    }
+
+    async fn matching_for(
+        &self,
+        task_list: &str,
+        method: &str,
+        envelope: Struct,
+        timeout: Duration,
+    ) -> Result<Struct, CadenceError> {
+        let addr = self.matching_addr_for(task_list);
         self.call_with_timeout(
-            self.matching_addr(),
+            &addr,
             MATCHING_SERVICE,
             "MatchingService",
             method,
@@ -400,7 +411,12 @@ impl ProductionBackend {
         let poll: tk::PollForDecisionTaskRequest = typed(request, "pollRequest")?;
         let envelope = self.poll_envelope(request, "pollRequest", poll.to_thrift())?;
         let reply = self
-            .matching("PollForDecisionTask", envelope, POLL_TIMEOUT)
+            .matching_for(
+                poll.task_list.as_ref().map_or("", |t| t.name.as_str()),
+                "PollForDecisionTask",
+                envelope,
+                POLL_TIMEOUT,
+            )
             .await?;
         eprintln!(
             "PD-TRACE reply fields={:?}",
@@ -436,7 +452,12 @@ impl ProductionBackend {
         let poll: tk::PollForActivityTaskRequest = typed(request, "pollRequest")?;
         let envelope = self.poll_envelope(request, "pollRequest", poll.to_thrift())?;
         let reply = self
-            .matching("PollForActivityTask", envelope, POLL_TIMEOUT)
+            .matching_for(
+                poll.task_list.as_ref().map_or("", |t| t.name.as_str()),
+                "PollForActivityTask",
+                envelope,
+                POLL_TIMEOUT,
+            )
             .await?;
         let response = tk::PollForActivityTaskResponse::from_thrift(&reply)
             .map_err(|e| thrift_err("Matching PollForActivityTask response", e))?;
@@ -508,7 +529,8 @@ impl ProductionBackend {
                 (40, Value::Struct(completed.to_thrift())),
             ],
         };
-        self.matching(
+        self.matching_for(
+            &task_list.name,
             "RespondQueryTaskCompleted",
             envelope,
             Duration::from_secs(30),
@@ -529,7 +551,12 @@ impl ProductionBackend {
             ],
         };
         let reply = self
-            .matching("DescribeTaskList", envelope, Duration::from_secs(30))
+            .matching_for(
+                desc.task_list.as_ref().map_or("", |t| t.name.as_str()),
+                "DescribeTaskList",
+                envelope,
+                Duration::from_secs(30),
+            )
             .await?;
         to_json(
             &tk::DescribeTaskListResponse::from_thrift(&reply)

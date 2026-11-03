@@ -1,0 +1,35 @@
+# Split Cadence compose on Cassandra. Switching a service to Rust changes ONLY `image:`.
+x-env: &env
+  DB: cassandra
+  CASSANDRA_SEEDS: cassandra
+  DYNAMIC_CONFIG_FILE_PATH: dynamicconfig/development.yaml
+  PRIMARY_FRONTEND_SERVICE: frontend
+  RINGPOP_SEEDS: frontend:7933,history:7934,matching:7935,worker:7939
+  CADENCE_AUTO_SETUP: "false"
+services:
+  cassandra:
+    image: cassandra:4.1
+    environment: { MAX_HEAP_SIZE: 1G, HEAP_NEWSIZE: 256M }
+    mem_limit: 1800m
+    memswap_limit: 1800m
+    cpus: 1.5
+    pids_limit: 2048
+    healthcheck: { test: ["CMD", "cqlsh", "-e", "describe keyspaces"], interval: 10s, retries: 30 }
+  history:
+    image: ${CADENCE_IMAGE_HISTORY:-cadence-go:ci}
+    environment: { <<: *env, SERVICES: history, CADENCE_AUTO_SETUP: "true", CADENCE_SETUP_OPTION_REPLICATION_FACTOR: "1" }
+    depends_on: { cassandra: { condition: service_healthy } }
+    healthcheck: { test: ["CMD", "bash", "-c", "echo > /dev/tcp/$$(hostname -i)/7934"], interval: 5s, retries: 60 }
+  matching:
+    image: ${CADENCE_IMAGE_MATCHING:-cadence-go:ci}
+    environment: { <<: *env, SERVICES: matching }
+    depends_on: { history: { condition: service_healthy } }
+  worker:
+    image: ${CADENCE_IMAGE_WORKER:-cadence-go:ci}
+    environment: { <<: *env, SERVICES: worker }
+    depends_on: { history: { condition: service_healthy } }
+  frontend:
+    image: ${CADENCE_IMAGE_FRONTEND:-cadence-go:ci}
+    environment: { <<: *env, SERVICES: frontend }
+    ports: ["7933:7933", "7833:7833"]
+    depends_on: { history: { condition: service_healthy } }
