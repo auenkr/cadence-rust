@@ -134,10 +134,11 @@ impl HistoryAccess {
             next_page_token,
             shard_id,
         };
-        let response = tokio::task::spawn_blocking(move || read_history_branch(store.as_ref(), &request))
-            .await
-            .map_err(|e| internal(format!("history read task failed: {e}")))?
-            .map_err(read_error)?;
+        let response =
+            tokio::task::spawn_blocking(move || read_history_branch(store.as_ref(), &request))
+                .await
+                .map_err(|e| internal(format!("history read task failed: {e}")))?
+                .map_err(read_error)?;
         let mut blobs: Vec<ty::DataBlob> = response
             .raw_blobs
             .into_iter()
