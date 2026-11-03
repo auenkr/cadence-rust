@@ -636,6 +636,7 @@ pub struct HandlerApi {
         crate::wrappers::redirection_runtime::ForwardingBackend<ProductionBackend>,
     >,
     admin_auth: AdminAccessControl,
+    schedule_redirect: Option<crate::wrappers::redirection_runtime::ScheduleRedirect>,
 }
 
 /// Go `accesscontrolled.NewAdminHandler`: every Admin method needs
@@ -745,6 +746,20 @@ impl cadence_service_core::workflow_api::WorkflowApi for HandlerApi {
             self.handler
                 .dispatch_with_metadata(operation, request, &caller)
                 .await
+        })
+    }
+
+    fn redirect<'a>(
+        &'a self,
+        operation: &'a str,
+        request: &'a serde_json::Value,
+        ctx: &'a cadence_service_core::workflow_api::CallerContext,
+    ) -> cadence_service_core::workflow_api::RedirectFuture<'a> {
+        Box::pin(async move {
+            match &self.schedule_redirect {
+                Some(redirect) => redirect.route(operation, request, &ctx.headers).await,
+                None => Ok(None),
+            }
         })
     }
 }
@@ -1041,9 +1056,9 @@ pub fn build_workflow_api(
         version_check_enabled,
         std::sync::Arc::new(crate::wrappers::versioncheck::GoVersionChecker),
     );
-    let handler =
+    let (handler, schedule_redirect) =
         if redirection_policy == crate::wrappers::clusterredirection::ForwardingPolicy::Noop {
-            handler
+            (handler, None)
         } else {
             let overlay = ctx.state.admin.dynamic_config.clone();
             let config = crate::wrappers::redirection_runtime::FnRuntimeConfig(
@@ -1057,7 +1072,7 @@ pub fn build_workflow_api(
                     })
                 }),
             );
-            handler.with_cluster_redirection(std::sync::Arc::new(
+            let redirector = std::sync::Arc::new(
                 crate::wrappers::clusterredirection::WorkflowRedirector {
                     policy: redirection_policy,
                     current_cluster: metadata.current_cluster_name.clone(),
@@ -1077,11 +1092,23 @@ pub fn build_workflow_api(
                         ctx.state.domain_manager.clone(),
                     ),
                 },
-            ))
+            );
+            let schedule_redirect = crate::wrappers::redirection_runtime::ScheduleRedirect {
+                redirector: redirector.clone(),
+                remotes: crate::wrappers::redirection_runtime::RemoteFrontends::from_metadata(
+                    metadata,
+                ),
+                timeout: cadence_service_core::frontend_remote::DEFAULT_REMOTE_TIMEOUT,
+            };
+            (
+                handler.with_cluster_redirection(redirector),
+                Some(schedule_redirect),
+            )
         };
     Ok(std::sync::Arc::new(HandlerApi {
         handler,
         admin_auth: AdminAccessControl(selected_authorizer),
+        schedule_redirect,
     }))
 }
 

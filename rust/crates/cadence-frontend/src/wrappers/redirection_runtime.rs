@@ -32,7 +32,15 @@ use crate::handler_workflow::{WorkflowBackend, WorkflowFuture, WorkflowOperation
 /// APIs Go's `clusterRedirectionHandler` wraps with `Redirect`. Everything
 /// else (domain admin, health, search attributes, diagnose...) is local.
 const REDIRECTED: &[&str] = &[
+    "BackfillSchedule",
     "CountWorkflowExecutions",
+    "CreateSchedule",
+    "DeleteSchedule",
+    "DescribeSchedule",
+    "ListSchedules",
+    "PauseSchedule",
+    "UnpauseSchedule",
+    "UpdateSchedule",
     "DescribeTaskList",
     "DescribeWorkflowExecution",
     "GetTaskListsByDomain",
@@ -377,6 +385,53 @@ impl RemoteFrontends {
                 "Cannot find remote Frontend client for cluster {cluster}"
             )))
         })
+    }
+}
+
+/// The production redirector (`policy.go` + `DomainCacheResolver`).
+pub type ProductionRedirector = super::clusterredirection::WorkflowRedirector<
+    FnRuntimeConfig,
+    UnsupportedActiveClusterManager,
+    DomainCacheResolver,
+>;
+
+/// Go's generated wrapper for the schedule APIs, which Rust serves from the
+/// core schedule handlers: run the redirection policy, forward to the remote
+/// Frontend for another cluster, or return `None` to serve locally.
+#[derive(Clone)]
+pub struct ScheduleRedirect {
+    pub redirector: Arc<ProductionRedirector>,
+    pub remotes: RemoteFrontends,
+    pub timeout: Duration,
+}
+
+impl ScheduleRedirect {
+    pub async fn route(
+        &self,
+        operation: &str,
+        request: &Value,
+        headers: &HashMap<String, String>,
+    ) -> Result<Option<Value>, CadenceError> {
+        let current = self.redirector.current_cluster.as_str();
+        self.redirector
+            .route(
+                operation,
+                request,
+                Some(super::clusterredirection::consistency_from_headers(headers)),
+                |cluster: Option<String>| {
+                    let request = request.clone();
+                    async move {
+                        match cluster {
+                            Some(cluster) if cluster != current => {
+                                let client = self.remotes.get(&cluster)?;
+                                client.call(operation, request, self.timeout).await.map(Some)
+                            }
+                            _ => Ok(None),
+                        }
+                    }
+                },
+            )
+            .await
     }
 }
 
