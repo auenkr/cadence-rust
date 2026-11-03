@@ -857,7 +857,8 @@ pub async fn refresh_workflow_tasks(
             }
         };
         let request = cadence_proto::history::RefreshWorkflowTasksRequest {
-            domain: domain_id,
+            domain_id,
+            domain: domain.clone(),
             workflow_execution: Some(cadence_proto::api::WorkflowExecution {
                 workflow_id: execution.workflow_id,
                 run_id: execution.run_id,
