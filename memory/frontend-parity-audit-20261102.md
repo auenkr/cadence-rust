@@ -269,7 +269,7 @@ Rule: a row keeps the status in its original table row unless it is listed here.
 | API | Final | Evidence |
 |---|---|---|
 | Get/UpdateDomainAsyncWorkflowConfiguraton | ported | gate `cli-admin-async-config-update-grpc` / `-get` |
-| ResendReplicationTasks | ported (unit; no two-cluster gate) | `admin_replication.rs::resend_replication_tasks` + `resend_tests`, rust-ci 41587752247; remote must be gRPC, no remote TLS |
+| ResendReplicationTasks | ported (unit + two-cluster gate 41598950223) | `admin_replication.rs::resend_replication_tasks` + `resend_tests`, rust-ci 41587752247; remote must be gRPC, no remote TLS |
 | GetDomainReplicationMessages | ported | re-checked line-by-line against Go handler.go:945-1001 (memory/frontend-final-audit-20261103.md) |
 | GetCrossClusterTasks / RespondCrossClusterTasksCompleted | partial | validation + History proxy done; non-empty payload types NOT ported (return Internal error). Go cross-cluster queue is experimental/off by default |
 | Other Admin `partial` rows (replication/DLQ proxies, raw history, queue/shard/host describe, Operational dynamic config, isolation groups, DeleteWorkflow, MaintainCorruptWorkflow, UpdateTaskListPartitionConfig, CloseShard, RemoveTask, ResetQueue, ReapplyEvents) | partial | implemented per earlier audit rows; no mixed-gate assertion on this head |
