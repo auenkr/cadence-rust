@@ -1,8 +1,9 @@
 //! Go `common/authorization` oauthAuthorizer: RS256 JWT validation with a
 //! public key file and domain-group permission checks.
 //!
-//! Not ported: the external `provider` (JWKS + jmespath attribute paths).
-//! `new` rejects it explicitly so a Go config using it fails loudly.
+//! The external `provider` mode fetches the JWKS once at startup (Go
+//! keyfunc default options do not refresh) and applies the jmespath
+//! groups/admin attribute paths to external tokens.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -11,7 +12,7 @@ use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use serde_json::Value;
 
 use crate::wrappers::accesscontrolled::{Attributes, Authorizer, Decision, Permission};
-use cadence_service_core::config::{AuthorizationConfig, OAuthAuthorizerConfig};
+use cadence_service_core::config::{AuthorizationConfig, OAuthAuthorizerConfig, OAuthProviderConfig};
 
 const GROUP_SEPARATOR: char = ' ';
 const JWT_INTERNAL_ISSUER: &str = "internal-jwt";
@@ -25,8 +26,74 @@ pub type DomainDataLookup =
 
 pub struct OAuthAuthorizer {
     max_jwt_ttl: i64,
-    public_key: DecodingKey,
+    public_key: Option<DecodingKey>,
+    /// kid -> verification key (Go keyfunc JWKS, fetched once at startup).
+    jwks: Option<HashMap<String, (DecodingKey, Algorithm)>>,
+    provider: Option<OAuthProviderConfig>,
     domain_data: DomainDataLookup,
+}
+
+/// Claims of a JWT without verifying the signature (Go `ParseUnverified`).
+fn unverified_claims(token: &str) -> Result<Value, String> {
+    use base64::Engine;
+    let payload = token.split('.').nth(1).ok_or("token is malformed")?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload.trim_end_matches('='))
+        .map_err(|e| e.to_string())?;
+    serde_json::from_slice(&bytes).map_err(|e| e.to_string())
+}
+
+fn jmespath_search(expression: &str, data: &Value) -> Result<std::rc::Rc<jmespath::Variable>, String> {
+    jmespath::compile(expression)
+        .map_err(|e| e.to_string())?
+        .search(data)
+        .map_err(|e| e.to_string())
+}
+
+/// Fetch and parse a JWKS document (RFC 7517) over HTTP(S). Runs on a
+/// dedicated thread because the blocking client cannot run inside tokio.
+fn fetch_jwks(url: &str) -> Result<HashMap<String, (DecodingKey, Algorithm)>, String> {
+    let url = url.to_owned();
+    let body: Value = std::thread::spawn(move || {
+        reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .and_then(|c| c.get(&url).send())
+            .and_then(|r| r.error_for_status())
+            .and_then(|r| r.json::<Value>())
+            .map_err(|e| e.to_string())
+    })
+    .join()
+    .map_err(|_| "JWKS fetch panicked".to_owned())??;
+    parse_jwks(&body)
+}
+
+fn parse_jwks(body: &Value) -> Result<HashMap<String, (DecodingKey, Algorithm)>, String> {
+    let keys = body
+        .get("keys")
+        .and_then(Value::as_array)
+        .ok_or("JWKS has no keys")?;
+    let mut out = HashMap::new();
+    for key in keys {
+        let text = |f: &str| key.get(f).and_then(Value::as_str);
+        if text("kty") != Some("RSA") {
+            continue;
+        }
+        let (Some(kid), Some(n), Some(e)) = (text("kid"), text("n"), text("e")) else {
+            continue;
+        };
+        let alg = match text("alg") {
+            Some("RS384") => Algorithm::RS384,
+            Some("RS512") => Algorithm::RS512,
+            Some("PS256") => Algorithm::PS256,
+            Some("PS384") => Algorithm::PS384,
+            Some("PS512") => Algorithm::PS512,
+            _ => Algorithm::RS256,
+        };
+        let decoding = DecodingKey::from_rsa_components(n, e).map_err(|e| e.to_string())?;
+        out.insert(kid.to_owned(), (decoding, alg));
+    }
+    Ok(out)
 }
 
 impl std::fmt::Debug for OAuthAuthorizer {
@@ -64,68 +131,108 @@ impl OAuthAuthorizer {
         if config.jwt_credentials.is_none() && config.provider.is_none() {
             return Err("jwtCredentials or provider must be provided".into());
         }
+        let mut jwks = None;
         if let Some(provider) = &config.provider {
             if provider.jwks_url.is_empty() {
                 return Err("[OAuthConfig] JWKSURL is not set".into());
             }
-            return Err(
-                "oauthAuthorizer.provider (JWKS) is not supported by the Rust Frontend".into(),
-            );
+            jwks = Some(fetch_jwks(&provider.jwks_url).map_err(|e| {
+                format!(
+                    "creating JWKS from resource: {} error: {e}",
+                    provider.jwks_url
+                )
+            })?);
         }
-        let creds = config.jwt_credentials.as_ref().expect("checked above");
-        if creds.public_key.is_empty() {
-            return Err("[OAuthConfig] PublicKey can't be empty".into());
+        let mut public_key = None;
+        if let Some(creds) = &config.jwt_credentials {
+            if creds.public_key.is_empty() {
+                return Err("[OAuthConfig] PublicKey can't be empty".into());
+            }
+            if creds.algorithm != "RS256" {
+                return Err("[OAuthConfig] The only supported Algorithm is RS256".into());
+            }
+            let pem = std::fs::read(&creds.public_key).map_err(|_| {
+                format!(
+                    "loading RSA public key: invalid public key path {}",
+                    creds.public_key
+                )
+            })?;
+            if !String::from_utf8_lossy(&pem).contains("-----BEGIN PUBLIC KEY-----") {
+                return Err(
+                    "loading RSA public key: failed to parse PEM block containing the public key"
+                        .into(),
+                );
+            }
+            public_key = Some(DecodingKey::from_rsa_pem(&pem).map_err(|e| {
+                format!("loading RSA public key: failed to parse DER encoded public key: {e}")
+            })?);
         }
-        if creds.algorithm != "RS256" {
-            return Err("[OAuthConfig] The only supported Algorithm is RS256".into());
-        }
-        let pem = std::fs::read(&creds.public_key).map_err(|_| {
-            format!(
-                "loading RSA public key: invalid public key path {}",
-                creds.public_key
-            )
-        })?;
-        if !String::from_utf8_lossy(&pem).contains("-----BEGIN PUBLIC KEY-----") {
-            return Err(
-                "loading RSA public key: failed to parse PEM block containing the public key"
-                    .into(),
-            );
-        }
-        let public_key = DecodingKey::from_rsa_pem(&pem).map_err(|e| {
-            format!("loading RSA public key: failed to parse DER encoded public key: {e}")
-        })?;
         Ok(Self {
             max_jwt_ttl: config.max_jwt_ttl,
             public_key,
+            jwks,
+            provider: config.provider.clone(),
             domain_data,
         })
     }
 
-    /// Returns the verified claims, or a reason for denial.
-    fn verify(&self, token: &str, now: i64) -> Result<Value, String> {
+    /// Returns the verified claims (plus whether the token is internal), or
+    /// a reason for denial.
+    fn verify(&self, token: &str, now: i64) -> Result<(Value, bool), String> {
         let header = decode_header(token).map_err(|e| e.to_string())?;
-        let mut validation = Validation::new(Algorithm::RS256);
+        let unverified = unverified_claims(token)?;
+        // Go isTokenInternal: no kid header, or the internal issuer.
+        let internal = header.kid.is_none()
+            || unverified.get("iss").and_then(Value::as_str) == Some(JWT_INTERNAL_ISSUER);
+        let (key, algorithm) = match (&self.public_key, &self.jwks) {
+            (Some(key), _) if internal => (key, Algorithm::RS256),
+            (_, Some(jwks)) => {
+                let kid = header.kid.as_deref().ok_or("token has no kid header")?;
+                let (key, alg) = jwks.get(kid).ok_or("no JWKS key for kid")?;
+                (key, *alg)
+            }
+            _ => return Err("no public key for verification".into()),
+        };
+        let mut validation = Validation::new(algorithm);
         validation.required_spec_claims = HashSet::new();
         validation.leeway = 0;
         validation.validate_exp = true;
         validation.validate_nbf = true;
-        let claims = decode::<Value>(token, &self.public_key, &validation)
+        let claims = decode::<Value>(token, key, &validation)
             .map_err(|e| e.to_string())?
             .claims;
-        // Go: external (kid + non-internal issuer) tokens need a JWKS
-        // provider, which is not configured here -> no key for verification.
-        let internal = header.kid.is_none()
-            || claims.get("iss").and_then(Value::as_str) == Some(JWT_INTERNAL_ISSUER);
-        if !internal {
-            return Err("no public key for verification".into());
-        }
         // jwt.WithIssuedAt: iat in the future is invalid.
         if let Some(iat) = claims.get("iat").and_then(Value::as_i64) {
             if iat > now {
                 return Err("token used before issued".into());
             }
         }
-        Ok(claims)
+        Ok((claims, internal))
+    }
+
+    /// Go `parseExternal`: override groups/admin via jmespath attribute paths.
+    fn parse_external(&self, raw: &Value, claims: &mut Value) -> Result<(), String> {
+        let Some(provider) = &self.provider else {
+            return Ok(());
+        };
+        let Some(obj) = claims.as_object_mut() else {
+            return Ok(());
+        };
+        if !provider.groups_attribute_path.is_empty() {
+            let found = jmespath_search(&provider.groups_attribute_path, raw)
+                .map_err(|e| format!("extracting JWT Groups claim: {e}"))?;
+            let groups = found.as_string().ok_or("cannot convert groups to string")?;
+            obj.insert("groups".into(), Value::String(groups.clone()));
+            obj.remove("Groups");
+        }
+        if !provider.admin_attribute_path.is_empty() {
+            let found = jmespath_search(&provider.admin_attribute_path, raw)
+                .map_err(|e| format!("extracting JWT Admin claim: {e}"))?;
+            let admin = found.as_boolean().ok_or("cannot convert isAdmin to bool")?;
+            obj.insert("admin".into(), Value::Bool(admin));
+            obj.remove("Admin");
+        }
+        Ok(())
     }
 
     fn validate_ttl(&self, claims: &Value, now: i64) -> Result<(), String> {
@@ -161,7 +268,14 @@ impl OAuthAuthorizer {
             return Ok(Decision::Deny);
         }
         let claims = match self.verify(&attributes.auth_token, now) {
-            Ok(c) => c,
+            Ok((c, true)) => c,
+            Ok((mut c, false)) => {
+                let raw = c.clone();
+                if self.parse_external(&raw, &mut c).is_err() {
+                    return Ok(Decision::Deny);
+                }
+                c
+            }
             Err(_) => return Ok(Decision::Deny),
         };
         if self.validate_ttl(&claims, now).is_err() {

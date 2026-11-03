@@ -2299,6 +2299,76 @@ impl p::worker_api_server::WorkerApi for Frontend {
     }
 }
 
+/// Go `accesscontrolled.NewAdminHandler` for the gRPC Admin API: runs the
+/// Frontend-installed admin authorizer before the inner service.
+#[derive(Clone)]
+struct AdminAuth<S> {
+    inner: S,
+    api: Option<cadence_service_core::workflow_api::SharedWorkflowApi>,
+}
+
+impl<S: tonic::server::NamedService> tonic::server::NamedService for AdminAuth<S> {
+    const NAME: &'static str = S::NAME;
+}
+
+impl<S, B> tower::Service<axum::http::Request<B>> for AdminAuth<S>
+where
+    S: tower::Service<
+            axum::http::Request<B>,
+            Response = axum::http::Response<tonic::body::BoxBody>,
+            Error = std::convert::Infallible,
+        > + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+    B: Send + 'static,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future =
+        std::pin::Pin<Box<dyn std::future::Future<Output = Result<S::Response, S::Error>> + Send>>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, request: axum::http::Request<B>) -> Self::Future {
+        use cadence_service_core::workflow_api::AdminAuthError;
+        let denial = self
+            .api
+            .as_ref()
+            .and_then(|api| api.admin_authorizer())
+            .and_then(|auth| {
+                let method = request.uri().path().rsplit('/').next().unwrap_or_default();
+                let token = request
+                    .headers()
+                    .get("cadence-authorization")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or_default();
+                auth.authorize_admin(method, token).err()
+            });
+        if let Some(error) = denial {
+            let status = match error {
+                AdminAuthError::Denied(m) => tonic::Status::permission_denied(m),
+                AdminAuthError::Failed(m) => tonic::Status::unknown(m),
+            };
+            let mut response = axum::http::Response::new(tonic::body::empty_body());
+            response.headers_mut().insert(
+                axum::http::header::CONTENT_TYPE,
+                axum::http::HeaderValue::from_static("application/grpc"),
+            );
+            status.add_header(response.headers_mut()).ok();
+            return Box::pin(async move { Ok(response) });
+        }
+        let clone = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, clone);
+        Box::pin(async move { inner.call(request).await })
+    }
+}
+
 pub async fn serve(
     addr: std::net::SocketAddr,
     state: crate::handlers::AppState,
@@ -2372,15 +2442,16 @@ pub async fn serve(
                 admission(),
             ),
         )
-        .add_service(
-            tonic::service::interceptor::InterceptedService::new(
+        .add_service(AdminAuth {
+            inner: tonic::service::interceptor::InterceptedService::new(
                 cadence_proto::admin::admin_api_server::AdminApiServer::new(
                     crate::grpc_admin::Admin { frontend: service.clone() },
                 )
                 .max_decoding_message_size(limit),
                 admission(),
             ),
-        )
+            api: service.state.workflow_api.clone(),
+        })
         .add_service(
             cadence_proto::sharddistributor::shard_distributor_api_server::ShardDistributorApiServer::new(
                 crate::grpc_shard::ShardDistributor {

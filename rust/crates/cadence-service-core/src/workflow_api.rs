@@ -32,7 +32,29 @@ pub struct CallerContext {
 pub type ApiFuture<'a> =
     Pin<Box<dyn Future<Output = Result<serde_json::Value, CadenceError>> + Send + 'a>>;
 
+/// Failure of the Admin API access-control wrapper (Go
+/// `accesscontrolled.adminHandler`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdminAuthError {
+    /// Go `errUnauthorized` (`AccessDeniedError`, "Request unauthorized.").
+    Denied(String),
+    /// Authorizer returned an error; Go returns it unchanged.
+    Failed(String),
+}
+
+/// Seam so the Admin dispatch in this crate can be wrapped by the Frontend's
+/// authorizer (the Frontend crate depends on this one, not the reverse).
+pub trait AdminAuthorizer: Send + Sync {
+    /// `api` is the Admin method name (e.g. `GetDynamicConfig`); `token` the
+    /// `cadence-authorization` header value.
+    fn authorize_admin(&self, api: &str, token: &str) -> Result<(), AdminAuthError>;
+}
+
 pub trait WorkflowApi: Send + Sync + std::fmt::Debug {
+    /// Admin access control installed by the Frontend; `None` allows all.
+    fn admin_authorizer(&self) -> Option<&dyn AdminAuthorizer> {
+        None
+    }
     /// True when the operation is served by this implementation.
     fn serves(&self, operation: &str) -> bool;
     fn call<'a>(

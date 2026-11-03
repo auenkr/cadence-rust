@@ -2485,6 +2485,36 @@ pub async fn dispatch_with_headers(
     let shared = || Arc::new(state.clone());
     let admin = method.starts_with("AdminService::");
     let name = method.rsplit("::").next().unwrap_or(method);
+    if admin {
+        if let Some(auth) = state
+            .workflow_api
+            .as_ref()
+            .and_then(|api| api.admin_authorizer())
+        {
+            let token = caller_headers
+                .get("cadence-authorization")
+                .map(String::as_str)
+                .unwrap_or_default();
+            match auth.authorize_admin(name, token) {
+                Ok(()) => {}
+                Err(crate::workflow_api::AdminAuthError::Failed(message)) => return Err(message),
+                Err(crate::workflow_api::AdminAuthError::Denied(message)) => {
+                    let def = find_method(method).ok_or_else(|| format!("unknown method {method}"))?;
+                    let e = cadence_api::errors::AccessDeniedError::new(message.clone());
+                    let field = cadence_thrift::service::exception_field(def, "AccessDeniedError")
+                        .ok_or_else(|| {
+                            format!("error AccessDeniedError ({message}) not declared for {method}")
+                        })?;
+                    return Ok((
+                        Struct {
+                            fields: vec![(field, Value::Struct(e.to_thrift()))],
+                        },
+                        Some(("AccessDeniedError", message)),
+                    ));
+                }
+            }
+        }
+    }
     let schedule_ctx = schedule_api_context(deadline, &caller_headers);
     let outcome: HandlerResult = match name {
         "health" => Ok(Struct {

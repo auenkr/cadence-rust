@@ -632,6 +632,51 @@ pub struct HandlerApi {
     handler: crate::handler_workflow::Handler<
         crate::wrappers::redirection_runtime::ForwardingBackend<ProductionBackend>,
     >,
+    admin_auth: AdminAccessControl,
+}
+
+/// Go `accesscontrolled.NewAdminHandler`: every Admin method needs
+/// `PermissionAdmin` except `DescribeCluster` (`PermissionRead`).
+struct AdminAccessControl(std::sync::Arc<SelectedAuthorizer>);
+
+impl cadence_service_core::workflow_api::AdminAuthorizer for AdminAccessControl {
+    fn authorize_admin(
+        &self,
+        api: &str,
+        token: &str,
+    ) -> Result<(), cadence_service_core::workflow_api::AdminAuthError> {
+        use crate::wrappers::accesscontrolled::{Attributes, Authorizer, Decision, Permission};
+        use cadence_service_core::workflow_api::AdminAuthError;
+        let attributes = Attributes {
+            operation: api.to_owned(),
+            permission: Some(if api == "DescribeCluster" {
+                Permission::Read
+            } else {
+                Permission::Admin
+            }),
+            auth_token: token.to_owned(),
+            ..Default::default()
+        };
+        match self.0.authorize(&attributes) {
+            Err(e) => Err(AdminAuthError::Failed(e)),
+            Ok(Decision::Allow) => Ok(()),
+            Ok(Decision::Deny) => Err(AdminAuthError::Denied("Request unauthorized.".into())),
+        }
+    }
+}
+
+/// Shares one `SelectedAuthorizer` between the Workflow and Admin wrappers.
+struct SharedAuthorizer(std::sync::Arc<SelectedAuthorizer>);
+
+impl crate::wrappers::accesscontrolled::Authorizer for SharedAuthorizer {
+    type Error = String;
+
+    fn authorize(
+        &self,
+        attributes: &crate::wrappers::accesscontrolled::Attributes,
+    ) -> Result<crate::wrappers::accesscontrolled::Decision, Self::Error> {
+        crate::wrappers::accesscontrolled::Authorizer::authorize(&*self.0, attributes)
+    }
 }
 
 impl std::fmt::Debug for HandlerApi {
@@ -641,6 +686,10 @@ impl std::fmt::Debug for HandlerApi {
 }
 
 impl cadence_service_core::workflow_api::WorkflowApi for HandlerApi {
+    fn admin_authorizer(&self) -> Option<&dyn cadence_service_core::workflow_api::AdminAuthorizer> {
+        Some(&self.admin_auth)
+    }
+
     fn serves(&self, operation: &str) -> bool {
         WorkflowOperation::from_name(operation).is_some_and(|op| op != WorkflowOperation::Health)
     }
@@ -821,6 +870,7 @@ pub fn build_workflow_api(
             None => SelectedAuthorizer::Nop,
         }
     };
+    let selected_authorizer = std::sync::Arc::new(selected_authorizer);
     let default_metadata = cadence_common::cluster::GroupMetadata::default();
     let metadata = ctx
         .config
@@ -852,7 +902,7 @@ pub fn build_workflow_api(
     .with_rate_limit_policies(rate_limit)
     .with_access_control(std::sync::Arc::new(
         crate::wrappers::accesscontrolled::HandlerAuthorization::new(
-            selected_authorizer,
+            SharedAuthorizer(selected_authorizer.clone()),
             NopAuthorizationMetrics,
         ),
     ))
@@ -898,7 +948,10 @@ pub fn build_workflow_api(
                 },
             ))
         };
-    Ok(std::sync::Arc::new(HandlerApi { handler }))
+    Ok(std::sync::Arc::new(HandlerApi {
+        handler,
+        admin_auth: AdminAccessControl(selected_authorizer),
+    }))
 }
 
 /// Builds the Go `ArchivalMetadata` + archiver provider readers from the
