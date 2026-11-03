@@ -16,9 +16,12 @@ type Raw = (u16, Vec<u8>);
 /// Runs `f` on its own thread (blocking reqwest builds a private runtime).
 fn on_thread<T: Send>(f: impl FnOnce() -> Result<T, StoreError> + Send) -> Result<T, StoreError> {
     std::thread::scope(|s| {
-        s.spawn(f)
-            .join()
-            .unwrap_or_else(|_| Err(StoreError::new(StoreErrorKind::Other, "store request panicked")))
+        s.spawn(f).join().unwrap_or_else(|_| {
+            Err(StoreError::new(
+                StoreErrorKind::Other,
+                "store request panicked",
+            ))
+        })
     })
 }
 
@@ -69,7 +72,9 @@ fn uri_encode(s: &str, keep_slash: bool) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             b'/' if keep_slash => out.push('/'),
             _ => out.push_str(&format!("%{b:02X}")),
         }
@@ -126,7 +131,9 @@ fn env_creds() -> Option<AwsCreds> {
     Some(AwsCreds {
         access_key,
         secret_key,
-        session_token: std::env::var("AWS_SESSION_TOKEN").ok().filter(|t| !t.is_empty()),
+        session_token: std::env::var("AWS_SESSION_TOKEN")
+            .ok()
+            .filter(|t| !t.is_empty()),
     })
 }
 
@@ -148,8 +155,8 @@ fn amz_now() -> (String, String) {
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
-    let dt = chrono::DateTime::from_timestamp(i64::try_from(secs).unwrap_or(0), 0)
-        .unwrap_or_default();
+    let dt =
+        chrono::DateTime::from_timestamp(i64::try_from(secs).unwrap_or(0), 0).unwrap_or_default();
     (
         dt.format("%Y%m%d").to_string(),
         dt.format("%Y%m%dT%H%M%SZ").to_string(),
@@ -203,7 +210,11 @@ impl S3Store {
             if parts.len() >= 5 {
                 let name = parts[4..].join(":");
                 let name = name.strip_prefix("accesspoint/").unwrap_or(&name);
-                let dns = if parts[0] == "aws-cn" { "amazonaws.com.cn" } else { "amazonaws.com" };
+                let dns = if parts[0] == "aws-cn" {
+                    "amazonaws.com.cn"
+                } else {
+                    "amazonaws.com"
+                };
                 return Target {
                     scheme,
                     host: authority.unwrap_or_else(|| {
@@ -260,7 +271,9 @@ impl S3Store {
             ("x-amz-content-sha256".to_owned(), payload_hash.clone()),
             ("x-amz-date".to_owned(), now.1.clone()),
         ];
-        let Some(creds) = &self.creds else { return Vec::new() };
+        let Some(creds) = &self.creds else {
+            return Vec::new();
+        };
         if let Some(t) = &creds.session_token {
             headers.push(("x-amz-security-token".to_owned(), t.clone()));
         }
@@ -275,7 +288,10 @@ impl S3Store {
             .map(|(k, v)| format!("{k}={v}"))
             .collect::<Vec<_>>()
             .join("&");
-        let canonical_headers: String = headers.iter().map(|(k, v)| format!("{k}:{}\n", v.trim())).collect();
+        let canonical_headers: String = headers
+            .iter()
+            .map(|(k, v)| format!("{k}:{}\n", v.trim()))
+            .collect();
         let signed = headers
             .iter()
             .map(|(k, _)| k.as_str())
@@ -291,12 +307,16 @@ impl S3Store {
             now.1,
             sha256_hex(canonical.as_bytes())
         );
-        let k_date = hmac_sha256(format!("AWS4{}", creds.secret_key).as_bytes(), now.0.as_bytes());
+        let k_date = hmac_sha256(
+            format!("AWS4{}", creds.secret_key).as_bytes(),
+            now.0.as_bytes(),
+        );
         let k_region = hmac_sha256(&k_date, self.region.as_bytes());
         let k_service = hmac_sha256(&k_region, b"s3");
         let k_signing = hmac_sha256(&k_service, b"aws4_request");
         let signature = hex(&hmac_sha256(&k_signing, to_sign.as_bytes()));
-        let mut out: Vec<(String, String)> = headers.into_iter().filter(|(k, _)| k != "host").collect();
+        let mut out: Vec<(String, String)> =
+            headers.into_iter().filter(|(k, _)| k != "host").collect();
         out.push((
             "authorization".to_owned(),
             format!(
@@ -344,7 +364,11 @@ impl S3Store {
         let kind = match code {
             "NoSuchBucket" => StoreErrorKind::NoSuchBucket,
             "NoSuchKey" => StoreErrorKind::NoSuchKey,
-            "SlowDown" | "Throttling" | "ThrottlingException" | "RequestTimeout" | "InternalError"
+            "SlowDown"
+            | "Throttling"
+            | "ThrottlingException"
+            | "RequestTimeout"
+            | "InternalError"
             | "ServiceUnavailable" => StoreErrorKind::Retryable,
             "" if status == 404 => StoreErrorKind::NotFound,
             _ if status >= 500 => StoreErrorKind::Retryable,
@@ -451,14 +475,20 @@ impl GcsStore {
     /// Go `connector.NewClient`: emulator via `STORAGE_EMULATOR_HOST`, else
     /// service-account credentials (config path or ADC env var).
     pub fn new(config: &GcsConfig) -> Result<Self, String> {
-        let emulator = std::env::var("STORAGE_EMULATOR_HOST").ok().filter(|h| !h.is_empty());
+        let emulator = std::env::var("STORAGE_EMULATOR_HOST")
+            .ok()
+            .filter(|h| !h.is_empty());
         let cred_path = if config.credentials_path.is_empty() {
             std::env::var("GOOGLE_APPLICATION_CREDENTIALS").unwrap_or_default()
         } else {
             config.credentials_path.clone()
         };
         if let Some(host) = emulator {
-            let base = if host.contains("://") { host } else { format!("http://{host}") };
+            let base = if host.contains("://") {
+                host
+            } else {
+                format!("http://{host}")
+            };
             return Ok(Self::with_base(base.trim_end_matches('/').to_owned(), None));
         }
         let auth = if cred_path.is_empty() {
@@ -467,7 +497,10 @@ impl GcsStore {
             let raw = std::fs::read_to_string(&cred_path).map_err(|e| e.to_string())?;
             Some(serde_json::from_str::<ServiceAccount>(&raw).map_err(|e| e.to_string())?)
         };
-        Ok(Self::with_base("https://storage.googleapis.com".to_owned(), auth))
+        Ok(Self::with_base(
+            "https://storage.googleapis.com".to_owned(),
+            auth,
+        ))
     }
 
     fn with_base(base: String, sa: Option<ServiceAccount>) -> Self {
@@ -483,8 +516,12 @@ impl GcsStore {
     }
 
     fn bearer(&self) -> Result<Option<String>, StoreError> {
-        let GcsAuth::ServiceAccount(sa) = &self.auth else { return Ok(None) };
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        let GcsAuth::ServiceAccount(sa) = &self.auth else {
+            return Ok(None);
+        };
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
         if let Ok(guard) = self.token.lock() {
             if let Some((t, exp)) = guard.as_ref() {
                 if *exp > now + 60 {
@@ -503,8 +540,12 @@ impl GcsStore {
         });
         let key = jsonwebtoken::EncodingKey::from_rsa_pem(sa.private_key.as_bytes())
             .map_err(|e| StoreError::new(StoreErrorKind::Other, e.to_string()))?;
-        let jwt = jsonwebtoken::encode(&jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256), &claims, &key)
-            .map_err(|e| StoreError::new(StoreErrorKind::Other, e.to_string()))?;
+        let jwt = jsonwebtoken::encode(
+            &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256),
+            &claims,
+            &key,
+        )
+        .map_err(|e| StoreError::new(StoreErrorKind::Other, e.to_string()))?;
         let (status, body) = on_thread(|| {
             send(client()?.post(&token_uri).form(&[
                 ("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer"),
@@ -709,11 +750,20 @@ mod tests {
             store.get_object("bkt", "missing").unwrap_err().kind,
             StoreErrorKind::NoSuchKey
         );
-        assert_eq!(store.head_bucket("bkt").unwrap_err().kind, StoreErrorKind::NotFound);
+        assert_eq!(
+            store.head_bucket("bkt").unwrap_err().kind,
+            StoreErrorKind::NotFound
+        );
         let seen = handle.join().unwrap();
-        assert!(seen[0].starts_with("GET /bkt?delimiter=%2F&list-type=2&max-keys=2&prefix=a%2F HTTP/1.1")
-            || seen[0].starts_with("GET /bkt?list-type=2&prefix=a%2F&delimiter=%2F&max-keys=2 HTTP/1.1"),
-            "{}", seen[0]);
+        assert!(
+            seen[0]
+                .starts_with("GET /bkt?delimiter=%2F&list-type=2&max-keys=2&prefix=a%2F HTTP/1.1")
+                || seen[0].starts_with(
+                    "GET /bkt?list-type=2&prefix=a%2F&delimiter=%2F&max-keys=2 HTTP/1.1"
+                ),
+            "{}",
+            seen[0]
+        );
         let lower = seen[0].to_lowercase();
         assert!(lower.contains("authorization: aws4-hmac-sha256 credential=akid/"));
         assert!(lower.contains("signedheaders=host;x-amz-content-sha256;x-amz-date"));
@@ -723,21 +773,38 @@ mod tests {
     #[test]
     fn s3_virtual_hosted_arn_and_endpoint_targets() {
         let virtual_host = S3Store::with_creds_for_test(
-            &S3Config { region: "eu-west-1".into(), endpoint: None, force_path_style: false },
+            &S3Config {
+                region: "eu-west-1".into(),
+                endpoint: None,
+                force_path_style: false,
+            },
             "k",
             "s",
         );
         let t = virtual_host.target("bkt", "p/k");
-        assert_eq!((t.host.as_str(), t.path.as_str()), ("bkt.s3.eu-west-1.amazonaws.com", "/p/k"));
+        assert_eq!(
+            (t.host.as_str(), t.path.as_str()),
+            ("bkt.s3.eu-west-1.amazonaws.com", "/p/k")
+        );
         let t = virtual_host.target("arn:aws:s3:eu-west-1:123456789012:accesspoint/ap", "k");
-        assert_eq!(t.host, "ap-123456789012.s3-accesspoint.eu-west-1.amazonaws.com");
+        assert_eq!(
+            t.host,
+            "ap-123456789012.s3-accesspoint.eu-west-1.amazonaws.com"
+        );
         let custom = S3Store::with_creds_for_test(
-            &S3Config { region: "r".into(), endpoint: Some("http://minio:9000/".into()), force_path_style: false },
+            &S3Config {
+                region: "r".into(),
+                endpoint: Some("http://minio:9000/".into()),
+                force_path_style: false,
+            },
             "k",
             "s",
         );
         let t = custom.target("bkt", "k");
-        assert_eq!((t.scheme.as_str(), t.host.as_str()), ("http", "bkt.minio:9000"));
+        assert_eq!(
+            (t.scheme.as_str(), t.host.as_str()),
+            ("http", "bkt.minio:9000")
+        );
     }
 
     #[test]
@@ -757,11 +824,21 @@ mod tests {
         assert_eq!(page.next_token.as_deref(), Some("n2"));
         assert_eq!(store.get_object("bkt", "p/a").unwrap(), b"blob");
         let e = store.get_object("bkt", "gone").unwrap_err();
-        assert_eq!((e.kind, e.message.as_str()), (StoreErrorKind::NoSuchKey, "No such object"));
-        assert_eq!(store.head_bucket("zzz").unwrap_err().kind, StoreErrorKind::NoSuchBucket);
+        assert_eq!(
+            (e.kind, e.message.as_str()),
+            (StoreErrorKind::NoSuchKey, "No such object")
+        );
+        assert_eq!(
+            store.head_bucket("zzz").unwrap_err().kind,
+            StoreErrorKind::NoSuchBucket
+        );
         let seen = handle.join().unwrap();
         assert!(seen[0].starts_with("GET /storage/v1/b/bkt HTTP/1.1"));
-        assert!(seen[1].contains("prefix=p%2F") && seen[1].contains("maxResults=2") && seen[1].contains("pageToken=n1"));
+        assert!(
+            seen[1].contains("prefix=p%2F")
+                && seen[1].contains("maxResults=2")
+                && seen[1].contains("pageToken=n1")
+        );
         assert!(seen[2].starts_with("GET /storage/v1/b/bkt/o/p%2Fa?alt=media"));
     }
 }

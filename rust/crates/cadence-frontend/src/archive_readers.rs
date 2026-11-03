@@ -305,10 +305,11 @@ impl ArchivedHistory {
             page_size,
         };
         // Cloud stores use blocking HTTP: keep it off the async workers.
-        let response = tokio::task::spawn_blocking(move || provider.get_history(&uri, &get_request))
-            .await
-            .map_err(|e| CadenceError::from(InternalServiceError::new(e.to_string())))?
-            .map_err(map_archiver_error)?;
+        let response =
+            tokio::task::spawn_blocking(move || provider.get_history(&uri, &get_request))
+                .await
+                .map_err(|e| CadenceError::from(InternalServiceError::new(e.to_string())))?
+                .map_err(map_archiver_error)?;
         let mut events = Vec::new();
         for batch in response.history_batches {
             if let Some(list) = batch.get("events").and_then(Value::as_array) {
