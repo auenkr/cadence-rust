@@ -530,6 +530,271 @@ pub fn describe_response_in(
     })
 }
 
+pub fn partitions_request_out(v: tk::ListTaskListPartitionsRequest) -> p::ListTaskListPartitionsRequest {
+    p::ListTaskListPartitionsRequest {
+        domain: v.domain,
+        task_list: v.task_list.map(task_list_out),
+    }
+}
+
+pub fn partitions_response_in(
+    v: p::ListTaskListPartitionsResponse,
+) -> Result<tk::ListTaskListPartitionsResponse, Status> {
+    let meta = |m: p::TaskListPartitionMetadata| tk::TaskListPartitionMetadata {
+        key: m.key,
+        owner_host_name: m.owner_host_name,
+    };
+    Ok(tk::ListTaskListPartitionsResponse {
+        activity_task_list_partitions: v.activity_task_list_partitions.into_iter().map(meta).collect(),
+        decision_task_list_partitions: v.decision_task_list_partitions.into_iter().map(meta).collect(),
+    })
+}
+
+// ---- Worker API (client direction) ----
+
+fn query_in(v: p::WorkflowQuery) -> tk::WorkflowQuery {
+    tk::WorkflowQuery {
+        query_type: v.query_type,
+        query_args: data(v.query_args),
+    }
+}
+
+fn query_out(v: tk::WorkflowQuery) -> p::WorkflowQuery {
+    p::WorkflowQuery {
+        query_type: v.query_type,
+        query_args: payload(v.query_args),
+    }
+}
+
+pub fn poll_decision_response_in(
+    v: p::PollForDecisionTaskResponse,
+) -> Result<tk::PollForDecisionTaskResponse, Status> {
+    let queries: std::collections::HashMap<String, tk::WorkflowQuery> =
+        v.queries.into_iter().map(|(k, q)| (k, query_in(q))).collect();
+    Ok(tk::PollForDecisionTaskResponse {
+        task_token: v.task_token,
+        workflow_execution: v.workflow_execution.map(execution),
+        workflow_type: v.workflow_type.map(|x| t::WorkflowType { name: x.name }),
+        previous_started_event_id: v.previous_started_event_id,
+        started_event_id: v.started_event_id,
+        attempt: v.attempt,
+        backlog_count_hint: v.backlog_count_hint,
+        next_event_id: v.next_event_id,
+        scheduled_timestamp: nanos(v.scheduled_time),
+        started_timestamp: nanos(v.started_time),
+        history: v.history.map(history_in).transpose()?,
+        next_page_token: v.next_page_token,
+        workflow_execution_task_list: v.workflow_execution_task_list.map(task_list).transpose()?,
+        query: v.query.map(query_in),
+        query_id: None,
+        queries: if queries.is_empty() { None } else { Some(queries) },
+    })
+}
+
+pub fn poll_decision_response_out(
+    v: tk::PollForDecisionTaskResponse,
+) -> Result<p::PollForDecisionTaskResponse, Status> {
+    Ok(p::PollForDecisionTaskResponse {
+        task_token: v.task_token,
+        workflow_execution: v.workflow_execution.map(execution_out),
+        workflow_type: v.workflow_type.map(|x| p::WorkflowType { name: x.name }),
+        previous_started_event_id: v.previous_started_event_id,
+        started_event_id: v.started_event_id,
+        attempt: v.attempt,
+        backlog_count_hint: v.backlog_count_hint,
+        next_event_id: v.next_event_id,
+        scheduled_time: v.scheduled_timestamp.map(timestamp_nanos),
+        started_time: v.started_timestamp.map(timestamp_nanos),
+        history: v.history.map(history).transpose()?,
+        next_page_token: v.next_page_token,
+        workflow_execution_task_list: v.workflow_execution_task_list.map(task_list_out),
+        query: v.query.map(query_out),
+        queries: v
+            .queries
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(k, q)| (k, query_out(q)))
+            .collect(),
+        ..Default::default()
+    })
+}
+
+pub fn respond_decision_completed_request_out(
+    v: tk::RespondDecisionTaskCompletedRequest,
+) -> Result<p::RespondDecisionTaskCompletedRequest, Status> {
+    Ok(p::RespondDecisionTaskCompletedRequest {
+        task_token: v.task_token,
+        decisions: v
+            .decisions
+            .into_iter()
+            .map(decisions_out::decision_out)
+            .collect::<Result<_, _>>()?,
+        execution_context: v.execution_context,
+        identity: v.identity,
+        sticky_attributes: v.sticky_attributes.map(|s| p::StickyExecutionAttributes {
+            worker_task_list: s.worker_task_list.map(task_list_out),
+            schedule_to_start_timeout: s
+                .schedule_to_start_timeout_seconds
+                .map(|x| duration(x.into())),
+        }),
+        return_new_decision_task: v.return_new_decision_task,
+        force_create_new_decision_task: v.force_create_new_decision_task,
+        binary_checksum: v.binary_checksum,
+        query_results: v
+            .query_results
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(k, r)| {
+                (
+                    k,
+                    p::WorkflowQueryResult {
+                        result_type: r.result_type.map_or(0, |x| x as i32 + 1),
+                        answer: payload(r.answer),
+                        error_message: r.error_message,
+                    },
+                )
+            })
+            .collect(),
+    })
+}
+
+pub fn respond_decision_completed_response_in(
+    v: p::RespondDecisionTaskCompletedResponse,
+) -> Result<tk::RespondDecisionTaskCompletedResponse, Status> {
+    Ok(tk::RespondDecisionTaskCompletedResponse {
+        decision_task: v.decision_task.map(poll_decision_response_in).transpose()?,
+    })
+}
+
+pub fn respond_decision_failed_request_out(
+    v: tk::RespondDecisionTaskFailedRequest,
+) -> p::RespondDecisionTaskFailedRequest {
+    p::RespondDecisionTaskFailedRequest {
+        task_token: v.task_token,
+        cause: v.cause.map_or(0, |x| x as i32 + 1),
+        details: payload(v.details),
+        identity: v.identity,
+        binary_checksum: v.binary_checksum,
+    }
+}
+
+pub fn poll_activity_response_in(
+    v: p::PollForActivityTaskResponse,
+) -> Result<tk::PollForActivityTaskResponse, Status> {
+    Ok(tk::PollForActivityTaskResponse {
+        task_token: v.task_token,
+        workflow_execution: v.workflow_execution.map(execution),
+        activity_id: v.activity_id,
+        activity_type: v.activity_type.map(|x| t::ActivityType { name: x.name }),
+        input: data(v.input),
+        scheduled_timestamp: nanos(v.scheduled_time),
+        schedule_to_close_timeout_seconds: seconds(v.schedule_to_close_timeout)?,
+        started_timestamp: nanos(v.started_time),
+        start_to_close_timeout_seconds: seconds(v.start_to_close_timeout)?,
+        heartbeat_timeout_seconds: seconds(v.heartbeat_timeout)?,
+        attempt: v.attempt,
+        scheduled_timestamp_of_this_attempt: nanos(v.scheduled_time_of_this_attempt),
+        heartbeat_details: data(v.heartbeat_details),
+        workflow_type: v.workflow_type.map(|x| t::WorkflowType { name: x.name }),
+        workflow_domain: v.workflow_domain,
+        header: v.header.map(header_in),
+    })
+}
+
+pub fn respond_activity_completed_request_out(
+    v: tk::RespondActivityTaskCompletedRequest,
+) -> p::RespondActivityTaskCompletedRequest {
+    p::RespondActivityTaskCompletedRequest {
+        task_token: v.task_token,
+        result: payload(v.result),
+        identity: v.identity,
+    }
+}
+
+fn by_id(workflow_id: String, run_id: String) -> Option<p::WorkflowExecution> {
+    Some(p::WorkflowExecution { workflow_id, run_id })
+}
+
+pub fn respond_activity_completed_by_id_request_out(
+    v: tk::RespondActivityTaskCompletedByIDRequest,
+) -> p::RespondActivityTaskCompletedByIdRequest {
+    p::RespondActivityTaskCompletedByIdRequest {
+        domain: v.domain,
+        workflow_execution: by_id(v.workflow_id, v.run_id),
+        activity_id: v.activity_id,
+        result: payload(v.result),
+        identity: v.identity,
+    }
+}
+
+pub fn respond_activity_failed_request_out(
+    v: tk::RespondActivityTaskFailedRequest,
+) -> p::RespondActivityTaskFailedRequest {
+    p::RespondActivityTaskFailedRequest {
+        task_token: v.task_token,
+        failure: failure(v.reason, v.details, v.failure_options),
+        identity: v.identity,
+        heartbeat_details: payload(v.heartbeat_details),
+    }
+}
+
+pub fn respond_activity_failed_by_id_request_out(
+    v: tk::RespondActivityTaskFailedByIDRequest,
+) -> p::RespondActivityTaskFailedByIdRequest {
+    p::RespondActivityTaskFailedByIdRequest {
+        domain: v.domain,
+        workflow_execution: by_id(v.workflow_id, v.run_id),
+        activity_id: v.activity_id,
+        failure: failure(v.reason, v.details, v.failure_options),
+        identity: v.identity,
+        heartbeat_details: payload(v.heartbeat_details),
+    }
+}
+
+pub fn respond_activity_canceled_request_out(
+    v: tk::RespondActivityTaskCanceledRequest,
+) -> p::RespondActivityTaskCanceledRequest {
+    p::RespondActivityTaskCanceledRequest {
+        task_token: v.task_token,
+        details: payload(v.details),
+        identity: v.identity,
+    }
+}
+
+pub fn respond_activity_canceled_by_id_request_out(
+    v: tk::RespondActivityTaskCanceledByIDRequest,
+) -> p::RespondActivityTaskCanceledByIdRequest {
+    p::RespondActivityTaskCanceledByIdRequest {
+        domain: v.domain,
+        workflow_execution: by_id(v.workflow_id, v.run_id),
+        activity_id: v.activity_id,
+        details: payload(v.details),
+        identity: v.identity,
+    }
+}
+
+pub fn heartbeat_request_out(
+    v: tk::RecordActivityTaskHeartbeatRequest,
+) -> p::RecordActivityTaskHeartbeatRequest {
+    p::RecordActivityTaskHeartbeatRequest {
+        task_token: v.task_token,
+        details: payload(v.details),
+        identity: v.identity,
+    }
+}
+
+pub fn heartbeat_by_id_request_out(
+    v: tk::RecordActivityTaskHeartbeatByIDRequest,
+) -> p::RecordActivityTaskHeartbeatByIdRequest {
+    p::RecordActivityTaskHeartbeatByIdRequest {
+        domain: v.domain,
+        workflow_execution: by_id(v.workflow_id, v.run_id),
+        activity_id: v.activity_id,
+        details: payload(v.details),
+        identity: v.identity,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

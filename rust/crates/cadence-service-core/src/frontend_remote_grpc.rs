@@ -104,10 +104,21 @@ pub async fn call(
     let mut visibility = p::visibility_api_client::VisibilityApiClient::new(channel.clone());
     let mut worker = p::worker_api_client::WorkerApiClient::new(channel.clone());
     let mut schedule = p::schedule_api_client::ScheduleApiClient::new(channel);
-    let _ = (&mut visibility, &mut worker, &mut schedule);
+    let _ = &mut schedule;
     // `forward!(client, rpc, RequestType, request_fn, response_fn)`: JSON -> typed
     // request -> proto, then proto response -> typed -> JSON. `void` ignores the response.
     macro_rules! forward {
+        ($client:ident, $rpc:ident, $ty:ty, fallible $out:expr, $inn:expr) => {{
+            let typed: $ty = serde_json::from_value(request).map_err(bad)?;
+            let proto_request = $out(typed).map_err(internal)?;
+            let response = $client
+                .$rpc(decorate(proto_request, service, caller, forwarding_cluster, timeout))
+                .await
+                .map_err(|s| error_from_status(&s))?
+                .into_inner();
+            let converted = $inn(response).map_err(internal)?;
+            serde_json::to_value(converted).map_err(bad)
+        }};
         ($client:ident, $rpc:ident, $ty:ty, $out:expr, void) => {{
             let typed: $ty = serde_json::from_value(request).map_err(bad)?;
             $client
@@ -223,6 +234,68 @@ pub async fn call(
             visibility, count_workflow_executions, st::CountWorkflowExecutionsRequest,
             c::count_request_out,
             |r: p::CountWorkflowExecutionsResponse| Ok::<_, tonic::Status>(st::CountWorkflowExecutionsResponse { count: r.count })
+        ),
+        "DescribeTaskList" => forward!(
+            workflow, describe_task_list, tk::DescribeTaskListRequest,
+            cv::describe_task_list_request_out, cv::describe_task_list_in
+        ),
+        "ListTaskListPartitions" => forward!(
+            workflow, list_task_list_partitions, tk::ListTaskListPartitionsRequest,
+            c::partitions_request_out, c::partitions_response_in
+        ),
+        "PollForDecisionTask" => forward!(
+            worker, poll_for_decision_task, tk::PollForDecisionTaskRequest,
+            cv::poll_for_decision_task_request_out, c::poll_decision_response_in
+        ),
+        "PollForActivityTask" => forward!(
+            worker, poll_for_activity_task, tk::PollForActivityTaskRequest,
+            cv::poll_for_activity_task_request_out, c::poll_activity_response_in
+        ),
+        "RespondDecisionTaskCompleted" => forward!(
+            worker, respond_decision_task_completed, tk::RespondDecisionTaskCompletedRequest,
+            fallible c::respond_decision_completed_request_out, c::respond_decision_completed_response_in
+        ),
+        "RespondDecisionTaskFailed" => forward!(
+            worker, respond_decision_task_failed, tk::RespondDecisionTaskFailedRequest,
+            c::respond_decision_failed_request_out, void
+        ),
+        "RespondActivityTaskCompleted" => forward!(
+            worker, respond_activity_task_completed, tk::RespondActivityTaskCompletedRequest,
+            c::respond_activity_completed_request_out, void
+        ),
+        "RespondActivityTaskCompletedByID" => forward!(
+            worker, respond_activity_task_completed_by_id, tk::RespondActivityTaskCompletedByIDRequest,
+            c::respond_activity_completed_by_id_request_out, void
+        ),
+        "RespondActivityTaskFailed" => forward!(
+            worker, respond_activity_task_failed, tk::RespondActivityTaskFailedRequest,
+            c::respond_activity_failed_request_out, void
+        ),
+        "RespondActivityTaskFailedByID" => forward!(
+            worker, respond_activity_task_failed_by_id, tk::RespondActivityTaskFailedByIDRequest,
+            c::respond_activity_failed_by_id_request_out, void
+        ),
+        "RespondActivityTaskCanceled" => forward!(
+            worker, respond_activity_task_canceled, tk::RespondActivityTaskCanceledRequest,
+            c::respond_activity_canceled_request_out, void
+        ),
+        "RespondActivityTaskCanceledByID" => forward!(
+            worker, respond_activity_task_canceled_by_id, tk::RespondActivityTaskCanceledByIDRequest,
+            c::respond_activity_canceled_by_id_request_out, void
+        ),
+        "RespondQueryTaskCompleted" => forward!(
+            worker, respond_query_task_completed, tk::RespondQueryTaskCompletedRequest,
+            cv::query_completed_out, void
+        ),
+        "RecordActivityTaskHeartbeat" => forward!(
+            worker, record_activity_task_heartbeat, tk::RecordActivityTaskHeartbeatRequest,
+            c::heartbeat_request_out,
+            |r: p::RecordActivityTaskHeartbeatResponse| Ok::<_, tonic::Status>(tk::RecordActivityTaskHeartbeatResponse { cancel_requested: r.cancel_requested })
+        ),
+        "RecordActivityTaskHeartbeatByID" => forward!(
+            worker, record_activity_task_heartbeat_by_id, tk::RecordActivityTaskHeartbeatByIDRequest,
+            c::heartbeat_by_id_request_out,
+            |r: p::RecordActivityTaskHeartbeatByIdResponse| Ok::<_, tonic::Status>(tk::RecordActivityTaskHeartbeatResponse { cancel_requested: r.cancel_requested })
         ),
         other => Err(CadenceError::Internal(InternalServiceError::new(format!(
             "operation {other} is not supported over the gRPC remote Frontend transport"
