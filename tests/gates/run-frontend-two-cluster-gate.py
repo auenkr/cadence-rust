@@ -12,7 +12,7 @@ Phases (A's Rust Frontend is restarted with a different config for each):
   forward-all      : all-domain-apis-forwarding (target cluster1)
   noop             : DomainNotActiveError with Go's message
   failover         : domain made active in A (updated on B, replicated to A) -> runs locally
-  resend           : remote cluster1 over gRPC; admin rereplicate against A
+  resend           : remote cluster1 over gRPC; admin kafka rereplicate against A
 Steps land in OUT/steps.json. Usage:
   run-frontend-two-cluster-gate.py --out DIR --rust-binary P --go-server P --go-cli P --rust-root DIR
 MySQL: CADENCE_MYSQL_{ADDR,USER,PASSWORD}; databases cadence_a, cadence_a_visibility,
@@ -254,11 +254,11 @@ try:
     # (d) ResendReplicationTasks from A against B over gRPC
     if start_rust_frontend('resend', 'noop', '', 'grpc'):
         wid, rid = wids.get('sel', ('', ''))
-        rc, out = cli(A_G, 'grpc', 'admin', 'rereplicate', '--source_cluster', 'cluster1', '--domain_id', domain_id, '--wid', wid, '--rid', rid)
+        rc, out = cli(A_G, 'grpc', 'admin', 'kafka', 'rereplicate', '--source_cluster', 'cluster1', '--domain_id', domain_id, '--wid', wid, '--rid', rid)
         record('resend-replication-tasks-grpc-remote', rc == 0, out)
         rc, out = cli(A_G, 'grpc', '--domain', dom, 'workflow', 'show', '--wid', wid, '--rid', rid)
         record('resend-history-visible-on-A', rc == 0 and 'WorkflowExecutionStarted' in out, out)
-        rc, out = cli(A_G, 'grpc', 'admin', 'rereplicate', '--source_cluster', 'no-such-cluster', '--domain_id', domain_id, '--wid', wid, '--rid', rid)
+        rc, out = cli(A_G, 'grpc', 'admin', 'kafka', 'rereplicate', '--source_cluster', 'no-such-cluster', '--domain_id', domain_id, '--wid', wid, '--rid', rid)
         record('resend-unknown-cluster-fails', rc != 0, out)
     for n in ['go-b', 'go-a-history-worker', 'rust-matching', 'rust-frontend']:
         record(f'{n}-alive-at-end', procs[n].poll() is None, f'exit={procs[n].poll()}')
