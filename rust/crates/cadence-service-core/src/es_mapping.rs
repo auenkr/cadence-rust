@@ -58,6 +58,8 @@ pub fn es_data_type(value_type: IndexedValueType) -> &'static str {
         IndexedValueType::Double => "double",
         IndexedValueType::Bool => "boolean",
         IndexedValueType::Datetime => "date",
+        // Go's switch has no default arm and returns the empty string.
+        _ => "",
     }
 }
 
