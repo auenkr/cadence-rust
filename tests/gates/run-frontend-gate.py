@@ -268,13 +268,14 @@ try:
     # ---- metrics parity: scrape Rust Frontend Prometheus, compare names/tags with Go's metered wrapper
     # (go/service/frontend/wrappers/metered: scope tagged operation=<Scope>+domain; cadence_requests,
     # cadence_latency timer, cadence_latency_ns histogram, cadence_errors* counters).
+    run('metrics-probe-start', [*cli_g, '--domain', dom_t, 'workflow', 'start', '--tl', 'metrics-probe-tl', '--wt', 'MetricsProbe', '--wid', 'metrics-probe-' + secrets.token_hex(3), '--et', '60', '--dt', '10'])
     try:
         import urllib.request
-        body = urllib.request.urlopen(f'http://127.0.0.1:{prom_port}/metrics', timeout=15).read().decode()
+        body =urllib.request.urlopen(f'http://127.0.0.1:{prom_port}/metrics', timeout=15).read().decode()
         (work / 'frontend-metrics.prom').write_text(body)
         def has(prefix, *must):
             return any(l.startswith(prefix) and all(m in l for m in must) for l in body.splitlines())
-        dom = f'domain="{dom_t}"'
+        dom = 'domain="' + dom_t.replace('-', '_') + '"'  # Prometheus label values keep tally's sanitised form
         for nm, pre, must in [
             ('requests-start', 'cadence_requests', ('operation="StartWorkflowExecution"', dom)),
             ('requests-poll-decision', 'cadence_requests', ('operation="PollForDecisionTask"', dom)),
