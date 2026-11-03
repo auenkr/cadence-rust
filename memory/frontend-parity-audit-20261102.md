@@ -288,3 +288,6 @@ Rule: a row keeps the status in its original table row unless it is listed here.
 
 ## Lane coverage update 2026-11-03
 Full Frontend mixed gate (kafka, two_history, oauth, metrics, archival, dynconfig, multi-History churn) green on MySQL, Postgres (run 41622697487) and Cassandra (run 41622702539); ES visibility lane green on Postgres (41624742792); rust-ci green (41624747694). Details: memory/evidence/frontend-pg-cassandra-lanes-20261103.md.
+
+
+Update 2026-11-03: s3store history/visibility archival read and URI validation are ported and gate-proven (run 41646999287, see memory/evidence/frontend-archival-cloud-20261103.md). gcloud/gstorage is unit and fake-server tested only, so it is not marked ported.
