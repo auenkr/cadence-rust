@@ -1,5 +1,10 @@
 name: Docker drop-in (Go image vs Rust image for frontend+matching)
 on:
+  # Temporary: a new workflow cannot be dispatched until it is on master; this branch
+  # push trigger lets it run from the branch. Remove after merge.
+  push:
+    branches: [t3/rust-docker-drop-in]
+    paths: [.github/workflows/docker-drop-in.yml, rust/Dockerfile, tests/docker-drop-in/**]
   workflow_dispatch:
     inputs:
       rust_services:
@@ -44,7 +49,7 @@ jobs:
       - name: Start cluster, only image names differ
         run: |
           export COMPOSE_FILE=tests/docker-drop-in/docker-compose.split.yml
-          for s in $(echo "${{ inputs.rust_services }}" | tr ',' ' '); do
+          for s in $(echo "${{ inputs.rust_services || 'frontend,matching' }}" | tr ',' ' '); do
             S=$(echo $s | tr a-z A-Z); export CADENCE_IMAGE_$S=cadence-rust:ci
           done
           env | grep CADENCE_IMAGE | tee out/images-used.txt
