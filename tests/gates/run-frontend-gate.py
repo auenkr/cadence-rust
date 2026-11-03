@@ -120,6 +120,10 @@ rt = rt.replace('localhost:7833', f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}')
 rt = rt.replace('/tmp/cadence_archival/development', str(work / 'history-archive'))
 rt = rt.replace('/tmp/cadence_vis_archival/development', str(work / 'visibility-archive'))
 rt = rt.replace('/tmp/blobstore', str(work / 'blobstore'))
+_ms = socket.socket(); _ms.bind(('127.0.0.1', 0)); prom_port = _ms.getsockname()[1]; _ms.close()
+rt, n = re.subn(r'(?m)^(  frontend:\n(?:.*\n)*?    metrics:\n)      statsd:\n        hostPort: "127.0.0.1:8125"\n        prefix: "cadence"\n',
+                lambda m: m.group(1) + f'      prometheus:\n        timerType: histogram\n        listenAddress: "127.0.0.1:{prom_port}"\n', rt, count=1)
+assert n == 1, 'frontend metrics block not found'
 rt = rt.rstrip('\n') + '\n' + async_yaml
 (work / 'rust.yaml').write_text(rt)
 
@@ -261,13 +265,32 @@ try:
     print('SDK LOG TAIL\n' + '\n'.join((work / 'sdk.log').read_text().splitlines()[-40:]), flush=True)
     record('sdk-driver-exit', drv.returncode == 0, f'exit={drv.returncode}')
     record_services_alive('after-sdk')
+    # ---- metrics parity: scrape Rust Frontend Prometheus, compare names/tags with Go's metered wrapper
+    # (go/service/frontend/wrappers/metered: scope tagged operation=<Scope>+domain; cadence_requests,
+    # cadence_latency timer, cadence_latency_ns histogram, cadence_errors* counters).
+    try:
+        import urllib.request
+        body = urllib.request.urlopen(f'http://127.0.0.1:{prom_port}/metrics', timeout=15).read().decode()
+        (work / 'frontend-metrics.prom').write_text(body)
+        def has(prefix, *must):
+            return any(l.startswith(prefix) and all(m in l for m in must) for l in body.splitlines())
+        dom = f'domain="{dom_t}"'
+        for nm, pre, must in [
+            ('requests-start', 'cadence_requests', ('operation="StartWorkflowExecution"', dom)),
+            ('requests-poll-decision', 'cadence_requests', ('operation="PollForDecisionTask"', dom)),
+            ('latency-start', 'cadence_latency', ('operation="StartWorkflowExecution"', dom)),
+            ('latency-ns-start', 'cadence_latency_ns', ('operation="StartWorkflowExecution"', dom)),
+        ]:
+            record('metrics-' + nm, has(pre, *must), '' if has(pre, *must) else '\n'.join(l for l in body.splitlines() if l.startswith('cadence_'))[:1500])
+    except Exception as e:
+        record('metrics-scrape', False, repr(e))
     if args.kafka_broker:
         amarks = work / 'async-marks'; amarks.mkdir(exist_ok=True)
         aenv = {**env, 'FE_MODE': 'async', 'FE_DOMAIN': dom_a, 'FE_DOMAIN_NOASYNC': dom_n, 'FE_MARK_DIR': str(amarks)}
         adrv = subprocess.Popen([str(args.driver)], cwd=work, stdout=(work / 'sdk-async.log').open('w'), stderr=subprocess.STDOUT, env=aenv, start_new_session=True)
         procs['sdk-async-driver'] = adrv
         adeadline = time.monotonic() + 900
-        done_down = done_up = False
+        done_down = done_up = done_fe = False
         while adrv.poll() is None:
             if time.monotonic() >= adeadline:
                 record('sdk-async-driver-timeout', False, 'exceeded 900s')
@@ -278,6 +301,16 @@ try:
                 r = subprocess.run(['docker', 'stop', '-t', '5', args.kafka_container], capture_output=True, text=True)
                 record('kafka-broker-stopped', r.returncode == 0, r.stdout + r.stderr)
                 (amarks / 'broker-down-done').write_text('x')
+            if (amarks / 'frontend-restart-request').exists() and not done_fe:
+                done_fe = True
+                kill('rust-frontend')
+                record('async-rust-frontend-killed', True)
+                time.sleep(3)
+                start('rust-frontend', rust_frontend(), env=frontend_env)
+                ok = wait_port(ports['FRONTEND_PORT'], 120, 'rust-frontend') and wait_port(ports['FRONTEND_PORT_GRPC'], 10, 'rust-frontend')
+                record('async-rust-frontend-restarted-listening', ok)
+                time.sleep(15)
+                (amarks / 'frontend-restart-done').write_text('x')
             if (amarks / 'broker-up-request').exists() and not done_up:
                 done_up = True
                 r = subprocess.run(['docker', 'start', args.kafka_container], capture_output=True, text=True)

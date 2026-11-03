@@ -150,6 +150,60 @@ func asyncMain(rpc workflowserviceclient.Interface, domain, noAsyncDomain, marks
 		}
 		step("async-failed-start-not-executed", e)
 	}
+	// 7. Rust Frontend restart during async traffic. Every accepted start must execute (no loss);
+	// RejectDuplicate makes any duplicate processing of one message fail loudly instead of re-running
+	// (Go's consumer is at-least-once, so a redelivery must be absorbed as already-started).
+	if marks != "" {
+		const n = 40
+		accepted := make([]bool, n)
+		ropts := func(id string) client.StartWorkflowOptions {
+			o := opts(id)
+			o.WorkflowIDReusePolicy = client.WorkflowIDReusePolicyRejectDuplicate
+			return o
+		}
+		restartReqd := false
+		for i := 0; i < n; i++ {
+			if i == n/2 && !restartReqd {
+				restartReqd = true
+				_ = os.WriteFile(filepath.Join(marks, "frontend-restart-request"), []byte("x"), 0o644)
+			}
+			rid := fmt.Sprintf("%s-fe-restart-%d", tl, i)
+			rctx, rcancel := context.WithTimeout(ctx, 20*time.Second)
+			_, e := c.StartWorkflowAsync(rctx, ropts(rid), EchoWorkflow, rid)
+			rcancel()
+			accepted[i] = e == nil
+			time.Sleep(300 * time.Millisecond)
+		}
+		step("frontend-restart-handshake", waitFile(filepath.Join(marks, "frontend-restart-done"), 5*time.Minute))
+		// Retry the ones that errored during the outage (client retry), then verify everything completes.
+		var lost []string
+		cnt := 0
+		for i := 0; i < n; i++ {
+			rid := fmt.Sprintf("%s-fe-restart-%d", tl, i)
+			if accepted[i] {
+				cnt++
+			} else {
+				_ = retryFor(ctx, func() error {
+					rctx, rcancel := context.WithTimeout(ctx, 30*time.Second)
+					defer rcancel()
+					_, e := c.StartWorkflowAsync(rctx, ropts(rid), EchoWorkflow, rid)
+					return e
+				})
+			}
+		}
+		for i := 0; i < n; i++ {
+			rid := fmt.Sprintf("%s-fe-restart-%d", tl, i)
+			if e := waitResult(rid, rid); e != nil {
+				lost = append(lost, rid)
+			}
+		}
+		var lerr error
+		if len(lost) > 0 {
+			lerr = fmt.Errorf("%d messages lost: %v", len(lost), lost)
+		}
+		step("async-frontend-restart-no-lost-messages", lerr)
+		fmt.Printf("INFO async frontend restart: %d/%d accepted before retry\n", cnt, n)
+	}
 	fmt.Printf("RESULT failures=%d\n", failures)
 	if failures > 0 {
 		os.Exit(1)

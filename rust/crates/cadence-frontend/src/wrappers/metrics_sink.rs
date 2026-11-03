@@ -79,12 +79,31 @@ impl Metrics for SinkMetrics {
     }
 
     fn increment_requests(&self, operation: &str) {
+        self.increment_requests_tagged(operation, &[]);
+    }
+
+    fn increment_requests_tagged(&self, operation: &str, tags: &[MetricTag]) {
         self.emit(
             CADENCE_REQUESTS,
             MetricKind::Counter,
             MetricValue::Count(1),
-            Self::tags(operation, &[]),
+            Self::tags(operation, tags),
             None,
+        );
+    }
+
+    fn record_latency_histogram_tagged(
+        &self,
+        operation: &str,
+        elapsed: Duration,
+        tags: &[MetricTag],
+    ) {
+        self.emit(
+            CADENCE_LATENCY_NS,
+            MetricKind::Histogram,
+            MetricValue::Duration(elapsed),
+            Self::tags(operation, tags),
+            Some(HistogramSpec::GoDefault1ms100s),
         );
     }
 

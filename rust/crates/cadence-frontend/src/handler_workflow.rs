@@ -805,8 +805,9 @@ impl<B: WorkflowBackend> Handler<B> {
     ) -> WorkflowFuture<'a> {
         Box::pin(async move {
             let start = std::time::Instant::now();
-            self.metrics.increment_requests(operation.name());
             let tags = crate::wrappers::metered::request_tags(operation.name(), &request);
+            self.metrics
+                .increment_requests_tagged(operation.name(), &tags);
             let result = self
                 .dispatch_operation(operation, request, caller, target_cluster)
                 .await;
@@ -814,7 +815,7 @@ impl<B: WorkflowBackend> Handler<B> {
             self.metrics
                 .record_operation(operation.name(), elapsed, &tags);
             self.metrics
-                .record_latency_histogram(operation.name(), elapsed);
+                .record_latency_histogram_tagged(operation.name(), elapsed, &tags);
             match result {
                 Ok(response) => Ok(response),
                 Err(error) => {

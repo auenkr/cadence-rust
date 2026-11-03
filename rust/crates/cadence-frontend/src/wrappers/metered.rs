@@ -64,6 +64,19 @@ pub trait Metrics {
     ) {
     }
     fn record_latency_histogram(&self, _operation: &str, _elapsed: std::time::Duration) {}
+    /// Go tags the whole per-operation scope (requests, latency, histogram,
+    /// errors) with the request tags; these defaults keep older impls working.
+    fn increment_requests_tagged(&self, operation: &str, _tags: &[MetricTag]) {
+        self.increment_requests(operation);
+    }
+    fn record_latency_histogram_tagged(
+        &self,
+        operation: &str,
+        elapsed: std::time::Duration,
+        _tags: &[MetricTag],
+    ) {
+        self.record_latency_histogram(operation, elapsed);
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -254,12 +267,12 @@ pub fn measure<T>(
     metrics: &dyn Metrics,
     call: impl FnOnce() -> Result<T, CadenceError>,
 ) -> Result<T, CadenceError> {
-    metrics.increment_requests(operation);
+    metrics.increment_requests_tagged(operation, tags);
     let start = std::time::Instant::now();
     let result = call();
     let elapsed = start.elapsed();
     metrics.record_operation(operation, elapsed, tags);
-    metrics.record_latency_histogram(operation, elapsed);
+    metrics.record_latency_histogram_tagged(operation, elapsed, tags);
     result.map_err(|error| handle_error(error, metrics))
 }
 
