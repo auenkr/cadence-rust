@@ -364,5 +364,7 @@ func adminCLI(ctx context.Context, domain, wid, rid string) {
 		check("dynconfig-operational-get", "", true, "admin", "config", "operational-get", "--name", "frontend.visibilityMaxPageSize")
 		check("dynconfig-operational-list-values", "", true, "admin", "config", "operational-list")
 	}
+	// CloseShard/ResetQueue disturb shard ownership; let History re-acquire before later gate phases.
+	time.Sleep(20 * time.Second)
 	// Schedule update/pause/unpause/list run in the schedule block (gRPC CLI).
 }
