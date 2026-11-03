@@ -29,7 +29,14 @@ jobs:
       - name: Build Go image
         run: |
           mkdir -p out
-          docker build -f go/Dockerfile --target cadence-auto-setup -t cadence-go:ci go 2>&1 | tail -30
+          # The Go Makefile needs git metadata at the context root (upstream go/ is the repo root).
+          mkdir /tmp/gobuild
+          rsync -a --exclude .git go/ /tmp/gobuild/
+          git -C /tmp/gobuild init -q
+          git -C /tmp/gobuild add -A >/dev/null
+          git -C /tmp/gobuild -c user.email=ci@example.com -c user.name=ci commit -qm ci
+          docker build -f /tmp/gobuild/Dockerfile --target cadence-auto-setup -t cadence-go:ci /tmp/gobuild > out/go-build.log 2>&1 || { tail -40 out/go-build.log; exit 1; }
+          tail -5 out/go-build.log
           docker image inspect cadence-go:ci --format 'go image id={{.Id}} size={{.Size}}' | tee out/images.txt
       - name: Build Rust image
         run: |
