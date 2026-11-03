@@ -349,6 +349,17 @@ impl P {
             let r = self.operand()?;
             return Ok(Expr::Cmp(l, op, r));
         }
+        // A bare operand is valid SQL for Go's parser; the validator then
+        // rejects it as "invalid where clause".
+        if self.peek().is_none()
+            || matches!(self.peek(), Some(Tok::RParen))
+            || self.peek_kw("and")
+            || self.peek_kw("or")
+            || self.peek_kw("order")
+            || self.peek_kw("limit")
+        {
+            return Ok(Expr::Is);
+        }
         Err(())
     }
 }
