@@ -213,7 +213,14 @@ where
     M: AuthorizationMetrics + Send + Sync,
 {
     fn authorize(&self, operation: &str, request: &Value, actor: &str) -> Result<(), CadenceError> {
-        authorize_request(operation, request, actor, "", &self.authorizer, &self.metrics)
+        authorize_request(
+            operation,
+            request,
+            actor,
+            "",
+            &self.authorizer,
+            &self.metrics,
+        )
     }
 
     fn authorize_with_headers(
