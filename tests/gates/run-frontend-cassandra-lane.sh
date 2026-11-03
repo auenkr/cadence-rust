@@ -13,9 +13,11 @@ CONTAINER="cadence-rust-gate-$RUN_ID"
 mkdir -p "$ARTIFACTS"
 [[ "$KEYSPACE" =~ ^[A-Za-z][A-Za-z0-9_]*$ && "$VISIBILITY_KEYSPACE" =~ ^[A-Za-z][A-Za-z0-9_]*$ ]] || { echo "bad keyspace name" >&2; exit 2; }
 STARTED=0
+source "$ROOT/tests/gates/lib-kafka.sh"
 cleanup() {
   local status=$?
   trap - EXIT INT TERM
+  kafka_cleanup
   if (( STARTED )); then
     docker logs "$CONTAINER" > "$ARTIFACTS/cassandra-container.log" 2>&1 || true
     docker rm --force "$CONTAINER" > "$ARTIFACTS/cassandra-container-cleanup.txt" 2>&1 || true
@@ -39,7 +41,8 @@ done
 export CADENCE_CASSANDRA_DOCKER_CONTAINER="$CONTAINER"
 export CADENCE_CASSANDRA_CONTACT_POINTS=127.0.0.1 CADENCE_CASSANDRA_PORT="$PORT"
 export CADENCE_CASSANDRA_KEYSPACE="$KEYSPACE" CADENCE_CASSANDRA_VISIBILITY_KEYSPACE="$VISIBILITY_KEYSPACE"
-python3 "$ROOT/tests/gates/run-frontend-gate.py" --database cassandra --out "$ARTIFACTS/run" "$@"
+kafka_start
+python3 "$ROOT/tests/gates/run-frontend-gate.py" --database cassandra --out "$ARTIFACTS/run" "${KAFKA_ARGS[@]}" "$@"
 status=$?
 echo "$status" > "$ARTIFACTS/lane.exit"
 exit "$status"
