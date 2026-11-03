@@ -12,9 +12,6 @@ use pa::cross_cluster_task_request::Attributes as ReqAttr;
 use pa::cross_cluster_task_response::Attributes as RespAttr;
 use std::collections::HashMap;
 
-fn ms(ts: prost_types::Timestamp) -> i64 {
-    ts.seconds * 1000 + i64::from(ts.nanos) / 1_000_000
-}
 fn ns(ts: prost_types::Timestamp) -> i64 {
     ts.seconds * 1_000_000_000 + i64::from(ts.nanos)
 }
@@ -86,7 +83,7 @@ fn start_child_initiated_in(
         }),
         delay_start_seconds: seconds(v.delay_start)?,
         jitter_start_seconds: seconds(v.jitter_start)?,
-        first_run_at_timestamp: v.first_run_at.map(ms),
+        first_run_at_timestamp: v.first_run_at.map(ns),
         cron_overlap_policy: enum_in(v.cron_overlap_policy, e::CronOverlapPolicy::from_i32)?,
     })
 }
@@ -97,7 +94,7 @@ fn completion_event_in(v: p::HistoryEvent) -> Result<st::HistoryEvent, Status> {
     use p::history_event::Attributes as A;
     let mut out = st::HistoryEvent {
         event_id: v.event_id,
-        timestamp: v.event_time.map(ms),
+        timestamp: v.event_time.map(ns),
         version: v.version,
         task_id: v.task_id,
         ..Default::default()

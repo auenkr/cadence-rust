@@ -99,6 +99,13 @@ pub fn request_tags(operation: &str, request: &serde_json::Value) -> Vec<MetricT
     let mut tags = Vec::new();
     let mut add = |key, value: String| tags.push(MetricTag { key, value });
     let domain = || string_field(request, "domain");
+    // Go's per-task-list scopes also read the task list of Start*/SignalWithStart*.
+    fn add_task_list(add: &mut impl FnMut(&'static str, String), request: &serde_json::Value) {
+        if let Some(task_list) = request.get("taskList").filter(|t| t.is_object()) {
+            add("wf-task-list-name", string_field(task_list, "name"));
+            add("wf-task-list-kind", number_field(task_list, "kind"));
+        }
+    }
     match operation {
         "CountWorkflowExecutions"
         | "GetTaskListsByDomain"
@@ -165,12 +172,14 @@ pub fn request_tags(operation: &str, request: &serde_json::Value) -> Vec<MetricT
             add("wf-id", string_field(request, "workflowId"));
             add("wf-type", nested_string(request, "workflowType", "name"));
             add("wf-cron-schedule", string_field(request, "cronSchedule"));
+            add_task_list(&mut add, request);
         }
         "SignalWithStartWorkflowExecution" | "SignalWithStartWorkflowExecutionAsync" => {
             add("wf-domain-name", domain());
             add("wf-id", string_field(request, "workflowId"));
             add("wf-type", nested_string(request, "workflowType", "name"));
             add("wf-signal-name", string_field(request, "signalName"));
+            add_task_list(&mut add, request);
         }
         "ListTaskListPartitions" | "PollForActivityTask" | "PollForDecisionTask" => {
             add("wf-domain-name", domain());
@@ -179,6 +188,14 @@ pub fn request_tags(operation: &str, request: &serde_json::Value) -> Vec<MetricT
             add("wf-task-list-kind", number_field(task_list, "kind"));
         }
         _ => {}
+    }
+    // Go tags every per-operation scope with `domain` (request domain, or
+    // `_unknown_` for APIs without one), so make sure it is always present.
+    if !tags.iter().any(|t| t.key == "wf-domain-name") {
+        tags.push(MetricTag {
+            key: "wf-domain-name",
+            value: string_field(request, "domain"),
+        });
     }
     tags
 }
@@ -196,6 +213,12 @@ fn number_field(value: &serde_json::Value, key: &str) -> String {
         .get(key)
         .map_or_else(String::new, |value| match value {
             serde_json::Value::Number(number) => number.to_string(),
+            serde_json::Value::String(name) => match name.as_str() {
+                "NORMAL" => "0".to_owned(),
+                "STICKY" => "1".to_owned(),
+                "EPHEMERAL" => "2".to_owned(),
+                _ => String::new(),
+            },
             _ => String::new(),
         })
 }

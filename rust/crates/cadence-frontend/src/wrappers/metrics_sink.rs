@@ -15,6 +15,22 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 pub const CADENCE_REQUESTS: &str = "cadence_requests";
 pub const CADENCE_LATENCY: &str = "cadence_latency";
 pub const CADENCE_LATENCY_NS: &str = "cadence_latency_ns";
+pub const CADENCE_REQUESTS_PER_TL: &str = "cadence_requests_per_tl";
+pub const CADENCE_LATENCY_PER_TL: &str = "cadence_latency_per_tl";
+pub const CADENCE_LATENCY_PER_TL_NS: &str = "cadence_latency_per_tl_ns";
+const UNKNOWN: &str = "_unknown_";
+
+/// Go `common.NewPerTaskListScope` users in `metered/api_generated.go`.
+const PER_TASK_LIST_OPERATIONS: &[&str] = &[
+    "DescribeTaskList",
+    "ListTaskListPartitions",
+    "PollForActivityTask",
+    "PollForDecisionTask",
+    "SignalWithStartWorkflowExecution",
+    "SignalWithStartWorkflowExecutionAsync",
+    "StartWorkflowExecution",
+    "StartWorkflowExecutionAsync",
+];
 
 pub struct SinkMetrics {
     sink: Arc<dyn MetricSink>,
@@ -25,16 +41,58 @@ impl SinkMetrics {
         Self { sink }
     }
 
+    /// Go's per-domain scope tags: `operation`, `domain` (`_unknown_` when
+    /// blank) and, when `frontend.emitSignalNameMetricsTag` is on, `signalName`.
+    /// The request log tags (`wf-*`) are NOT metric tags in Go.
     fn tags(operation: &str, tags: &[MetricTag]) -> BTreeMap<String, String> {
+        let unknown = |v: &str| {
+            if v.is_empty() {
+                UNKNOWN.to_owned()
+            } else {
+                v.to_owned()
+            }
+        };
         let mut out = BTreeMap::new();
         out.insert("operation".to_owned(), operation.to_owned());
+        let mut domain = "";
         for tag in tags {
-            out.insert(tag.key.to_owned(), tag.value.clone());
-            if tag.key == "wf-domain-name" {
-                out.insert("domain".to_owned(), tag.value.clone());
+            match tag.key {
+                "wf-domain-name" => domain = &tag.value,
+                "signalName" => {
+                    out.insert("signalName".to_owned(), unknown(&tag.value));
+                }
+                _ => {}
             }
         }
+        out.insert("domain".to_owned(), unknown(domain));
         out
+    }
+
+    /// Go `NewPerTaskListScope` tag: sticky/ephemeral fixed names, the name for
+    /// a normal list, `_unknown_` otherwise.
+    fn task_list_tag(tags: &[MetricTag]) -> String {
+        let find = |key: &str| {
+            tags.iter()
+                .find(|t| t.key == key)
+                .map_or("", |t| t.value.as_str())
+        };
+        match find("wf-task-list-kind") {
+            "1" => "__sticky__".to_owned(),
+            "2" => "__ephemeral__".to_owned(),
+            _ => match find("wf-task-list-name") {
+                "" => UNKNOWN.to_owned(),
+                name => name.to_owned(),
+            },
+        }
+    }
+
+    fn per_task_list(operation: &str, tags: &[MetricTag]) -> Option<BTreeMap<String, String>> {
+        if !PER_TASK_LIST_OPERATIONS.contains(&operation) {
+            return None;
+        }
+        let mut out = Self::tags(operation, tags);
+        out.insert("tasklist".to_owned(), Self::task_list_tag(tags));
+        Some(out)
     }
 
     fn emit(
@@ -83,6 +141,15 @@ impl Metrics for SinkMetrics {
     }
 
     fn increment_requests_tagged(&self, operation: &str, tags: &[MetricTag]) {
+        if let Some(tl) = Self::per_task_list(operation, tags) {
+            self.emit(
+                CADENCE_REQUESTS_PER_TL,
+                MetricKind::Counter,
+                MetricValue::Count(1),
+                tl,
+                None,
+            );
+        }
         self.emit(
             CADENCE_REQUESTS,
             MetricKind::Counter,
@@ -98,6 +165,15 @@ impl Metrics for SinkMetrics {
         elapsed: Duration,
         tags: &[MetricTag],
     ) {
+        if let Some(tl) = Self::per_task_list(operation, tags) {
+            self.emit(
+                CADENCE_LATENCY_PER_TL_NS,
+                MetricKind::Histogram,
+                MetricValue::Duration(elapsed),
+                tl,
+                Some(HistogramSpec::GoDefault1ms100s),
+            );
+        }
         self.emit(
             CADENCE_LATENCY_NS,
             MetricKind::Histogram,
@@ -108,6 +184,15 @@ impl Metrics for SinkMetrics {
     }
 
     fn record_operation(&self, operation: &str, elapsed: Duration, tags: &[MetricTag]) {
+        if let Some(tl) = Self::per_task_list(operation, tags) {
+            self.emit(
+                CADENCE_LATENCY_PER_TL,
+                MetricKind::Timer,
+                MetricValue::Duration(elapsed),
+                tl,
+                None,
+            );
+        }
         self.emit(
             CADENCE_LATENCY,
             MetricKind::Timer,
@@ -144,14 +229,18 @@ mod tests {
     fn request_latency_and_errors_carry_operation_and_domain_tags() {
         let sink = Arc::new(RecordingMetricSink::default());
         let m = SinkMetrics::new(sink.clone());
-        m.increment_requests("StartWorkflowExecution");
+        m.increment_requests("DescribeWorkflowExecution");
         m.record_operation(
-            "StartWorkflowExecution",
+            "DescribeWorkflowExecution",
             Duration::from_millis(3),
             &domain_tag(),
         );
-        m.record_latency_histogram("StartWorkflowExecution", Duration::from_millis(3));
-        m.increment_error("StartWorkflowExecution", &domain_tag(), Counter::BadRequest);
+        m.record_latency_histogram("DescribeWorkflowExecution", Duration::from_millis(3));
+        m.increment_error(
+            "DescribeWorkflowExecution",
+            &domain_tag(),
+            Counter::BadRequest,
+        );
         let events = sink.events();
         let names: Vec<_> = events.iter().map(|e| e.name).collect();
         assert_eq!(
@@ -163,9 +252,9 @@ mod tests {
                 "cadence_errors_bad_request"
             ]
         );
-        assert_eq!(events[1].tags["operation"], "StartWorkflowExecution");
+        assert_eq!(events[1].tags["operation"], "DescribeWorkflowExecution");
         assert_eq!(events[1].tags["domain"], "d1");
-        assert_eq!(events[1].tags["wf-domain-name"], "d1");
+        assert!(!events[1].tags.contains_key("wf-domain-name"));
         assert_eq!(events[1].kind, MetricKind::Timer);
         assert_eq!(events[2].kind, MetricKind::Histogram);
         assert_eq!(events[3].tags["domain"], "d1");
@@ -179,5 +268,47 @@ mod tests {
         m.increment_error("X", &[], Counter::ServiceBusy);
         let names: Vec<_> = sink.events().iter().map(|e| e.name).collect();
         assert_eq!(names, ["cadence_errors", "cadence_errors_service_busy"]);
+    }
+
+    #[test]
+    fn blank_domain_is_unknown_and_per_tasklist_metrics_match_go() {
+        let sink = Arc::new(RecordingMetricSink::default());
+        let m = SinkMetrics::new(sink.clone());
+        let tags = vec![
+            MetricTag {
+                key: "wf-domain-name",
+                value: String::new(),
+            },
+            MetricTag {
+                key: "wf-task-list-name",
+                value: "tl".into(),
+            },
+            MetricTag {
+                key: "wf-task-list-kind",
+                value: "1".into(),
+            },
+        ];
+        m.increment_requests_tagged("PollForDecisionTask", &tags);
+        m.record_operation("PollForDecisionTask", Duration::from_millis(1), &tags);
+        m.record_latency_histogram_tagged("PollForDecisionTask", Duration::from_millis(1), &tags);
+        let events = sink.events();
+        let names: Vec<_> = events.iter().map(|e| e.name).collect();
+        assert_eq!(
+            names,
+            [
+                "cadence_requests_per_tl",
+                "cadence_requests",
+                "cadence_latency_per_tl",
+                "cadence_latency",
+                "cadence_latency_per_tl_ns",
+                "cadence_latency_ns"
+            ]
+        );
+        assert_eq!(events[0].tags["tasklist"], "__sticky__");
+        assert_eq!(events[0].tags["domain"], "_unknown_");
+        assert!(!events[1].tags.contains_key("tasklist"));
+        m.increment_requests_tagged("StartWorkflowExecution", &[]);
+        let events = sink.events();
+        assert_eq!(events[6].tags["tasklist"], "_unknown_");
     }
 }
