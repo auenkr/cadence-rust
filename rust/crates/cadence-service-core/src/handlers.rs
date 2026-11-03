@@ -2148,6 +2148,21 @@ async fn delete_domain(
     if current.domain_info.as_ref().and_then(|info| info.status) != Some(DomainStatus::Deprecated) {
         return bad_request(BadRequestError::new("Domain is not in a deprecated state."));
     }
+    if let Ok(store) = state.execution_store(&req.name) {
+        let list_request = cadence_api::service_types::ListWorkflowExecutionsRequest {
+            domain: req.name.clone(),
+            ..Default::default()
+        };
+        match store.visibility_page(&list_request) {
+            Ok(page) if !page.executions.is_empty() => {
+                return bad_request(BadRequestError::new(
+                    "Domain still have workflow execution history.",
+                ));
+            }
+            Ok(_) => {}
+            Err(error) => return bad_request(error),
+        }
+    }
     match state.domain_manager.delete(&req.name) {
         Ok(()) => {
             state.executions.unregister_domain(&req.name);

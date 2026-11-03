@@ -78,7 +78,7 @@ if args.es_url:
     assert 'value: "db"' in dyn
     dyn = dyn.replace('value: "db"', 'value: "es"')
 (work / 'dynamic-config.yaml').write_text(dyn)
-(work / 'rust-dynamic-config.yaml').write_text(dyn + f'\nsystem.enableGRPCOutbound:\n  - value: {str(args.rust_outbound == "grpc").lower()}\n')
+(work / 'rust-dynamic-config.yaml').write_text(dyn + f'\nsystem.enableGRPCOutbound:\n  - value: {str(args.rust_outbound == "grpc").lower()}\nfrontend.sendRawWorkflowHistory:\n  - value: true\n')
 (work / 'config/base.yaml').write_text((root / 'go/config/base.yaml').read_text())
 seeds = ', '.join(f'"127.0.0.1:{ports[k]}"' for k in ['FRONTEND_PORT', 'HISTORY_PORT', 'WORKER_PORT', 'RUST_MATCHING_PORT'] + (['HISTORY2_PORT'] if args.two_history else []))
 text = (root / 'go/config/development.yaml').read_text()

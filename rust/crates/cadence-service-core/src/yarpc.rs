@@ -189,7 +189,11 @@ fn require_task_domain_thrift(state: &AppState, bytes: &[u8]) -> Result<(), AppE
         .map_err(|e| AppError::entity_not_exists(e.message))
 }
 
-async fn handle_delete_domain(state: &AppState, body: &Struct) -> HandlerResult {
+async fn handle_delete_domain(
+    state: &AppState,
+    body: &Struct,
+    ctx: &crate::workflow_api::CallerContext,
+) -> HandlerResult {
     let req: DeleteDomainRequest = decode_args(body).map_err(AppError::bad_request)?;
     if req.name.is_empty() {
         return Err(AppError::bad_request(
@@ -207,6 +211,33 @@ async fn handle_delete_domain(state: &AppState, body: &Struct) -> HandlerResult 
     if current.domain_info.as_ref().and_then(|info| info.status) != Some(cadence_api::enums::DomainStatus::Deprecated) {
         return Err(AppError::bad_request(
             "Domain is not in a deprecated state.".to_string(),
+        ));
+    }
+    // Go: ListWorkflowExecutions(domain) must return no executions.
+    let list_request = cadence_api::service_types::ListWorkflowExecutionsRequest {
+        domain: req.name.clone(),
+        ..Default::default()
+    };
+    let has_executions = if let Some(api) = &state.workflow_api {
+        let value = serde_json::to_value(&list_request)
+            .map_err(|e| AppError::internal(e.to_string()))?;
+        let out = api
+            .call("ListWorkflowExecutions", value, ctx.clone())
+            .await
+            .map_err(schedule_api_error)?;
+        let response: cadence_api::service_types::ListWorkflowExecutionsResponse =
+            serde_json::from_value(out).map_err(|e| AppError::internal(e.to_string()))?;
+        !response.executions.is_empty()
+    } else {
+        !require_domain_thrift(state, &req.name)?
+            .visibility_page(&list_request)
+            .map_err(|e| AppError::bad_request(e.message))?
+            .executions
+            .is_empty()
+    };
+    if has_executions {
+        return Err(AppError::bad_request(
+            "Domain still have workflow execution history.".to_string(),
         ));
     }
     state
@@ -2863,7 +2894,7 @@ pub async fn dispatch_with_headers(
         "ListOperationalDynamicConfig" => handle_list_dynamic_config(state, body, true),
         "UpdateDomain" => handle_update_domain(state, body).await,
         "DeprecateDomain" => handle_deprecate_domain(state, body).await,
-        "DeleteDomain" => handle_delete_domain(state, body).await,
+        "DeleteDomain" => handle_delete_domain(state, body, &schedule_ctx).await,
         "StartWorkflowExecution" => handle_start(state, body).await,
         "DescribeWorkflowExecution" => handle_describe_workflow(state, body).await,
         "GetWorkflowExecutionHistory" => handle_get_history(state, body, deadline).await,

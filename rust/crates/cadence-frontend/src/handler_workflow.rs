@@ -323,6 +323,7 @@ pub struct Handler<B> {
     validator: crate::request_validator::RequestValidator,
     history_max_page_size: i32,
     history_page_size_policy: Option<Arc<dyn HistoryPageSizePolicy>>,
+    raw_history_policy: Option<Arc<dyn RawHistoryPolicy>>,
     metrics: Arc<dyn crate::wrappers::metered::Metrics + Send + Sync>,
     access_control: Option<Arc<dyn RequestAuthorization>>,
     redirector: Option<Arc<dyn RequestRedirector>>,
@@ -511,6 +512,11 @@ pub trait HistoryPageSizePolicy: Send + Sync {
     fn maximum_page_size(&self, domain: &str) -> i32;
 }
 
+/// Go `frontend.sendRawWorkflowHistory` (domain filtered, default false).
+pub trait RawHistoryPolicy: Send + Sync {
+    fn send_raw_history(&self, domain: &str) -> bool;
+}
+
 /// Dynamic per-domain `DisallowQuery` check performed by Go before it checks
 /// the Query payload itself.
 pub trait WorkflowQueryPolicy: Send + Sync {
@@ -553,6 +559,7 @@ impl<B: WorkflowBackend> Handler<B> {
             validator: crate::request_validator::RequestValidator::default(),
             history_max_page_size: 1000,
             history_page_size_policy: None,
+            raw_history_policy: None,
             metrics: Arc::new(NoopWorkflowMetrics),
             access_control: None,
             redirector: None,
@@ -585,6 +592,7 @@ impl<B: WorkflowBackend> Handler<B> {
             validator,
             history_max_page_size: 1000,
             history_page_size_policy: None,
+            raw_history_policy: None,
             metrics: Arc::new(NoopWorkflowMetrics),
             access_control: None,
             redirector: None,
@@ -622,6 +630,7 @@ impl<B: WorkflowBackend> Handler<B> {
             validator,
             history_max_page_size: 1000,
             history_page_size_policy: None,
+            raw_history_policy: None,
             metrics,
             access_control: None,
             redirector: None,
@@ -701,6 +710,11 @@ impl<B: WorkflowBackend> Handler<B> {
     /// when GetWorkflowExecutionHistory omits a positive page size.
     pub fn with_history_max_page_size(mut self, maximum: i32) -> Self {
         self.history_max_page_size = maximum;
+        self
+    }
+
+    pub fn with_raw_history_policy(mut self, policy: Arc<dyn RawHistoryPolicy>) -> Self {
+        self.raw_history_policy = Some(policy);
         self
     }
 
@@ -1115,6 +1129,28 @@ impl<B: WorkflowBackend> Handler<B> {
                 })?;
                 publisher.publish(message).await?;
                 return Ok(serde_json::json!({}));
+            }
+        }
+        // Go: isRawHistoryEnabled = SendRawWorkflowHistory(domain) && client supports it.
+        let mut request = request;
+        if operation == WorkflowOperation::GetWorkflowExecutionHistory {
+            let domain = request
+                .get("domain")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+            if self
+                .raw_history_policy
+                .as_ref()
+                .is_some_and(|policy| policy.send_raw_history(&domain))
+                && crate::wrappers::versioncheck::supports_raw_history_query(
+                    &caller.client_impl,
+                    &caller.feature_version,
+                )
+            {
+                if let Some(object) = request.as_object_mut() {
+                    object.insert("__rawHistory".to_owned(), Value::Bool(true));
+                }
             }
         }
         let poll_domain = if matches!(

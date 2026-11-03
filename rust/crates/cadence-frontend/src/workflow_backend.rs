@@ -933,6 +933,21 @@ impl crate::handler_workflow::HistoryPageSizePolicy for DynamicHistoryPageSize {
     }
 }
 
+/// Go `frontend.sendRawWorkflowHistory` (domain filtered, default false).
+struct DynamicRawHistory(SharedOverlay);
+
+impl crate::handler_workflow::RawHistoryPolicy for DynamicRawHistory {
+    fn send_raw_history(&self, domain: &str) -> bool {
+        self.0.lock().is_ok_and(|o| {
+            cadence_persistence::dynamic_config::boolean(
+                o.property_values("frontend.sendRawWorkflowHistory"),
+                Some(domain),
+                false,
+            )
+        })
+    }
+}
+
 /// Build the production WorkflowService for the Frontend launcher.
 pub fn build_workflow_api(
     ctx: cadence_matching::launcher::FrontendHookContext,
@@ -1342,6 +1357,9 @@ pub fn build_workflow_api(
         dynamic_overlay.clone(),
     )))
     .with_history_page_size_policy(std::sync::Arc::new(DynamicHistoryPageSize(
+        dynamic_overlay.clone(),
+    )))
+    .with_raw_history_policy(std::sync::Arc::new(DynamicRawHistory(
         dynamic_overlay.clone(),
     )))
     .with_archived_history_reader(archived_history)

@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/cadence/.gen/go/cadence/workflowserviceclient"
 	"go.uber.org/cadence/.gen/go/shared"
+	"go.uber.org/yarpc"
 )
 
 // routed accepts nil or a typed Cadence error produced by the service that Go would also produce
@@ -105,8 +106,63 @@ func apiCoverage(ctx context.Context, rpc workflowserviceclient.Interface, domai
 		e = de
 	}
 	step("api-deprecate-domain", e)
-	// Go lists workflow executions before deleting; either outcome must be a Go-shaped response.
-	step("api-delete-domain-deprecated", routed(rpc.DeleteDomain(ctx, &shared.DeleteDomainRequest{Name: ptr(dom)})))
+	// Go lists workflow executions before deleting. When the domain has no executions the delete must
+	// succeed and the domain must be gone; otherwise it must be a Go-shaped (non-Internal) response.
+	step("api-delete-domain-deprecated", func() error {
+		lst, le := rpc.ListWorkflowExecutions(ctx, &shared.ListWorkflowExecutionsRequest{Domain: ptr(dom)})
+		de := rpc.DeleteDomain(ctx, &shared.DeleteDomainRequest{Name: ptr(dom)})
+		if le != nil || len(lst.Executions) != 0 {
+			return routed(de)
+		}
+		if de != nil {
+			return fmt.Errorf("delete of empty deprecated domain: %w", de)
+		}
+		_, ge := rpc.DescribeDomain(ctx, &shared.DescribeDomainRequest{Name: ptr(dom)})
+		var nf *shared.EntityNotExistsError
+		if !errors.As(ge, &nf) {
+			return fmt.Errorf("deleted domain should be EntityNotExists, got %T %v", ge, ge)
+		}
+		return nil
+	}())
+	// Deprecated domain that still has an execution must not be deleted.
+	step("api-delete-domain-with-executions", func() error {
+		dom3 := dom + "c"
+		if e := rpc.RegisterDomain(ctx, &shared.RegisterDomainRequest{Name: ptr(dom3), WorkflowExecutionRetentionPeriodInDays: ptr(int32(1))}); e != nil {
+			return e
+		}
+		// The domain cache may take a moment to see a freshly registered domain.
+			var se error
+			for i := 0; i < 30; i++ {
+				_, se = rpc.StartWorkflowExecution(ctx, &shared.StartWorkflowExecutionRequest{Domain: ptr(dom3), WorkflowId: ptr("del-dom-wf"), WorkflowType: &shared.WorkflowType{Name: ptr("main.EchoWorkflow")},
+					TaskList: &shared.TaskList{Name: ptr(tl + "-deldom")}, ExecutionStartToCloseTimeoutSeconds: ptr(int32(60)), TaskStartToCloseTimeoutSeconds: ptr(int32(10)), RequestId: ptr(uuid.NewString())})
+				if se == nil {
+					break
+				}
+				time.Sleep(time.Second)
+			}
+			if se != nil {
+				return se
+			}
+			if e := rpc.DeprecateDomain(ctx, &shared.DeprecateDomainRequest{Name: ptr(dom3)}); e != nil {
+			return e
+		}
+		visible := false
+		for i := 0; i < 30 && !visible; i++ {
+			lst, le := rpc.ListWorkflowExecutions(ctx, &shared.ListWorkflowExecutionsRequest{Domain: ptr(dom3)})
+			if le != nil {
+				break
+			}
+			visible = len(lst.Executions) > 0
+			if !visible {
+				time.Sleep(time.Second)
+			}
+		}
+		de := rpc.DeleteDomain(ctx, &shared.DeleteDomainRequest{Name: ptr(dom3)})
+		if visible {
+			return wantBadRequest(de, "Domain still have workflow execution history.")
+		}
+		return routed(de)
+	}())
 	step("api-delete-domain-missing", func() error {
 		e := rpc.DeleteDomain(ctx, &shared.DeleteDomainRequest{Name: ptr("fe-api-none-" + uuid.NewString()[:6])})
 		var nf *shared.EntityNotExistsError
@@ -125,7 +181,23 @@ func apiCoverage(ctx context.Context, rpc workflowserviceclient.Interface, domai
 		return nil
 	}())
 	_, e = rpc.FailoverDomain(ctx, &shared.FailoverDomainRequest{DomainName: ptr(dom2), DomainActiveClusterName: ptr("active")})
-	step("api-failover-domain", routed(e))
+	step("api-failover-domain", func() error {
+		if e != nil {
+			var br *shared.BadRequestError
+			if errors.As(e, &br) {
+				return nil
+			}
+			return routed(e)
+		}
+		d, de := rpc.DescribeDomain(ctx, &shared.DescribeDomainRequest{Name: ptr(dom2)})
+		if de != nil {
+			return de
+		}
+		if d.ReplicationConfiguration.GetActiveClusterName() != "active" {
+			return fmt.Errorf("active cluster after failover = %q", d.ReplicationConfiguration.GetActiveClusterName())
+		}
+		return nil
+	}())
 	_, e = rpc.ListFailoverHistory(ctx, &shared.ListFailoverHistoryRequest{})
 	step("api-list-failover-history-no-domain-id", wantBadRequest(e, "DomainID is required in filters"))
 	d2, e := rpc.DescribeDomain(ctx, &shared.DescribeDomainRequest{Name: ptr(dom2)})
@@ -239,6 +311,37 @@ func apiCoverage(ctx context.Context, rpc workflowserviceclient.Interface, domai
 
 	// ---- reset: find the first DecisionTaskFailed event
 	hist, e := rpc.GetWorkflowExecutionHistory(ctx, &shared.GetWorkflowExecutionHistoryRequest{Domain: &domain, Execution: &shared.WorkflowExecution{WorkflowId: &wfID, RunId: &runID}})
+	// ---- raw history (frontend.sendRawWorkflowHistory=true in the Rust dynamic config; Go sends raw blobs
+	// only for clients that advertise support via the implementation/feature-version headers).
+	step("api-history-raw-supported-client", func() error {
+		resp, err := rpc.GetWorkflowExecutionHistory(ctx, &shared.GetWorkflowExecutionHistoryRequest{Domain: &domain, Execution: &shared.WorkflowExecution{WorkflowId: &wfID, RunId: &runID}},
+			yarpc.WithHeader("cadence-client-implementation", "uber-go"), yarpc.WithHeader("cadence-client-feature-version", "1.7.0"))
+		if err != nil {
+			return err
+		}
+		if len(resp.RawHistory) == 0 {
+			return errors.New("expected RawHistory blobs for a raw-capable client")
+		}
+		if resp.History != nil && len(resp.History.Events) != 0 {
+			return fmt.Errorf("expected empty History.Events when raw, got %d", len(resp.History.Events))
+		}
+		for _, b := range resp.RawHistory {
+			if b.GetEncodingType() != shared.EncodingTypeThriftRW || len(b.Data) == 0 {
+				return fmt.Errorf("unexpected raw blob encoding %v len %d", b.GetEncodingType(), len(b.Data))
+			}
+		}
+		return nil
+	}())
+	step("api-history-raw-unsupported-client", func() error {
+		resp, err := rpc.GetWorkflowExecutionHistory(ctx, &shared.GetWorkflowExecutionHistoryRequest{Domain: &domain, Execution: &shared.WorkflowExecution{WorkflowId: &wfID, RunId: &runID}})
+		if err != nil {
+			return err
+		}
+		if len(resp.RawHistory) != 0 || resp.History == nil || len(resp.History.Events) == 0 {
+			return fmt.Errorf("expected decoded events without raw blobs, raw=%d", len(resp.RawHistory))
+		}
+		return nil
+	}())
 	var resetAt int64
 	if e == nil {
 		for _, ev := range hist.History.Events {
