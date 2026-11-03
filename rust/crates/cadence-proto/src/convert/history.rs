@@ -411,7 +411,7 @@ fn upsert_workflow_search_attributes_event_attributes(
         search_attributes: v.search_attributes.map(search_attributes),
     }
 }
-fn start_child_workflow_execution_initiated_event_attributes(
+pub(crate) fn start_child_workflow_execution_initiated_event_attributes(
     v: tasks::StartChildWorkflowExecutionInitiatedEventAttributes,
 ) -> p::StartChildWorkflowExecutionInitiatedEventAttributes {
     p::StartChildWorkflowExecutionInitiatedEventAttributes {

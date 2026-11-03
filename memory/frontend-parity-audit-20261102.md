@@ -284,3 +284,7 @@ Rule: a row keeps the status in its original table row unless it is listed here.
 | IPv6 bind | ported | gate `cli-describe-domain-grpc-ipv6` |
 | Multi-History churn | ported | gate `go-history-2-killed` / `sdk-history-churn-*` |
 | History shard routing, Ringpop multi-node, domain replication remote consumption | partial | see rows above; unchanged |
+
+
+## Lane coverage update 2026-11-03
+Full Frontend mixed gate (kafka, two_history, oauth, metrics, archival, dynconfig, multi-History churn) green on MySQL, Postgres (run 41622697487) and Cassandra (run 41622702539); ES visibility lane green on Postgres (41624742792); rust-ci green (41624747694). Details: memory/evidence/frontend-pg-cassandra-lanes-20261103.md.

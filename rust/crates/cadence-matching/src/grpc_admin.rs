@@ -45,6 +45,8 @@ impl Admin {
     }
 }
 
+use cadence_proto::convert::cross_cluster as xc;
+
 fn data_blob_out(v: cadence_api::types::DataBlob) -> cadence_proto::api::DataBlob {
     // Admin DataBlobs carry JSON bytes, mirroring Go's json.Marshal wrapper.
     cadence_proto::api::DataBlob {
@@ -1077,9 +1079,15 @@ impl a::admin_api_server::AdminApi for Admin {
         if r.target_cluster.is_empty() {
             return Err(Status::invalid_argument("Target cluster is not set."));
         }
+        let input = cadence_api::admin::GetCrossClusterTasksRequest {
+            shard_ids: r.shard_ids,
+            target_cluster: r.target_cluster,
+        };
+        let out: cadence_api::admin::GetCrossClusterTasksResponse =
+            self.call("/api/v1/admin/cross-cluster/tasks", &input).await?;
         Ok(Response::new(a::GetCrossClusterTasksResponse {
-            tasks_by_shard: Default::default(),
-            failed_cause_by_shard: Default::default(),
+            tasks_by_shard: xc::tasks_by_shard_out(out.tasks_by_shard)?,
+            failed_cause_by_shard: xc::failed_causes_out(out.failed_cause_by_shard),
         }))
     }
 
@@ -1091,9 +1099,22 @@ impl a::admin_api_server::AdminApi for Admin {
         if r.target_cluster.is_empty() {
             return Err(Status::invalid_argument("Target cluster is not set."));
         }
-        Ok(Response::new(
-            a::RespondCrossClusterTasksCompletedResponse { tasks: None },
-        ))
+        let input = cadence_api::admin::RespondCrossClusterTasksCompletedRequest {
+            shard_id: r.shard_id,
+            target_cluster: r.target_cluster,
+            task_responses: r
+                .task_responses
+                .into_iter()
+                .map(xc::task_response_in)
+                .collect::<Result<_, _>>()?,
+            fetch_new_tasks: r.fetch_new_tasks,
+        };
+        let out: cadence_api::admin::RespondCrossClusterTasksCompletedResponse = self
+            .call("/api/v1/admin/cross-cluster/tasks-completed", &input)
+            .await?;
+        Ok(Response::new(a::RespondCrossClusterTasksCompletedResponse {
+            tasks: xc::task_requests_out(out.tasks)?,
+        }))
     }
 }
 

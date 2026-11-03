@@ -88,6 +88,26 @@ pub struct EsBinding {
             + Sync,
     >,
     pub validate: Arc<dyn Fn() -> bool + Send + Sync>,
+    /// Go `system.readVisibilityStoreName` (per domain name, default `es`).
+    pub read_store: Arc<dyn Fn(&str) -> String + Send + Sync>,
+}
+
+/// Go `chooseVisibilityManagerForRead`: the first comma-separated store wins;
+/// stores that are not available (anything but the configured ES/OpenSearch
+/// store) fall back to the DB visibility manager. Returns true for ES.
+pub fn read_store_selects_es(configured: &str) -> bool {
+    let first = configured.split(',').next().unwrap_or_default();
+    matches!(first.trim().to_lowercase().as_str(), "es" | "os")
+}
+
+impl ProductionBackend {
+    /// The ES binding when this request's domain reads from advanced
+    /// visibility, else `None` (DB visibility).
+    fn es_for_read(&self, request: &serde_json::Value) -> Option<EsBinding> {
+        let binding = self.es.as_ref()?;
+        let domain = str_field(request, "domain").unwrap_or_default();
+        read_store_selects_es(&(binding.read_store)(&domain)).then(|| binding.clone())
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -126,7 +146,7 @@ impl ProductionBackend {
         request: &serde_json::Value,
         op: EsOp,
     ) -> Result<serde_json::Value, CadenceError> {
-        let Some(binding) = self.es.clone() else {
+        let Some(binding) = self.es_for_read(request) else {
             return Err(not_supported());
         };
         let domain_id = str_field(request, "domainUUID").unwrap_or_default();
@@ -175,7 +195,7 @@ impl ProductionBackend {
         request: &serde_json::Value,
         closed: bool,
     ) -> Result<serde_json::Value, CadenceError> {
-        let Some(binding) = self.es.clone() else {
+        let Some(binding) = self.es_for_read(request) else {
             return Err(not_supported());
         };
         let domain_id = str_field(request, "domainUUID").unwrap_or_default();
@@ -259,7 +279,7 @@ impl ProductionBackend {
         request: &serde_json::Value,
         closed: bool,
     ) -> Result<serde_json::Value, CadenceError> {
-        if self.es.is_some() {
+        if self.es_for_read(request).is_some() {
             return self.es_open_closed(request, closed).await;
         }
         let store = self.visibility_store()?.clone();
@@ -332,5 +352,22 @@ impl ProductionBackend {
         row.workflow_id = workflow_id.to_string();
         row.run_id = run_id.to_string();
         Ok(row_to_info(&row))
+    }
+}
+
+#[cfg(test)]
+mod read_store_tests {
+    use super::read_store_selects_es;
+
+    #[test]
+    fn first_store_decides_like_go_choose_visibility_manager() {
+        assert!(read_store_selects_es("es"));
+        assert!(read_store_selects_es(" ES , db"));
+        assert!(read_store_selects_es("os"));
+        assert!(!read_store_selects_es("db"));
+        assert!(!read_store_selects_es("db,es"));
+        // Unavailable stores fall back to DB visibility.
+        assert!(!read_store_selects_es("pinot"));
+        assert!(!read_store_selects_es(""));
     }
 }

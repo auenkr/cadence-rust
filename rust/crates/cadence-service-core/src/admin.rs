@@ -1631,7 +1631,7 @@ pub async fn get_cross_cluster_tasks(
         ));
     }
     if state.history_admin_channel.is_none() {
-        return ok_json(serde_json::json!({ "tasksByShard": {}, "failedCauseByShard": {} }));
+        return ok_json(cadence_api::admin::GetCrossClusterTasksResponse::default());
     }
     match crate::admin_replication::get_cross_cluster_tasks(&state, req).await {
         Ok(value) => ok_json(value),
@@ -1650,7 +1650,7 @@ pub async fn respond_cross_cluster_tasks_completed(
         ));
     }
     if state.history_admin_channel.is_none() {
-        return ok_json(cadence_api::admin::RespondCrossClusterTasksCompletedResponse {});
+        return ok_json(cadence_api::admin::RespondCrossClusterTasksCompletedResponse::default());
     }
     match crate::admin_replication::respond_cross_cluster_tasks_completed(&state, req).await {
         Ok(response) => ok_json(response),

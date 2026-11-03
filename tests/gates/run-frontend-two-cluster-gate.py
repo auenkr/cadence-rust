@@ -9,6 +9,7 @@ registered on B (active cluster1) and replicated to A by A's Go worker.
 
 Phases (A's Rust Frontend is restarted with a different config for each):
   forward-selected : selected-apis-forwarding -> request on A is forwarded to B
+                     (workflow start/signal and schedule create/pause)
   forward-all      : all-domain-apis-forwarding (target cluster1)
   noop             : DomainNotActiveError with Go's message
   failover         : domain made active in A (updated on B, replicated to A) -> runs locally
@@ -48,6 +49,8 @@ for s in socks:
 _ms = socket.socket(); _ms.bind(('127.0.0.1', 0)); prom_port = _ms.getsockname()[1]; _ms.close()
 
 dyn = (root / 'go/config/dynamicconfig/development.yaml').read_text()
+if 'worker.enableScheduler' not in dyn:
+    dyn += '\nworker.enableScheduler:\n  - value: true\n'
 (work / 'dynamic-config.yaml').write_text(dyn)
 (work / 'rust-dynamic-config.yaml').write_text(dyn + '\nsystem.enableGRPCOutbound:\n  - value: true\n')
 
@@ -215,6 +218,23 @@ try:
            ' | '.join(l for l in body.splitlines() if 'redirection' in l or 'forwarding_policy' in l)[:800])
     rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'signal', '--wid', wid, '--name', 'sig', '--input', '"x"')
     record('selected-forward-signal', rc == 0, out)
+    # Schedule writes go through Redirect too (Go api_generated.go); reads
+    # (DescribeSchedule) stay local under selected-apis-forwarding.
+    # The Go CLI schedule commands dial gRPC only.
+    sid = 'tc-sched-' + secrets.token_hex(3)
+    rc, out = cli(A_G, 'grpc', '--domain', dom, 'schedule', 'create', '--sid', sid, '--ce', '0 0 1 1 *',
+                  '--wt', 'TcType', '--tl', 'tc-tl', '--et', '600')
+    record('selected-forward-schedule-create-on-A', rc == 0, out)
+    def b_has_schedule():
+        rc, out = cli(B_G, 'grpc', '--domain', dom, 'schedule', 'describe', '--sid', sid)
+        return rc == 0 and '0 0 1 1 *' in out, out
+    poll('selected-forward-schedule-lives-on-B', b_has_schedule, 60)
+    rc, out = cli(A_G, 'grpc', '--domain', dom, 'schedule', 'pause', '--sid', sid, '--reason', 'gate')
+    record('selected-forward-schedule-pause-on-A', rc == 0, out)
+    def b_paused():
+        rc, out = cli(B_G, 'grpc', '--domain', dom, 'schedule', 'describe', '--sid', sid)
+        return rc == 0 and re.search(r'paused', out, re.I) is not None, out
+    poll('selected-forward-schedule-paused-on-B', b_paused, 60)
     # (a2) all-domain-apis-forwarding
     if start_rust_frontend('forward-all', 'all-domain-apis-forwarding', 'cluster1', 'tchannel'):
         rc, out, wid2, rid2 = start_wf('all')

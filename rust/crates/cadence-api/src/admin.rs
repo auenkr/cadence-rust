@@ -973,19 +973,216 @@ pub struct GetCrossClusterTasksRequest {
     pub target_cluster: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RespondCrossClusterTasksCompletedRequest {
-    #[serde(rename = "shardId", default)]
+    #[serde(rename = "shardID", alias = "shardId", default)]
     pub shard_id: i32,
-    #[serde(
-        rename = "targetCluster",
-        default,
-        skip_serializing_if = "String::is_empty"
-    )]
+    #[serde(rename = "targetCluster", default, skip_serializing_if = "String::is_empty")]
     pub target_cluster: String,
-    #[serde(rename = "fetchNewTasks", default)]
+    #[serde(rename = "taskResponses", default, skip_serializing_if = "Vec::is_empty")]
+    pub task_responses: Vec<CrossClusterTaskResponse>,
+    #[serde(rename = "fetchNewTasks", default, skip_serializing_if = "is_false")]
     pub fetch_new_tasks: bool,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RespondCrossClusterTasksCompletedResponse {}
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct RespondCrossClusterTasksCompletedResponse {
+    #[serde(rename = "tasks", default, skip_serializing_if = "Vec::is_empty")]
+    pub tasks: Vec<CrossClusterTaskRequest>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct GetCrossClusterTasksResponse {
+    #[serde(rename = "tasksByShard", default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub tasks_by_shard: std::collections::HashMap<i32, Vec<CrossClusterTaskRequest>>,
+    #[serde(rename = "failedCauseByShard", default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub failed_cause_by_shard: std::collections::HashMap<i32, crate::enums::GetTaskFailedCause>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CrossClusterTaskInfo {
+    #[serde(rename = "domainID", default, skip_serializing_if = "String::is_empty")]
+    pub domain_id: String,
+    #[serde(rename = "workflowID", default, skip_serializing_if = "String::is_empty")]
+    pub workflow_id: String,
+    #[serde(rename = "runID", default, skip_serializing_if = "String::is_empty")]
+    pub run_id: String,
+    #[serde(rename = "taskType", default, skip_serializing_if = "Option::is_none")]
+    pub task_type: Option<crate::enums::CrossClusterTaskType>,
+    #[serde(rename = "taskState", default)]
+    pub task_state: i16,
+    #[serde(rename = "taskID", default)]
+    pub task_id: i64,
+    #[serde(rename = "visibilityTimestamp", default, skip_serializing_if = "Option::is_none")]
+    pub visibility_timestamp: Option<i64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CrossClusterStartChildExecutionRequestAttributes {
+    #[serde(rename = "targetDomainID", default, skip_serializing_if = "String::is_empty")]
+    pub target_domain_id: String,
+    #[serde(rename = "requestID", default, skip_serializing_if = "String::is_empty")]
+    pub request_id: String,
+    #[serde(rename = "initiatedEventID", default)]
+    pub initiated_event_id: i64,
+    #[serde(rename = "initiatedEventAttributes", default, skip_serializing_if = "Option::is_none")]
+    pub initiated_event_attributes: Option<crate::tasks::StartChildWorkflowExecutionInitiatedEventAttributes>,
+    #[serde(rename = "targetRunID", default, skip_serializing_if = "Option::is_none")]
+    pub target_run_id: Option<String>,
+    #[serde(rename = "PartitionConfig", default, skip_serializing_if = "Option::is_none")]
+    pub partition_config: Option<std::collections::HashMap<String, String>>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CrossClusterStartChildExecutionResponseAttributes {
+    #[serde(rename = "runID", default, skip_serializing_if = "String::is_empty")]
+    pub run_id: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CrossClusterCancelExecutionRequestAttributes {
+    #[serde(rename = "targetDomainID", default, skip_serializing_if = "String::is_empty")]
+    pub target_domain_id: String,
+    #[serde(rename = "targetWorkflowID", default, skip_serializing_if = "String::is_empty")]
+    pub target_workflow_id: String,
+    #[serde(rename = "targetRunID", default, skip_serializing_if = "String::is_empty")]
+    pub target_run_id: String,
+    #[serde(rename = "requestID", default, skip_serializing_if = "String::is_empty")]
+    pub request_id: String,
+    #[serde(rename = "initiatedEventID", default)]
+    pub initiated_event_id: i64,
+    #[serde(rename = "childWorkflowOnly", default, skip_serializing_if = "is_false")]
+    pub child_workflow_only: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CrossClusterCancelExecutionResponseAttributes {}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CrossClusterSignalExecutionRequestAttributes {
+    #[serde(rename = "targetDomainID", default, skip_serializing_if = "String::is_empty")]
+    pub target_domain_id: String,
+    #[serde(rename = "targetWorkflowID", default, skip_serializing_if = "String::is_empty")]
+    pub target_workflow_id: String,
+    #[serde(rename = "targetRunID", default, skip_serializing_if = "String::is_empty")]
+    pub target_run_id: String,
+    #[serde(rename = "requestID", default, skip_serializing_if = "String::is_empty")]
+    pub request_id: String,
+    #[serde(rename = "initiatedEventID", default)]
+    pub initiated_event_id: i64,
+    #[serde(rename = "childWorkflowOnly", default, skip_serializing_if = "is_false")]
+    pub child_workflow_only: bool,
+    #[serde(rename = "signalName", default, skip_serializing_if = "String::is_empty")]
+    pub signal_name: String,
+    #[serde(rename = "signalInput", default, skip_serializing_if = "Option::is_none", serialize_with = "crate::b64::serialize_opt_bytes", deserialize_with = "crate::b64::deserialize_opt_bytes")]
+    pub signal_input: Option<Vec<u8>>,
+    #[serde(rename = "control", default, skip_serializing_if = "Option::is_none", serialize_with = "crate::b64::serialize_opt_bytes", deserialize_with = "crate::b64::deserialize_opt_bytes")]
+    pub control: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CrossClusterSignalExecutionResponseAttributes {}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CrossClusterRecordChildWorkflowExecutionCompleteRequestAttributes {
+    #[serde(rename = "targetDomainID", default, skip_serializing_if = "String::is_empty")]
+    pub target_domain_id: String,
+    #[serde(rename = "targetWorkflowID", default, skip_serializing_if = "String::is_empty")]
+    pub target_workflow_id: String,
+    #[serde(rename = "targetRunID", default, skip_serializing_if = "String::is_empty")]
+    pub target_run_id: String,
+    #[serde(rename = "initiatedEventID", default)]
+    pub initiated_event_id: i64,
+    #[serde(rename = "completionEvent", default, skip_serializing_if = "Option::is_none")]
+    pub completion_event: Option<crate::service_types::HistoryEvent>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CrossClusterRecordChildWorkflowExecutionCompleteResponseAttributes {}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ApplyParentClosePolicyAttributes {
+    #[serde(rename = "ChildDomainID", default, skip_serializing_if = "String::is_empty")]
+    pub child_domain_id: String,
+    #[serde(rename = "ChildWorkflowID", default, skip_serializing_if = "String::is_empty")]
+    pub child_workflow_id: String,
+    #[serde(rename = "ChildRunID", default, skip_serializing_if = "String::is_empty")]
+    pub child_run_id: String,
+    #[serde(rename = "parentClosePolicy", default, skip_serializing_if = "Option::is_none")]
+    pub parent_close_policy: Option<crate::enums::ParentClosePolicy>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ApplyParentClosePolicyStatus {
+    #[serde(rename = "completed", default, skip_serializing_if = "is_false")]
+    pub completed: bool,
+    #[serde(rename = "failedCause", default, skip_serializing_if = "Option::is_none")]
+    pub failed_cause: Option<crate::enums::CrossClusterTaskFailedCause>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ApplyParentClosePolicyRequest {
+    #[serde(rename = "child", default, skip_serializing_if = "Option::is_none")]
+    pub child: Option<ApplyParentClosePolicyAttributes>,
+    #[serde(rename = "status", default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<ApplyParentClosePolicyStatus>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CrossClusterApplyParentClosePolicyRequestAttributes {
+    #[serde(rename = "children", default, skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<ApplyParentClosePolicyRequest>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ApplyParentClosePolicyResult {
+    #[serde(rename = "child", default, skip_serializing_if = "Option::is_none")]
+    pub child: Option<ApplyParentClosePolicyAttributes>,
+    #[serde(rename = "failedCause", default, skip_serializing_if = "Option::is_none")]
+    pub failed_cause: Option<crate::enums::CrossClusterTaskFailedCause>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CrossClusterApplyParentClosePolicyResponseAttributes {
+    #[serde(rename = "childrenStatus", default, skip_serializing_if = "Vec::is_empty")]
+    pub children_status: Vec<ApplyParentClosePolicyResult>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CrossClusterTaskRequest {
+    #[serde(rename = "taskInfo", default, skip_serializing_if = "Option::is_none")]
+    pub task_info: Option<CrossClusterTaskInfo>,
+    #[serde(rename = "startChildExecutionAttributes", default, skip_serializing_if = "Option::is_none")]
+    pub start_child_execution_attributes: Option<CrossClusterStartChildExecutionRequestAttributes>,
+    #[serde(rename = "cancelExecutionAttributes", default, skip_serializing_if = "Option::is_none")]
+    pub cancel_execution_attributes: Option<CrossClusterCancelExecutionRequestAttributes>,
+    #[serde(rename = "signalExecutionAttributes", default, skip_serializing_if = "Option::is_none")]
+    pub signal_execution_attributes: Option<CrossClusterSignalExecutionRequestAttributes>,
+    #[serde(rename = "RecordChildWorkflowExecutionCompleteAttributes", default, skip_serializing_if = "Option::is_none")]
+    pub record_child_workflow_execution_complete_attributes: Option<CrossClusterRecordChildWorkflowExecutionCompleteRequestAttributes>,
+    #[serde(rename = "ApplyParentClosePolicyAttributes", default, skip_serializing_if = "Option::is_none")]
+    pub apply_parent_close_policy_attributes: Option<CrossClusterApplyParentClosePolicyRequestAttributes>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CrossClusterTaskResponse {
+    #[serde(rename = "taskID", default)]
+    pub task_id: i64,
+    #[serde(rename = "taskType", default, skip_serializing_if = "Option::is_none")]
+    pub task_type: Option<crate::enums::CrossClusterTaskType>,
+    #[serde(rename = "taskState", default)]
+    pub task_state: i16,
+    #[serde(rename = "failedCause", default, skip_serializing_if = "Option::is_none")]
+    pub failed_cause: Option<crate::enums::CrossClusterTaskFailedCause>,
+    #[serde(rename = "startChildExecutionAttributes", default, skip_serializing_if = "Option::is_none")]
+    pub start_child_execution_attributes: Option<CrossClusterStartChildExecutionResponseAttributes>,
+    #[serde(rename = "cancelExecutionAttributes", default, skip_serializing_if = "Option::is_none")]
+    pub cancel_execution_attributes: Option<CrossClusterCancelExecutionResponseAttributes>,
+    #[serde(rename = "signalExecutionAttributes", default, skip_serializing_if = "Option::is_none")]
+    pub signal_execution_attributes: Option<CrossClusterSignalExecutionResponseAttributes>,
+    #[serde(rename = "RecordChildWorkflowExecutionCompleteAttributes", default, skip_serializing_if = "Option::is_none")]
+    pub record_child_workflow_execution_complete_attributes: Option<CrossClusterRecordChildWorkflowExecutionCompleteResponseAttributes>,
+    #[serde(rename = "ApplyParentClosePolicyAttributes", default, skip_serializing_if = "Option::is_none")]
+    pub apply_parent_close_policy_attributes: Option<CrossClusterApplyParentClosePolicyResponseAttributes>,
+}
+

@@ -1,0 +1,727 @@
+[
+  {
+    "step": "go-history-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-matching-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-frontend-tchannel-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-frontend-grpc-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "cli-register-domain-tchannel",
+    "ok": true,
+    "detail": "Domain fe-gate-t-ca87ff successfully registered."
+  },
+  {
+    "step": "cli-register-domain-grpc",
+    "ok": true,
+    "detail": "Domain fe-gate-g-ff770c successfully registered."
+  },
+  {
+    "step": "cli-register-domain-async",
+    "ok": true,
+    "detail": "Domain fe-gate-async-21a1c1 successfully registered."
+  },
+  {
+    "step": "cli-register-domain-noasync",
+    "ok": true,
+    "detail": "Domain fe-gate-noasync-9087b7 successfully registered."
+  },
+  {
+    "step": "cli-admin-async-config-update-grpc",
+    "ok": true,
+    "detail": "Successfully updated async workflow queue config for domain fe-gate-async-21a1c1"
+  },
+  {
+    "step": "cli-admin-async-config-get",
+    "ok": true,
+    "detail": "Async workflow queue config for domain fe-gate-async-21a1c1:\n{\n  \"Enabled\": true,\n  \"PredefinedQueueName\": \"gate-async-queue\",\n  \"QueueType\": \"\",\n  \"QueueConfig\": null\n}"
+  },
+  {
+    "step": "cli-describe-domain-tchannel",
+    "ok": true,
+    "detail": "Name: fe-gate-t-ca87ff\nUUID: 01a1a11b-02f8-75ed-b29e-facb14eecb87\nDescription: \nOwnerEmail: \nDomainData: map[]\nStatus: REGISTERED\nRetentionInDays: 1\nEmitMetrics: true\nIsGlobal(XDC)Domain: true\nActiveClusterName: cluster0\nIsActiveActiveDomain: false\nClusters: [cluster0]\nHistoryArchivalStatus: ENABLED\nHistoryArchivalURI: file:///home/runner/work/cadence-rust/cadence-rust/out/gate/run/history-archive\nVisibilityArchivalStatus: ENABLED\nVisibilityArchivalURI: file:///home/runner/work/cadence-rust/cadence-rust/out/gate/run/visibility-archive"
+  },
+  {
+    "step": "cli-describe-domain-grpc",
+    "ok": true,
+    "detail": "Name: fe-gate-g-ff770c\nUUID: 01a1a11b-0316-7667-bc77-9e7bd6cbfcf9\nDescription: \nOwnerEmail: \nDomainData: map[]\nStatus: REGISTERED\nRetentionInDays: 1\nEmitMetrics: true\nIsGlobal(XDC)Domain: true\nActiveClusterName: cluster0\nIsActiveActiveDomain: false\nClusters: [cluster0]\nHistoryArchivalStatus: DISABLED\nVisibilityArchivalStatus: DISABLED"
+  },
+  {
+    "step": "go-history-worker-alive-before-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-matching-alive-before-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-frontend-alive-before-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-frontend-killed",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-frontend-restarted-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-describe-domain",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-worker-start",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-start-echo",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-complete-echo",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-describe-closed",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-start-child",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-complete-child",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-describe-task-list",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-list-task-list-partitions",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-get-task-lists-by-domain",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-start-cancel",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-refresh-workflow-tasks",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-reset-sticky-task-list",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-cancel-workflow-execution",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-start-terminate",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-terminate-workflow-execution",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-sched-create-grpc",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-sched-backfill-grpc",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-sched-backfill-completed",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-sched-describe-after-backfill-grpc",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-sched-delete-grpc",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-start-signal-query",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-signal",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-query",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-describe-open",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-list-open",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-restart-handshake",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-signal-after-restart",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-signal-done",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-complete-after-restart",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-list-closed",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-driver-exit",
+    "ok": true,
+    "detail": "exit=0"
+  },
+  {
+    "step": "go-history-worker-alive-after-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-matching-alive-after-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-frontend-alive-after-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "metrics-probe-start",
+    "ok": true,
+    "detail": "Started Workflow Id: metrics-probe-9bd280, run Id: 4af3e206-5f70-4b05-97ff-319d87daffda"
+  },
+  {
+    "step": "metrics-requests-start",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "metrics-requests-poll-decision",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "metrics-latency-start",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "metrics-latency-ns-start",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "kafka-broker-stopped",
+    "ok": true,
+    "detail": "cadence-rust-gate-kafka-postgres-lane-20261103T111018-9345\n"
+  },
+  {
+    "step": "kafka-broker-restarted",
+    "ok": true,
+    "detail": "cadence-rust-gate-kafka-postgres-lane-20261103T111018-9345\n"
+  },
+  {
+    "step": "async-rust-frontend-killed",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "async-rust-frontend-restarted-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-async-worker-start",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-async-start-accepted",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-async-start-executes",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-async-signal-with-start-accepted",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-async-signal-with-start-signal-delivered",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-async-signal-with-start-done-signal",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-async-signal-with-start-executes",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-async-invalid-workflow-bad-request",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-async-disabled-domain-bad-request",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-broker-down-handshake",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-async-broker-down-returns-error",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-broker-up-handshake",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-async-start-after-broker-restart-accepted",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-async-start-after-broker-restart-executes",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-async-failed-start-not-executed",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-frontend-restart-handshake",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-async-frontend-restart-no-lost-messages",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-async-driver-exit",
+    "ok": true,
+    "detail": "exit=0"
+  },
+  {
+    "step": "go-history-worker-alive-after-async-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-matching-alive-after-async-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-frontend-alive-after-async-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "cli-list-workflows-grpc",
+    "ok": true,
+    "detail": "\u001b[94m     WORKFLOW TYPE      \u001b[0m | \u001b[94m                    WORKFLOW ID                    \u001b[0m | \u001b[94m               RUN ID               \u001b[0m | \u001b[94mTASK LIST\u001b[0m | \u001b[94mIS CRON\u001b[0m | \u001b[94mSTART TIME\u001b[0m | \u001b[94mEXECUTION TIME\u001b[0m | \u001b[94mCLOSE STATUS\u001b[0m | \u001b[94mHISTORY LENGTH\u001b[0m | \u001b[94mUPDATE TIME\u001b[0m | \u001b[94mEXECUTION STATUS\u001b[0m  \n  main.SignalQueryWorkflow | fe-gate-e722fa8d-8c58-4f25-ac0a-f6e59f603ce5-cancel | b1eb1e08-f0cc-4249-acf9-afbe986a2d34 |           | false   | 11:11:16   | 11:11:16       | COMPLETED    |              0 | 00:00:00    | PENDING           \n\nFetching 0 workflows..."
+  },
+  {
+    "step": "cli-list-workflows-tchannel",
+    "ok": true,
+    "detail": "\u001b[94m     WORKFLOW TYPE      \u001b[0m | \u001b[94m                    WORKFLOW ID                    \u001b[0m | \u001b[94m               RUN ID               \u001b[0m | \u001b[94mTASK LIST\u001b[0m | \u001b[94mIS CRON\u001b[0m | \u001b[94mSTART TIME\u001b[0m | \u001b[94mEXECUTION TIME\u001b[0m | \u001b[94mCLOSE STATUS\u001b[0m | \u001b[94mHISTORY LENGTH\u001b[0m | \u001b[94mUPDATE TIME\u001b[0m | \u001b[94mEXECUTION STATUS\u001b[0m  \n  main.SignalQueryWorkflow | fe-gate-e722fa8d-8c58-4f25-ac0a-f6e59f603ce5-cancel | b1eb1e08-f0cc-4249-acf9-afbe986a2d34 |           | false   | 23:47:16   | 23:47:16       | COMPLETED    |              0 | 00:00:00    | PENDING"
+  },
+  {
+    "step": "archival-register-domain",
+    "ok": true,
+    "detail": "Domain fe-gate-arch-621001 successfully registered."
+  },
+  {
+    "step": "archival-describe-domain",
+    "ok": true,
+    "detail": "Name: fe-gate-arch-621001\nUUID: 01a1a11e-503e-736e-8206-eace1af0993e\nDescription: \nOwnerEmail: \nDomainData: map[]\nStatus: REGISTERED\nRetentionInDays: 1\nEmitMetrics: true\nIsGlobal(XDC)Domain: true\nActiveClusterName: cluster0\nIsActiveActiveDomain: false\nClusters: [cluster0]\nHistoryArchivalStatus: ENABLED\nHistoryArchivalURI: file:///home/runner/work/cadence-rust/cadence-rust/out/gate/run/history-archive\nVisibilityArchivalStatus: ENABLED\nVisibilityArchivalURI: file:///home/runner/work/cadence-rust/cadence-rust/out/gate/run/visibility-archive\n\n\n"
+  },
+  {
+    "step": "archival-describe-domain-grpc",
+    "ok": true,
+    "detail": "Name: fe-gate-arch-621001\nUUID: 01a1a11e-503e-736e-8206-eace1af0993e\nDescription: \nOwnerEmail: \nDomainData: map[]\nStatus: REGISTERED\nRetentionInDays: 1\nEmitMetrics: true\nIsGlobal(XDC)Domain: true\nActiveClusterName: cluster0\nIsActiveActiveDomain: false\nClusters: [cluster0]\nHistoryArchivalStatus: ENABLED\nHistoryArchivalURI: file:///home/runner/work/cadence-rust/cadence-rust/out/gate/run/history-archive\nVisibilityArchivalStatus: ENABLED\nVisibilityArchivalURI: file:///home/runner/work/cadence-rust/cadence-rust/out/gate/run/visibility-archive\n\n\n"
+  },
+  {
+    "step": "archival-start-0",
+    "ok": true,
+    "detail": "Started Workflow Id: arch-wf-8c65bc, run Id: 76d8f359-9fa9-426c-b719-e1145069e767"
+  },
+  {
+    "step": "archival-terminate-0",
+    "ok": true,
+    "detail": "Terminate workflow succeeded."
+  },
+  {
+    "step": "archival-start-1",
+    "ok": true,
+    "detail": "Started Workflow Id: arch-wf-15adab, run Id: 3ec0c0f5-69a3-4218-a347-4c67fc6a7e82"
+  },
+  {
+    "step": "archival-terminate-1",
+    "ok": true,
+    "detail": "Terminate workflow succeeded."
+  },
+  {
+    "step": "archival-list-archived-visibility",
+    "ok": true,
+    "detail": "  \u001b[94mWORKFLOW TYPE\u001b[0m | \u001b[94m WORKFLOW ID  \u001b[0m | \u001b[94m               RUN ID               \u001b[0m | \u001b[94mTASK LIST\u001b[0m | \u001b[94mIS CRON\u001b[0m | \u001b[94mSTART TIME\u001b[0m | \u001b[94mEXECUTION TIME\u001b[0m | \u001b[94mEND TIME\u001b[0m | \u001b[94mCLOSE STATUS\u001b[0m | \u001b[94mHISTORY LENGTH\u001b[0m | \u001b[94mUPDATE TIME\u001b[0m | \u001b[94mEXECUTION STATUS\u001b[0m  \n  ArchGateType  | arch-wf-15adab | 3ec0c0f5-69a3-4218-a347-4c67fc6a7e82 |           | false   | 11:14:52   | 11:14:52       | 11:14:52 | TERMINATED   |              3 | 00:00:00    |                   \n  ArchGateType  | arch-wf-8c65bc | 76d8f359-9fa9-426c-b719-e1145069e767 |           | false   | 11:14:52   | 11:14:52       | 11:14:52 | TERMINATED   |              3 | 00:00:00    |                   \n\n"
+  },
+  {
+    "step": "archival-list-archived-paged",
+    "ok": true,
+    "detail": "  \u001b[94mWORKFLOW TYPE\u001b[0m | \u001b[94m WORKFLOW ID  \u001b[0m | \u001b[94m               RUN ID               \u001b[0m | \u001b[94mTASK LIST\u001b[0m | \u001b[94mIS CRON\u001b[0m | \u001b[94mSTART TIME\u001b[0m | \u001b[94mEXECUTION TIME\u001b[0m | \u001b[94mEND TIME\u001b[0m | \u001b[94mCLOSE STATUS\u001b[0m | \u001b[94mHISTORY LENGTH\u001b[0m | \u001b[94mUPDATE TIME\u001b[0m | \u001b[94mEXECUTION STATUS\u001b[0m  \n  ArchGateType  | arch-wf-15adab | 3ec0c0f5-69a3-4218-a347-4c67fc6a7e82 |           | false   | 23:47:16   | 23:47:16       | 23:47:16 | TERMINATED   |              3 | 00:00:00    |                   \n\nPress Enter to show next page, press any other key then Enter to quit: "
+  },
+  {
+    "step": "archival-go-visibility-wrote-archive",
+    "ok": true,
+    "detail": "['visibility-archive/01a1a11b-02f8-75ed-b29e-facb14eecb87/1793704276739833301_2751909991095696380.visibility', 'visibility-archive/01a1a11b-02f8-75ed-b29e-facb14eecb87/1793704276825550466_8149781814758206273.visibility', 'visibility-archive/01a1a11b-02f8-75ed-b29e-facb14eecb87/1793704276844396054_4073592919283018437.visibility', 'visibility-archive/01a1a11b-02f8-75ed-b29e-facb14eecb87/1793704276893424213_10017189002403594725.visibility', 'visibility-archive/01a1a11b-02f8-75ed-b29e-facb14eecb87/1793704304242781646_13569517074134317582.visibility', 'visibility-archive/01a1a11b-02f8-75ed-b29e-facb14eecb87/1793704304293131582_1056788209910375821.visibility', 'visibility-archive/01a1a11b-02f8-75ed-b29e-facb14eecb87/1793704304328477182_1229533146491148236.visibility', 'visibility-archive/01a1a11b-02f8-75ed-b29e-facb14eecb87/1793704305113746665_17753334723522712329.visibility', 'visibility-archive/01a1a11b-02f8-75ed-b29e-facb14eecb87/1793704324396889461_8889693946928320907.visibility', 'visibility-archive/01a1a11b-02f8-75ed-b29e-facb14eecb87/1793704385165834470_2990481529944911556.visibility']"
+  },
+  {
+    "step": "archival-update-uri-rejected",
+    "ok": true,
+    "detail": "Error: Operation UpdateDomain failed.\nError details:\n  Cannot update existing archival URI\n"
+  },
+  {
+    "step": "archival-update-disable-history",
+    "ok": true,
+    "detail": "Domain fe-gate-arch-621001 successfully updated.\n"
+  },
+  {
+    "step": "archival-describe-after-disable",
+    "ok": true,
+    "detail": "Name: fe-gate-arch-621001\nUUID: 01a1a11e-503e-736e-8206-eace1af0993e\nDescription: \nOwnerEmail: \nDomainData: map[]\nStatus: REGISTERED\nRetentionInDays: 1\nEmitMetrics: true\nIsGlobal(XDC)Domain: true\nActiveClusterName: cluster0\nIsActiveActiveDomain: false\nClusters: [cluster0]\nHistoryArchivalStatus: DISABLED\nHistoryArchivalURI: file:///home/runner/work/cadence-rust/cadence-rust/out/gate/run/history-archive\nVisibilityArchivalStatus: ENABLED\nVisibilityArchivalURI: file:///home/runner/work/cadence-rust/cadence-rust/out/gate/run/visibility-archive\n\n\n"
+  },
+  {
+    "step": "archival-register-disabled-domain",
+    "ok": true,
+    "detail": "Domain fe-gate-noarch-c9a2dd successfully registered."
+  },
+  {
+    "step": "archival-list-archived-domain-not-configured",
+    "ok": true,
+    "detail": "Error: Failed to list archived workflow.\nError details:\n  Domain is not configured for visibility archival\n"
+  },
+  {
+    "step": "dynconfig-restart-with-configstore",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "dyncfg-update",
+    "ok": true,
+    "detail": "Dynamic Config \"frontend.visibilityMaxPageSize\" updated successfully"
+  },
+  {
+    "step": "dyncfg-get",
+    "ok": true,
+    "detail": "777"
+  },
+  {
+    "step": "dyncfg-list",
+    "ok": true,
+    "detail": "[\n  {\n    \"Name\": \"frontend.visibilityMaxPageSize\",\n    \"Values\": [\n      {\n        \"Value\": 777,\n        \"Filters\": []\n      }\n    ]\n  }\n]"
+  },
+  {
+    "step": "dyncfg-db-row-written",
+    "ok": true,
+    "detail": "[(0, -1)]"
+  },
+  {
+    "step": "dyncfg-restore",
+    "ok": true,
+    "detail": "Dynamic Config \"frontend.visibilityMaxPageSize\" restored"
+  },
+  {
+    "step": "dyncfg-get-after-restore",
+    "ok": true,
+    "detail": "Error: Failed to get dynamic config value\nError details:\n  code:invalid-argument message\n  error EntityNotExistsError not declared for AdminService::GetDynamicConfig\n"
+  },
+  {
+    "step": "dyncfg-list-after-restore",
+    "ok": true,
+    "detail": "No dynamic config values stored to list."
+  },
+  {
+    "step": "dyncfg-db-version-advanced",
+    "ok": true,
+    "detail": "[(0, -1)] -> [(0, -1), (0, -2)]"
+  },
+  {
+    "step": "dyncfg-update-again",
+    "ok": true,
+    "detail": "Dynamic Config \"frontend.visibilityMaxPageSize\" updated successfully"
+  },
+  {
+    "step": "dyncfg-seeded-go-row",
+    "ok": true,
+    "detail": "[(0, -1), (0, -2)] -> [(0, -1), (0, -2), (0, -3), (0, -4)]"
+  },
+  {
+    "step": "dynconfig-restart-persistence",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "dyncfg-get-after-restart",
+    "ok": true,
+    "detail": "888"
+  },
+  {
+    "step": "dyncfg-update-after-seed",
+    "ok": true,
+    "detail": "Dynamic Config \"frontend.visibilityMaxPageSize\" updated successfully"
+  },
+  {
+    "step": "dyncfg-get-after-seed-update",
+    "ok": true,
+    "detail": "999"
+  },
+  {
+    "step": "dyncfg-db-version-after-seed",
+    "ok": true,
+    "detail": "[(0, -1), (0, -2), (0, -3), (0, -4)] -> [(0, -1), (0, -2), (0, -3), (0, -4), (0, -5)]"
+  },
+  {
+    "step": "dyncfg-add-search-attr",
+    "ok": true,
+    "detail": "Are you trying to add key [GateAttrf71e] with Type [Int]? y/N\nSuccess. Note that for a multi-node Cadence cluster, DynamicConfig MUST be updated separately to whitelist the new attributes.\n"
+  },
+  {
+    "step": "dyncfg-add-search-attr-persisted",
+    "ok": true,
+    "detail": "[(0, -1), (0, -2), (0, -3), (0, -4), (0, -5)] -> [(0, -1), (0, -2), (0, -3), (0, -4), (0, -5), (0, -6)]"
+  },
+  {
+    "step": "dynconfig-restart-search-attr",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "dyncfg-list-search-attr-after-restart",
+    "ok": true,
+    "detail": "[\n  {\n    \"Name\": \"frontend.validSearchAttributes\",\n    \"Values\": [\n      {\n        \"Value\": {\n          \"BinaryChecksums\": 1,\n          \"CadenceChangeVersion\": 1,\n          \"CadenceScheduleBackfillID\": 1,\n          \"CadenceScheduleCron\": 1,\n          \"CadenceScheduleID\": 1,\n          \"CadenceScheduleIsBackfill\": 4,\n          \"CadenceScheduleState\": 1,\n          \"CadenceScheduleTime\": 5,\n          \"CadenceScheduleWorkflowType\": 1,\n          \"CloseStatus\": 2,\n          \"CloseTime\": 2,\n          \"ClusterAttributeName\": 1,\n          \"ClusterAttributeScope\": 1,\n          \"CronSchedule\": 1,\n          \"CustomBoolField\": 4,\n          \"CustomDatetimeField\": 5,\n          \"CustomDomain\": 0,\n          \"CustomDoubleField\": 3,\n          \"CustomIntField\": 2,\n          \"CustomKeywordField\": 1,\n          \"CustomStringField\": 0,\n          \"DomainID\": 1,\n          \"ExecutionStatus\": 2,\n          \"ExecutionTime\": 2,\n          \"GateAttrf71e\": 2,\n          \"HistoryLength\": 2,\n          \"IsCron\": 4,\n          \"NumClusters\": 2,\n          \"Operator\": 0,\n          \"RunID\": 1,\n          \"ScheduledExecutionTime\": 2,\n          \"StartTime\": 2,\n          \"TaskList\": 1,\n          \"UpdateTime\": 2,\n          \"WorkflowID\": 1,\n          \"WorkflowType\": 1\n        },\n        \"Filters\": []\n      }\n    ]\n  },\n  {\n    \"Name\": \"frontend.visibilityMaxPageSize\",\n    \"Values\": [\n      {\n        \"Value\": 999,\n        \"Filters\": []\n      }\n    ]\n  }\n]"
+  },
+  {
+    "step": "dynconfig-restart-filebased",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "cli-describe-domain-grpc-ipv6",
+    "ok": true,
+    "detail": "Name: fe-gate-t-ca87ff\nUUID: 01a1a11b-02f8-75ed-b29e-facb14eecb87\nDescription: \nOwnerEmail: \nDomainData: map[]\nStatus: REGISTERED\nRetentionInDays: 1\nEmitMetrics: true\nIsGlobal(XDC)Domain: true\nActiveClusterName: cluster0\nIsActiveActiveDomain: false\nClusters: [cluster0]\nHistoryArchivalStatus: ENABLED\nHistoryArchivalURI: file:///home/runner/work/cadence-rust/cadence-rust/out/gate/run/history-archive\nVisibilityArchivalStatus: ENABLED\nVisibilityArchivalURI: file:///home/runner/work/cadence-rust/cadence-rust/out/gate/run/visibility-archive\n\n\n"
+  },
+  {
+    "step": "oauth-frontend-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "oauth-tchannel-no-token-denied",
+    "ok": true,
+    "detail": "Error: Operation DescribeDomain failed.. Ensure the domain and cluster are correct.\nError details:\n  Request unauthorized."
+  },
+  {
+    "step": "oauth-tchannel-garbage-token-denied",
+    "ok": true,
+    "detail": "Error: Operation DescribeDomain failed.. Ensure the domain and cluster are correct.\nError details:\n  Request unauthorized."
+  },
+  {
+    "step": "oauth-tchannel-expired-token-denied",
+    "ok": true,
+    "detail": "Error: Operation DescribeDomain failed.. Ensure the domain and cluster are correct.\nError details:\n  Request unauthorized."
+  },
+  {
+    "step": "oauth-tchannel-wrong-key-denied",
+    "ok": true,
+    "detail": "Error: Operation DescribeDomain failed.. Ensure the domain and cluster are correct.\nError details:\n  Request unauthorized."
+  },
+  {
+    "step": "oauth-tchannel-admin-token-allowed",
+    "ok": true,
+    "detail": "Name: fe-gate-t-ca87ff\nUUID: 01a1a11b-02f8-75ed-b29e-facb14eecb87\nDescription: \nOwnerEmail: \nDomainData: map[]\nStatus: REGISTERED\nRetentionInDays: 1\nEmitMetrics: true\nIsGlobal(XDC)Domain: true\nActiveClusterName: cluster0\nIsActiveActiveDomain: false\nClusters: [cluster0]\nHistoryArchivalStatus: ENABLED\nHistoryArchivalURI: file:///home/runner/work/cadence-rust/cadence-rust/out/gate/run/history-archive\nVisibilityArchivalStatus: ENABLED\nVisibilityArchivalURI: file:///home/runner/work/cadence-rust/cade"
+  },
+  {
+    "step": "oauth-grpc-no-token-denied",
+    "ok": true,
+    "detail": "Error: Operation DescribeDomain failed.. Ensure the domain and cluster are correct.\nError details:\n  Request unauthorized."
+  },
+  {
+    "step": "oauth-grpc-garbage-token-denied",
+    "ok": true,
+    "detail": "Error: Operation DescribeDomain failed.. Ensure the domain and cluster are correct.\nError details:\n  Request unauthorized."
+  },
+  {
+    "step": "oauth-grpc-expired-token-denied",
+    "ok": true,
+    "detail": "Error: Operation DescribeDomain failed.. Ensure the domain and cluster are correct.\nError details:\n  Request unauthorized."
+  },
+  {
+    "step": "oauth-grpc-wrong-key-denied",
+    "ok": true,
+    "detail": "Error: Operation DescribeDomain failed.. Ensure the domain and cluster are correct.\nError details:\n  Request unauthorized."
+  },
+  {
+    "step": "oauth-grpc-admin-token-allowed",
+    "ok": true,
+    "detail": "Name: fe-gate-t-ca87ff\nUUID: 01a1a11b-02f8-75ed-b29e-facb14eecb87\nDescription: \nOwnerEmail: \nDomainData: map[]\nStatus: REGISTERED\nRetentionInDays: 1\nEmitMetrics: true\nIsGlobal(XDC)Domain: true\nActiveClusterName: cluster0\nIsActiveActiveDomain: false\nClusters: [cluster0]\nHistoryArchivalStatus: ENABLED\nHistoryArchivalURI: file:///home/runner/work/cadence-rust/cadence-rust/out/gate/run/history-archive\nVisibilityArchivalStatus: ENABLED\nVisibilityArchivalURI: file:///home/runner/work/cadence-rust/cade"
+  },
+  {
+    "step": "oauth-domain-update-groups",
+    "ok": true,
+    "detail": "Domain fe-gate-t-ca87ff successfully updated."
+  },
+  {
+    "step": "oauth-tchannel-reader-describe-allowed",
+    "ok": true,
+    "detail": "Name: fe-gate-t-ca87ff\nUUID: 01a1a11b-02f8-75ed-b29e-facb14eecb87\nDescription: \nOwnerEmail: \nDomainData: map[READ_GROUPS:gate-readers]\nStatus: REGISTERED\nRetentionInDays: 1\nEmitMetrics: true\nIsGlobal(XDC)Domain: true\nActiveClusterName: cluster0\nIsActiveActiveDomain: false\nClusters: [cluster0]\nHistoryArchivalStatus: ENABLED\nHistoryArchivalURI: file:///home/runner/work/cadence-rust/cadence-rust/out/gate/run/history-archive\nVisibilityArchivalStatus: ENABLED\nVisibilityArchivalURI: file:///home/runne"
+  },
+  {
+    "step": "oauth-tchannel-reader-write-denied",
+    "ok": true,
+    "detail": "Error: Failed to create workflow.. Ensure the domain and cluster are correct.\nError details:\n  Request unauthorized."
+  },
+  {
+    "step": "oauth-grpc-reader-describe-allowed",
+    "ok": true,
+    "detail": "Name: fe-gate-t-ca87ff\nUUID: 01a1a11b-02f8-75ed-b29e-facb14eecb87\nDescription: \nOwnerEmail: \nDomainData: map[READ_GROUPS:gate-readers]\nStatus: REGISTERED\nRetentionInDays: 1\nEmitMetrics: true\nIsGlobal(XDC)Domain: true\nActiveClusterName: cluster0\nIsActiveActiveDomain: false\nClusters: [cluster0]\nHistoryArchivalStatus: ENABLED\nHistoryArchivalURI: file:///home/runner/work/cadence-rust/cadence-rust/out/gate/run/history-archive\nVisibilityArchivalStatus: ENABLED\nVisibilityArchivalURI: file:///home/runne"
+  },
+  {
+    "step": "oauth-grpc-reader-write-denied",
+    "ok": true,
+    "detail": "Error: Failed to create workflow.. Ensure the domain and cluster are correct.\nError details:\n  Request unauthorized."
+  },
+  {
+    "step": "oauth-tchannel-admin-api-no-token-denied",
+    "ok": true,
+    "detail": "Error: Failed to list dynamic config value(s). Ensure the domain and cluster are correct.\nError details:\n  code:invalid-argument message\n  error AccessDeniedError (Request unauthorized.) not declared for AdminService::ListDynamicConfig"
+  },
+  {
+    "step": "oauth-tchannel-admin-api-expired-denied",
+    "ok": true,
+    "detail": "Error: Failed to list dynamic config value(s). Ensure the domain and cluster are correct.\nError details:\n  code:invalid-argument message\n  error AccessDeniedError (Request unauthorized.) not declared for AdminService::ListDynamicConfig"
+  },
+  {
+    "step": "oauth-tchannel-admin-api-non-admin-denied",
+    "ok": true,
+    "detail": "Error: Failed to list dynamic config value(s)\nError details:\n  code:invalid-argument message\n  Domain  does not exist."
+  },
+  {
+    "step": "oauth-tchannel-admin-api-admin-allowed",
+    "ok": true,
+    "detail": "[\n  {\n    \"Name\": \"frontend.enableActiveClusterSelectionPolicyInStartWorkflow\",\n    \"Values\": [\n      {\n        \"Value\": true,\n        \"Filters\": []\n      }\n    ]\n  },\n  {\n    \"Name\": \"frontend.enableClientVersionCheck\",\n    \"Values\": [\n      {\n        \"Value\": true,\n        \"Filters\": []\n      }\n    ]\n  },\n  {\n    \"Name\": \"frontend.failoverCoolDown\",\n    \"Values\": [\n      {\n        \"Value\": \"1s\",\n        \"Filters\": []\n      }\n    ]\n  },\n  {\n    \"Name\": \"frontend.globalRatelimiterMode\",\n    \"Val"
+  },
+  {
+    "step": "oauth-grpc-admin-api-no-token-denied",
+    "ok": true,
+    "detail": "Error: Failed to list dynamic config value(s). Ensure the domain and cluster are correct.\nError details:\n  Request unauthorized."
+  },
+  {
+    "step": "oauth-grpc-admin-api-expired-denied",
+    "ok": true,
+    "detail": "Error: Failed to list dynamic config value(s). Ensure the domain and cluster are correct.\nError details:\n  Request unauthorized."
+  },
+  {
+    "step": "oauth-grpc-admin-api-non-admin-denied",
+    "ok": true,
+    "detail": "Error: Failed to list dynamic config value(s)\nError details:\n  code:unknown message:Domain  does not exist."
+  },
+  {
+    "step": "oauth-grpc-admin-api-admin-allowed",
+    "ok": true,
+    "detail": "[\n  {\n    \"Name\": \"frontend.enableActiveClusterSelectionPolicyInStartWorkflow\",\n    \"Values\": [\n      {\n        \"Value\": true,\n        \"Filters\": []\n      }\n    ]\n  },\n  {\n    \"Name\": \"frontend.enableClientVersionCheck\",\n    \"Values\": [\n      {\n        \"Value\": true,\n        \"Filters\": []\n      }\n    ]\n  },\n  {\n    \"Name\": \"frontend.failoverCoolDown\",\n    \"Values\": [\n      {\n        \"Value\": \"1s\",\n        \"Filters\": []\n      }\n    ]\n  },\n  {\n    \"Name\": \"frontend.globalRatelimiterMode\",\n    \"Val"
+  }
+]

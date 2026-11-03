@@ -810,6 +810,47 @@ async fn handle_purge_dlq_messages(state: &AppState, body: &Struct) -> HandlerRe
     ))
 }
 
+async fn handle_get_cross_cluster_tasks(state: &AppState, body: &Struct) -> HandlerResult {
+    let req: cadence_api::admin::GetCrossClusterTasksRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    if req.target_cluster.is_empty() {
+        return Err(AppError::bad_request(
+            "Target cluster is not set on request.".to_string(),
+        ));
+    }
+    if state.history_admin_channel.is_none() {
+        return Ok(wrap_success(
+            &cadence_api::admin::GetCrossClusterTasksResponse::default(),
+        ));
+    }
+    let response = crate::admin_replication::get_cross_cluster_tasks(state, req)
+        .await
+        .map_err(proxy_app_error)?;
+    Ok(wrap_success(&response))
+}
+
+async fn handle_respond_cross_cluster_tasks_completed(
+    state: &AppState,
+    body: &Struct,
+) -> HandlerResult {
+    let req: cadence_api::admin::RespondCrossClusterTasksCompletedRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    if req.target_cluster.is_empty() {
+        return Err(AppError::bad_request(
+            "Target cluster is not set on request.".to_string(),
+        ));
+    }
+    if state.history_admin_channel.is_none() {
+        return Ok(wrap_success(
+            &cadence_api::admin::RespondCrossClusterTasksCompletedResponse::default(),
+        ));
+    }
+    let response = crate::admin_replication::respond_cross_cluster_tasks_completed(state, req)
+        .await
+        .map_err(proxy_app_error)?;
+    Ok(wrap_success(&response))
+}
+
 async fn handle_reset_queue(state: &AppState, body: &Struct) -> HandlerResult {
     let req: cadence_api::admin::ResetQueueRequest =
         decode_args(body).map_err(AppError::bad_request)?;
@@ -2750,6 +2791,10 @@ pub async fn dispatch_with_headers(
         "ReadDLQMessages" => handle_read_dlq_messages(state, body).await,
         "PurgeDLQMessages" => handle_purge_dlq_messages(state, body).await,
         "ResetQueue" => handle_reset_queue(state, body).await,
+        "GetCrossClusterTasks" => handle_get_cross_cluster_tasks(state, body).await,
+        "RespondCrossClusterTasksCompleted" => {
+            handle_respond_cross_cluster_tasks_completed(state, body).await
+        }
         "DescribeQueue" => handle_describe_queue(state, body).await,
         "MergeDLQMessages" => handle_merge_dlq_messages(state, body).await,
         "GetWorkflowExecutionRawHistoryV2" => handle_raw_history_v2(state, body),

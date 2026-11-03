@@ -532,4 +532,47 @@ mod tests {
             .unwrap()
             .is_none());
     }
+
+    /// Go keyfunc `Options{}` never refreshes: the JWKS is fetched exactly once
+    /// at construction, and an unknown kid is denied without another fetch.
+    #[test]
+    fn jwks_is_fetched_once_and_not_refreshed() {
+        use std::io::{Read, Write};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let hits = Arc::new(AtomicUsize::new(0));
+        let server_hits = hits.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { break };
+                let mut buf = [0u8; 2048];
+                let _ = stream.read(&mut buf);
+                server_hits.fetch_add(1, Ordering::SeqCst);
+                let body = r#"{"keys":[{"kty":"RSA","kid":"k1","n":"sXchDaQebHnPiGvyDOAT4saGEUetSyo9MKLOoWFsueri23bOdgWp4Dy1WlUzewbgBHod5pcM9H95GQRV3JDXboIRROSBigeC5yjU1hGzHHyXss8UDprecbAYxknTcQkhslANGRUZmdTOQ5qTRsLAt6BTYuyvVRdhS8exSZEy_c4gs_7svlJJQ4H9_NxsiIoLwAEk7-Q3UXERGYw_75IDrGA84-lA_-Ct4eTlXHBIY2EaV7t7LjJaynVJCpkv4LKjTTAumiGUIuQhrNhZLuF_RJLqHpM2kgWFLU7-VTdL1VbC2tejvcI2BlMkEpk1BzBZI0KQB0GaDWFLN-aEAw3vRw","e":"AQAB"}]}"#;
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+            }
+        });
+        let url = format!("http://127.0.0.1:{port}/jwks.json");
+        let config = OAuthAuthorizerConfig {
+            max_jwt_ttl: 300,
+            provider: Some(OAuthProviderConfig {
+                jwks_url: url,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let a = OAuthAuthorizer::new(&config, Arc::new(|_| Ok(HashMap::new()))).unwrap();
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        assert!(a.jwks.as_ref().unwrap().contains_key("k1"));
+        // Unknown kid: denied, no refetch.
+        let token = "eyJhbGciOiJSUzI1NiIsImtpZCI6InVua25vd24ifQ.e30.c2ln";
+        assert!(a.verify(token, 0).is_err());
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
 }
