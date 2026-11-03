@@ -14,6 +14,25 @@ pub struct ClusterInformation {
     /// gRPC remote Frontend client.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tls: Option<serde_json::Value>,
+    /// Go `ClusterInformation.AuthorizationProvider`.
+    #[serde(skip_serializing_if = "AuthorizationProvider::is_default")]
+    pub authorization_provider: AuthorizationProvider,
+}
+
+/// Go `config.AuthorizationProvider` of a cluster group member.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AuthorizationProvider {
+    pub enable: bool,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub private_key: String,
+}
+
+impl AuthorizationProvider {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// Go `config.ClusterRedirectionPolicy` (clusterGroupMetadata.clusterRedirectionPolicy).

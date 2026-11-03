@@ -1769,6 +1769,57 @@ impl crate::history_reader::HistoryNodeStore for MySqlTaskStore {
             })
             .collect())
     }
+
+    fn select_current_execution(
+        &self,
+        shard_id: i32,
+        domain_id: [u8; 16],
+        workflow_id: &str,
+    ) -> std::result::Result<
+        Option<crate::history_reader::CurrentExecutionRow>,
+        crate::history_reader::HistoryReadError,
+    > {
+        use crate::history_reader::{CurrentExecutionRow, HistoryReadError};
+        let index = mysql_database_index(shard_id.max(0) as usize, self.pools.len());
+        let mut connection = self.pools[index]
+            .checkout()
+            .map_err(|e| HistoryReadError::Internal(format!("{e:?}")))?;
+        let discard = connection.discard.clone();
+        let row: Option<(Vec<u8>, i32)> = connection
+            .exec_first(
+                "SELECT run_id, state FROM current_executions WHERE shard_id = ? AND domain_id = ? AND workflow_id = ?",
+                (shard_id, domain_id.as_slice(), workflow_id),
+            )
+            .map_err(|e| HistoryReadError::Internal(format!("{:?}", normalize_mysql_error_on_lease(e, &discard))))?;
+        row.map(|(run, state)| {
+            let run_id: [u8; 16] = run.as_slice().try_into().map_err(|_| {
+                HistoryReadError::DataInconsistency("invalid current run_id length".into())
+            })?;
+            Ok(CurrentExecutionRow { run_id, state })
+        })
+        .transpose()
+    }
+
+    fn select_active_cluster_policy(
+        &self,
+        shard_id: i32,
+        domain_id: [u8; 16],
+        workflow_id: &str,
+        run_id: [u8; 16],
+    ) -> std::result::Result<Option<(Vec<u8>, String)>, crate::history_reader::HistoryReadError> {
+        use crate::history_reader::HistoryReadError;
+        let index = mysql_database_index(shard_id.max(0) as usize, self.pools.len());
+        let mut connection = self.pools[index]
+            .checkout()
+            .map_err(|e| HistoryReadError::Internal(format!("{e:?}")))?;
+        let discard = connection.discard.clone();
+        connection
+            .exec_first(
+                "SELECT data, data_encoding FROM active_cluster_selection_policy WHERE shard_id = ? AND domain_id = ? AND workflow_id = ? AND run_id = ?",
+                (shard_id, domain_id.as_slice(), workflow_id, run_id.as_slice()),
+            )
+            .map_err(|e| HistoryReadError::Internal(format!("{:?}", normalize_mysql_error_on_lease(e, &discard))))
+    }
 }
 
 impl crate::visibility_reader::VisibilityStore for MySqlTaskStore {

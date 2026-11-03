@@ -1083,9 +1083,17 @@ pub fn build_workflow_api(
                     .map(|p| p.all_domain_apis_forwarding_target_cluster.clone())
                     .unwrap_or_default(),
                 config,
-                manager: crate::wrappers::redirection_runtime::DomainActiveClusterManager::new(
-                    ctx.state.domain_manager.clone(),
-                ),
+                manager: {
+                    let manager =
+                        crate::wrappers::redirection_runtime::DomainActiveClusterManager::new(
+                            ctx.state.domain_manager.clone(),
+                        );
+                    match ctx.state.history_node_store.clone() {
+                        Some(store) => manager
+                            .with_executions(store, ctx.config.persistence.num_history_shards),
+                        None => manager,
+                    }
+                },
                 metrics: std::sync::Arc::new(
                     crate::wrappers::redirection_runtime::SinkRedirectMetrics::new(
                         shared_metrics_sink.clone(),

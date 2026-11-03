@@ -83,6 +83,89 @@ pub trait HistoryNodeStore: Send + Sync + std::fmt::Debug {
         max_node: i64,
         limit: i64,
     ) -> Result<Vec<HistoryNodeRow>>;
+
+    /// Go `ExecutionManager.GetCurrentExecution` (`current_executions` row /
+    /// Cassandra current-run row). `Ok(None)` is Go's `EntityNotExistsError`.
+    fn select_current_execution(
+        &self,
+        _shard_id: i32,
+        _domain_id: [u8; 16],
+        _workflow_id: &str,
+    ) -> Result<Option<CurrentExecutionRow>> {
+        Err(HistoryReadError::Internal(
+            "current execution reads are not supported by this store".into(),
+        ))
+    }
+
+    /// Go `ExecutionManager.GetActiveClusterSelectionPolicy`: the stored
+    /// `(data, data_encoding)` blob, `Ok(None)` when no row exists.
+    fn select_active_cluster_policy(
+        &self,
+        _shard_id: i32,
+        _domain_id: [u8; 16],
+        _workflow_id: &str,
+        _run_id: [u8; 16],
+    ) -> Result<Option<(Vec<u8>, String)>> {
+        Err(HistoryReadError::Internal(
+            "active cluster selection policy reads are not supported by this store".into(),
+        ))
+    }
+}
+
+/// Go `GetCurrentExecutionResponse` fields the Frontend needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CurrentExecutionRow {
+    pub run_id: [u8; 16],
+    pub state: i32,
+}
+
+/// Go `persistence.WorkflowStateCreated` / `WorkflowStateRunning`.
+pub const WORKFLOW_STATE_CREATED: i32 = 0;
+pub const WORKFLOW_STATE_RUNNING: i32 = 1;
+
+/// Go `persistence.IsWorkflowRunning`.
+pub fn is_workflow_running(state: i32) -> bool {
+    state == WORKFLOW_STATE_RUNNING || state == WORKFLOW_STATE_CREATED
+}
+
+/// Decoded `types.ActiveClusterSelectionPolicy.ClusterAttribute`
+/// (`None` = nil attribute).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ClusterSelectionPolicy {
+    pub cluster_attribute: Option<(String, String)>,
+}
+
+/// Go `serializer.DeserializeActiveClusterSelectionPolicy`: thriftrw struct,
+/// optionally snappy compressed (`thriftrw_snappy`).
+pub fn decode_active_cluster_selection_policy(
+    data: &[u8],
+    encoding: &str,
+) -> Result<ClusterSelectionPolicy> {
+    use cadence_thrift::protocol::Reader;
+    use cadence_thrift::value::{read_struct, Value};
+    let raw = match encoding {
+        "thriftrw" => data.to_vec(),
+        "thriftrw_snappy" => snap::raw::Decoder::new()
+            .decompress_vec(data)
+            .map_err(|e| HistoryReadError::DataInconsistency(e.to_string()))?,
+        other => {
+            return Err(HistoryReadError::DataInconsistency(format!(
+                "unsupported active cluster selection policy encoding {other}"
+            )))
+        }
+    };
+    let top = read_struct(&mut Reader::new(&raw))
+        .map_err(|e| HistoryReadError::DataInconsistency(e.to_string()))?;
+    let text = |s: &cadence_thrift::value::Struct, id: i16| match s.get(id) {
+        Some(Value::Bytes(b)) => String::from_utf8_lossy(b).into_owned(),
+        _ => String::new(),
+    };
+    Ok(ClusterSelectionPolicy {
+        cluster_attribute: match top.get(1) {
+            Some(Value::Struct(attr)) => Some((text(attr, 1), text(attr, 2))),
+            _ => None,
+        },
+    })
 }
 
 #[derive(Debug, Clone)]
