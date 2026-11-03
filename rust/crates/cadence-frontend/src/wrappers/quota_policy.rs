@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 
 use cadence_api::errors::CadenceError;
 
-use crate::global_ratelimit::{Collection, Decision};
 use super::ratelimited::{CallerBypass, DomainNameLookup, Policy, QuotaInfo, WaitFailure};
+use crate::global_ratelimit::{Collection, Decision};
 
 /// Go's `quotas.UnlimitedRPS`.
 pub const UNLIMITED_RPS: f64 = 100_000.0;
@@ -169,7 +169,11 @@ impl TokenBucketPolicy {
             .filter(|_| !task_list_external)
             .map_or(0.0, |(b, rps)| need(b.tokens, *rps));
         let seconds = need(global.tokens, global_rps)
-            .max(if domain_external { 0.0 } else { need(domain.tokens, domain_rps) })
+            .max(if domain_external {
+                0.0
+            } else {
+                need(domain.tokens, domain_rps)
+            })
             .max(task_list_need);
         Err(Duration::from_secs_f64(seconds.max(0.001)))
     }

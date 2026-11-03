@@ -1119,10 +1119,10 @@ pub fn build_workflow_api(
     };
     let mut collection_handles = Vec::new();
     let mut policy = |global: (&'static str, i64),
-                  domain: (&'static str, i64),
-                  global_domain: &'static str,
-                  tl: Option<(&'static str, &'static str, i64)>,
-                  names: (&'static str, &'static str)| {
+                      domain: (&'static str, i64),
+                      global_domain: &'static str,
+                      tl: Option<(&'static str, &'static str, i64)>,
+                      names: (&'static str, &'static str)| {
         use crate::wrappers::quota_policy::per_member;
         let global_rps = read_rps(global.0, global.1, false);
         let domain_rps = std::sync::Arc::new(read_rps(domain.0, domain.1, true));

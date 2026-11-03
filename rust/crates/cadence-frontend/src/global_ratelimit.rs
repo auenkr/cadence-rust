@@ -67,7 +67,9 @@ pub fn update_to_bytes(host: &str, elapsed: Duration, load: &HashMap<String, Cal
             (10, bytes(host)),
             (
                 20,
-                Value::I32(saturating_i32(elapsed.as_millis().min(i64::MAX as u128) as i64)),
+                Value::I32(saturating_i32(
+                    elapsed.as_millis().min(i64::MAX as u128) as i64
+                )),
             ),
             (30, Value::Map(calls)),
         ],
@@ -104,7 +106,8 @@ pub fn weights_from_bytes(data: &[u8]) -> Result<HashMap<String, UpdateEntry>, S
             let key = String::from_utf8(k.clone()).map_err(|e| e.to_string())?;
             let weight = v.opt_f64(10).map_err(|e| e.to_string())?.unwrap_or(0.0);
             let used = v.opt_f64(20).map_err(|e| e.to_string())?.unwrap_or(0.0);
-            sane(0.0, weight, 1.0, "weight").map_err(|m| format!("bad value for key {key:?}: {m}"))?;
+            sane(0.0, weight, 1.0, "weight")
+                .map_err(|m| format!("bad value for key {key:?}: {m}"))?;
             sane(0.0, used, f64::INFINITY, "used rps")
                 .map_err(|m| format!("bad value for key {key:?}: {m}"))?;
             out.insert(
@@ -246,7 +249,9 @@ impl FallbackLimiter {
     }
 
     pub fn failed_update(&self) -> i64 {
-        self.failed_updates.fetch_add(1, Ordering::Relaxed).saturating_add(1)
+        self.failed_updates
+            .fetch_add(1, Ordering::Relaxed)
+            .saturating_add(1)
     }
 
     /// Go `both()`: shadowed(primary, shadow); the shadow always consumes.
@@ -279,7 +284,10 @@ impl FallbackLimiter {
         if starting || failing {
             return fb.wait_time();
         }
-        self.primary.lock().unwrap_or_else(|e| e.into_inner()).wait_time()
+        self.primary
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .wait_time()
     }
 }
 
@@ -307,7 +315,10 @@ impl CountedLimiter {
         ok
     }
     pub fn retry_after(&self) -> Duration {
-        self.bucket.lock().unwrap_or_else(|e| e.into_inner()).wait_time()
+        self.bucket
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .wait_time()
     }
     pub fn collect(&self) -> UsageMetrics {
         self.usage.collect()
@@ -425,21 +436,37 @@ impl Collection {
             KeyMode::Disabled => Decision::Disabled,
             KeyMode::Local => {
                 let l = self.local_limiter(key);
-                run(if l.allow() { Ok(()) } else { Err(l.retry_after()) })
+                run(if l.allow() {
+                    Ok(())
+                } else {
+                    Err(l.retry_after())
+                })
             }
             KeyMode::Global => {
                 let g = self.global_limiter(key);
-                run(if g.allow() { Ok(()) } else { Err(g.retry_after()) })
+                run(if g.allow() {
+                    Ok(())
+                } else {
+                    Err(g.retry_after())
+                })
             }
             KeyMode::LocalShadowGlobal => {
                 let (l, g) = (self.local_limiter(key), self.global_limiter(key));
                 let _ = g.allow();
-                run(if l.allow() { Ok(()) } else { Err(l.retry_after()) })
+                run(if l.allow() {
+                    Ok(())
+                } else {
+                    Err(l.retry_after())
+                })
             }
             KeyMode::GlobalShadowLocal => {
                 let (l, g) = (self.local_limiter(key), self.global_limiter(key));
                 let _ = l.allow();
-                run(if g.allow() { Ok(()) } else { Err(g.retry_after()) })
+                run(if g.allow() {
+                    Ok(())
+                } else {
+                    Err(g.retry_after())
+                })
             }
         }
     }
@@ -626,10 +653,7 @@ impl AggregatorClient for HistoryAggregators {
                 let data = update_to_bytes(&host, period, &sub);
                 async move {
                     let any = Struct {
-                        fields: vec![
-                            (10, bytes(USAGE_ANY_TYPE)),
-                            (20, Value::Bytes(data)),
-                        ],
+                        fields: vec![(10, bytes(USAGE_ANY_TYPE)), (20, Value::Bytes(data))],
                     };
                     let envelope = Struct {
                         fields: vec![(10, Value::Struct(any))],
