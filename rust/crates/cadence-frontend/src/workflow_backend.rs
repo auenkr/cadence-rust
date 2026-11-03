@@ -802,6 +802,25 @@ pub fn build_workflow_api(
         std::sync::Arc::new(backend.clone());
     let (archived_history, archived_visibility) =
         build_archive_readers(&ctx, probe).map_err(anyhow::Error::msg)?;
+    let selected_authorizer = {
+        let manager = ctx.state.domain_manager.clone();
+        let domain_data: crate::oauth_authorizer::DomainDataLookup =
+            std::sync::Arc::new(move |name: &str| {
+                manager
+                    .describe(&cadence_api::service_types::DescribeDomainRequest {
+                        name: Some(name.to_owned()),
+                        ..Default::default()
+                    })
+                    .map(|d| d.domain_info.and_then(|i| i.data).unwrap_or_default())
+                    .map_err(|e| e.to_string())
+            });
+        match crate::oauth_authorizer::new_authorizer(&ctx.config.authorization, domain_data)
+            .map_err(anyhow::Error::msg)?
+        {
+            Some(oauth) => SelectedAuthorizer::OAuth(oauth),
+            None => SelectedAuthorizer::Nop,
+        }
+    };
     let default_metadata = cadence_common::cluster::GroupMetadata::default();
     let metadata = ctx
         .config
@@ -833,7 +852,7 @@ pub fn build_workflow_api(
     .with_rate_limit_policies(rate_limit)
     .with_access_control(std::sync::Arc::new(
         crate::wrappers::accesscontrolled::HandlerAuthorization::new(
-            NopAuthorizer,
+            selected_authorizer,
             NopAuthorizationMetrics,
         ),
     ))
@@ -1040,18 +1059,26 @@ fn install_async_publisher<B: WorkflowBackend>(
     ))
 }
 
-/// Go's `authorization.NewNopAuthorizer`: used when authorization is not
-/// enabled in the service configuration, allowing every request.
-struct NopAuthorizer;
+/// Go's `authorization.NewAuthorizer`: nop unless oauth is enabled.
+enum SelectedAuthorizer {
+    /// `authorization.NewNopAuthorizer`: allows every request.
+    Nop,
+    OAuth(crate::oauth_authorizer::OAuthAuthorizer),
+}
 
-impl crate::wrappers::accesscontrolled::Authorizer for NopAuthorizer {
-    type Error = std::convert::Infallible;
+impl crate::wrappers::accesscontrolled::Authorizer for SelectedAuthorizer {
+    type Error = String;
 
     fn authorize(
         &self,
-        _attributes: &crate::wrappers::accesscontrolled::Attributes,
+        attributes: &crate::wrappers::accesscontrolled::Attributes,
     ) -> Result<crate::wrappers::accesscontrolled::Decision, Self::Error> {
-        Ok(crate::wrappers::accesscontrolled::Decision::Allow)
+        match self {
+            Self::Nop => Ok(crate::wrappers::accesscontrolled::Decision::Allow),
+            Self::OAuth(oauth) => {
+                crate::wrappers::accesscontrolled::Authorizer::authorize(oauth, attributes)
+            }
+        }
     }
 }
 

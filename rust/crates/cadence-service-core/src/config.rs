@@ -72,6 +72,53 @@ pub struct Config {
     pub domain_defaults: Option<serde_yaml::Value>,
     #[serde(default, rename = "asyncWorkflowQueues")]
     pub async_workflow_queues: HashMap<String, AsyncWorkflowQueueProviderConfig>,
+    /// Go `authorization` section (common/config/authorization.go).
+    #[serde(default)]
+    pub authorization: AuthorizationConfig,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AuthorizationConfig {
+    #[serde(default, rename = "oauthAuthorizer")]
+    pub oauth_authorizer: OAuthAuthorizerConfig,
+    #[serde(default, rename = "noopAuthorizer")]
+    pub noop_authorizer: NoopAuthorizerConfig,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct NoopAuthorizerConfig {
+    #[serde(default)]
+    pub enable: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct OAuthAuthorizerConfig {
+    #[serde(default)]
+    pub enable: bool,
+    #[serde(default, rename = "maxJwtTTL")]
+    pub max_jwt_ttl: i64,
+    #[serde(default, rename = "jwtCredentials")]
+    pub jwt_credentials: Option<JwtCredentialsConfig>,
+    #[serde(default)]
+    pub provider: Option<OAuthProviderConfig>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct JwtCredentialsConfig {
+    #[serde(default)]
+    pub algorithm: String,
+    #[serde(default, rename = "publicKey")]
+    pub public_key: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct OAuthProviderConfig {
+    #[serde(default, rename = "jwksURL")]
+    pub jwks_url: String,
+    #[serde(default, rename = "groupsAttributePath")]
+    pub groups_attribute_path: String,
+    #[serde(default, rename = "adminAttributePath")]
+    pub admin_attribute_path: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

@@ -437,6 +437,18 @@ struct DiagnosticsStarterWorkflowInput<'a> {
 
 pub trait RequestAuthorization: Send + Sync {
     fn authorize(&self, operation: &str, request: &Value, actor: &str) -> Result<(), CadenceError>;
+
+    /// Header-aware entry point (token authorizers read
+    /// `cadence-authorization`). Defaults to the header-less form.
+    fn authorize_with_headers(
+        &self,
+        operation: &str,
+        request: &Value,
+        actor: &str,
+        _headers: &HashMap<String, String>,
+    ) -> Result<(), CadenceError> {
+        self.authorize(operation, request, actor)
+    }
 }
 
 pub trait RequestRateLimit: Send + Sync {
@@ -781,7 +793,12 @@ impl<B: WorkflowBackend> Handler<B> {
             )))
         })?;
         if let Some(access_control) = &self.access_control {
-            access_control.authorize(operation.name(), &request, &caller.actor)?;
+            access_control.authorize_with_headers(
+                operation.name(),
+                &request,
+                &caller.actor,
+                &caller.original_headers,
+            )?;
         }
         if let Some(redirector) = &self.redirector {
             let redirect_request = request.clone();
