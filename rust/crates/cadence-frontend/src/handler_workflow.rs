@@ -2231,6 +2231,8 @@ fn prepare_by_id_task_request(
         workflow_id: request_string_any(&request, &["workflowID", "workflowId"]),
         run_id: request_string_any(&request, &["runID", "runId"]),
         activity_id: request_string_any(&request, &["activityID", "activityId"]),
+        // Go: ScheduleID is constants.EmptyEventID so History resolves by ActivityID.
+        schedule_id: -23,
         ..Default::default()
     };
     let token_bytes = cadence_api::tasktoken::JsonTaskTokenSerializer::serialize(&token)
@@ -4413,6 +4415,7 @@ mod tests {
         .unwrap();
         assert_eq!(synthesized_token.workflow_id, "order-1");
         assert_eq!(synthesized_token.activity_id, "activity-1");
+        assert_eq!(synthesized_token.schedule_id, -23);
     }
 
     #[test]

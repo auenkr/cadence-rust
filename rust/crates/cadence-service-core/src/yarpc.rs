@@ -196,6 +196,19 @@ async fn handle_delete_domain(state: &AppState, body: &Struct) -> HandlerResult 
             "Domain not set on request.".to_string(),
         ));
     }
+    // Go: DescribeDomain, then require the Deprecated status before deleting.
+    let current = state
+        .domain_manager
+        .describe(&DescribeDomainRequest {
+            name: Some(req.name.clone()),
+            uuid: None,
+        })
+        .map_err(|e| AppError::entity_not_exists(e.message))?;
+    if current.status != Some(cadence_api::enums::DomainStatus::Deprecated) {
+        return Err(AppError::bad_request(
+            "Domain is not in a deprecated state.".to_string(),
+        ));
+    }
     state
         .domain_manager
         .delete(&req.name)

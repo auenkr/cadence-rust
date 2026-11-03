@@ -110,7 +110,8 @@ func apiCoverage(ctx context.Context, rpc workflowserviceclient.Interface, domai
 	step("api-delete-domain-missing", func() error {
 		e := rpc.DeleteDomain(ctx, &shared.DeleteDomainRequest{Name: ptr("fe-api-none-" + uuid.NewString()[:6])})
 		var nf *shared.EntityNotExistsError
-		if !errors.As(e, &nf) {
+		// DeleteDomain does not declare EntityNotExists in the Thrift IDL, so Go's yarpc layer surfaces it as an undeclared error.
+		if !errors.As(e, &nf) && (e == nil || !strings.Contains(e.Error(), "EntityNotExistsError")) {
 			return fmt.Errorf("want EntityNotExistsError, got %T %v", e, e)
 		}
 		return nil
@@ -148,7 +149,13 @@ func apiCoverage(ctx context.Context, rpc workflowserviceclient.Interface, domai
 		Domain: &domain, WorkflowId: ptr(swsID + "-id"), WorkflowType: &shared.WorkflowType{Name: ptr("main.SignalQueryWorkflow")},
 		TaskList: &shared.TaskList{Name: &tl}, ExecutionStartToCloseTimeoutSeconds: ptr(int32(300)), TaskStartToCloseTimeoutSeconds: ptr(int32(10)),
 		RequestId: ptr(uuid.NewString()), SignalName: ptr("done"), Identity: &longIdentity})
-	step("api-signal-with-start-identity-too-long", wantBadRequest(e, "Identity length exceeds limit."))
+	// Go's SignalWithStart validation does not check identity length (only Respond*/heartbeat do), so it must not be rejected.
+	step("api-signal-with-start-identity-not-validated", func() error {
+		if e != nil && strings.Contains(e.Error(), "Identity length") {
+			return fmt.Errorf("unexpected identity rejection: %v", e)
+		}
+		return nil
+	}())
 
 	// ---- manual decision/activity task flow (no SDK worker on mtl)
 	start, e := rpc.StartWorkflowExecution(ctx, &shared.StartWorkflowExecutionRequest{
@@ -269,7 +276,13 @@ func apiCoverage(ctx context.Context, rpc workflowserviceclient.Interface, domai
 	_, e = rpc.DiagnoseWorkflowExecution(ctx, &shared.DiagnoseWorkflowExecutionRequest{Domain: &domain, WorkflowExecution: &shared.WorkflowExecution{WorkflowId: &echoID, RunId: &echoRunID}, Identity: &identity})
 	step("api-diagnose-workflow-execution", routed(e))
 	_, e = rpc.DiagnoseWorkflowExecution(ctx, &shared.DiagnoseWorkflowExecutionRequest{Domain: &domain, WorkflowExecution: &shared.WorkflowExecution{WorkflowId: &echoID}})
-	step("api-diagnose-missing-run-id-rejected", wantBadRequest(e, "Run ID is not set"))
+	// Go returns validate.ErrExecutionNotSet; BadRequest is undeclared for Diagnose in Thrift so it arrives as a yarpc error.
+	step("api-diagnose-missing-run-id-rejected", func() error {
+		if e == nil || !strings.Contains(e.Error(), "Execution is not set on request.") {
+			return fmt.Errorf("want Execution is not set on request., got %v", e)
+		}
+		return nil
+	}())
 
 	adminCLI(ctx, domain, echoID, echoRunID)
 }
@@ -287,7 +300,7 @@ func adminCLI(ctx context.Context, domain, wid, rid string) {
 			defer cancel()
 			out, e := exec.CommandContext(c, cli, append(base, args...)...).CombinedOutput()
 			if e != nil {
-				e = fmt.Errorf("%v: %s", e, out)
+				e = fmt.Errorf("%v: %s", e, strings.ReplaceAll(strings.TrimSpace(string(out)), "\n", " | "))
 			}
 			step("api-admin-"+name+"-"+tr.name, e)
 		}
