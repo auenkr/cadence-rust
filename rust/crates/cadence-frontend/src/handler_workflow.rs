@@ -2999,7 +2999,7 @@ mod tests {
 
     #[tokio::test]
     async fn handler_lists_archived_visibility_through_real_filestore_reader() {
-        use cadence_api::types::ArchivalStatus;
+        use cadence_api::enums::ArchivalStatus;
         let root = archive_tmp("vis");
         let domain_dir = root.join("uuid:archived");
         std::fs::create_dir_all(&domain_dir).unwrap();
@@ -3063,7 +3063,7 @@ mod tests {
 
     #[tokio::test]
     async fn handler_serves_archived_history_through_real_filestore_reader() {
-        use cadence_api::types::ArchivalStatus;
+        use cadence_api::enums::ArchivalStatus;
         let root = archive_tmp("hist");
         let name = cadence_common::archiver::history_filename("uuid:archived", "wf-a", "run-a", 2);
         std::fs::write(
