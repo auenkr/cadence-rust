@@ -14,9 +14,11 @@ mkdir -p "$ARTIFACTS"
 [[ "$KEYSPACE" =~ ^[A-Za-z][A-Za-z0-9_]*$ && "$VISIBILITY_KEYSPACE" =~ ^[A-Za-z][A-Za-z0-9_]*$ ]] || { echo "bad keyspace name" >&2; exit 2; }
 STARTED=0
 source "$ROOT/tests/gates/lib-kafka.sh"
+source "$ROOT/tests/gates/lib-es.sh"
 cleanup() {
   local status=$?
   trap - EXIT INT TERM
+  es_cleanup
   kafka_cleanup
   if (( STARTED )); then
     docker logs "$CONTAINER" > "$ARTIFACTS/cassandra-container.log" 2>&1 || true
@@ -42,7 +44,9 @@ export CADENCE_CASSANDRA_DOCKER_CONTAINER="$CONTAINER"
 export CADENCE_CASSANDRA_CONTACT_POINTS=127.0.0.1 CADENCE_CASSANDRA_PORT="$PORT"
 export CADENCE_CASSANDRA_KEYSPACE="$KEYSPACE" CADENCE_CASSANDRA_VISIBILITY_KEYSPACE="$VISIBILITY_KEYSPACE"
 kafka_start
-python3 "$ROOT/tests/gates/run-frontend-gate.py" --database cassandra --out "$ARTIFACTS/run" "${KAFKA_ARGS[@]}" "$@"
+es_start
+if [[ "${CADENCE_GATE_TWO_HISTORY:-}" == "true" ]]; then KAFKA_ARGS+=(--two-history); fi
+python3 "$ROOT/tests/gates/run-frontend-gate.py" --database cassandra --out "$ARTIFACTS/run" "${KAFKA_ARGS[@]}" "${ES_ARGS[@]}" "$@"
 status=$?
 echo "$status" > "$ARTIFACTS/lane.exit"
 exit "$status"

@@ -12,9 +12,14 @@ on:
         type: boolean
         default: true
       es:
-        description: Also run the advanced visibility (Elasticsearch + Kafka + Go indexer) steps; mysql/postgres only, requires kafka
+        description: Also run the advanced visibility (Elasticsearch + Kafka + Go indexer) steps; requires kafka
         type: boolean
         default: false
+      es_flavor:
+        description: Search backend for es=true
+        type: choice
+        options: [elasticsearch, opensearch]
+        default: elasticsearch
       two_history:
         description: Run two Go History hosts and kill/restart one during SDK traffic
         type: boolean
@@ -28,7 +33,7 @@ on:
         default: fe-integ
 
 concurrency:
-  group: frontend-mixed-gate-${{ github.ref }}-${{ inputs.database }}
+  group: frontend-mixed-gate-${{ github.ref }}-${{ inputs.database }}-${{ inputs.es_flavor }}-${{ inputs.es }}
   cancel-in-progress: true
 
 jobs:
@@ -72,6 +77,7 @@ jobs:
         env:
           CADENCE_GATE_KAFKA: ${{ inputs.kafka }}
           CADENCE_GATE_ES: ${{ inputs.es }}
+          CADENCE_GATE_ES_FLAVOR: ${{ inputs.es_flavor || 'elasticsearch' }}
           CADENCE_GATE_TWO_HISTORY: ${{ inputs.two_history }}
         run: |
           set +e
