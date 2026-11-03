@@ -509,6 +509,61 @@ try:
         (work / 'cli-describe-domain-grpc-ipv6.log').write_text(last)
         record('cli-describe-domain-grpc-ipv6', ok, last)
 
+    # ---- OAuth phase: Rust Frontend with authorization.oauthAuthorizer enabled.
+    # Runs after the normal phase: the Go Worker/History cannot send a JWT to the
+    # Frontend, so all client calls here come from the Go CLI (--jwt) through
+    # TChannel and gRPC (`cadence-authorization` header).
+    import base64, hashlib
+    keydir = work / 'oauth'; keydir.mkdir(exist_ok=True)
+    priv, pub = keydir / 'private.pem', keydir / 'public.pem'
+    subprocess.run(['openssl', 'genrsa', '-out', str(priv), '2048'], check=True, capture_output=True)
+    subprocess.run(['openssl', 'rsa', '-in', str(priv), '-pubout', '-out', str(pub)], check=True, capture_output=True)
+    def b64(b):
+        return base64.urlsafe_b64encode(b).rstrip(b'=').decode()
+    def mint(claims, key=priv):
+        signing = b64(json.dumps({'alg': 'RS256', 'typ': 'JWT'}).encode()) + '.' + b64(json.dumps(claims).encode())
+        sig = subprocess.run(['openssl', 'dgst', '-sha256', '-sign', str(key)], input=signing.encode(), capture_output=True, check=True).stdout
+        return signing + '.' + b64(sig)
+    now = int(time.time())
+    t_admin = mint({'admin': True, 'iat': now, 'ttl': 600})
+    t_reader = mint({'groups': 'gate-readers', 'iat': now, 'ttl': 600})
+    t_expired = mint({'admin': True, 'iat': now - 7200, 'exp': now - 3600})
+    other = keydir / 'other.pem'
+    subprocess.run(['openssl', 'genrsa', '-out', str(other), '2048'], check=True, capture_output=True)
+    t_badsig = mint({'admin': True, 'iat': now, 'ttl': 600}, other)
+    oauth_cfg = (rt.rstrip('\n') + '\nauthorization:\n  oauthAuthorizer:\n    enable: true\n    maxJwtTTL: 3600\n'
+                 f'    jwtCredentials:\n      algorithm: "RS256"\n      publicKey: {json.dumps(str(pub))}\n')
+    (work / 'rust.yaml').write_text(oauth_cfg)
+    kill('rust-frontend')
+    start('rust-frontend', rust_frontend(), env=frontend_env)
+    record('oauth-frontend-listening', wait_port(ports['FRONTEND_PORT'], 120, 'rust-frontend') and wait_port(ports['FRONTEND_PORT_GRPC'], 10, 'rust-frontend'))
+    def cli_expect(name, cmd, ok, expect=None):
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        out = r.stdout + r.stderr
+        (work / f'{name}.log').write_text(out)
+        good = (r.returncode == 0) == ok and (expect is None or expect in out)
+        record(name, good, out.strip()[:500])
+        return good
+    desc = ['--domain', dom_t, 'domain', 'describe']
+    for tname, base in (('tchannel', cli_t), ('grpc', cli_g)):
+        cli_expect(f'oauth-{tname}-no-token-denied', [*base, *desc], False, 'Request unauthorized')
+        cli_expect(f'oauth-{tname}-garbage-token-denied', [*base, '--jwt', 'x.y.z', *desc], False, 'Request unauthorized')
+        cli_expect(f'oauth-{tname}-expired-token-denied', [*base, '--jwt', t_expired, *desc], False, 'Request unauthorized')
+        cli_expect(f'oauth-{tname}-wrong-key-denied', [*base, '--jwt', t_badsig, *desc], False, 'Request unauthorized')
+        cli_expect(f'oauth-{tname}-admin-token-allowed', [*base, '--jwt', t_admin, *desc], True)
+    # Domain-group permissions: reader group on the domain.
+    cli_expect('oauth-domain-update-groups', [*cli_t, '--jwt', t_admin, '--domain', dom_t, 'domain', 'update', '--domain_data', 'READ_GROUPS=gate-readers'], True)
+    time.sleep(3)
+    for tname, base in (('tchannel', cli_t), ('grpc', cli_g)):
+        cli_expect(f'oauth-{tname}-reader-describe-allowed', [*base, '--jwt', t_reader, *desc], True)
+        cli_expect(f'oauth-{tname}-reader-write-denied', [*base, '--jwt', t_reader, '--domain', dom_t, 'workflow', 'start', '--tl', 'oauth-tl', '--wt', 'OauthProbe', '--et', '60', '--dt', '10'], False, 'Request unauthorized')
+    # Admin API (Go accesscontrolled.NewAdminHandler): admin claim required.
+    for tname, base in (('tchannel', cli_t), ('grpc', cli_g)):
+        cli_expect(f'oauth-{tname}-admin-api-no-token-denied', [*base, 'admin', 'config', 'list'], False, 'Request unauthorized')
+        cli_expect(f'oauth-{tname}-admin-api-expired-denied', [*base, '--jwt', t_expired, 'admin', 'config', 'list'], False, 'Request unauthorized')
+        cli_expect(f'oauth-{tname}-admin-api-non-admin-denied', [*base, '--jwt', t_reader, 'admin', 'config', 'list'], False)
+        cli_expect(f'oauth-{tname}-admin-api-admin-allowed', [*base, '--jwt', t_admin, 'admin', 'config', 'list'], True)
+
 except SystemExit:
     pass
 except Exception as e:
