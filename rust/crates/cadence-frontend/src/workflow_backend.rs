@@ -869,6 +869,7 @@ pub fn build_workflow_api(
                 )
             });
             let validate_overlay = overlay.clone();
+            let store_overlay = overlay.clone();
             backend = backend.with_es_visibility(crate::workflow_visibility::EsBinding {
                 es: std::sync::Arc::new(crate::es_visibility::EsVisibility::new(
                     std::sync::Arc::new(client),
@@ -877,6 +878,18 @@ pub fn build_workflow_api(
                 )),
                 attrs: std::sync::Arc::new(move || {
                     cadence_service_core::admin::valid_search_attributes(&state.admin)
+                }),
+                read_store: std::sync::Arc::new(move |domain: &str| {
+                    store_overlay.lock().map_or_else(
+                        |_| "es".to_owned(),
+                        |o| {
+                            cadence_persistence::dynamic_config::string_domain(
+                                o.property_values("system.readVisibilityStoreName"),
+                                domain,
+                                "es",
+                            )
+                        },
+                    )
                 }),
                 validate: std::sync::Arc::new(move || {
                     validate_overlay.lock().map_or(true, |o| {
