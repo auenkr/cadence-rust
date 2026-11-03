@@ -863,8 +863,9 @@ try:
                     break
         return busy, (outs[-1] if outs else '')[:500]
     def set_grl(extra):
+        base = re.sub(r'(?m)^frontend\.(globalRatelimiterMode|globalDomainrps|domainrps):\n(?:[- ].*\n?)*', '', dyn)
         (work / 'rust-dynamic-config.yaml').write_text(
-            dyn + f'\nsystem.enableGRPCOutbound:\n  - value: {str(args.rust_outbound == "grpc").lower()}\n' + extra)
+            base + f'\nsystem.enableGRPCOutbound:\n  - value: {str(args.rust_outbound == "grpc").lower()}\n' + extra)
         return restart_frontend(work / 'rust-ratelimit.yaml')
     for mode, limit_key in (('global', 'frontend.globalDomainrps'), ('local-shadow-global', 'frontend.domainrps'), ('global-shadow-local', 'frontend.globalDomainrps')):
         tag = mode.replace('-', '')
