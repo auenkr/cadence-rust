@@ -424,7 +424,10 @@ impl ScheduleRedirect {
                         match cluster {
                             Some(cluster) if cluster != current => {
                                 let client = self.remotes.get(&cluster)?;
-                                client.call(operation, request, self.timeout).await.map(Some)
+                                client
+                                    .call(operation, request, self.timeout)
+                                    .await
+                                    .map(Some)
                             }
                             _ => Ok(None),
                         }

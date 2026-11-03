@@ -519,7 +519,9 @@ where
 /// `cadence-client-feature-flags` is a jsonpb `FeatureFlags`; a set
 /// `autoforwardingEnabled` means strong consistency. Unparseable values fail
 /// open to empty flags (eventual).
-pub fn consistency_from_headers(headers: &std::collections::HashMap<String, String>) -> Consistency {
+pub fn consistency_from_headers(
+    headers: &std::collections::HashMap<String, String>,
+) -> Consistency {
     let Some(raw) = headers.get("cadence-client-feature-flags") else {
         return Consistency::Eventual;
     };
@@ -606,6 +608,36 @@ fn active_active_target<M: ActiveClusterManager>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn autoforwarding_feature_flag_selects_strong_consistency() {
+        let h = |v: &str| {
+            std::collections::HashMap::from([(
+                "cadence-client-feature-flags".to_string(),
+                v.to_string(),
+            )])
+        };
+        let none = std::collections::HashMap::new();
+        assert_eq!(consistency_from_headers(&none), Consistency::Eventual);
+        assert_eq!(
+            consistency_from_headers(&h(r#"{"autoforwardingEnabled":true}"#)),
+            Consistency::Strong
+        );
+        assert_eq!(
+            consistency_from_headers(&h(r#"{"autoforwarding_enabled":true,"WorkflowExecutionAlreadyCompletedErrorEnabled":true}"#)),
+            Consistency::Strong
+        );
+        assert_eq!(
+            consistency_from_headers(&h(r#"{"autoforwardingEnabled":false}"#)),
+            Consistency::Eventual
+        );
+        // jsonpb rejects unknown fields and non-bool values: fail open.
+        assert_eq!(
+            consistency_from_headers(&h(r#"{"autoforwardingEnabled":true,"x":1}"#)),
+            Consistency::Eventual
+        );
+        assert_eq!(consistency_from_headers(&h("garbage")), Consistency::Eventual);
+    }
     use std::sync::Mutex;
 
     struct Config(bool);
