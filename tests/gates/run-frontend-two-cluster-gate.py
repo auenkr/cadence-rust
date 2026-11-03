@@ -244,6 +244,23 @@ try:
         record('all-domain-forward-workflow-lives-on-B', rc == 0 and wid2 in out, out)
         rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'list', '--open')
         record('all-domain-forward-list-sees-B-workflow', rc == 0 and wid2 in out, out)
+    # (a3) forwarding over gRPC: cluster B is configured with rpcTransport grpc
+    if start_rust_frontend('forward-grpc', 'selected-apis-forwarding', '', 'grpc'):
+        rc, out, wid5, rid5 = start_wf('grpc')
+        record('grpc-forward-start-on-A', rc == 0, out)
+        wids['grpc'] = (wid5, rid5)
+        def on_b():
+            rc, out = cli(B_T, 'tchannel', '--domain', dom, 'workflow', 'describe', '--wid', wid5)
+            return rc == 0 and wid5 in out, out
+        poll('grpc-forward-workflow-lives-on-B', on_b, 60)
+        rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'signal', '--wid', wid5, '--name', 'sig', '--input', '"x"')
+        record('grpc-forward-signal', rc == 0, out)
+        rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'terminate', '--wid', wid5, '--reason', 'gate')
+        record('grpc-forward-terminate', rc == 0, out)
+        def terminated():
+            rc, out = cli(B_T, 'tchannel', '--domain', dom, 'workflow', 'describe', '--wid', wid5)
+            return rc == 0 and 'terminated' in out.lower(), out
+        poll('grpc-forward-terminated-on-B', terminated, 60)
     # (b) noop
     if start_rust_frontend('noop', 'noop', '', 'tchannel'):
         rc, out, wid3, _ = start_wf('noop')
