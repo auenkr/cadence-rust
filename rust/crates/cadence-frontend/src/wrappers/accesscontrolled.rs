@@ -22,6 +22,9 @@ pub struct Attributes {
     pub task_list: Option<Value>,
     pub workflow_type: Option<Value>,
     pub request_body: Option<Value>,
+    /// Value of the `cadence-authorization` transport header (Go reads it
+    /// from the yarpc call in the authorizer).
+    pub auth_token: String,
 }
 
 /// Build the authorization input used by Go's generated Workflow API wrapper.
@@ -100,6 +103,7 @@ pub fn attributes_for_request(operation: &str, request: &Value, actor: &str) -> 
         workflow_type: request_fields.get("workflowType").cloned(),
         // Go's NewFilteredRequestBody JSON-serializes the full API request.
         request_body: Some(request_body),
+        auth_token: String::new(),
     })
 }
 
@@ -168,6 +172,7 @@ pub fn authorize_request<A, M>(
     operation: &str,
     request: &Value,
     actor: &str,
+    token: &str,
     authorizer: &A,
     metrics: &M,
 ) -> Result<(), CadenceError>
@@ -176,7 +181,10 @@ where
     M: AuthorizationMetrics,
 {
     match attributes_for_request(operation, request, actor) {
-        Some(attributes) => authorize(authorizer, metrics, &attributes),
+        Some(mut attributes) => {
+            attributes.auth_token = token.to_owned();
+            authorize(authorizer, metrics, &attributes)
+        }
         None => Ok(()),
     }
 }
@@ -205,7 +213,35 @@ where
     M: AuthorizationMetrics + Send + Sync,
 {
     fn authorize(&self, operation: &str, request: &Value, actor: &str) -> Result<(), CadenceError> {
-        authorize_request(operation, request, actor, &self.authorizer, &self.metrics)
+        authorize_request(
+            operation,
+            request,
+            actor,
+            "",
+            &self.authorizer,
+            &self.metrics,
+        )
+    }
+
+    fn authorize_with_headers(
+        &self,
+        operation: &str,
+        request: &Value,
+        actor: &str,
+        headers: &std::collections::HashMap<String, String>,
+    ) -> Result<(), CadenceError> {
+        let token = headers
+            .get("cadence-authorization")
+            .map(String::as_str)
+            .unwrap_or_default();
+        authorize_request(
+            operation,
+            request,
+            actor,
+            token,
+            &self.authorizer,
+            &self.metrics,
+        )
     }
 }
 

@@ -19,6 +19,7 @@ cadence-proto = { path = "../cadence-proto" }
 cadence-persistence = { path = "../cadence-persistence" }
 cadence-thrift = { path = "../cadence-thrift" }
 chrono = "0.4"
+jsonwebtoken = "9"
 rskafka = { version = "0.6", default-features = false, features = ["transport-tls"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-native-certs = "0.8"
