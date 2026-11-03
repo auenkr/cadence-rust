@@ -1,9 +1,10 @@
 //! Remote Frontend client used by cluster redirection (Go:
 //! `resource.GetRemoteFrontendClient(cluster)` + the autoforwarding header).
 //!
-//! Calls go over TChannel/Thrift using the same WorkflowService codecs the
-//! Frontend serves. `clusterGroup[x].rpcTransport: grpc` is not supported by
-//! this client and fails with a clear error instead of silently going local.
+//! Transport follows `clusterGroup[x].rpcTransport` like Go's
+//! `NewCrossDCOutbounds`: `tchannel` uses TChannel/Thrift with the WorkflowService
+//! codecs the Frontend serves; `grpc` uses the proto WorkflowAPI with the
+//! cluster's `tls` block. Anything else is an error.
 #![allow(clippy::result_large_err)]
 
 use std::time::Duration;
@@ -17,7 +18,7 @@ use crate::workflow_api::{decode_client_response, encode_client_request};
 pub const AUTOFORWARDING_CLUSTER_HEADER: &str = "cadence-forwarding-cluster";
 pub const DEFAULT_REMOTE_TIMEOUT: Duration = Duration::from_secs(30);
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct RemoteFrontendClient {
     pub cluster: String,
     pub address: String,
@@ -25,15 +26,77 @@ pub struct RemoteFrontendClient {
     pub transport: String,
     pub caller: String,
     pub forwarding_cluster: String,
+    /// Go `ClusterInformation.TLS` for the gRPC transport.
+    pub tls: Option<crate::config::TlsConfig>,
+    channel: std::sync::Arc<tokio::sync::OnceCell<tonic::transport::Channel>>,
 }
 
 impl RemoteFrontendClient {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        cluster: String,
+        address: String,
+        service: String,
+        transport: String,
+        caller: String,
+        forwarding_cluster: String,
+        tls: Option<crate::config::TlsConfig>,
+    ) -> Self {
+        Self {
+            cluster,
+            address,
+            service,
+            transport,
+            caller,
+            forwarding_cluster,
+            tls,
+            channel: Default::default(),
+        }
+    }
+
+    async fn grpc_call(
+        &self,
+        operation: &str,
+        request: serde_json::Value,
+        timeout: Duration,
+    ) -> Result<serde_json::Value, CadenceError> {
+        let internal = |m: String| CadenceError::Internal(InternalServiceError::new(m));
+        let channel = self
+            .channel
+            .get_or_try_init(|| async {
+                let tls = match &self.tls {
+                    Some(tls) => crate::grpc_tls::client_tls(tls).map_err(|e| {
+                        internal(format!("remote Frontend {} TLS config: {e}", self.cluster))
+                    })?,
+                    None => None,
+                };
+                crate::grpc_tls::endpoint_channel(&self.address, tls.as_ref()).map_err(|e| {
+                    internal(format!("remote Frontend {} unavailable: {e}", self.cluster))
+                })
+            })
+            .await?
+            .clone();
+        crate::frontend_remote_grpc::call(
+            channel,
+            &self.service,
+            &self.caller,
+            &self.forwarding_cluster,
+            operation,
+            request,
+            timeout,
+        )
+        .await
+    }
+
     pub async fn call(
         &self,
         operation: &str,
         request: serde_json::Value,
         timeout: Duration,
     ) -> Result<serde_json::Value, CadenceError> {
+        if self.transport.eq_ignore_ascii_case("grpc") {
+            return self.grpc_call(operation, request, timeout).await;
+        }
         if !self.transport.eq_ignore_ascii_case("tchannel") {
             return Err(CadenceError::Internal(InternalServiceError::new(format!(
                 "remote Frontend transport {:?} for cluster {} is not supported",
@@ -74,24 +137,57 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn grpc_transport_is_rejected_explicitly() {
-        let client = RemoteFrontendClient {
-            cluster: "b".into(),
-            address: "127.0.0.1:1".into(),
-            service: "cadence-frontend".into(),
-            transport: "grpc".into(),
-            caller: "cadence-frontend".into(),
-            forwarding_cluster: "a".into(),
-        };
+    async fn unknown_transport_is_rejected_explicitly() {
+        let client = RemoteFrontendClient::new(
+            "b".into(),
+            "127.0.0.1:1".into(),
+            "cadence-frontend".into(),
+            "http".into(),
+            "cadence-frontend".into(),
+            "a".into(),
+            None,
+        );
         let err = client
-            .call(
-                "SignalWorkflowExecution",
-                serde_json::json!({}),
-                Duration::from_secs(1),
-            )
+            .call("SignalWorkflowExecution", serde_json::json!({}), Duration::from_secs(1))
             .await
             .unwrap_err();
         assert!(err.to_string().contains("not supported"));
+    }
+
+    #[tokio::test]
+    async fn grpc_transport_rejects_unconverted_operations() {
+        let client = RemoteFrontendClient::new(
+            "b".into(),
+            "127.0.0.1:1".into(),
+            "cadence-frontend".into(),
+            "grpc".into(),
+            "cadence-frontend".into(),
+            "a".into(),
+            None,
+        );
+        let err = client
+            .call("QueryWorkflow", serde_json::json!({}), Duration::from_secs(1))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("gRPC remote Frontend"));
+    }
+
+    #[tokio::test]
+    async fn grpc_transport_reports_unreachable_remote() {
+        let client = RemoteFrontendClient::new(
+            "b".into(),
+            "127.0.0.1:1".into(),
+            "cadence-frontend".into(),
+            "grpc".into(),
+            "cadence-frontend".into(),
+            "a".into(),
+            None,
+        );
+        let err = client
+            .call("SignalWorkflowExecution", serde_json::json!({}), Duration::from_secs(2))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CadenceError::Internal(_)), "{err:?}");
     }
 
     #[test]
