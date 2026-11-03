@@ -34,6 +34,7 @@ enum Tok {
     RParen,
     Comma,
     Star,
+    Arith,
 }
 
 fn tokenize(s: &str) -> Result<Vec<Tok>, ()> {
@@ -128,6 +129,9 @@ fn tokenize(s: &str) -> Result<Vec<Tok>, ()> {
             i += 1;
         } else if ch == '*' {
             out.push(Tok::Star);
+            i += 1;
+        } else if matches!(ch, '+' | '-' | '/' | '%') {
+            out.push(Tok::Arith);
             i += 1;
         } else if matches!(ch, '=' | '!' | '<' | '>') {
             let mut op = String::from(ch);
@@ -243,7 +247,18 @@ impl P {
         }
         self.cond()
     }
+    /// Arithmetic on operands parses as a binary expression in Go's parser,
+    /// which the validator then rejects as a non-column left side.
     fn operand(&mut self) -> Result<Operand, ()> {
+        let mut o = self.operand_base()?;
+        while matches!(self.peek(), Some(Tok::Arith | Tok::Star)) {
+            self.i += 1;
+            self.operand_base()?;
+            o = Operand::Other("expr".into());
+        }
+        Ok(o)
+    }
+    fn operand_base(&mut self) -> Result<Operand, ()> {
         match self.peek().cloned() {
             Some(Tok::Back(s)) => {
                 self.i += 1;
