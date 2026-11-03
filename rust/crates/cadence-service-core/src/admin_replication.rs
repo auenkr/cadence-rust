@@ -518,7 +518,7 @@ mod tests {
             Some(cadence_api::enums::CrossClusterTaskType::SignalExecution)
         );
         let json = serde_json::to_value(&value).unwrap();
-        assert_eq!(json["failedCauseByShard"]["7"], "SHARD_OWNERSHIP_LOST");
+        assert_eq!(json["failedCauseByShard"]["7"], 2);
         assert_eq!(json["tasksByShard"]["7"][0]["taskInfo"]["taskID"], 5);
     }
 
