@@ -558,7 +558,9 @@ try:
                     (work / f's3-history-list-{tag}.log').write_text(f'{st}\n{listing}')
                 r = subprocess.run(cli_s3('workflow', 'show', '--wid', hwid, '--rid', hrun), capture_output=True, text=True, timeout=60)
                 (work / 's3-show-archived.log').write_text(r.stdout + r.stderr)
-                record('s3-archived-only-history', r.returncode == 0 and 'WorkflowExecutionStarted' in r.stdout and 'WorkflowExecutionTerminated' in r.stdout, r.stdout + r.stderr)
+                # The CLI prints the history, then calls DescribeWorkflowExecution (which Go also fails for an
+                # archived-only run), so success is judged on the printed events, not the exit code.
+                record('s3-archived-only-history', 'WorkflowExecutionStarted' in r.stdout and 'WorkflowExecutionTerminated' in r.stdout, r.stdout + r.stderr)
                 r = subprocess.run(cli_s3('workflow', 'show', '--wid', hwid, '--rid', str(uuid.uuid4())), capture_output=True, text=True, timeout=60)
                 record('s3-archived-history-missing-run', r.returncode != 0, r.stdout + r.stderr)
             else:
