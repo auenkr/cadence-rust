@@ -814,6 +814,7 @@ pub fn build_workflow_api(
     .with_domain_lookup(lookup)
     .with_archived_history_reader(archived_history)
     .with_archived_visibility_reader(archived_visibility)
+    .with_metrics_sink(frontend_metrics_sink(&ctx.config))
     .with_rate_limit_policies(rate_limit)
     .with_access_control(std::sync::Arc::new(
         crate::wrappers::accesscontrolled::HandlerAuthorization::new(
@@ -932,6 +933,43 @@ fn build_archive_readers(
             domains,
         )),
     ))
+
+/// Builds the Frontend metrics sink from `services.frontend.metrics` using the
+/// shared exporter runtime (StatsD/M3/Prometheus). An absent/empty reporter is
+/// a no-op scope like Go. The runtime lives for the process lifetime.
+fn frontend_metrics_sink(
+    config: &cadence_service_core::config::Config,
+) -> std::sync::Arc<dyn cadence_service_core::matching_metrics::MetricSink> {
+    use cadence_service_core::matching_metrics_runtime::MatchingMetricsRuntime;
+    let Some(service) = config.services.get("frontend") else {
+        return std::sync::Arc::new(cadence_service_core::matching_metrics::NoopMetricSink);
+    };
+    let runtime = MatchingMetricsRuntime::new_for_service(
+        &service.metrics,
+        Some(&service.pprof),
+        cadence_service_core::matching_metrics_migration::MigrationPolicy {
+            histograms: config.histograms.clone(),
+            gauges: config.gauge_migration.clone(),
+            counters: config.counter_migration.clone(),
+        },
+        "cadence-frontend",
+    );
+    match runtime {
+        Ok(mut runtime) => {
+            let sink = runtime.sink();
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    let _ = runtime.start().await;
+                    std::future::pending::<()>().await;
+                });
+            }
+            sink
+        }
+        Err(error) => {
+            eprintln!("frontend metrics disabled: {error}");
+            std::sync::Arc::new(cadence_service_core::matching_metrics::NoopMetricSink)
+        }
+    }
 }
 
 /// Installs the production async publisher on the handler.
