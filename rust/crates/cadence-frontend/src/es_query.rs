@@ -1256,4 +1256,44 @@ mod tests {
         assert_eq!(v["query"]["bool"]["must"].as_array().unwrap().len(), 3);
         assert_eq!(v["sort"][0], json!({"CloseTime": {"order": "desc"}}));
     }
+
+    /// Mirrors go/common/elasticsearch/validator TestValidateQuery.
+    #[test]
+    fn go_validate_query_table() {
+        let mut a: HashMap<String, i32> = cadence_api::search_attributes::default_indexed_keys()
+            .into_keys()
+            .map(|k| (k, 0))
+            .collect();
+        for k in ["Custom_Field", "Custom_0", "Custom.Field", "Custom-Field"] {
+            a.insert(k.to_string(), 0);
+        }
+        let cases: &[(&str, Result<&str, &str>)] = &[
+            ("", Ok("")),
+            ("WorkflowID = 'wid'", Ok("WorkflowID = 'wid'")),
+            ("CustomStringField = 'custom'", Ok("`Attr.CustomStringField` = 'custom'")),
+            ("Invalid SQL", Err("Invalid query.")),
+            ("InvalidWhereExpr", Err("invalid where clause")),
+            ("WorkflowID = 'wid' and 1 < 2", Err("invalid comparison expression")),
+            ("1 between 1 and 2 or WorkflowID = 'wid'", Err("invalid range expression")),
+            ("Invalid = 'a' and 1 < 2", Err("invalid search attribute \"Invalid\"")),
+            ("Invalid between 1 and 2 or WorkflowID = 'wid'", Err("invalid search attribute \"Invalid\"")),
+            ("order by InvalidField desc", Err("invalid order by attribute")),
+            ("order by 123", Err("invalid order by expression")),
+            ("WorkflowID = 'wid'; SELECT * FROM important_table;", Err("Invalid query.")),
+            ("WorkflowID = 'wid' and (RunID = 'rid' or 1 = 1)", Err("invalid comparison expression")),
+            ("WorkflowID = 'wid' union select * from dummy", Err("Invalid select query.")),
+            ("Custom_Field = 'value'", Ok("`Attr.Custom_Field` = 'value'")),
+            ("Custom_0 = 'value'", Ok("`Attr.Custom_0` = 'value'")),
+            ("Custom.Field = 'value'", Err("invalid search attribute \"Field\"")),
+            ("Custom-Field = 'value'", Err("invalid comparison expression")),
+            ("CustomStringField not like 'value'", Ok("`Attr.CustomStringField` not like 'value'")),
+        ];
+        for (q, want) in cases {
+            let got = validate_query(q, &a, true);
+            match want {
+                Ok(v) => assert_eq!(got, Ok(v.to_string()), "{q}"),
+                Err(m) => assert_eq!(got, Err(bad(*m)), "{q}"),
+            }
+        }
+    }
 }
