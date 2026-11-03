@@ -11,6 +11,7 @@ pub mod async_kafka_tls;
 pub mod async_publisher;
 pub mod async_queue;
 pub mod config;
+pub mod es_query;
 pub mod handler_admin;
 pub mod handler_admin_history;
 pub mod handler_domain;
