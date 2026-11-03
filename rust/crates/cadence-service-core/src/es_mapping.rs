@@ -125,6 +125,46 @@ impl HttpEsClient {
         })
     }
 
+    /// Generic JSON call used by the Frontend's search/scroll/count read path.
+    /// Errors read like olivere's `elastic: Error <status> (<reason>): <body>`.
+    pub fn raw(&self, method: &str, path: &str, body: Option<String>) -> Result<Value, String> {
+        let this = self.clone();
+        let (method, path) = (method.to_string(), path.to_string());
+        std::thread::spawn(move || {
+            let client = reqwest::blocking::Client::builder()
+                .timeout(Duration::from_secs(60))
+                .build()
+                .map_err(|e| e.to_string())?;
+            let m = reqwest::Method::from_bytes(method.as_bytes()).map_err(|e| e.to_string())?;
+            let mut req = client.request(m, format!("{}{}", this.base, path));
+            if !this.username.is_empty() {
+                req = req.basic_auth(&this.username, Some(&this.password));
+            }
+            for (k, v) in &this.headers {
+                req = req.header(k, v);
+            }
+            if let Some(b) = body {
+                req = req.header("Content-Type", "application/json").body(b);
+            }
+            let resp = req.send().map_err(|e| e.to_string())?;
+            let status = resp.status();
+            let text = resp.text().unwrap_or_default();
+            if !status.is_success() {
+                return Err(format!(
+                    "elastic: Error {} ({}): {text}",
+                    status.as_u16(),
+                    status.canonical_reason().unwrap_or("")
+                ));
+            }
+            if text.trim().is_empty() {
+                return Ok(Value::Null);
+            }
+            serde_json::from_str(&text).map_err(|e| e.to_string())
+        })
+        .join()
+        .unwrap_or_else(|_| Err("elasticsearch request thread panicked".into()))
+    }
+
     fn request(&self, path: String, body: Option<Value>) -> Result<(), EsError> {
         let this = self.clone();
         std::thread::spawn(move || {
@@ -204,6 +244,30 @@ pub fn from_persistence(
         client: Arc::new(client),
         index: cfg.indices.get("visibility").cloned().unwrap_or_default(),
     }))
+}
+
+/// Read-path client + visibility index for the Frontend (same store selection
+/// as `from_persistence`). Returns None when advanced visibility is not configured.
+pub fn search_client_from_persistence(
+    persistence: &crate::config::PersistenceConfig,
+) -> Result<Option<(HttpEsClient, String)>, String> {
+    if persistence.advanced_visibility_store.is_empty() {
+        return Ok(None);
+    }
+    let key = if persistence.advanced_visibility_store == "os-visibility" {
+        "os-visibility"
+    } else {
+        "es-visibility"
+    };
+    let cfg = persistence
+        .datastores
+        .get(key)
+        .and_then(|d| d.elasticsearch.as_ref())
+        .ok_or_else(|| format!("Cannot find {key} store with elasticsearch config"))?;
+    Ok(Some((
+        HttpEsClient::from_config(cfg)?,
+        cfg.indices.get("visibility").cloned().unwrap_or_default(),
+    )))
 }
 
 #[cfg(test)]
