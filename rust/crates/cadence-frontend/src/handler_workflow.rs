@@ -3166,12 +3166,17 @@ mod tests {
             .dispatch("RespondDecisionTaskCompleted", body.clone())
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("Decision result count exceeds limit."));
+        assert!(err
+            .to_string()
+            .contains("Decision result count exceeds limit."));
         assert!(handler.backend.0.lock().unwrap().is_empty());
         let handler = Handler::new(CapturingBackend::default())
             .with_domain_lookup(Arc::new(StaticDomainLookup))
             .with_decision_result_limit_policy(Arc::new(FixedDecisionLimit(0)));
-        handler.dispatch("RespondDecisionTaskCompleted", body).await.unwrap();
+        handler
+            .dispatch("RespondDecisionTaskCompleted", body)
+            .await
+            .unwrap();
     }
 
     struct DomainHistoryPageSize;
