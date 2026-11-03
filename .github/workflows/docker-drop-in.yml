@@ -65,6 +65,19 @@ jobs:
           sleep 20
           echo "COMPOSE_FILE=$COMPOSE_FILE" >> $GITHUB_ENV
           docker compose ps | tee out/ps.txt
+      - name: Assert default domain exists
+        run: |
+          cli=$PWD/out/cadence-cli
+          docker compose cp frontend:/tmp/default-domain.log out/default-domain.log || echo "no default-domain.log" > out/default-domain.log
+          ok=0
+          for i in $(seq 1 30); do
+            $cli --address 127.0.0.1:7833 --transport grpc --domain default domain describe > out/default-domain-describe.txt 2>&1 && { ok=1; break; }
+            sleep 5
+          done
+          docker compose cp frontend:/tmp/default-domain.log out/default-domain.log || true
+          cat out/default-domain-describe.txt out/default-domain.log
+          test "$ok" = 1
+          grep -q "default" out/default-domain-describe.txt
       - name: Register domain and SDK smoke
         run: |
           cli=$PWD/out/cadence-cli
@@ -79,7 +92,9 @@ jobs:
           test "$(cat out/smoke.exit)" = 0
       - name: Collect logs
         if: always()
-        run: docker compose logs --no-color > out/compose.log 2>&1 || true
+        run: |
+          docker compose logs --no-color > out/compose.log 2>&1 || true
+          docker compose cp frontend:/tmp/default-domain.log out/default-domain.log 2>/dev/null || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:

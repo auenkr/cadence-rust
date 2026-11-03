@@ -30,7 +30,13 @@ ap.add_argument('--es-version', default='v7')
 ap.add_argument('--es-container', help='docker container of the ES/OpenSearch node; enables the restart-resilience steps')
 ap.add_argument('--s3-endpoint', help='http://host:port of MinIO; enables the S3 archival (s3store) steps')
 ap.add_argument('--s3-bucket', default='cadence-archival-gate')
+ap.add_argument('--gcs-endpoint', help='http://host:port of fake-gcs-server; enables the GCS archival (gstorage) steps')
+ap.add_argument('--gcs-bucket', default='cadence-archival-gate-gcs')
+ap.add_argument('--gcs-seed', help='path of the gcs-seed Go helper (prints Go gstorage history filenames)')
 args = ap.parse_args()
+if args.gcs_endpoint:
+    # Go (storage client) and the Rust Frontend honour STORAGE_EMULATOR_HOST and skip authentication.
+    os.environ['STORAGE_EMULATOR_HOST'] = args.gcs_endpoint.replace('http://', '')
 S3_KEY, S3_SECRET = 'cadencegate', 'cadencegate-secret'
 if args.s3_endpoint:
     # Go History/Worker and the Rust Frontend read AWS credentials from the environment.
@@ -88,7 +94,10 @@ s3_provider = (f'      s3store:\n        region: us-east-1\n        endpoint: {j
                if args.s3_endpoint else '')
 def add_s3(cfg):
     return cfg.replace('        dirMode: "0766"\n', '        dirMode: "0766"\n' + s3_provider) if s3_provider else cfg
-text = add_s3(text)
+def add_gcs(cfg):
+    # development.yaml already has gstorage for history only; add it where missing (visibility)
+    return re.sub(r'(        dirMode: "0766"\n)(?!      gstorage)', r'\1      gstorage:\n        credentialsPath: ""\n', cfg) if args.gcs_endpoint else cfg
+text = add_gcs(add_s3(text))
 text = text.rstrip('\n') + '\n' + async_yaml
 (work / 'config/development.yaml').write_text(text)
 if args.two_history:
@@ -153,7 +162,7 @@ rt = rt.replace('localhost:7833', f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}')
 rt = rt.replace('/tmp/cadence_archival/development', str(work / 'history-archive'))
 rt = rt.replace('/tmp/cadence_vis_archival/development', str(work / 'visibility-archive'))
 rt = rt.replace('/tmp/blobstore', str(work / 'blobstore'))
-rt = add_s3(rt)
+rt = add_gcs(add_s3(rt))
 _ms = socket.socket(); _ms.bind(('127.0.0.1', 0)); prom_port = _ms.getsockname()[1]; _ms.close()
 rt, n = re.subn(r'(?m)^(  frontend:\n(?:.*\n)*?    metrics:\n)      statsd:\n        hostPort: "127.0.0.1:8125"\n        prefix: "cadence"\n',
                 lambda m: m.group(1) + f'      prometheus:\n        timerType: histogram\n        listenAddress: "127.0.0.1:{prom_port}"\n', rt, count=1)
@@ -638,6 +647,88 @@ try:
                 record('s3-archived-history-missing-run', r.returncode != 0, r.stdout + r.stderr)
             else:
                 record('s3-describe-has-uuid', False, d.stdout)
+    # ---- GCS archival phase (fake-gcs-server): Go History/Worker archive to gstorage, Rust Frontend reads/validates
+    if args.gcs_endpoint:
+        import urllib.request, urllib.error, urllib.parse, uuid
+        def gcs_call(method, path, body=b'', ctype='application/json'):
+            req = urllib.request.Request(args.gcs_endpoint + path, data=body or None, method=method, headers={'Content-Type': ctype})
+            try:
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    return r.status, r.read().decode()
+            except urllib.error.HTTPError as e:
+                return e.code, e.read().decode()
+        gb = args.gcs_bucket
+        st, body = gcs_call('POST', '/storage/v1/b?project=cadence-gate', json.dumps({'name': gb}).encode())
+        record('gcs-create-bucket', st == 200, f'{st} {body}')
+        gcs_hist, gcs_vis = f'gs://{gb}/gate-history', f'gs://{gb}/gate-visibility'
+        dom_g = 'fe-gate-gcs-' + secrets.token_hex(3)
+        cli_gc = lambda *a: [*cli_t, '--domain', dom_g, *a]
+        r = subprocess.run(cli_gc('domain', 'register', '--retention', '1', '--history_archival_status', 'enabled',
+                                  '--history_uri', f'gs://no-such-bucket-{secrets.token_hex(3)}/x', '--visibility_archival_status', 'disabled'),
+                           capture_output=True, text=True, timeout=60)
+        (work / 'gcs-register-missing-bucket.log').write_text(r.stdout + r.stderr)
+        record('gcs-register-missing-bucket-rejected', r.returncode != 0, r.stdout + r.stderr)
+        r = subprocess.run(cli_gc('domain', 'register', '--retention', '1', '--history_archival_status', 'enabled', '--history_uri', 's3://x/y',
+                                  '--visibility_archival_status', 'disabled'), capture_output=True, text=True, timeout=60)
+        (work / 'gcs-register-wrong-scheme.log').write_text(r.stdout + r.stderr)
+        record('gcs-register-s3-uri-rejected', r.returncode != 0, r.stdout + r.stderr)
+        ok_reg = run('gcs-register-domain', cli_gc('domain', 'register', '--retention', '1', '--history_archival_status', 'enabled',
+                                                   '--history_uri', gcs_hist, '--visibility_archival_status', 'enabled', '--visibility_uri', gcs_vis))
+        if ok_reg:
+            time.sleep(12)  # domain cache refresh in Go History/Worker
+            d = subprocess.run(cli_gc('domain', 'describe'), capture_output=True, text=True, timeout=60)
+            (work / 'gcs-describe-domain.log').write_text(d.stdout + d.stderr)
+            record('gcs-describe-domain', d.returncode == 0 and gcs_hist in d.stdout and gcs_vis in d.stdout, d.stdout + d.stderr)
+            m = re.search(r'UUID:\s*(\S+)', d.stdout)
+            wtypeg, idsg = 'GcsGateType', []
+            for i in range(2):
+                wid = f'gcs-wf-{secrets.token_hex(3)}'
+                idsg.append(wid)
+                run(f'gcs-start-{i}', cli_gc('workflow', 'start', '--tl', 'gcs-gate-tl', '--wt', wtypeg, '--wid', wid, '--et', '600', '--dt', '10'))
+                run(f'gcs-terminate-{i}', cli_gc('workflow', 'terminate', '--wid', wid, '--reason', 'gcs-gate'))
+            foundg, outg = False, ''
+            for _ in range(24):
+                r = subprocess.run(cli_gc('workflow', 'listarchived', '--query', f"WorkflowTypeName = '{wtypeg}'", '--all'), capture_output=True, text=True, timeout=60)
+                outg = r.stdout + r.stderr
+                if r.returncode == 0 and all(w in outg for w in idsg):
+                    foundg = True
+                    break
+                time.sleep(5)
+            (work / 'gcs-listarchived.log').write_text(outg)
+            record('gcs-list-archived-visibility', foundg, outg)
+            st, listing = gcs_call('GET', f'/storage/v1/b/{gb}/o?prefix=' + urllib.parse.quote('gate-visibility/', safe=''))
+            names = [o['name'] for o in json.loads(listing).get('items', [])] if st == 200 else []
+            (work / 'gcs-visibility-objects.log').write_text('\n'.join(names))
+            record('gcs-go-visibility-wrote-archive', len(names) >= 2, '\n'.join(names[:10]))
+            # Archived-only history: Go archives history at retention expiry (not reachable here), so Go-format
+            # multipart files (<fingerprint hashes>_<version>_<part>.history, JSON array of batches) are uploaded.
+            if m and args.gcs_seed:
+                hwid, hrun = 'gcs-archived-' + secrets.token_hex(3), str(uuid.uuid4())
+                ev = lambda i, t, a: {'eventId': i, 'timestamp': 1700000000000000000 + i, 'eventType': t, 'version': 0, 'taskId': i, a[0]: a[1]}
+                started = ev(1, 'WorkflowExecutionStarted', ('workflowExecutionStartedEventAttributes',
+                    {'workflowType': {'name': 'GcsArchived'}, 'taskList': {'name': 'gcs-gate-tl'}, 'executionStartToCloseTimeoutSeconds': 60,
+                     'taskStartToCloseTimeoutSeconds': 10, 'originalExecutionRunId': hrun, 'firstExecutionRunId': hrun,
+                     'initiator': 'CronSchedule', 'attempt': 0}))
+                closed = ev(2, 'WorkflowExecutionTerminated', ('workflowExecutionTerminatedEventAttributes', {'reason': 'archived-only'}))
+                for part, events in enumerate([[started], [closed]]):
+                    fname = subprocess.run([args.gcs_seed, m.group(1), hwid, hrun, '0', str(part)], capture_output=True, text=True, timeout=30).stdout.strip()
+                    obj = urllib.parse.quote(f'gate-history/{fname}', safe='')
+                    st, resp = gcs_call('POST', f'/upload/storage/v1/b/{gb}/o?uploadType=media&name={obj}', json.dumps([{'events': events}]).encode())
+                    record(f'gcs-upload-history-part-{part}', st == 200 and bool(fname), f'{st} {fname} {resp}')
+                hist_out = work / 'gcs-archived-history.json'
+                r = subprocess.run(cli_gc('workflow', 'show', '--wid', hwid, '--rid', hrun, '--output_filename', str(hist_out)), capture_output=True, text=True, timeout=60)
+                (work / 'gcs-show-archived.log').write_text(r.stdout + r.stderr)
+                exported = hist_out.read_text() if hist_out.exists() else ''
+                record('gcs-archived-only-history', 'WorkflowExecutionStarted' in exported and 'WorkflowExecutionTerminated' in exported, exported + r.stdout + r.stderr)
+                hist_out_g = work / 'gcs-archived-history-grpc.json'
+                rg = subprocess.run([*cli_g, '--domain', dom_g, 'workflow', 'show', '--wid', hwid, '--rid', hrun, '--output_filename', str(hist_out_g)], capture_output=True, text=True, timeout=60)
+                (work / 'gcs-show-archived-grpc.log').write_text(rg.stdout + rg.stderr)
+                exported_g = hist_out_g.read_text() if hist_out_g.exists() else ''
+                record('gcs-archived-only-history-grpc', 'WorkflowExecutionStarted' in exported_g and 'WorkflowExecutionTerminated' in exported_g, exported_g + rg.stdout + rg.stderr)
+                r = subprocess.run(cli_gc('workflow', 'show', '--wid', hwid, '--rid', str(uuid.uuid4())), capture_output=True, text=True, timeout=60)
+                record('gcs-archived-history-missing-run', r.returncode != 0, r.stdout + r.stderr)
+            else:
+                record('gcs-describe-has-uuid-and-seed', False, d.stdout)
     # ---- durable dynamic config / search attribute phase (config-store insert_config on this lane)
     def dbq(stmt):
         c = os.environ.get(prefix + '_DOCKER_CONTAINER')
