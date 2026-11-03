@@ -324,6 +324,11 @@ impl ArchivedHistory {
                 events.extend(list.iter().cloned());
             }
         }
+        eprintln!(
+            "FE-ARCHIVE history ok: events={} next_token_len={}",
+            events.len(),
+            response.next_page_token.len()
+        );
         Ok(Some(json!({
             "history": {"events": events},
             "nextPageToken": b64_token(&response.next_page_token),
