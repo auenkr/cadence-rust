@@ -2911,6 +2911,43 @@ mod schedule_dispatch_tests {
     }
 
     #[tokio::test]
+    async fn archived_visibility_dispatch_reaches_installed_workflow_api() {
+        let capture = Arc::new(Capture::default());
+        let state = AppState {
+            workflow_api: Some(capture.clone()),
+            ..AppState::default()
+        };
+        let args = Struct {
+            fields: vec![(
+                1,
+                Value::Struct(
+                    cadence_api::service_types::ListArchivedWorkflowExecutionsRequest {
+                        domain: "archived".into(),
+                        page_size: 10,
+                        query: "WorkflowType = 't'".into(),
+                        ..Default::default()
+                    }
+                    .to_thrift(),
+                ),
+            )],
+        };
+        dispatch_with_headers(
+            &state,
+            "WorkflowService::ListArchivedWorkflowExecutions",
+            &args,
+            Instant::now() + Duration::from_secs(5),
+            HashMap::new(),
+        )
+        .await
+        .unwrap();
+        let calls = capture.0.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "ListArchivedWorkflowExecutions");
+        assert_eq!(calls[0].1["domain"], "archived");
+        assert_eq!(calls[0].1["query"], "WorkflowType = 't'");
+    }
+
+    #[tokio::test]
     async fn schedule_dispatch_without_workflow_api_keeps_local_engine_fallback() {
         let state = AppState::default();
         let (_, error) = dispatch_with_headers(

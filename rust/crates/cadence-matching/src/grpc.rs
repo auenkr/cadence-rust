@@ -241,6 +241,7 @@ fn hook_operation(
         ("POST", "/api/v1/workflows/query") => "QueryWorkflow",
         ("POST", "/api/v1/workflows/list-open") => "ListOpenWorkflowExecutions",
         ("POST", "/api/v1/workflows/list-closed") => "ListClosedWorkflowExecutions",
+        ("POST", "/api/v1/workflows/archived") => "ListArchivedWorkflowExecutions",
         ("POST", "/api/v1/workflows/terminate") => "TerminateWorkflowExecution",
         ("POST", "/api/v1/workflows/restart") => "RestartWorkflowExecution",
         ("POST", "/api/v1/workflows/reset") => "ResetWorkflowExecution",
@@ -1911,9 +1912,23 @@ impl p::visibility_api_server::VisibilityApi for Frontend {
             next_page_token: r.next_page_token,
             query: r.query,
         };
+        if self
+            .state
+            .workflow_api
+            .as_ref()
+            .is_some_and(|api| api.serves("ListArchivedWorkflowExecutions"))
+        {
+            let result: st::ListArchivedWorkflowExecutionsResponse = self
+                .call_with_headers(Method::POST, "/api/v1/workflows/archived", &input, &[])
+                .await?;
+            return Ok(Response::new(p::ListArchivedWorkflowExecutionsResponse {
+                executions: result.executions.into_iter().map(cv::info_nanos).collect(),
+                next_page_token: result.next_page_token,
+            }));
+        }
         cadence_api::validation::validate_list_archived_request(Some(&input))
             .map_err(|e| Status::invalid_argument(e.message))?;
-        // Visibility archival has no backend in this port; mirror Go's
+        // Legacy in-process path (no WorkflowApi installed); mirror Go's
         // cluster-gating error.
         Err(Status::invalid_argument(
             "Cluster is not configured for visibility archival",
