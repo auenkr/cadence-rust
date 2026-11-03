@@ -2,13 +2,13 @@
 //! metrics sinks, lifecycle helpers and the legacy in-process `AppState`.
 pub mod admin;
 pub mod admin_replication;
-pub mod es_mapping;
 pub mod cli;
 pub mod config;
+pub mod es_mapping;
 pub mod frontend_lifecycle;
+pub mod frontend_remote;
 #[allow(clippy::result_large_err)]
 pub mod grpc_shard;
-pub mod frontend_remote;
 pub mod grpc_tls;
 pub mod handlers;
 pub mod matching_metrics;

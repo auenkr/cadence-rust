@@ -82,12 +82,13 @@ pub fn apply_search_attributes(
         let es_type = es_data_type(*value_type);
         let mut result = es.client.put_mapping(&es.index, key, es_type);
         if matches!(result, Err(EsError::NotFound(_))) {
-            es.client
-                .create_index(&es.index)
-                .map_err(|e| ApplyError::Internal(format!("Failed to create ES index, err: {e}")))?;
+            es.client.create_index(&es.index).map_err(|e| {
+                ApplyError::Internal(format!("Failed to create ES index, err: {e}"))
+            })?;
             result = es.client.put_mapping(&es.index, key, es_type);
         }
-        result.map_err(|e| ApplyError::Internal(format!("Failed to update ES mapping, err: {e}")))?;
+        result
+            .map_err(|e| ApplyError::Internal(format!("Failed to update ES mapping, err: {e}")))?;
     }
     Ok(())
 }
@@ -111,13 +112,25 @@ pub struct HttpEsClient {
 impl HttpEsClient {
     /// Go `NewGenericClient`: empty version defaults to v6; unsupported versions are an error.
     pub fn from_config(cfg: &ElasticSearchConfig) -> Result<Self, String> {
-        let version = if cfg.version.is_empty() { "v6" } else { cfg.version.as_str() };
+        let version = if cfg.version.is_empty() {
+            "v6"
+        } else {
+            cfg.version.as_str()
+        };
         if !matches!(version, "v6" | "v7" | "os2") {
             return Err(format!("not supported ElasticSearch version: {version}"));
         }
-        let scheme = if cfg.url.scheme.is_empty() { "http" } else { cfg.url.scheme.as_str() };
+        let scheme = if cfg.url.scheme.is_empty() {
+            "http"
+        } else {
+            cfg.url.scheme.as_str()
+        };
         Ok(Self {
-            base: format!("{scheme}://{}{}", cfg.url.host, cfg.url.path.trim_end_matches('/')),
+            base: format!(
+                "{scheme}://{}{}",
+                cfg.url.host,
+                cfg.url.path.trim_end_matches('/')
+            ),
             version: version.to_owned(),
             username: cfg.username.clone(),
             password: cfg.password.clone(),
@@ -186,7 +199,9 @@ impl HttpEsClient {
             let status = resp.status();
             let text = resp.text().unwrap_or_default();
             if status.as_u16() == 404 {
-                return Err(EsError::NotFound(format!("elastic: Error 404 (Not Found): {text}")));
+                return Err(EsError::NotFound(format!(
+                    "elastic: Error 404 (Not Found): {text}"
+                )));
             }
             if !status.is_success() {
                 return Err(EsError::Other(format!("elastic: Error {status}: {text}")));
@@ -201,7 +216,11 @@ impl HttpEsClient {
             Ok(())
         })
         .join()
-        .unwrap_or_else(|_| Err(EsError::Other("elasticsearch request thread panicked".into())))
+        .unwrap_or_else(|_| {
+            Err(EsError::Other(
+                "elasticsearch request thread panicked".into(),
+            ))
+        })
     }
 }
 
@@ -285,7 +304,9 @@ mod tests {
         let seen2 = seen.clone();
         std::thread::spawn(move || {
             for (status, body) in responses {
-                let Ok((mut s, _)) = listener.accept() else { return };
+                let Ok((mut s, _)) = listener.accept() else {
+                    return;
+                };
                 let mut buf = vec![0u8; 16384];
                 let mut n = 0;
                 loop {
@@ -298,7 +319,11 @@ mod tests {
                     if let Some(h) = text.find("\r\n\r\n") {
                         let len = text[..h]
                             .lines()
-                            .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap_or(0)))
+                            .find_map(|l| {
+                                l.to_ascii_lowercase()
+                                    .strip_prefix("content-length:")
+                                    .map(|v| v.trim().parse::<usize>().unwrap_or(0))
+                            })
                             .unwrap_or(0);
                         if n >= h + 4 + len {
                             break;
@@ -321,7 +346,11 @@ mod tests {
 
     fn cfg(addr: &str, version: &str) -> ElasticSearchConfig {
         ElasticSearchConfig {
-            url: crate::config::EsUrl { scheme: "http".into(), host: addr.into(), path: String::new() },
+            url: crate::config::EsUrl {
+                scheme: "http".into(),
+                host: addr.into(),
+                path: String::new(),
+            },
             indices: HashMap::from([("visibility".to_string(), "cadence-visibility".to_string())]),
             version: version.into(),
             ..Default::default()
@@ -351,9 +380,16 @@ mod tests {
         apply_search_attributes(&es, &attrs()).unwrap();
         let seen = seen.lock().unwrap();
         assert_eq!(seen.len(), 1);
-        assert!(seen[0].starts_with("PUT /cadence-visibility/_mapping HTTP/1.1"), "{}", seen[0]);
+        assert!(
+            seen[0].starts_with("PUT /cadence-visibility/_mapping HTTP/1.1"),
+            "{}",
+            seen[0]
+        );
         let body: Value = serde_json::from_str(seen[0].split(" | ").nth(1).unwrap()).unwrap();
-        assert_eq!(body, json!({"properties":{"Attr":{"properties":{"CustomKw":{"type":"keyword"}}}}}));
+        assert_eq!(
+            body,
+            json!({"properties":{"Attr":{"properties":{"CustomKw":{"type":"keyword"}}}}})
+        );
     }
 
     #[test]
@@ -422,6 +458,10 @@ mod tests {
 
     #[test]
     fn no_advanced_visibility_store_means_no_es() {
-        assert!(from_persistence(&crate::config::PersistenceConfig::default()).unwrap().is_none());
+        assert!(
+            from_persistence(&crate::config::PersistenceConfig::default())
+                .unwrap()
+                .is_none()
+        );
     }
 }

@@ -2499,7 +2499,8 @@ pub async fn dispatch_with_headers(
                 Ok(()) => {}
                 Err(crate::workflow_api::AdminAuthError::Failed(message)) => return Err(message),
                 Err(crate::workflow_api::AdminAuthError::Denied(message)) => {
-                    let def = find_method(method).ok_or_else(|| format!("unknown method {method}"))?;
+                    let def =
+                        find_method(method).ok_or_else(|| format!("unknown method {method}"))?;
                     let e = cadence_api::errors::AccessDeniedError::new(message.clone());
                     let field = cadence_thrift::service::exception_field(def, "AccessDeniedError")
                         .ok_or_else(|| {
@@ -2553,9 +2554,11 @@ pub async fn dispatch_with_headers(
                 Ok(()) => {}
                 Err(crate::workflow_api::AdminAuthError::Failed(message)) => return Err(message),
                 Err(crate::workflow_api::AdminAuthError::Denied(message)) => {
-                    let def = find_method(method).ok_or_else(|| format!("unknown method {method}"))?;
+                    let def =
+                        find_method(method).ok_or_else(|| format!("unknown method {method}"))?;
                     let e = cadence_api::errors::AccessDeniedError::new(message.clone());
-                    let Some(field) = cadence_thrift::service::exception_field(def, "AccessDeniedError")
+                    let Some(field) =
+                        cadence_thrift::service::exception_field(def, "AccessDeniedError")
                     else {
                         return Err(message);
                     };

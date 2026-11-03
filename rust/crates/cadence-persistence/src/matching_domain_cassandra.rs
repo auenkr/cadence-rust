@@ -771,8 +771,8 @@ mod tests {
         type P = CassandraDomainMetadataPersistence;
         let plain = P::finish_blob(vec![0x0c, 0x00], BlobEncoding::ThriftRW).expect("plain");
         assert_eq!(plain, vec![0x59, 0x0c, 0x00]);
-        let snappy = P::finish_blob(vec![0x0c, 0x00], BlobEncoding::ThriftRWSnappy)
-            .expect("snappy");
+        let snappy =
+            P::finish_blob(vec![0x0c, 0x00], BlobEncoding::ThriftRWSnappy).expect("snappy");
         let raw = snap::raw::Decoder::new()
             .decompress_vec(&snappy)
             .expect("decompress");

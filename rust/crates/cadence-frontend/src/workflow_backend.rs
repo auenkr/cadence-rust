@@ -799,7 +799,10 @@ impl crate::handler_workflow::SearchAttributeProvider for ProdSearchAttributes {
             )
         };
         crate::search_attr_validator::Limits {
-            number_of_keys: int("frontend.searchAttributesNumberOfKeysLimit", d.number_of_keys),
+            number_of_keys: int(
+                "frontend.searchAttributesNumberOfKeysLimit",
+                d.number_of_keys,
+            ),
             size_of_value: int("frontend.searchAttributesSizeOfValueLimit", d.size_of_value),
             total_size: int("frontend.searchAttributesTotalSizeLimit", d.total_size),
         }

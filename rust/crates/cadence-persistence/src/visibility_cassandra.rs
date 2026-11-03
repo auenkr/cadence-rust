@@ -490,6 +490,10 @@ mod tests {
         assert_eq!(row.workflow_type_name, "t");
         assert_eq!(row.memo, vec![9]);
         assert_eq!(row.encoding, "json");
-        assert!(row.close_time_us.is_none() && row.close_status.is_none() && row.history_length.is_none());
+        assert!(
+            row.close_time_us.is_none()
+                && row.close_status.is_none()
+                && row.history_length.is_none()
+        );
     }
 }

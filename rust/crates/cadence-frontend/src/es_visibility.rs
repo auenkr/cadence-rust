@@ -31,7 +31,9 @@ pub struct EsVisibility {
 
 impl std::fmt::Debug for EsVisibility {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EsVisibility").field("index", &self.index).finish_non_exhaustive()
+        f.debug_struct("EsVisibility")
+            .field("index", &self.index)
+            .finish_non_exhaustive()
     }
 }
 
@@ -61,11 +63,17 @@ fn parse_hits(v: &Value) -> Hits {
                 .collect()
         })
         .unwrap_or_default();
-    Hits { total, sources, scroll_id: v["_scroll_id"].as_str().unwrap_or("").to_string() }
+    Hits {
+        total,
+        sources,
+        scroll_id: v["_scroll_id"].as_str().unwrap_or("").to_string(),
+    }
 }
 
 fn i64_of(v: &Value, k: &str) -> i64 {
-    v.get(k).and_then(|x| x.as_i64().or_else(|| x.as_f64().map(|f| f as i64))).unwrap_or(0)
+    v.get(k)
+        .and_then(|x| x.as_i64().or_else(|| x.as_f64().map(|f| f as i64)))
+        .unwrap_or(0)
 }
 
 /// Go `convertSearchResultToVisibilityRecord` + `convertVisibilityWorkflowExecutionInfo`.
@@ -77,7 +85,12 @@ pub fn source_to_info(src: &Value) -> st::WorkflowExecutionInfo {
         .and_then(Value::as_str)
         .and_then(|s| base64::engine::general_purpose::STANDARD.decode(s).ok())
         .and_then(|b| {
-            decode_memo(&b, src.get("Encoding").and_then(Value::as_str).unwrap_or("")).ok().flatten()
+            decode_memo(
+                &b,
+                src.get("Encoding").and_then(Value::as_str).unwrap_or(""),
+            )
+            .ok()
+            .flatten()
         });
     let search_attributes = src
         .get("Attr")
@@ -131,7 +144,11 @@ fn internal(prefix: &str, e: impl std::fmt::Display) -> QueryError {
 
 impl EsVisibility {
     pub fn new(client: Arc<dyn EsSearch>, index: String, max_result_window: i64) -> Self {
-        Self { client, index, max_result_window }
+        Self {
+            client,
+            index,
+            max_result_window,
+        }
     }
 
     fn page_size(n: i64) -> i64 {
@@ -149,19 +166,28 @@ impl EsVisibility {
             return Vec::new();
         }
         if hits.total <= self.max_result_window - page_size {
-            return PageToken { from: token.from + n, ..Default::default() }.encode();
+            return PageToken {
+                from: token.from + n,
+                ..Default::default()
+            }
+            .encode();
         }
         let sort = &hits.sources[hits.sources.len() - 1].1;
         PageToken {
             sort_value: sort.first().cloned().unwrap_or(Value::Null),
-            tie_breaker: sort.get(1).and_then(Value::as_str).unwrap_or("").to_string(),
+            tie_breaker: sort
+                .get(1)
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
             ..Default::default()
         }
         .encode()
     }
 
     fn search(&self, body: String) -> Result<Value, String> {
-        self.client.call("POST", &format!("/{}/_search", self.index), Some(body))
+        self.client
+            .call("POST", &format!("/{}/_search", self.index), Some(body))
     }
 
     pub fn list(
@@ -179,7 +205,11 @@ impl EsVisibility {
             .search(body)
             .map_err(|e| internal("ListWorkflowExecutions failed, ", e))?;
         let hits = parse_hits(&resp);
-        let infos = hits.sources.iter().map(|(s, _)| source_to_info(s)).collect();
+        let infos = hits
+            .sources
+            .iter()
+            .map(|(s, _)| source_to_info(s))
+            .collect();
         Ok((infos, self.next_token(&hits, page_size, &token)))
     }
 
@@ -194,8 +224,11 @@ impl EsVisibility {
         let token = PageToken::decode(next_page_token)?;
         let resp = if token.scroll_id.is_empty() {
             let body = es_query::dsl_for_scan(query, domain_id, page_size)?;
-            self.client
-                .call("POST", &format!("/{}/_search?scroll=5m", self.index), Some(body))
+            self.client.call(
+                "POST",
+                &format!("/{}/_search?scroll=5m", self.index),
+                Some(body),
+            )
         } else {
             self.client.call(
                 "POST",
@@ -205,7 +238,11 @@ impl EsVisibility {
         }
         .map_err(|e| internal("ScanWorkflowExecutions failed, ", e))?;
         let hits = parse_hits(&resp);
-        let scroll_id = if hits.scroll_id.is_empty() { token.scroll_id.clone() } else { hits.scroll_id.clone() };
+        let scroll_id = if hits.scroll_id.is_empty() {
+            token.scroll_id.clone()
+        } else {
+            hits.scroll_id.clone()
+        };
         if hits.sources.is_empty() {
             // io.EOF: last page, release the scroll context.
             if !scroll_id.is_empty() {
@@ -217,9 +254,17 @@ impl EsVisibility {
             }
             return Ok((vec![], vec![]));
         }
-        let infos: Vec<_> = hits.sources.iter().map(|(s, _)| source_to_info(s)).collect();
+        let infos: Vec<_> = hits
+            .sources
+            .iter()
+            .map(|(s, _)| source_to_info(s))
+            .collect();
         let next = if hits.sources.len() as i64 == page_size {
-            PageToken { scroll_id, ..Default::default() }.encode()
+            PageToken {
+                scroll_id,
+                ..Default::default()
+            }
+            .encode()
         } else {
             let _ = self.client.call(
                 "DELETE",
@@ -256,9 +301,17 @@ impl EsVisibility {
         let page_size = Self::page_size(page_size);
         let token = PageToken::decode(next_page_token)?;
         let body = es_query::open_closed_body(
-            domain_id, is_open, earliest, latest, page_size, &token, match_query,
+            domain_id,
+            is_open,
+            earliest,
+            latest,
+            page_size,
+            &token,
+            match_query,
         );
-        let resp = self.search(body).map_err(|e| internal(&format!("{op_name} failed, "), e))?;
+        let resp = self
+            .search(body)
+            .map_err(|e| internal(&format!("{op_name} failed, "), e))?;
         let hits = parse_hits(&resp);
         let field = if is_open { "StartTime" } else { "CloseTime" };
         let infos = hits
@@ -292,7 +345,10 @@ mod tests {
         }
     }
     fn fake(r: Vec<Result<Value, String>>) -> (Arc<Fake>, EsVisibility) {
-        let f = Arc::new(Fake { calls: Mutex::new(vec![]), responses: Mutex::new(r) });
+        let f = Arc::new(Fake {
+            calls: Mutex::new(vec![]),
+            responses: Mutex::new(r),
+        });
         (f.clone(), EsVisibility::new(f, "idx".into(), 10000))
     }
     fn hit(id: &str, close: i64) -> Value {
@@ -303,7 +359,9 @@ mod tests {
 
     #[test]
     fn list_converts_and_pages_by_from() {
-        let (f, v) = fake(vec![Ok(json!({"hits": {"total": 5, "hits": [hit("a", 0), hit("b", 200)]}}))]);
+        let (f, v) = fake(vec![Ok(
+            json!({"hits": {"total": 5, "hits": [hit("a", 0), hit("b", 200)]}}),
+        )]);
         let (infos, tok) = v.list("d", "", 2, b"", &|_| None).unwrap();
         assert_eq!(infos.len(), 2);
         assert_eq!(infos[0].close_time, None);
@@ -318,7 +376,9 @@ mod tests {
 
     #[test]
     fn list_switches_to_search_after_over_window() {
-        let (_, v) = fake(vec![Ok(json!({"hits": {"total": {"value": 20000}, "hits": [hit("a", 0)]}}))]);
+        let (_, v) = fake(vec![Ok(
+            json!({"hits": {"total": {"value": 20000}, "hits": [hit("a", 0)]}}),
+        )]);
         let (_, tok) = v.list("d", "", 1, b"", &|_| None).unwrap();
         let t = PageToken::decode(&tok).unwrap();
         assert_eq!(t.tie_breaker, "r");
@@ -330,10 +390,15 @@ mod tests {
         let (_, v) = fake(vec![Err("boom".into())]);
         assert_eq!(
             v.list("d", "", 1, b"", &|_| None),
-            Err(QueryError::Internal("ListWorkflowExecutions failed, boom".into()))
+            Err(QueryError::Internal(
+                "ListWorkflowExecutions failed, boom".into()
+            ))
         );
         let (_, v) = fake(vec![]);
-        assert!(matches!(v.list("d", "", 1, b"{x", &|_| None), Err(QueryError::BadRequest(_))));
+        assert!(matches!(
+            v.list("d", "", 1, b"{x", &|_| None),
+            Err(QueryError::BadRequest(_))
+        ));
     }
 
     #[test]
@@ -346,7 +411,9 @@ mod tests {
     #[test]
     fn scan_scrolls_until_eof() {
         let (f, v) = fake(vec![
-            Ok(json!({"_scroll_id": "S1", "hits": {"total": 3, "hits": [hit("a", 0), hit("b", 0)]}})),
+            Ok(
+                json!({"_scroll_id": "S1", "hits": {"total": 3, "hits": [hit("a", 0), hit("b", 0)]}}),
+            ),
             Ok(json!({"_scroll_id": "S1", "hits": {"total": 3, "hits": []}})),
             Ok(Value::Null),
         ]);
@@ -364,9 +431,20 @@ mod tests {
 
     #[test]
     fn open_closed_filters_by_range() {
-        let (_, v) = fake(vec![Ok(json!({"hits": {"total": 2, "hits": [hit("a", 150), hit("b", 900)]}}))]);
+        let (_, v) = fake(vec![Ok(
+            json!({"hits": {"total": 2, "hits": [hit("a", 150), hit("b", 900)]}}),
+        )]);
         let (infos, tok) = v
-            .list_open_closed("ListClosedWorkflowExecutions", "d", false, 100, 200, 10, b"", None)
+            .list_open_closed(
+                "ListClosedWorkflowExecutions",
+                "d",
+                false,
+                100,
+                200,
+                10,
+                b"",
+                None,
+            )
             .unwrap();
         assert_eq!(infos.len(), 1);
         assert!(tok.is_empty());

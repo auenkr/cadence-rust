@@ -108,7 +108,11 @@ fn tokenize(s: &str) -> Result<Vec<Tok>, ()> {
         } else if ch.is_alphabetic() || ch == '_' || ch == '$' || ch == '@' {
             let st = i;
             while i < c.len()
-                && (c[i].is_alphanumeric() || c[i] == '_' || c[i] == '$' || c[i] == '.' || c[i] == '@')
+                && (c[i].is_alphanumeric()
+                    || c[i] == '_'
+                    || c[i] == '$'
+                    || c[i] == '.'
+                    || c[i] == '@')
             {
                 i += 1;
             }
@@ -153,7 +157,11 @@ fn tokenize(s: &str) -> Result<Vec<Tok>, ()> {
 fn prev_is_value(out: &[Tok]) -> bool {
     matches!(
         out.last(),
-        Some(Tok::Num(_)) | Some(Tok::Str(_)) | Some(Tok::Ident(_)) | Some(Tok::Back(_)) | Some(Tok::RParen)
+        Some(Tok::Num(_))
+            | Some(Tok::Str(_))
+            | Some(Tok::Ident(_))
+            | Some(Tok::Back(_))
+            | Some(Tok::RParen)
     )
 }
 
@@ -325,7 +333,11 @@ impl P {
         }
         if self.eat_kw("like") {
             let r = self.operand()?;
-            return Ok(Expr::Cmp(l, if neg { "not like" } else { "like" }.into(), r));
+            return Ok(Expr::Cmp(
+                l,
+                if neg { "not like" } else { "like" }.into(),
+                r,
+            ));
         }
         if self.eat_kw("is") {
             self.eat_kw("not");
@@ -426,7 +438,13 @@ fn fmt_operand(o: &Operand) -> String {
         Operand::Tuple(items) => {
             let v: Vec<String> = items
                 .iter()
-                .map(|(v, q)| if *q { format!("'{}'", esc_sql(v)) } else { v.clone() })
+                .map(|(v, q)| {
+                    if *q {
+                        format!("'{}'", esc_sql(v))
+                    } else {
+                        v.clone()
+                    }
+                })
                 .collect();
             format!("({})", v.join(", "))
         }
@@ -485,7 +503,11 @@ pub fn validate_query<V>(
             if !valid(name) {
                 return Err(bad("invalid order by attribute"));
             }
-            let full = if is_system_key(name) { name.clone() } else { format!("Attr.{name}") };
+            let full = if is_system_key(name) {
+                name.clone()
+            } else {
+                format!("Attr.{name}")
+            };
             parts.push(format!("{} {}", fmt_col(&full, false), dir));
         }
         buf.push_str(" order by ");
@@ -526,7 +548,9 @@ fn prefix_col(l: &mut Operand, valid: &dyn Fn(&str) -> bool, msg: &str) -> Resul
 fn col_name(o: &Operand) -> Result<String, QueryError> {
     match o {
         Operand::Col(n, _) => Ok(n.clone()),
-        _ => Err(bad("elasticsql: invalid comparison expression, the left must be a column name")),
+        _ => Err(bad(
+            "elasticsql: invalid comparison expression, the left must be a column name",
+        )),
     }
 }
 
@@ -534,7 +558,11 @@ fn col_name(o: &Operand) -> Result<String, QueryError> {
 /// quoted it, because `fmt_col` quotes names containing '.').
 fn es_col(o: &Operand) -> Result<String, QueryError> {
     match o {
-        Operand::Col(n, _) => Ok(if n.contains('.') { format!("`{n}`") } else { n.clone() }),
+        Operand::Col(n, _) => Ok(if n.contains('.') {
+            format!("`{n}`")
+        } else {
+            n.clone()
+        }),
         _ => col_name(o),
     }
 }
@@ -554,7 +582,11 @@ fn convert_expr(e: &Expr, parent: Option<&str>) -> Result<Value, QueryError> {
         Expr::Not(_) => Err(bad("elasticsql: not expression currently not supported")),
         Expr::Is => Err(bad("elasticsql: is expression currently not supported")),
         Expr::And(l, r) | Expr::Or(l, r) => {
-            let (key, me) = if matches!(e, Expr::And(..)) { ("must", "and") } else { ("should", "or") };
+            let (key, me) = if matches!(e, Expr::And(..)) {
+                ("must", "and")
+            } else {
+                ("should", "or")
+            };
             let lv = convert_expr(l, Some(me))?;
             let rv = convert_expr(r, Some(me))?;
             let mut items = Vec::new();
@@ -570,7 +602,9 @@ fn convert_expr(e: &Expr, parent: Option<&str>) -> Result<Value, QueryError> {
         }
         Expr::Cmp(l, op, r) => {
             let c = es_col(l)?;
-            if matches!(r, Operand::Col(..)) && !matches!(r, Operand::Col(n, false) if n.eq_ignore_ascii_case("missing")) {
+            if matches!(r, Operand::Col(..))
+                && !matches!(r, Operand::Col(n, false) if n.eq_ignore_ascii_case("missing"))
+            {
                 return Err(bad(
                     "elasticsql: column name on the right side of compare operator is not supported",
                 ));
@@ -593,11 +627,17 @@ fn convert_expr(e: &Expr, parent: Option<&str>) -> Result<Value, QueryError> {
                 "<" => rng(&c, "lt", &v),
                 "in" | "not in" => {
                     let items: Vec<Value> = match r {
-                        Operand::Tuple(t) => t.iter().map(|(x, _)| Value::String(x.clone())).collect(),
+                        Operand::Tuple(t) => {
+                            t.iter().map(|(x, _)| Value::String(x.clone())).collect()
+                        }
                         _ => vec![],
                     };
                     let terms = json!({"terms": { c.clone(): items }});
-                    if op == "in" { terms } else { json!({"bool": {"must_not": [terms]}}) }
+                    if op == "in" {
+                        terms
+                    } else {
+                        json!({"bool": {"must_not": [terms]}})
+                    }
                 }
                 "wildcard" => {
                     let pat = format!("{}*", v.replace('%', "*").replace('_', "?"));
@@ -670,7 +710,11 @@ fn preprocess_like(e: &Expr) -> Expr {
             if op == "like" && !n.contains('.') && !v.is_empty() && !v.contains('\'') =>
         {
             // marker: wildcard comparison, resolved in convert via op "wildcard"
-            Expr::Cmp(Operand::Col(n.clone(), false), "wildcard".into(), Operand::Val(v.clone(), true))
+            Expr::Cmp(
+                Operand::Col(n.clone(), false),
+                "wildcard".into(),
+                Operand::Val(v.clone(), true),
+            )
         }
         o => o.clone(),
     }
@@ -711,14 +755,18 @@ fn process_values(v: &mut Value) -> Result<(), QueryError> {
                                         if s.parse::<i64>().is_ok() {
                                             None
                                         } else {
-                                            return Err(bad(format!("Invalid query. Cannot parse time value: {s}")));
+                                            return Err(bad(format!(
+                                                "Invalid query. Cannot parse time value: {s}"
+                                            )));
                                         }
                                     }
                                 }
                             } else {
                                 match close_status_from_str(&s) {
                                     Some(n) => Some(n.to_string()),
-                                    None => return Err(bad(format!("Invalid CloseStatus value: {s}"))),
+                                    None => {
+                                        return Err(bad(format!("Invalid CloseStatus value: {s}")))
+                                    }
                                 }
                             };
                             if let Some(n) = nv {
@@ -769,7 +817,10 @@ fn standard_processing(dsl: &mut Value, domain_id: &str) -> Result<(), QueryErro
     if compact.contains("{\"range\":{\"ExecutionTime\":") {
         add_must(dsl, json!({"range": {"ExecutionTime": {"gt": "0"}}}));
     }
-    add_must(dsl, json!({"match_phrase": {"DomainID": {"query": domain_id}}}));
+    add_must(
+        dsl,
+        json!({"match_phrase": {"DomainID": {"query": domain_id}}}),
+    );
     process_values(dsl)
 }
 
@@ -814,7 +865,9 @@ fn clean_dsl(s: &str) -> String {
         if c[i] == '`' {
             if let Some(j) = c[i + 1..].iter().position(|x| *x == '`') {
                 let inner: String = c[i + 1..i + 1 + j].iter().collect();
-                if inner.starts_with("Attr.") && inner[5..].chars().all(|x| x.is_alphanumeric() || x == '_') {
+                if inner.starts_with("Attr.")
+                    && inner[5..].chars().all(|x| x.is_alphanumeric() || x == '_')
+                {
                     out.push_str(&inner);
                     i += j + 2;
                     continue;
@@ -834,15 +887,22 @@ fn process_sort(
 ) -> Result<(), QueryError> {
     let sort = dsl.get("sort").and_then(|s| s.as_array()).cloned();
     let (field, mut arr) = match sort {
-        None => ("StartTime".to_string(), vec![json!({"StartTime": "desc"}), json!({"RunID": "desc"})]),
-        Some(a) if a.is_empty() => {
-            ("StartTime".to_string(), vec![json!({"StartTime": "desc"}), json!({"RunID": "desc"})])
-        }
+        None => (
+            "StartTime".to_string(),
+            vec![json!({"StartTime": "desc"}), json!({"RunID": "desc"})],
+        ),
+        Some(a) if a.is_empty() => (
+            "StartTime".to_string(),
+            vec![json!({"StartTime": "desc"}), json!({"RunID": "desc"})],
+        ),
         Some(a) => {
             if a.len() > 1 {
                 return Err(bad("only one field can be used to sort"));
             }
-            let f = a[0].as_object().and_then(|m| m.keys().next().cloned()).unwrap_or_default();
+            let f = a[0]
+                .as_object()
+                .and_then(|m| m.keys().next().cloned())
+                .unwrap_or_default();
             let bare = f.trim_matches('`');
             let name = bare.strip_prefix("Attr.").unwrap_or(bare);
             if attr_types(name) == Some(0) {
@@ -938,7 +998,11 @@ pub fn open_closed_body(
     }
     b.insert(
         "must".into(),
-        if must.len() == 1 { must.remove(0) } else { Value::Array(must) },
+        if must.len() == 1 {
+            must.remove(0)
+        } else {
+            Value::Array(must)
+        },
     );
     b.insert(
         "filter".into(),
@@ -954,7 +1018,10 @@ pub fn open_closed_body(
         json!([{ field: {"order": "desc"}}, {"RunID": {"order": "desc"}}]),
     );
     if token.should_search_after() {
-        dsl.insert("search_after".into(), json!([token.sort_value, token.tie_breaker]));
+        dsl.insert(
+            "search_after".into(),
+            json!([token.sort_value, token.tie_breaker]),
+        );
     } else {
         dsl.insert("from".into(), json!(token.from));
     }
@@ -976,8 +1043,16 @@ mod tests {
     #[test]
     fn validate_prefixes_custom_keys() {
         let a = attrs();
-        let q = validate_query("WorkflowID = 'a' and CustomKeywordField = 'b' order by StartTime", &a, true).unwrap();
-        assert_eq!(q, "WorkflowID = 'a' and `Attr.CustomKeywordField` = 'b' order by StartTime asc");
+        let q = validate_query(
+            "WorkflowID = 'a' and CustomKeywordField = 'b' order by StartTime",
+            &a,
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            q,
+            "WorkflowID = 'a' and `Attr.CustomKeywordField` = 'b' order by StartTime asc"
+        );
     }
 
     #[test]
@@ -988,8 +1063,14 @@ mod tests {
             validate_query("Nope = 'x'", &a, true),
             Err(bad("invalid search attribute \"Nope\""))
         );
-        assert_eq!(validate_query("not WorkflowID = 'x'", &a, true), Err(bad("invalid where clause")));
-        assert_eq!(validate_query("order by Nope", &a, true), Err(bad("invalid order by attribute")));
+        assert_eq!(
+            validate_query("not WorkflowID = 'x'", &a, true),
+            Err(bad("invalid where clause"))
+        );
+        assert_eq!(
+            validate_query("order by Nope", &a, true),
+            Err(bad("invalid order by attribute"))
+        );
         assert_eq!(validate_query("", &a, true), Ok(String::new()));
         // validation disabled accepts unknown keys
         assert!(validate_query("Nope = 'x'", &a, false).is_ok());
@@ -1035,16 +1116,26 @@ mod tests {
     fn dsl_close_status_and_missing() {
         let s = dsl_for_count("CloseStatus > 'FAILED' and CloseTime = missing", "d").unwrap();
         assert!(s.contains("\"CloseStatus\":{\"gt\":\"1\"}"), "{s}");
-        assert!(s.contains("\"must_not\":{\"exists\":{\"field\":\"CloseTime\"}}"), "{s}");
+        assert!(
+            s.contains("\"must_not\":{\"exists\":{\"field\":\"CloseTime\"}}"),
+            "{s}"
+        );
     }
 
     #[test]
     fn dsl_in_between_or() {
-        let s = dsl_for_count("WorkflowType in ('a', 'b') or HistoryLength between 1 and 5", "d", ).unwrap();
+        let s = dsl_for_count(
+            "WorkflowType in ('a', 'b') or HistoryLength between 1 and 5",
+            "d",
+        )
+        .unwrap();
         let v: Value = serde_json::from_str(&s).unwrap();
         let inner = &v["query"]["bool"]["must"][1]["bool"]["should"];
         assert_eq!(inner[0], json!({"terms": {"WorkflowType": ["a", "b"]}}));
-        assert_eq!(inner[1], json!({"range": {"HistoryLength": {"from": "1", "to": "5"}}}));
+        assert_eq!(
+            inner[1],
+            json!({"range": {"HistoryLength": {"from": "1", "to": "5"}}})
+        );
     }
 
     #[test]
@@ -1056,7 +1147,10 @@ mod tests {
     #[test]
     fn execution_time_adds_gt_zero() {
         let s = dsl_for_count("ExecutionTime > 5", "d").unwrap();
-        assert!(s.contains("{\"range\":{\"ExecutionTime\":{\"gt\":\"0\"}}}"), "{s}");
+        assert!(
+            s.contains("{\"range\":{\"ExecutionTime\":{\"gt\":\"0\"}}}"),
+            "{s}"
+        );
     }
 
     #[test]
@@ -1067,41 +1161,97 @@ mod tests {
 
     #[test]
     fn sort_user_field_and_search_after() {
-        let tok = PageToken { from: 0, sort_value: json!(123), tie_breaker: "run".into(), scroll_id: String::new() };
+        let tok = PageToken {
+            from: 0,
+            sort_value: json!(123),
+            tie_breaker: "run".into(),
+            scroll_id: String::new(),
+        };
         let s = dsl_for_list("order by CloseTime desc", "d", 5, &tok, &|_| None).unwrap();
         let v: Value = serde_json::from_str(&s).unwrap();
         assert_eq!(v["sort"], json!([{"CloseTime": "desc"}, {"RunID": "desc"}]));
         assert_eq!(v["search_after"], json!([123, "run"]));
         assert!(v.get("from").is_none());
-        let e = dsl_for_list("order by CloseTime desc, StartTime desc", "d", 5, &PageToken::default(), &|_| None);
+        let e = dsl_for_list(
+            "order by CloseTime desc, StartTime desc",
+            "d",
+            5,
+            &PageToken::default(),
+            &|_| None,
+        );
         assert_eq!(e, Err(bad("only one field can be used to sort")));
     }
 
     #[test]
     fn sort_by_string_rejected() {
-        let e = dsl_for_list("order by Attr.S desc", "d", 5, &PageToken::default(), &|n| {
-            if n == "S" { Some(0) } else { None }
-        });
-        assert!(matches!(e, Err(QueryError::BadRequest(m)) if m.contains("IndexedValueTypeString")));
+        let e = dsl_for_list(
+            "order by Attr.S desc",
+            "d",
+            5,
+            &PageToken::default(),
+            &|n| {
+                if n == "S" {
+                    Some(0)
+                } else {
+                    None
+                }
+            },
+        );
+        assert!(
+            matches!(e, Err(QueryError::BadRequest(m)) if m.contains("IndexedValueTypeString"))
+        );
     }
 
     #[test]
     fn page_token_roundtrip_and_errors() {
-        let t = PageToken { from: 7, ..Default::default() };
+        let t = PageToken {
+            from: 7,
+            ..Default::default()
+        };
         assert_eq!(PageToken::decode(&t.encode()).unwrap(), t);
-        assert!(matches!(PageToken::decode(b"{bad"), Err(QueryError::BadRequest(m)) if m.starts_with("unable to deserialize page token")));
+        assert!(
+            matches!(PageToken::decode(b"{bad"), Err(QueryError::BadRequest(m)) if m.starts_with("unable to deserialize page token"))
+        );
         assert_eq!(PageToken::decode(b"").unwrap(), PageToken::default());
     }
 
     #[test]
     fn open_closed_shapes() {
-        let s = open_closed_body("d", true, 1_000_000, 2_000_000, 10, &PageToken::default(), None);
+        let s = open_closed_body(
+            "d",
+            true,
+            1_000_000,
+            2_000_000,
+            10,
+            &PageToken::default(),
+            None,
+        );
         let v: Value = serde_json::from_str(&s).unwrap();
-        assert_eq!(v["query"]["bool"]["must"], json!({"match": {"DomainID": {"query": "d"}}}));
-        assert_eq!(v["query"]["bool"]["must_not"], json!({"exists": {"field": "CloseStatus"}}));
-        assert_eq!(v["query"]["bool"]["filter"]["range"]["StartTime"]["from"], json!("999000"));
-        assert_eq!(v["query"]["bool"]["filter"]["range"]["StartTime"]["to"], json!("2001000"));
-        let c = open_closed_body("d", false, 0, 0, 10, &PageToken::default(), Some(("WorkflowType".into(), json!("t"))));
+        assert_eq!(
+            v["query"]["bool"]["must"],
+            json!({"match": {"DomainID": {"query": "d"}}})
+        );
+        assert_eq!(
+            v["query"]["bool"]["must_not"],
+            json!({"exists": {"field": "CloseStatus"}})
+        );
+        assert_eq!(
+            v["query"]["bool"]["filter"]["range"]["StartTime"]["from"],
+            json!("999000")
+        );
+        assert_eq!(
+            v["query"]["bool"]["filter"]["range"]["StartTime"]["to"],
+            json!("2001000")
+        );
+        let c = open_closed_body(
+            "d",
+            false,
+            0,
+            0,
+            10,
+            &PageToken::default(),
+            Some(("WorkflowType".into(), json!("t"))),
+        );
         let v: Value = serde_json::from_str(&c).unwrap();
         assert_eq!(v["query"]["bool"]["must"].as_array().unwrap().len(), 3);
         assert_eq!(v["sort"][0], json!({"CloseTime": {"order": "desc"}}));

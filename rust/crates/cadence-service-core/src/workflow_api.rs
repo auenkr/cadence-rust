@@ -311,10 +311,7 @@ fn codec(method: &str) -> Option<Codec> {
 
 /// Encode a WorkflowService request as the strict Thrift args struct bytes
 /// used for a TChannel call to a remote Frontend.
-pub fn encode_client_request(
-    method: &str,
-    request: serde_json::Value,
-) -> Result<Vec<u8>, String> {
+pub fn encode_client_request(method: &str, request: serde_json::Value) -> Result<Vec<u8>, String> {
     let codec = codec(method).ok_or_else(|| format!("unsupported remote method {method}"))?;
     let args = (codec.client_encode)(request)?;
     let mut writer = cadence_thrift::protocol::Writer::new();
@@ -329,8 +326,8 @@ pub fn decode_client_response(
     application_error: bool,
     body: &[u8],
 ) -> Result<serde_json::Value, CadenceError> {
-    let codec =
-        codec(method).ok_or_else(|| CadenceError::Unknown(format!("unsupported method {method}")))?;
+    let codec = codec(method)
+        .ok_or_else(|| CadenceError::Unknown(format!("unsupported method {method}")))?;
     let mut reader = cadence_thrift::protocol::Reader::new(body);
     let result = cadence_thrift::value::read_struct(&mut reader)
         .map_err(|e| CadenceError::Unknown(format!("invalid remote Thrift result: {e}")))?;
@@ -354,11 +351,7 @@ pub fn decode_client_response(
 /// Typed error from a Thrift exception struct (inverse of `error_to_thrift`).
 pub fn exception_from_thrift(name: &str, exception: &Struct) -> CadenceError {
     use cadence_api::errors as e;
-    let message = exception
-        .opt_string(1)
-        .ok()
-        .flatten()
-        .unwrap_or_default();
+    let message = exception.opt_string(1).ok().flatten().unwrap_or_default();
     let unknown = || CadenceError::Unknown(format!("{name}: {message}"));
     let from_message = |ctor: fn(serde_json::Value) -> Option<CadenceError>| {
         ctor(serde_json::json!({ "message": message })).unwrap_or_else(unknown)
@@ -383,7 +376,9 @@ pub fn exception_from_thrift(name: &str, exception: &Struct) -> CadenceError {
             CadenceError::Internal(e::InternalServiceError::new(message.clone()))
         }
         "AccessDeniedError" => from_message(|v| {
-            serde_json::from_value(v).ok().map(CadenceError::AccessDenied)
+            serde_json::from_value(v)
+                .ok()
+                .map(CadenceError::AccessDenied)
         }),
         "WorkflowExecutionAlreadyCompletedError" => from_message(|v| {
             serde_json::from_value(v)
@@ -401,7 +396,9 @@ pub fn exception_from_thrift(name: &str, exception: &Struct) -> CadenceError {
                 .map(CadenceError::CancellationAlreadyRequested)
         }),
         "QueryFailedError" => from_message(|v| {
-            serde_json::from_value(v).ok().map(CadenceError::QueryFailed)
+            serde_json::from_value(v)
+                .ok()
+                .map(CadenceError::QueryFailed)
         }),
         "LimitExceededError" => from_message(|v| {
             serde_json::from_value(v)

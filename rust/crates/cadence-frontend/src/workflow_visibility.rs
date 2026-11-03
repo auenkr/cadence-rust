@@ -82,7 +82,11 @@ fn time_us(value: &serde_json::Value, key: &str) -> i64 {
 #[derive(Clone)]
 pub struct EsBinding {
     pub es: Arc<crate::es_visibility::EsVisibility>,
-    pub attrs: Arc<dyn Fn() -> std::collections::HashMap<String, cadence_api::enums::IndexedValueType> + Send + Sync>,
+    pub attrs: Arc<
+        dyn Fn() -> std::collections::HashMap<String, cadence_api::enums::IndexedValueType>
+            + Send
+            + Sync,
+    >,
     pub validate: Arc<dyn Fn() -> bool + Send + Sync>,
 }
 
@@ -127,7 +131,10 @@ impl ProductionBackend {
         };
         let domain_id = str_field(request, "domainUUID").unwrap_or_default();
         let raw_query = str_field(request, "query").unwrap_or_default();
-        let page_size = request.get("pageSize").and_then(serde_json::Value::as_i64).unwrap_or(0);
+        let page_size = request
+            .get("pageSize")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0);
         let token = token_bytes(request)?;
         tokio::task::spawn_blocking(move || -> Result<serde_json::Value, CadenceError> {
             let attrs = (binding.attrs)();
@@ -135,18 +142,26 @@ impl ProductionBackend {
                 .map_err(map_query_error)?;
             match op {
                 EsOp::Count => {
-                    let count = binding.es.count(&domain_id, &query).map_err(map_query_error)?;
+                    let count = binding
+                        .es
+                        .count(&domain_id, &query)
+                        .map_err(map_query_error)?;
                     to_json(&st::CountWorkflowExecutionsResponse { count })
                 }
                 EsOp::List | EsOp::Scan => {
                     let (executions, next_page_token) = if matches!(op, EsOp::List) {
                         let types = |n: &str| attrs.get(n).map(|t| t.value());
-                        binding.es.list(&domain_id, &query, page_size, &token, &types)
+                        binding
+                            .es
+                            .list(&domain_id, &query, page_size, &token, &types)
                     } else {
                         binding.es.scan(&domain_id, &query, page_size, &token)
                     }
                     .map_err(map_query_error)?;
-                    to_json(&st::ListWorkflowExecutionsResponse { executions, next_page_token })
+                    to_json(&st::ListWorkflowExecutionsResponse {
+                        executions,
+                        next_page_token,
+                    })
                 }
             }
         })
@@ -170,26 +185,47 @@ impl ProductionBackend {
             .and_then(serde_json::Value::as_i64)
             .unwrap_or(0);
         let token = token_bytes(request)?;
-        let earliest = request.get("earliestTime").and_then(serde_json::Value::as_i64).unwrap_or(0);
-        let latest = request.get("latestTime").and_then(serde_json::Value::as_i64).unwrap_or(i64::MAX);
+        let earliest = request
+            .get("earliestTime")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0);
+        let latest = request
+            .get("latestTime")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(i64::MAX);
         let (name, matcher) = {
             let status = request.get("status").filter(|v| !v.is_null());
             if closed {
                 if let Some(v) = status {
                     let st: WorkflowExecutionCloseStatus = serde_json::from_value(v.clone())
                         .map_err(|e| bad_request(format!("invalid close status: {e}")))?;
-                    ("ListClosedWorkflowExecutionsByStatus", Some(("CloseStatus".to_string(), serde_json::json!(st as i32))))
+                    (
+                        "ListClosedWorkflowExecutionsByStatus",
+                        Some(("CloseStatus".to_string(), serde_json::json!(st as i32))),
+                    )
                 } else if let Some(t) = str_field(request, "workflowTypeName") {
-                    ("ListClosedWorkflowExecutionsByType", Some(("WorkflowType".to_string(), serde_json::json!(t))))
+                    (
+                        "ListClosedWorkflowExecutionsByType",
+                        Some(("WorkflowType".to_string(), serde_json::json!(t))),
+                    )
                 } else if let Some(w) = str_field(request, "workflowId") {
-                    ("ListClosedWorkflowExecutionsByWorkflowID", Some(("WorkflowID".to_string(), serde_json::json!(w))))
+                    (
+                        "ListClosedWorkflowExecutionsByWorkflowID",
+                        Some(("WorkflowID".to_string(), serde_json::json!(w))),
+                    )
                 } else {
                     ("ListClosedWorkflowExecutions", None)
                 }
             } else if let Some(t) = str_field(request, "workflowTypeName") {
-                ("ListOpenWorkflowExecutionsByType", Some(("WorkflowType".to_string(), serde_json::json!(t))))
+                (
+                    "ListOpenWorkflowExecutionsByType",
+                    Some(("WorkflowType".to_string(), serde_json::json!(t))),
+                )
             } else if let Some(w) = str_field(request, "workflowId") {
-                ("ListOpenWorkflowExecutionsByWorkflowID", Some(("WorkflowID".to_string(), serde_json::json!(w))))
+                (
+                    "ListOpenWorkflowExecutionsByWorkflowID",
+                    Some(("WorkflowID".to_string(), serde_json::json!(w))),
+                )
             } else {
                 ("ListOpenWorkflowExecutions", None)
             }
@@ -202,7 +238,10 @@ impl ProductionBackend {
         .await
         .map_err(|e| internal(e.to_string()))?
         .map_err(map_query_error)?;
-        to_json(&st::ListOpenWorkflowExecutionsResponse { executions, next_page_token })
+        to_json(&st::ListOpenWorkflowExecutionsResponse {
+            executions,
+            next_page_token,
+        })
     }
 
     pub fn with_visibility_store(mut self, store: Arc<dyn VisibilityStore>) -> Self {

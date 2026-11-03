@@ -84,7 +84,11 @@ mod tests {
             forwarding_cluster: "a".into(),
         };
         let err = client
-            .call("SignalWorkflowExecution", serde_json::json!({}), Duration::from_secs(1))
+            .call(
+                "SignalWorkflowExecution",
+                serde_json::json!({}),
+                Duration::from_secs(1),
+            )
             .await
             .unwrap_err();
         assert!(err.to_string().contains("not supported"));
@@ -104,7 +108,10 @@ mod tests {
             crate::workflow_api::exception_from_thrift("DomainNotActiveError", &error.to_thrift());
         match decoded {
             CadenceError::DomainNotActive(e) => {
-                assert_eq!((e.active_cluster.as_str(), e.domain_name.as_str()), ("b", "d"))
+                assert_eq!(
+                    (e.active_cluster.as_str(), e.domain_name.as_str()),
+                    ("b", "d")
+                )
             }
             other => panic!("unexpected {other:?}"),
         }

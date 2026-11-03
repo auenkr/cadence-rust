@@ -107,17 +107,19 @@ pub async fn resend_replication_tasks(
     let mut history = client(state)?;
     let mut token: Vec<u8> = Vec::new();
     loop {
-        let mut raw = tonic::Request::new(cadence_proto::admin::GetWorkflowExecutionRawHistoryV2Request {
-            domain: domain_name.clone(),
-            workflow_execution: Some(cadence_proto::api::WorkflowExecution {
-                workflow_id: request.workflow_id.clone(),
-                run_id: request.run_id.clone(),
-            }),
-            start_event: version_item(request.start_event_id, request.start_version),
-            end_event: version_item(request.end_event_id, request.end_version),
-            page_size: RESEND_PAGE_SIZE,
-            next_page_token: token.clone(),
-        });
+        let mut raw = tonic::Request::new(
+            cadence_proto::admin::GetWorkflowExecutionRawHistoryV2Request {
+                domain: domain_name.clone(),
+                workflow_execution: Some(cadence_proto::api::WorkflowExecution {
+                    workflow_id: request.workflow_id.clone(),
+                    run_id: request.run_id.clone(),
+                }),
+                start_event: version_item(request.start_event_id, request.start_version),
+                end_event: version_item(request.end_event_id, request.end_version),
+                page_size: RESEND_PAGE_SIZE,
+                next_page_token: token.clone(),
+            },
+        );
         raw.set_timeout(RESEND_TIMEOUT);
         for (key, value) in [
             ("rpc-service", remote.rpc_name.as_str()),
@@ -188,7 +190,10 @@ mod resend_tests {
         let req = resend_replication_request("d", "w", "r", blob.clone(), items.clone());
         assert_eq!(req.domain_id, "d");
         let exec = req.workflow_execution.unwrap();
-        assert_eq!((exec.workflow_id.as_str(), exec.run_id.as_str()), ("w", "r"));
+        assert_eq!(
+            (exec.workflow_id.as_str(), exec.run_id.as_str()),
+            ("w", "r")
+        );
         assert_eq!(req.events, Some(blob));
         assert_eq!(req.version_history_items, items);
         assert!(req.new_run_events.is_none());

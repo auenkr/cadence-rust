@@ -17,7 +17,11 @@ pub struct Limits {
 
 impl Default for Limits {
     fn default() -> Self {
-        Self { number_of_keys: 100, size_of_value: 2048, total_size: 40 * 1024 }
+        Self {
+            number_of_keys: 100,
+            size_of_value: 2048,
+            total_size: 40 * 1024,
+        }
     }
 }
 
@@ -93,7 +97,9 @@ mod tests {
     use super::*;
 
     fn sa(k: &str, v: &str) -> SearchAttributes {
-        SearchAttributes { indexed_fields: Some([(k.to_string(), v.as_bytes().to_vec())].into()) }
+        SearchAttributes {
+            indexed_fields: Some([(k.to_string(), v.as_bytes().to_vec())].into()),
+        }
     }
     fn valid() -> HashMap<String, IndexedValueType> {
         [
@@ -110,7 +116,13 @@ mod tests {
         assert!(validate(Some(&sa("K", "\"x\"")), l, true, &valid()).is_ok());
         assert!(validate(Some(&sa("K", "[\"x\",\"y\"]")), l, true, &valid()).is_ok());
         assert!(validate(Some(&sa("I", "5")), l, true, &valid()).is_ok());
-        assert!(validate(Some(&sa("D", "\"2021-01-01T00:00:00Z\"")), l, true, &valid()).is_ok());
+        assert!(validate(
+            Some(&sa("D", "\"2021-01-01T00:00:00Z\"")),
+            l,
+            true,
+            &valid()
+        )
+        .is_ok());
         assert!(validate(None, l, true, &valid()).is_ok());
     }
 
@@ -131,12 +143,18 @@ mod tests {
             validate(Some(&sa("WorkflowID", "\"x\"")), l, true, &v),
             Err("WorkflowID is read-only Cadence reserved attribute".into())
         );
-        let tiny = Limits { number_of_keys: 0, ..l };
+        let tiny = Limits {
+            number_of_keys: 0,
+            ..l
+        };
         assert_eq!(
             validate(Some(&sa("K", "\"x\"")), tiny, true, &valid()),
             Err("number of keys 1 exceed limit".into())
         );
-        let small = Limits { size_of_value: 2, ..l };
+        let small = Limits {
+            size_of_value: 2,
+            ..l
+        };
         assert_eq!(
             validate(Some(&sa("K", "\"xyz\"")), small, true, &valid()),
             Err("size limit exceed for key K".into())
