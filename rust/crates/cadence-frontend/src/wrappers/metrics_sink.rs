@@ -229,14 +229,14 @@ mod tests {
     fn request_latency_and_errors_carry_operation_and_domain_tags() {
         let sink = Arc::new(RecordingMetricSink::default());
         let m = SinkMetrics::new(sink.clone());
-        m.increment_requests("StartWorkflowExecution");
+        m.increment_requests("DescribeWorkflowExecution");
         m.record_operation(
-            "StartWorkflowExecution",
+            "DescribeWorkflowExecution",
             Duration::from_millis(3),
             &domain_tag(),
         );
-        m.record_latency_histogram("StartWorkflowExecution", Duration::from_millis(3));
-        m.increment_error("StartWorkflowExecution", &domain_tag(), Counter::BadRequest);
+        m.record_latency_histogram("DescribeWorkflowExecution", Duration::from_millis(3));
+        m.increment_error("DescribeWorkflowExecution", &domain_tag(), Counter::BadRequest);
         let events = sink.events();
         let names: Vec<_> = events.iter().map(|e| e.name).collect();
         assert_eq!(
@@ -248,7 +248,7 @@ mod tests {
                 "cadence_errors_bad_request"
             ]
         );
-        assert_eq!(events[1].tags["operation"], "StartWorkflowExecution");
+        assert_eq!(events[1].tags["operation"], "DescribeWorkflowExecution");
         assert_eq!(events[1].tags["domain"], "d1");
         assert!(!events[1].tags.contains_key("wf-domain-name"));
         assert_eq!(events[1].kind, MetricKind::Timer);
