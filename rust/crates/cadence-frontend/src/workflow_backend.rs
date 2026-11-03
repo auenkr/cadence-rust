@@ -33,6 +33,8 @@ const CALLER: &str = "cadence-frontend";
 /// Go's frontend client default timeout for History calls.
 const HISTORY_TIMEOUT: Duration = Duration::from_secs(30);
 const HISTORY_RETRY_BUDGET: Duration = Duration::from_secs(25);
+const HISTORY_RETRY_BACKOFF_UNIT: Duration = Duration::from_millis(250);
+const HISTORY_RETRY_MAX_ATTEMPTS: u32 = 20;
 
 #[derive(Clone)]
 pub struct ProductionBackend {
@@ -264,33 +266,19 @@ impl ProductionBackend {
         envelope: Struct,
     ) -> Result<Struct, CadenceError> {
         let workflow_id = history_workflow_id(method, &envelope)?;
-        // Go client/history: the owner is re-resolved from Ringpop on every attempt;
-        // ShardOwnershipLost (request not applied) and ServiceBusy (host down /
-        // overloaded) are retried with backoff while shard ownership moves.
-        let started = std::time::Instant::now();
-        let mut attempt = 0u32;
-        loop {
-            let address = self.history_addr_for_workflow(&workflow_id)?;
-            let result = self
-                .call(
-                    &address,
-                    HISTORY_SERVICE,
-                    "HistoryService",
-                    method,
-                    envelope.clone(),
-                )
-                .await;
-            match &result {
-                Err(CadenceError::ShardOwnershipLost(_)) | Err(CadenceError::ServiceBusy(_))
-                    if attempt < 20 && started.elapsed() < HISTORY_RETRY_BUDGET =>
-                {
-                    attempt += 1;
-                    tokio::time::sleep(Duration::from_millis(250 * u64::from(attempt.min(8))))
-                        .await;
+        retry_history_call(
+            || self.history_addr_for_workflow(&workflow_id),
+            |address| {
+                let envelope = envelope.clone();
+                async move {
+                    self.call(&address, HISTORY_SERVICE, "HistoryService", method, envelope)
+                        .await
                 }
-                _ => return result,
-            }
-        }
+            },
+            HISTORY_RETRY_BACKOFF_UNIT,
+            HISTORY_RETRY_BUDGET,
+        )
+        .await
     }
 
     async fn call(
@@ -1139,6 +1127,174 @@ mod history_routing_tests {
                 );
             }
         }
+    }
+}
+
+/// Go client/history: the owner is re-resolved from Ringpop on every attempt;
+/// ShardOwnershipLost (request not applied) and ServiceBusy (host down /
+/// overloaded) are retried with linear backoff (capped at 8 units) while shard
+/// ownership moves. Any other result is returned immediately.
+pub(crate) async fn retry_history_call<R, C, Fut>(
+    mut resolve: R,
+    mut call: C,
+    backoff_unit: Duration,
+    budget: Duration,
+) -> Result<Struct, CadenceError>
+where
+    R: FnMut() -> Result<String, CadenceError>,
+    C: FnMut(String) -> Fut,
+    Fut: std::future::Future<Output = Result<Struct, CadenceError>>,
+{
+    let started = std::time::Instant::now();
+    let mut attempt = 0u32;
+    loop {
+        let address = resolve()?;
+        let result = call(address).await;
+        match &result {
+            Err(CadenceError::ShardOwnershipLost(_)) | Err(CadenceError::ServiceBusy(_))
+                if attempt < HISTORY_RETRY_MAX_ATTEMPTS && started.elapsed() < budget =>
+            {
+                attempt += 1;
+                tokio::time::sleep(backoff_unit * attempt.min(8)).await;
+            }
+            _ => return result,
+        }
+    }
+}
+
+#[cfg(test)]
+mod history_retry_tests {
+    use super::*;
+    use cadence_api::errors::{ServiceBusyError, ShardOwnershipLostError};
+    use std::sync::{Arc, Mutex};
+
+    fn lost() -> CadenceError {
+        CadenceError::ShardOwnershipLost(ShardOwnershipLostError::new("moved"))
+    }
+
+    #[tokio::test]
+    async fn retries_ownership_lost_and_re_resolves_owner_each_attempt() {
+        let owners = Arc::new(Mutex::new(vec!["h3:1", "h2:1", "h1:1"]));
+        let called = Arc::new(Mutex::new(Vec::new()));
+        let (o, c) = (owners.clone(), called.clone());
+        let result = retry_history_call(
+            move || Ok(o.lock().unwrap().pop().unwrap().to_string()),
+            move |addr| {
+                let c = c.clone();
+                async move {
+                    let mut c = c.lock().unwrap();
+                    c.push(addr);
+                    if c.len() < 3 {
+                        Err(lost())
+                    } else {
+                        Ok(Struct::default())
+                    }
+                }
+            },
+            Duration::from_millis(1),
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(result.is_ok());
+        assert_eq!(called.lock().unwrap().as_slice(), ["h1:1", "h2:1", "h3:1"]);
+    }
+
+    #[tokio::test]
+    async fn retries_service_busy_then_succeeds() {
+        let n = Arc::new(Mutex::new(0));
+        let n2 = n.clone();
+        let result = retry_history_call(
+            || Ok("h:1".into()),
+            move |_| {
+                let n = n2.clone();
+                async move {
+                    let mut n = n.lock().unwrap();
+                    *n += 1;
+                    if *n == 1 {
+                        Err(CadenceError::ServiceBusy(ServiceBusyError::new("busy")))
+                    } else {
+                        Ok(Struct::default())
+                    }
+                }
+            },
+            Duration::from_millis(1),
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(result.is_ok());
+        assert_eq!(*n.lock().unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn other_errors_are_not_retried() {
+        let n = Arc::new(Mutex::new(0));
+        let n2 = n.clone();
+        let result = retry_history_call(
+            || Ok("h:1".into()),
+            move |_| {
+                let n = n2.clone();
+                async move {
+                    *n.lock().unwrap() += 1;
+                    Err(internal("boom"))
+                }
+            },
+            Duration::from_millis(1),
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(matches!(result, Err(CadenceError::Internal(_))));
+        assert_eq!(*n.lock().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn gives_up_after_max_attempts_with_last_error() {
+        let n = Arc::new(Mutex::new(0u32));
+        let n2 = n.clone();
+        let result = retry_history_call(
+            || Ok("h:1".into()),
+            move |_| {
+                let n = n2.clone();
+                async move {
+                    *n.lock().unwrap() += 1;
+                    Err(lost())
+                }
+            },
+            Duration::from_micros(1),
+            Duration::from_secs(60),
+        )
+        .await;
+        assert!(matches!(result, Err(CadenceError::ShardOwnershipLost(_))));
+        assert_eq!(*n.lock().unwrap(), HISTORY_RETRY_MAX_ATTEMPTS + 1);
+    }
+
+    #[tokio::test]
+    async fn stops_when_budget_is_spent_and_propagates_resolver_errors() {
+        let n = Arc::new(Mutex::new(0u32));
+        let n2 = n.clone();
+        let result = retry_history_call(
+            || Ok("h:1".into()),
+            move |_| {
+                let n = n2.clone();
+                async move {
+                    *n.lock().unwrap() += 1;
+                    Err(lost())
+                }
+            },
+            Duration::from_millis(1),
+            Duration::ZERO,
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(*n.lock().unwrap(), 1);
+
+        let result = retry_history_call(
+            || Err(internal("no owner")),
+            |_| async { Ok(Struct::default()) },
+            Duration::from_millis(1),
+            Duration::from_secs(1),
+        )
+        .await;
+        assert!(matches!(result, Err(CadenceError::Internal(_))));
     }
 }
 

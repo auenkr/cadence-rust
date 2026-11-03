@@ -394,4 +394,102 @@ mod tests {
         );
         assert_eq!(us(None), 0);
     }
+
+    #[test]
+    fn closed_row_decodes_all_columns_and_converts_timestamps() {
+        let run = uuid::Uuid::from_u128(0xabc);
+        let row = closed_row(ClosedRec {
+            workflow_id: "wf".into(),
+            run_id: run,
+            start_time: Some(CqlTimestamp(1_000)),
+            execution_time: Some(CqlTimestamp(2_000)),
+            close_time: Some(CqlTimestamp(3_000)),
+            workflow_type_name: Some("type".into()),
+            status: Some(2),
+            history_length: Some(17),
+            memo: Some(vec![1, 2]),
+            encoding: Some("thriftrw".into()),
+            is_cron: Some(true),
+            update_time: Some(CqlTimestamp(4_000)),
+            shard_id: Some(9),
+            task_list: Some("tl".into()),
+            num_clusters: None,
+            execution_status: None,
+            cron_schedule: None,
+            scheduled_execution_time: None,
+        });
+        assert_eq!(row.workflow_id, "wf");
+        assert_eq!(row.run_id, run.to_string());
+        assert_eq!(row.start_time_us, 1_000_000);
+        assert_eq!(row.execution_time_us, 2_000_000);
+        assert_eq!(row.close_time_us, Some(3_000_000));
+        assert_eq!(row.workflow_type_name, "type");
+        assert_eq!(row.close_status, Some(2));
+        assert_eq!(row.history_length, Some(17));
+        assert_eq!(row.memo, vec![1, 2]);
+        assert_eq!(row.encoding, "thriftrw");
+        assert!(row.is_cron);
+        assert_eq!(row.update_time_us, 4_000_000);
+        assert_eq!(row.shard_id, 9);
+    }
+
+    #[test]
+    fn closed_row_null_columns_default_but_stay_closed() {
+        let row = closed_row(ClosedRec {
+            workflow_id: "wf".into(),
+            run_id: uuid::Uuid::nil(),
+            start_time: None,
+            execution_time: None,
+            close_time: None,
+            workflow_type_name: None,
+            status: None,
+            history_length: None,
+            memo: None,
+            encoding: None,
+            is_cron: None,
+            update_time: None,
+            shard_id: None,
+            task_list: None,
+            num_clusters: None,
+            execution_status: None,
+            cron_schedule: None,
+            scheduled_execution_time: None,
+        });
+        // A closed row keeps close fields Some(0) so it is never reported as open.
+        assert_eq!(row.close_time_us, Some(0));
+        assert_eq!(row.close_status, Some(0));
+        assert_eq!(row.history_length, Some(0));
+        assert!(row.workflow_type_name.is_empty() && row.memo.is_empty() && !row.is_cron);
+    }
+
+    #[test]
+    fn open_row_decodes_tuple_and_leaves_close_fields_unset() {
+        let run = uuid::Uuid::from_u128(7);
+        let row = open_row((
+            "wf".into(),
+            run,
+            Some(CqlTimestamp(10)),
+            Some(CqlTimestamp(20)),
+            Some("t".into()),
+            Some(vec![9]),
+            Some("json".into()),
+            Some("tl".into()),
+            Some(true),
+            Some(1),
+            Some(CqlTimestamp(30)),
+            Some(4),
+            Some(2),
+            Some("* * * * *".into()),
+            Some(CqlTimestamp(40)),
+        ));
+        assert_eq!(row.run_id, run.to_string());
+        assert_eq!(row.start_time_us, 10_000);
+        assert_eq!(row.execution_time_us, 20_000);
+        assert_eq!(row.update_time_us, 30_000);
+        assert_eq!((row.shard_id, row.is_cron), (4, true));
+        assert_eq!(row.workflow_type_name, "t");
+        assert_eq!(row.memo, vec![9]);
+        assert_eq!(row.encoding, "json");
+        assert!(row.close_time_us.is_none() && row.close_status.is_none() && row.history_length.is_none());
+    }
 }
