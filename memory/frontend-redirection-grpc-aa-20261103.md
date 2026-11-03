@@ -13,4 +13,7 @@ Branch `t3/frontend-redirection-grpc-aa`.
 - Active-active per-workflow lookups (`GetActiveClusterSelectionPolicyForWorkflow/CurrentWorkflow`, execution store read of the policy) are not ported: for active-active domains they fail and route to the current cluster. Authorization-provider outbound middleware not ported.
 
 ## Evidence
-(pending CI)
+- rust-ci full (clippy+workspace tests) on head 7a86792e..a rustfmt fix later: https://github.com/auenkr/cadence-rust/actions/runs/41637083087 success
+- two-cluster gate (rust_ref this branch, head 380765b5388145a1f329a8ef23fd708533a2050b): https://github.com/auenkr/cadence-rust/actions/runs/41638396585 success, `GATE SUMMARY failed: []`, steps grpc-forward-start-on-A / lives-on-B / signal / terminate / terminated-on-B all ok (cluster B `rpcTransport: grpc`)
+- Rust binary sha256: f571261aa93a36c7f8391d10afe7c62b68e5262627f028d3d1d3494dada2c79e
+- Unit tests: `frontend_remote_grpc::tests::*`, `frontend_remote::tests::*`, `redirection_runtime::tests::{active_active_*,cluster_attribute_lookup_*,requested_attribute_*}`
