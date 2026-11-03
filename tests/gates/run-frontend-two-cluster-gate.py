@@ -236,9 +236,11 @@ try:
     def a_active():
         rc, out = cli(A_T, 'tchannel', '--domain', dom, 'domain', 'describe')
         return rc == 0 and re.search(r'ActiveClusterName:\s*cluster0', out) is not None, out
-    poll('failover-replicated-to-A', a_active, 240)
-    time.sleep(12)
+    time.sleep(30)
+    # restart Rust Frontend so its domain cache is fresh, then wait for replication
     if start_rust_frontend('after-failover', 'selected-apis-forwarding', '', 'tchannel'):
+        poll('failover-replicated-to-A', a_active, 240)
+        time.sleep(12)
         before = prom()
         rc, out, wid4, rid4 = start_wf('local')
         record('after-failover-start-runs-locally-on-A', rc == 0, out)

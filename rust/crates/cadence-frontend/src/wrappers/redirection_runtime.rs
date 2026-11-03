@@ -430,7 +430,9 @@ impl<B: WorkflowBackend> WorkflowBackend for ForwardingBackend<B> {
         request: &Value,
         target_cluster: Option<&str>,
     ) -> Option<WorkflowFuture<'a>> {
-        let cluster = target_cluster.filter(|c| *c != self.current_cluster)?.to_owned();
+        let cluster = target_cluster
+            .filter(|c| *c != self.current_cluster)?
+            .to_owned();
         let request = request.clone();
         Some(Box::pin(async move {
             let client = self.remotes.get(&cluster)?;
