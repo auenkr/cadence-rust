@@ -432,7 +432,7 @@ impl ObjectStore for S3Store {
             .into_iter()
             .filter_map(|c| xml_tag(c, "Key").map(xml_unescape))
             .collect();
-        let common_prefixes = xml_blocks(&xml, "CommonPrefixes")
+        let common_prefixes: Vec<String> = xml_blocks(&xml, "CommonPrefixes")
             .into_iter()
             .filter_map(|c| xml_tag(c, "Prefix").map(xml_unescape))
             .collect();
