@@ -17,3 +17,20 @@ NOT ported / gaps (audit rows stay open):
 - Formatting of the 3 touched files was done with standalone rustfmt (not cargo) after CI fmt diff; Cargo.lock not committed by me.
 
 CI evidence: rust-ci (package=cadence-frontend) https://github.com/auenkr/cadence-rust/actions/runs/41584179907 conclusion success at head d181bc0bedd93777b293f8e8c432fb5c37ef55a8 (fmt+clippy+tests). Earlier runs 41583447308 (compile errors), 41583815107 (fmt) failed. Full-workspace run not done. No binary SHA256 (no gate).
+
+## Update: provider mode, Admin API wrapper, oauth gate phase (branch t3/frontend-oauth-admin)
+
+Ported:
+- `oauthAuthorizer.provider` (JWKS fetched once at startup via blocking reqwest, no refresh; jmespath groups/admin attribute paths). Internal tokens still verify with `jwtCredentials.publicKey`; external tokens use the JWKS key by `kid`.
+- Admin API access control (Go `accesscontrolled.NewAdminHandler`): `AdminAuthorizer` seam in cadence-service-core `workflow_api.rs` (no crate cycle). Admin permission for every method except DescribeCluster (Read), no domain, error "Request unauthorized.". TChannel: `yarpc.rs dispatch_with_headers` (tchannel.rs now passes `AdminService::<Method>` for AdminService calls; the bare name previously skipped the check). gRPC: `AdminAuth` tower wrapper in cadence-matching `grpc.rs`.
+- Legacy domain APIs (DescribeDomain Read/domain=name, FailoverDomain Write/domain=domainName, Register/Update/Deprecate/DeleteDomain Admin) were bypassing authorization because they are served by legacy handlers, not `workflow_api`. Now checked via `authorize_domain_api` on TChannel (yarpc.rs) and in each gRPC DomainApi handler before validation. ListDomains stays unauthenticated as in Go.
+- Gate: oauth phase in tests/gates/run-frontend-gate.py, run after the normal phase because the Go Worker/History cannot send a JWT to the Rust Frontend. Rust Frontend restarted with oauth enabled and a gate-generated RSA key; JWTs minted by the script. Steps `oauth-{tchannel,grpc}-*` cover missing/garbage/expired/wrong-key denied, admin allowed, reader describe allowed / write denied, Admin API no-token/expired/non-admin denied and admin allowed.
+
+Gaps: JWKS has no refresh; `RequestBody` attribute is not populated for the domain/Admin checks (OAuth ignores it); provider-mode JWKS path is covered by unit tests only, not the gate.
+
+CI evidence (head 81f54af1480b12f8d603d00903cb7fe43b0ef659):
+- rust-ci package=cadence-frontend: https://github.com/auenkr/cadence-rust/actions/runs/41594403425 success
+- frontend-mixed-gate (mysql, kafka=false): https://github.com/auenkr/cadence-rust/actions/runs/41594417872 success, all oauth steps ok
+- Rust binary SHA256 f340e8c0b836378a5bfa4ea58d45d148e3164ea26a8e75834e1dc335b75a470d (cadence-server)
+- Earlier: rust-ci 41592413541 success (ba9cad1); gate 41593096606 failed on 11 oauth steps (TChannel Admin + DescribeDomain unauthenticated), fixed here.
+- Full-workspace rust-ci not run (service-core and matching were touched); dispatched below.
