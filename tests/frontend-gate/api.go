@@ -344,8 +344,8 @@ func adminCLI(ctx context.Context, domain, wid, rid string) {
 		}
 		check("shard-list", "Total Number of Shards", false, "admin", "shard", "list")
 		check("shard-list-page", "Number of Shards Returned: 2", false, "admin", "shard", "list", "--pagesize", "2")
-		check("dlq-count-history", "", false, "admin", "dlq", "count", "--dlq_type", "history")
-		check("dlq-count-domain", "", false, "admin", "dlq", "count", "--dlq_type", "domain")
+		check("dlq-count-history", "", tr.name == "tchannel", "admin", "dlq", "count", "--dlq_type", "history") // CountDLQMessages is gRPC-only (Go: Feature not supported on TChannel)
+		check("dlq-count-domain", "", tr.name == "tchannel", "admin", "dlq", "count", "--dlq_type", "domain") // CountDLQMessages is gRPC-only (Go: Feature not supported on TChannel)
 		check("dlq-read-domain", "", true, "admin", "dlq", "read", "--dlq_type", "domain", "--max_message_count", "5")
 		check("dlq-read-history", "", true, "admin", "dlq", "read", "--dlq_type", "history", "--shards", "0", "--source_cluster", cluster, "--max_message_count", "5")
 		check("dlq-purge-domain", "", true, "admin", "dlq", "purge", "--dlq_type", "domain", "--last_message_id", "0")
