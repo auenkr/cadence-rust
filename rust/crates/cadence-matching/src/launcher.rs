@@ -1415,8 +1415,9 @@ async fn run_with_lifecycle(
                 state.admin.persistence_description.advanced_visibility =
                     !cfg.persistence.advanced_visibility_store.is_empty();
                 // Go setupVisibilityClients: a missing/invalid ES store is fatal at startup.
-                state.admin.es = cadence_service_core::es_mapping::from_persistence(&cfg.persistence)
-                    .map_err(|e| anyhow::anyhow!(e))?;
+                state.admin.es =
+                    cadence_service_core::es_mapping::from_persistence(&cfg.persistence)
+                        .map_err(|e| anyhow::anyhow!(e))?;
             }
             if let Some(provider) = &frontend_ringpop_provider {
                 state.admin.membership.set(Some(std::sync::Arc::new(
