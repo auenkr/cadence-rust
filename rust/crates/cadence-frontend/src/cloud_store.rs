@@ -436,6 +436,9 @@ impl ObjectStore for S3Store {
             .into_iter()
             .filter_map(|c| xml_tag(c, "Prefix").map(xml_unescape))
             .collect();
+        if delimiter.is_some() && common_prefixes.is_empty() {
+            eprintln!("FE-ARCHIVE s3 list empty: status={status} url-bucket={bucket} prefix={prefix:?} body={xml}");
+        }
         let truncated = xml_tag(&xml, "IsTruncated") == Some("true");
         let next_token = xml_tag(&xml, "NextContinuationToken")
             .map(xml_unescape)
