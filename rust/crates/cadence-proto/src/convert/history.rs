@@ -35,7 +35,7 @@ fn workflow_execution_started_event_attributes(
         first_execution_run_id: v.first_execution_run_id,
         retry_policy: v.retry_policy.map(retry_out),
         attempt: v.attempt,
-        expiration_time: v.expiration_timestamp.map(timestamp),
+        expiration_time: v.expiration_timestamp.map(timestamp_nanos),
         cron_schedule: v.cron_schedule,
         first_decision_task_backoff: v
             .first_decision_task_backoff_seconds
@@ -437,7 +437,7 @@ pub(crate) fn start_child_workflow_execution_initiated_event_attributes(
         search_attributes: v.search_attributes.map(search_attributes),
         delay_start: v.delay_start_seconds.map(|s| duration(s.into())),
         jitter_start: v.jitter_start_seconds.map(|s| duration(s.into())),
-        first_run_at: v.first_run_at_timestamp.map(timestamp),
+        first_run_at: v.first_run_at_timestamp.map(timestamp_nanos),
         cron_overlap_policy: v.cron_overlap_policy.map_or(0, |e| e as i32 + 1),
         ..Default::default()
     }
@@ -572,7 +572,7 @@ pub fn event(v: st::HistoryEvent) -> Result<p::HistoryEvent, Status> {
     }.ok_or_else(||Status::internal("History event attributes are missing."))?;
     Ok(p::HistoryEvent {
         event_id: v.event_id,
-        event_time: v.timestamp.map(timestamp),
+        event_time: v.timestamp.map(timestamp_nanos),
         version: v.version,
         task_id: v.task_id,
         attributes: Some(attributes),

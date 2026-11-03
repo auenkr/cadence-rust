@@ -569,10 +569,34 @@ pub async fn list_schedulers_api(
         }),
         ..Default::default()
     };
-    let resp: cadence_api::service_types::ListOpenWorkflowExecutionsResponse =
-        api_call(api, "ListOpenWorkflowExecutions", &request, ctx).await?;
-    let entries = resp.executions.iter().filter_map(list_entry).collect();
-    Ok((entries, resp.next_page_token))
+    let resp: Result<cadence_api::service_types::ListOpenWorkflowExecutionsResponse, _> =
+        api_call(api, "ListOpenWorkflowExecutions", &request, ctx).await;
+    match resp {
+        Ok(resp) => {
+            let entries = resp.executions.iter().filter_map(list_entry).collect();
+            Ok((entries, resp.next_page_token))
+        }
+        // Go `ListSchedules`: with `frontend.disableListVisibilityByFilter` the
+        // filtered list is disabled, so only list-by-query remains.
+        Err(CadenceError::BadRequest(error))
+            if error.message == "No permission to do this operation." =>
+        {
+            let query = cadence_api::service_types::ListWorkflowExecutionsRequest {
+                domain: domain.to_string(),
+                page_size: page_size as i32,
+                next_page_token: page_token.to_vec(),
+                query: format!(
+                    "WorkflowType = '{}' and CloseTime = missing",
+                    wire::WORKFLOW_TYPE_NAME
+                ),
+            };
+            let resp: cadence_api::service_types::ListWorkflowExecutionsResponse =
+                api_call(api, "ListWorkflowExecutions", &query, ctx).await?;
+            let entries = resp.executions.iter().filter_map(list_entry).collect();
+            Ok((entries, resp.next_page_token))
+        }
+        Err(error) => Err(error),
+    }
 }
 
 #[cfg(test)]

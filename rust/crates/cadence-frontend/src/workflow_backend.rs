@@ -933,6 +933,45 @@ impl crate::handler_workflow::HistoryPageSizePolicy for DynamicHistoryPageSize {
     }
 }
 
+/// Go `frontend.disableListVisibilityByFilter` (domain filtered, default false).
+struct DynamicVisibilityFilterPolicy(SharedOverlay);
+
+impl crate::handler_workflow::VisibilityFilterPolicy for DynamicVisibilityFilterPolicy {
+    fn filters_disabled(&self, domain: &str) -> bool {
+        self.0.lock().is_ok_and(|o| {
+            cadence_persistence::dynamic_config::boolean(
+                o.property_values("frontend.disableListVisibilityByFilter"),
+                Some(domain),
+                false,
+            )
+        })
+    }
+}
+
+/// Go `frontend.emitSignalNameMetricsTag` (domain filtered, default false).
+struct DynamicSignalNameMetrics(SharedOverlay);
+
+impl crate::handler_workflow::SignalNameMetricsPolicy for DynamicSignalNameMetrics {
+    fn emit_signal_name_tag(&self, domain: &str) -> bool {
+        self.0.lock().is_ok_and(|o| {
+            cadence_persistence::dynamic_config::boolean(
+                o.property_values("frontend.emitSignalNameMetricsTag"),
+                Some(domain),
+                false,
+            )
+        })
+    }
+}
+
+/// Go `frontend.decisionResultCountLimit` (domain filtered, default 0 = off).
+struct DynamicDecisionResultLimit(SharedOverlay);
+
+impl crate::handler_workflow::DecisionResultLimitPolicy for DynamicDecisionResultLimit {
+    fn decision_result_count_limit(&self, domain: &str) -> i64 {
+        overlay_integer(&self.0, "frontend.decisionResultCountLimit", domain, 0)
+    }
+}
+
 /// Build the production WorkflowService for the Frontend launcher.
 pub fn build_workflow_api(
     ctx: cadence_matching::launcher::FrontendHookContext,
@@ -1341,6 +1380,15 @@ pub fn build_workflow_api(
     .with_workflow_query_policy(std::sync::Arc::new(DynamicQueryPolicy(
         dynamic_overlay.clone(),
     )))
+    .with_visibility_filter_policy(std::sync::Arc::new(DynamicVisibilityFilterPolicy(
+        dynamic_overlay.clone(),
+    )))
+    .with_signal_name_metrics_policy(std::sync::Arc::new(DynamicSignalNameMetrics(
+        dynamic_overlay.clone(),
+    )))
+    .with_decision_result_limit_policy(std::sync::Arc::new(DynamicDecisionResultLimit(
+        dynamic_overlay.clone(),
+    )))
     .with_history_page_size_policy(std::sync::Arc::new(DynamicHistoryPageSize(
         dynamic_overlay.clone(),
     )))
@@ -1405,7 +1453,21 @@ pub fn build_workflow_api(
                     ),
                     requests: crate::wrappers::redirection_runtime::DomainCacheResolver::new(
                         ctx.state.domain_manager.clone(),
-                    ),
+                    )
+                    .with_cluster_selection_flag({
+                        let overlay = ctx.state.admin.dynamic_config.clone();
+                        std::sync::Arc::new(move |domain: &str| {
+                            overlay.lock().is_ok_and(|o| {
+                                cadence_persistence::dynamic_config::boolean(
+                                    o.property_values(
+                                        "frontend.enableActiveClusterSelectionPolicyInStartWorkflow",
+                                    ),
+                                    Some(domain),
+                                    false,
+                                )
+                            })
+                        })
+                    }),
                 });
             let schedule_redirect = crate::wrappers::redirection_runtime::ScheduleRedirect {
                 redirector: redirector.clone(),

@@ -330,6 +330,8 @@ pub struct Handler<B> {
     rate_limit: Option<Arc<dyn RequestRateLimit>>,
     visibility_query_validator: Option<Arc<dyn VisibilityQueryValidator>>,
     visibility_filter_policy: Option<Arc<dyn VisibilityFilterPolicy>>,
+    decision_result_limit_policy: Option<Arc<dyn DecisionResultLimitPolicy>>,
+    signal_name_metrics_policy: Option<Arc<dyn SignalNameMetricsPolicy>>,
     workflow_query_policy: Option<Arc<dyn WorkflowQueryPolicy>>,
     isolation_group_state: Option<Arc<dyn IsolationGroupState>>,
     poll_isolation_waiter: Option<Arc<dyn PollIsolationGroupWaiter>>,
@@ -497,6 +499,17 @@ pub trait VisibilityQueryValidator: Send + Sync {
     fn validate_query(&self, query: &str) -> Result<String, CadenceError>;
 }
 
+/// Go `frontend.emitSignalNameMetricsTag` (metered `withSignalName`).
+pub trait SignalNameMetricsPolicy: Send + Sync {
+    fn emit_signal_name_tag(&self, domain: &str) -> bool;
+}
+
+/// Go `frontend.decisionResultCountLimit` (`common.CheckDecisionResultLimit`):
+/// a limit > 0 rejects RespondDecisionTaskCompleted with more decisions.
+pub trait DecisionResultLimitPolicy: Send + Sync {
+    fn decision_result_count_limit(&self, domain: &str) -> i64;
+}
+
 /// Go's `DisableListVisibilityByFilter` dynamic property is evaluated for
 /// every open/closed visibility request that selects a workflow, type, or
 /// status filter. The policy is injected because it depends on live config.
@@ -560,6 +573,8 @@ impl<B: WorkflowBackend> Handler<B> {
             rate_limit: None,
             visibility_query_validator: None,
             visibility_filter_policy: None,
+            decision_result_limit_policy: None,
+            signal_name_metrics_policy: None,
             workflow_query_policy: None,
             isolation_group_state: None,
             poll_isolation_waiter: None,
@@ -592,6 +607,8 @@ impl<B: WorkflowBackend> Handler<B> {
             rate_limit: None,
             visibility_query_validator: None,
             visibility_filter_policy: None,
+            decision_result_limit_policy: None,
+            signal_name_metrics_policy: None,
             workflow_query_policy: None,
             isolation_group_state: None,
             poll_isolation_waiter: None,
@@ -629,6 +646,8 @@ impl<B: WorkflowBackend> Handler<B> {
             rate_limit: None,
             visibility_query_validator: None,
             visibility_filter_policy: None,
+            decision_result_limit_policy: None,
+            signal_name_metrics_policy: None,
             workflow_query_policy: None,
             isolation_group_state: None,
             poll_isolation_waiter: None,
@@ -722,6 +741,22 @@ impl<B: WorkflowBackend> Handler<B> {
         policy: Arc<dyn VisibilityFilterPolicy>,
     ) -> Self {
         self.visibility_filter_policy = Some(policy);
+        self
+    }
+
+    pub fn with_decision_result_limit_policy(
+        mut self,
+        policy: Arc<dyn DecisionResultLimitPolicy>,
+    ) -> Self {
+        self.decision_result_limit_policy = Some(policy);
+        self
+    }
+
+    pub fn with_signal_name_metrics_policy(
+        mut self,
+        policy: Arc<dyn SignalNameMetricsPolicy>,
+    ) -> Self {
+        self.signal_name_metrics_policy = Some(policy);
         self
     }
 
@@ -873,7 +908,8 @@ impl<B: WorkflowBackend> Handler<B> {
     ) -> WorkflowFuture<'a> {
         Box::pin(async move {
             let start = std::time::Instant::now();
-            let tags = crate::wrappers::metered::request_tags(operation.name(), &request);
+            let mut tags = crate::wrappers::metered::request_tags(operation.name(), &request);
+            self.augment_metric_tags(operation, &request, &mut tags);
             self.metrics
                 .increment_requests_tagged(operation.name(), &tags);
             let result = self
@@ -894,6 +930,57 @@ impl<B: WorkflowBackend> Handler<B> {
                 }
             }
         })
+    }
+
+    /// Go resolves the metrics `domain` of token-based Respond*/heartbeat calls
+    /// from the task token, and adds `signalName` when
+    /// `frontend.emitSignalNameMetricsTag` is on for the domain.
+    fn augment_metric_tags(
+        &self,
+        operation: WorkflowOperation,
+        request: &Value,
+        tags: &mut Vec<crate::wrappers::metered::MetricTag>,
+    ) {
+        use WorkflowOperation as Op;
+        if matches!(
+            operation,
+            Op::RecordActivityTaskHeartbeat
+                | Op::RespondActivityTaskCompleted
+                | Op::RespondActivityTaskFailed
+                | Op::RespondActivityTaskCanceled
+                | Op::RespondDecisionTaskCompleted
+                | Op::RespondDecisionTaskFailed
+        ) {
+            if let (Some(domains), Ok(token)) =
+                (&self.domain_lookup, decode_workflow_task_token(request))
+            {
+                if let Ok(Some(name)) = domains.domain_name(&token.domain_id) {
+                    if let Some(tag) = tags.iter_mut().find(|t| t.key == "wf-domain-name") {
+                        tag.value = name;
+                    }
+                }
+            }
+        }
+        if operation == Op::SignalWorkflowExecution {
+            let domain = request
+                .get("domain")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if self
+                .signal_name_metrics_policy
+                .as_ref()
+                .is_some_and(|p| p.emit_signal_name_tag(domain))
+            {
+                tags.push(crate::wrappers::metered::MetricTag {
+                    key: "signalName",
+                    value: request
+                        .get("signalName")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                });
+            }
+        }
     }
 
     async fn dispatch_operation(
@@ -1264,6 +1351,20 @@ impl<B: WorkflowBackend> Handler<B> {
             }
         };
         self.validator.check_identity(&domain, identity)?;
+        if operation == Op::RespondDecisionTaskCompleted {
+            if let Some(policy) = &self.decision_result_limit_policy {
+                let count = public_request
+                    .get("decisions")
+                    .and_then(Value::as_array)
+                    .map_or(0, Vec::len) as i64;
+                let limit = policy.decision_result_count_limit(&domain);
+                if limit > 0 && count > limit {
+                    return Err(CadenceError::BadRequest(BadRequestError::new(
+                        "Decision result count exceeds limit.",
+                    )));
+                }
+            }
+        }
         Ok(())
     }
 
@@ -3032,6 +3133,45 @@ mod tests {
         fn filters_disabled(&self, domain: &str) -> bool {
             domain == self.0
         }
+    }
+
+    struct FixedDecisionLimit(i64);
+
+    impl DecisionResultLimitPolicy for FixedDecisionLimit {
+        fn decision_result_count_limit(&self, _domain: &str) -> i64 {
+            self.0
+        }
+    }
+
+    #[tokio::test]
+    async fn decision_result_count_limit_rejects_like_go() {
+        let token = cadence_api::tasktoken::JsonTaskTokenSerializer::serialize(
+            &cadence_api::tasktoken::TaskToken {
+                domain_id: "uuid:shop".into(),
+                workflow_id: "order-1".into(),
+                run_id: "run-1".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let body = serde_json::json!({
+            "taskToken": cadence_api::b64::encode_bytes(&token),
+            "identity": "w",
+            "decisions": [{}, {}],
+        });
+        let handler = Handler::new(CapturingBackend::default())
+            .with_domain_lookup(Arc::new(StaticDomainLookup))
+            .with_decision_result_limit_policy(Arc::new(FixedDecisionLimit(1)));
+        let err = handler
+            .dispatch("RespondDecisionTaskCompleted", body.clone())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Decision result count exceeds limit."));
+        assert!(handler.backend.0.lock().unwrap().is_empty());
+        let handler = Handler::new(CapturingBackend::default())
+            .with_domain_lookup(Arc::new(StaticDomainLookup))
+            .with_decision_result_limit_policy(Arc::new(FixedDecisionLimit(0)));
+        handler.dispatch("RespondDecisionTaskCompleted", body).await.unwrap();
     }
 
     struct DomainHistoryPageSize;

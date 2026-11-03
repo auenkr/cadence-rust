@@ -115,11 +115,25 @@ struct EncodedToken {
 /// Go `DomainCache` lookups backed by the persistence domain manager.
 pub struct DomainCacheResolver {
     manager: Arc<dyn FrontendDomainManager>,
+    /// Go `frontend.enableActiveClusterSelectionPolicyInStartWorkflow`; when
+    /// off the requested policy is dropped (`sp1.ActiveClusterSelectionPolicy = nil`).
+    cluster_selection_enabled: Option<Arc<dyn Fn(&str) -> bool + Send + Sync>>,
 }
 
 impl DomainCacheResolver {
     pub fn new(manager: Arc<dyn FrontendDomainManager>) -> Self {
-        Self { manager }
+        Self {
+            manager,
+            cluster_selection_enabled: None,
+        }
+    }
+
+    pub fn with_cluster_selection_flag(
+        mut self,
+        flag: Arc<dyn Fn(&str) -> bool + Send + Sync>,
+    ) -> Self {
+        self.cluster_selection_enabled = Some(flag);
+        self
     }
 
     fn domain_id_from_token(operation: &str, request: &Value) -> Result<String, CadenceError> {
@@ -179,6 +193,10 @@ impl RedirectRequestResolver for DomainCacheResolver {
         let deprecated_or_deleted = info
             .status
             .is_some_and(|status| status != cadence_api::enums::DomainStatus::Registered);
+        let selection_enabled = self
+            .cluster_selection_enabled
+            .as_ref()
+            .map_or(true, |flag| flag(&info.name));
         let domain = DomainState {
             id: info.uuid,
             name: info.name,
@@ -208,7 +226,8 @@ impl RedirectRequestResolver for DomainCacheResolver {
         Ok(Some(RedirectRequest {
             domain,
             execution,
-            requested_cluster_attribute: requested_cluster_attribute(operation, fields),
+            requested_cluster_attribute: requested_cluster_attribute(operation, fields)
+                .filter(|_| selection_enabled),
             consistency: Consistency::Eventual,
         }))
     }
