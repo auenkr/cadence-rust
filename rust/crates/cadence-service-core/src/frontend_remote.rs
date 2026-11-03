@@ -155,7 +155,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn grpc_transport_rejects_unconverted_operations() {
+    async fn grpc_transport_rejects_operations_absent_from_grpc_api() {
         let client = RemoteFrontendClient::new(
             "b".into(),
             "127.0.0.1:1".into(),
@@ -166,7 +166,7 @@ mod tests {
             None,
         );
         let err = client
-            .call("QueryWorkflow", serde_json::json!({}), Duration::from_secs(1))
+            .call("GetTaskListsByDomain", serde_json::json!({}), Duration::from_secs(1))
             .await
             .unwrap_err();
         assert!(err.to_string().contains("gRPC remote Frontend"));
