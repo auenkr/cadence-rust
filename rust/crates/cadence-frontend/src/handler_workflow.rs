@@ -1695,12 +1695,22 @@ impl<B: WorkflowBackend> Handler<B> {
             let limits = self.validator.id_limits(&request.domain);
             for (id, kind, max) in [
                 (request.domain.as_str(), "DomainName", limits.ids.domain_max),
-                (request.workflow_id.as_str(), "WorkflowID", limits.ids.workflow_id_max),
-                (request.request_id.as_str(), "RequestID", limits.ids.request_id_max),
+                (
+                    request.workflow_id.as_str(),
+                    "WorkflowID",
+                    limits.ids.workflow_id_max,
+                ),
+                (
+                    request.request_id.as_str(),
+                    "RequestID",
+                    limits.ids.request_id_max,
+                ),
             ] {
                 // Warn-limit logging side effect only; the error limit is
                 // enforced by the validation below in Go's order.
-                let _ = self.validator.is_valid_id_length(id, max, &request.domain, kind);
+                let _ = self
+                    .validator
+                    .is_valid_id_length(id, max, &request.domain, kind);
             }
             cadence_api::validation::validate_start_workflow_execution_request(
                 Some(&request),

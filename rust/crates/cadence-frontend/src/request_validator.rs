@@ -119,7 +119,8 @@ impl RequestValidator {
 
     /// Go `limit.maxIDWarnLength` (default 128).
     pub fn id_warn_length(&self) -> usize {
-        self.dynamic_integer("limit.maxIDWarnLength", None, 128).max(0) as usize
+        self.dynamic_integer("limit.maxIDWarnLength", None, 128)
+            .max(0) as usize
     }
 
     /// Per-domain ID/name length limits (Go `limit.*Length`, default 1000).
@@ -152,7 +153,13 @@ impl RequestValidator {
 
     /// Go `common.IsValidIDLength`: warn (log) above the warn limit, fail
     /// above the error limit.
-    pub fn is_valid_id_length(&self, id: &str, error_limit: usize, domain: &str, kind: &str) -> bool {
+    pub fn is_valid_id_length(
+        &self,
+        id: &str,
+        error_limit: usize,
+        domain: &str,
+        kind: &str,
+    ) -> bool {
         if id.len() > self.id_warn_length() {
             eprintln!("WARN ID length exceeds limit. domain={domain} idType={kind} name={id}");
         }

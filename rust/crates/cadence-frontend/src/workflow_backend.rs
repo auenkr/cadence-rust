@@ -834,7 +834,8 @@ impl crate::handler_workflow::SearchAttributeProvider for ProdSearchAttributes {
     }
 }
 
-type SharedOverlay = std::sync::Arc<std::sync::Mutex<cadence_service_core::admin::DynamicConfigOverlay>>;
+type SharedOverlay =
+    std::sync::Arc<std::sync::Mutex<cadence_service_core::admin::DynamicConfigOverlay>>;
 
 fn overlay_integer(overlay: &SharedOverlay, key: &str, domain: &str, default: i64) -> i64 {
     overlay.lock().map_or(default, |o| {
@@ -1103,11 +1104,7 @@ pub fn build_workflow_api(
     let dynamic_overlay = ctx.state.admin.dynamic_config.clone();
     let validator = crate::request_validator::RequestValidator {
         config: crate::request_validator::ValidationConfig {
-            advanced_visibility_store: !ctx
-                .config
-                .persistence
-                .advanced_visibility_store
-                .is_empty(),
+            advanced_visibility_store: !ctx.config.persistence.advanced_visibility_store.is_empty(),
             ..Default::default()
         },
         dynamic: None,

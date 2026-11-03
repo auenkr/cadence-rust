@@ -204,7 +204,10 @@ pub fn validate_start_workflow_execution_request(
         return Err(BadRequestError::new("WorkflowID length exceeds limit."));
     }
     validate_retry_policy(r.retry_policy.as_ref())?;
-    if r.workflow_type.as_ref().is_some_and(|t| t.name.len() > limits.ids.workflow_type_max) {
+    if r.workflow_type
+        .as_ref()
+        .is_some_and(|t| t.name.len() > limits.ids.workflow_type_max)
+    {
         return Err(BadRequestError::new("WorkflowType length exceeds limit."));
     }
     match &r.task_list {
@@ -329,10 +332,16 @@ pub fn validate_signal_with_start_request(
     if r.signal_name.len() > limits.ids.signal_name_max {
         return Err(BadRequestError::new("SignalName length exceeds limit."));
     }
-    if r.workflow_type.as_ref().is_some_and(|t| t.name.len() > limits.ids.workflow_type_max) {
+    if r.workflow_type
+        .as_ref()
+        .is_some_and(|t| t.name.len() > limits.ids.workflow_type_max)
+    {
         return Err(BadRequestError::new("WorkflowType length exceeds limit."));
     }
-    if r.task_list.as_ref().is_some_and(|t| t.name.len() > limits.ids.task_list_max) {
+    if r.task_list
+        .as_ref()
+        .is_some_and(|t| t.name.len() > limits.ids.task_list_max)
+    {
         return Err(BadRequestError::new("TaskList length exceeds limit."));
     }
     if r.request_id.len() > limits.ids.request_id_max {
@@ -815,10 +824,14 @@ mod id_limit_tests {
     #[test]
     fn go_default_id_limit_is_1000() {
         let limits = Limits::cadence_default();
-        assert!(validate_start_workflow_execution_request(Some(&start("a".repeat(300))), &limits)
-            .is_ok());
-        assert!(validate_start_workflow_execution_request(Some(&start("a".repeat(1000))), &limits)
-            .is_ok());
+        assert!(
+            validate_start_workflow_execution_request(Some(&start("a".repeat(300))), &limits)
+                .is_ok()
+        );
+        assert!(
+            validate_start_workflow_execution_request(Some(&start("a".repeat(1000))), &limits)
+                .is_ok()
+        );
         assert_eq!(
             validate_start_workflow_execution_request(Some(&start("a".repeat(1001))), &limits)
                 .unwrap_err()
