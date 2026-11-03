@@ -277,6 +277,7 @@ impl ArchivedHistory {
         let exec = request.get("execution").cloned().unwrap_or(Value::Null);
         let workflow_id = field(&exec, "workflowId");
         let run_id = field(&exec, "runId");
+        eprintln!("FE-ARCHIVE history lookup domain={domain_id} wf={workflow_id} run={run_id}");
         if run_id.is_empty() {
             return Ok(None);
         }
