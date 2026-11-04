@@ -1089,7 +1089,7 @@ pub fn validate_create_transition(
         }
         CreateWorkflowMode::Zombie => {
             if current.run_id == new.run_id {
-                return Err(PersistenceError::CurrentWorkflowConditionFailed(format!(
+                return Err(PersistenceError::ConditionFailed(format!(
                     "Workflow execution run ID must mismatch current run ID. WorkflowId: {}, RunID: {}",
                     new.workflow_id, current.run_id
                 )));
@@ -1135,6 +1135,9 @@ mod tests {
         };
         let row =
             snapshot_to_execution_row(&snapshot, 5, crate::sqlblobs::Encoding::ThriftRW).unwrap();
+        let wire = crate::sqlblobs::Encoding::ThriftRW.decode(&row.data).unwrap();
+        assert!(wire.get(44).is_none(), "NDC writes must not activate legacy replication state");
+        assert_eq!(wire.get(102), Some(&cadence_thrift::Value::I32(2)));
         let (decoded, start_version, histories, checksum) = decode_execution_info(&row).unwrap();
         assert_eq!(decoded.workflow_id, snapshot.execution_info.workflow_id);
         assert_eq!(decoded.run_id, snapshot.execution_info.run_id);
