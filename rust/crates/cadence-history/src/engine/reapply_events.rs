@@ -5,15 +5,9 @@ use super::{deps::*, runtime::*};
 
 impl HistoryEngine {
     pub async fn reapply_events(&self, domain_uuid: &str, workflow_id: &str, run_id: &str, events: &[HistoryEvent]) -> HResult<()> {
-        let domain = match self.get_active_domain_by_workflow(domain_uuid, workflow_id, run_id).await {
-            Ok(domain) => domain,
-            Err(error) => {
-                // Go retains the domain entry on active-domain lookup failure.
-                if self.domain_cache.get_domain_by_id(domain_uuid)
-                    .is_ok_and(|entry| entry.is_domain_pending_active) { return Ok(()); }
-                return Err(error);
-            }
-        };
+        // The Go active-domain helper returns a nil entry on error, so its
+        // pending-active exception cannot suppress an error through this path.
+        let domain = self.get_active_domain_by_workflow(domain_uuid, workflow_id, run_id).await?;
         // Always reapply to the current execution, irrespective of the source run.
         let execution = WorkflowExecution { workflow_id: workflow_id.into(), run_id: String::new() };
         self.updater.update(&domain.info.id, &execution, false, self.time_source.now(), Box::new(|context, state| {
