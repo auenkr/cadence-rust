@@ -127,7 +127,11 @@ fn decision_task_failed_event_attributes(
         cause: v.cause.map_or(0, |e| e as i32 + 1),
         failure: failure(v.reason, v.details, None),
         identity: v.identity,
+        base_run_id: v.base_run_id,
+        new_run_id: v.new_run_id,
+        fork_event_version: v.fork_event_version,
         binary_checksum: v.binary_checksum,
+        request_id: v.request_id,
         ..Default::default()
     }
 }

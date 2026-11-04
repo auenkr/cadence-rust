@@ -114,7 +114,11 @@ fn decision_task_failed_event_attributes(v: p::DecisionTaskFailedEventAttributes
         reason: r_failure,
         details: d_failure,
         identity: v.identity,
+        base_run_id: v.base_run_id,
+        new_run_id: v.new_run_id,
+        fork_event_version: v.fork_event_version,
         binary_checksum: v.binary_checksum,
+        request_id: v.request_id,
         ..Default::default()
     })
 }
