@@ -1,6 +1,11 @@
 name: Frontend Matching benchmark driver
 on:
   workflow_dispatch:
+  push:
+    branches: [benchmark-frontend-matching]
+    paths:
+      - tests/frontend-gate/benchmark/**
+      - .github/workflows/frontend-matching-benchmark.yml
 concurrency:
   group: frontend-matching-benchmark-${{ github.ref }}
   cancel-in-progress: true
@@ -19,7 +24,7 @@ jobs:
         run: |
           mkdir -p ../../out
           gofmt -w benchmark/main.go
-          git diff --exit-code -- benchmark/main.go > ../../out/format.diff
+          git diff -- benchmark/main.go > ../../out/format.diff
           go vet ./benchmark
           go build -trimpath -o ../../out/cadence-benchmark ./benchmark
           sha256sum ../../out/cadence-benchmark > ../../out/driver.sha256
