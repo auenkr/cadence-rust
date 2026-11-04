@@ -247,3 +247,12 @@ No local Cargo, rustfmt, or Go validation commands were used.
   applied only to this task's engine/handler/wrappers files.
 - Final validation will use `clean_target=true` with no package selector so Clippy
   precedes workspace tests in a fresh uncached CI target.
+
+## Resumed audit checkpoint (2026-11-05)
+
+Fetched origin and verified history-port-engine worktree. Fresh workspace run
+41919069574 at a721d991a passed Clippy; tests were still running at checkpoint.
+Applied its formatting patch only within owned directories. Query audit adds
+Go counter and timer/histogram dependency hooks, including buffered-query
+invalid states, timeouts and sticky/non-sticky dispatch. Validation pending.
+No local Cargo/Go validation performed; no integration or runtime parity claimed.

@@ -56,7 +56,10 @@ impl HistoryHandler {
         self.wait_started().await;
         let (by_id, by_name) = self.admin.domain_cache_size();
         let status = match self.admin.shard_controller_status() {
-            0 => "initialized", 1 => "started", 2 => "stopped", _ => "",
+            0 => "initialized",
+            1 => "started",
+            2 => "stopped",
+            _ => "",
         };
         Ok(DescribeHistoryHostResponse {
             number_of_shards: self.admin.number_of_shards() as i32,

@@ -518,7 +518,10 @@ impl<M: WireMapper> ThriftHandler<M> {
         self.handler
             .get_cross_cluster_tasks(request.as_ref())
             .await
-            .map(|response| self.mapper.encode_get_cross_cluster_tasks_response(response))
+            .map(|response| {
+                self.mapper
+                    .encode_get_cross_cluster_tasks_response(response)
+            })
             .map_err(|error| self.mapper.error(error))
     }
     pub async fn count_dlq_messages(
@@ -565,7 +568,10 @@ impl<M: WireMapper> ThriftHandler<M> {
         self.handler
             .get_replication_messages(request.as_ref())
             .await
-            .map(|response| self.mapper.encode_get_replication_messages_response(response))
+            .map(|response| {
+                self.mapper
+                    .encode_get_replication_messages_response(response)
+            })
             .map_err(|error| self.mapper.error(error))
     }
     pub async fn merge_dlq_messages(
@@ -587,7 +593,10 @@ impl<M: WireMapper> ThriftHandler<M> {
         self.handler
             .notify_failover_markers(request.as_ref())
             .await
-            .map(|response| self.mapper.encode_notify_failover_markers_response(response))
+            .map(|response| {
+                self.mapper
+                    .encode_notify_failover_markers_response(response)
+            })
             .map_err(|error| self.mapper.error(error))
     }
     pub async fn poll_mutable_state(
@@ -798,7 +807,10 @@ impl<M: WireMapper> ThriftHandler<M> {
         self.handler
             .reset_workflow_execution(request.as_ref())
             .await
-            .map(|response| self.mapper.encode_reset_workflow_execution_response(response))
+            .map(|response| {
+                self.mapper
+                    .encode_reset_workflow_execution_response(response)
+            })
             .map_err(|error| self.mapper.error(error))
     }
     pub async fn respond_activity_task_canceled(
@@ -942,7 +954,10 @@ impl<M: WireMapper> ThriftHandler<M> {
         self.handler
             .start_workflow_execution(request.as_ref())
             .await
-            .map(|response| self.mapper.encode_start_workflow_execution_response(response))
+            .map(|response| {
+                self.mapper
+                    .encode_start_workflow_execution_response(response)
+            })
             .map_err(|error| self.mapper.error(error))
     }
     pub async fn sync_activity(

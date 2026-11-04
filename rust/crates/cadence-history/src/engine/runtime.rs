@@ -133,6 +133,11 @@ pub trait ShardClock: Send + Sync {
     fn set_current_time(&self, cluster: &str, timestamp: i64);
 }
 pub trait EngineMetrics: Send + Sync {
+    // TODO(link): map these names to HistoryQueryWorkflowScope in the metrics adapter.
+    fn query_counter(&self, domain: &str, name: &str);
+    fn consistent_query_per_shard(&self);
+    /// Record both the timer and its ExponentialHistogram counterpart.
+    fn query_latency(&self, domain: &str, name: &str, elapsed: std::time::Duration);
     fn event_reapply_skipped(&self);
     fn stale_mutable_state(&self, operation: &str);
     fn activity_e2e_latency(
