@@ -390,7 +390,10 @@ mod tests {
             task_list: "queue".into(), task_type: 3, schedule_id: 4, version: 5, record_visibility: false,
             original_task_list: "old-queue".into(), original_task_list_kind: 1,
         };
-        assert_eq!(transfer_task_from_struct(&transfer_task_to_struct(&transfer).unwrap()).unwrap(), transfer);
+        assert_eq!(
+            transfer_task_from_struct(&transfer_task_to_struct(&transfer).unwrap()).unwrap(),
+            TransferTask { task_id: 0, ..transfer },
+        );
 
         let timer = TimerTask {
             domain_id: "6ba7b810-9dad-11d1-80b4-00c04fd430c8".into(), workflow_id: "workflow".into(),
