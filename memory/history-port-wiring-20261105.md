@@ -10,7 +10,8 @@ Base: master 6bcc45d8d. CI: `gh workflow run rust-ci.yml --ref <branch> -f packa
 - D assembly (after A,B): shard controller, shard context, engine factory, queue processors, replication, failover, main.rs startup.
 
 ## Stubs replaced
-(none yet)
+- Unit C (server, branch history-wiring-server-c): rust/crates/cadence-history/src/wiring/server/{mod,tchannel,grpc,limiter,errors}.rs. `HistoryServer::start(ServerConfig, Arc<dyn Handler>) -> RunningServer` (+`shutdown()`: prepare_to_stop, stop listeners, handler.stop). Thrift TChannel (as=thrift, service `cadence-history`) serves Meta::health + CloseShard/RemoveTask/ResetQueue/DescribeQueue; gRPC HistoryApi serves the same 4 admin RPCs. Host rate limit (token bucket) and error mapping (HistoryError -> thrift exception / grpc Status) in place.
+  REMAINING for unit C: History-internal request/response Thrift codecs (cadence-thrift has no HistoryService method table nor FromThrift/ToThrift for engine::types) and proto<->engine::types converters for the other ~38 RPCs; those answer TChannel bad-request / gRPC UNIMPLEMENTED today. Also DescribeHistoryHost conversion, gRPC health service, TLS, per-domain/workflow-id quotas.
 
 ## Stubs remaining
 Per-module local trait universes (engine/deps.rs, task/deps.rs, queue/deps.rs, queuev2/deps.rs, replication/deps.rs, ...), NoopScope/NoopMetrics/NoopObserver, InMemoryShardStore, InMemoryClient, main.rs delegating to cadence_matching::launcher.
