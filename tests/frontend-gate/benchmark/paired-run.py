@@ -116,7 +116,7 @@ def main():
             for arm in order:
                 # Recreate the entire project, including MySQL state, for every arm.
                 run(["docker", "compose", "-p", PROJECT, "down", "-v", "--remove-orphans"],
-                    f"down-{rep:02d}-{arm}", env=base_env, check=False)
+                    f"down-{rep:02d}-{arm}", env=base_env)
                 arm_env = dict(base_env)
                 if arm == "rust":
                     arm_env["CADENCE_IMAGE_FRONTEND"] = "cadence-rust:ci"
@@ -154,8 +154,11 @@ def main():
                         raise RuntimeError(f"{arm} arm {service} uses {actual}, expected {expected_image}")
                     name = subprocess.check_output(["docker", "inspect", "--format", "{{.Name}}", container], text=True).strip().lstrip("/")
                     containers.append(name)
-                    identities[service] = {"container_id": container, "container_name": name, "image": actual}
+                    image_id = subprocess.check_output(["docker", "inspect", "--format", "{{.Image}}", container], text=True).strip()
+                    identities[service] = {"container_id": container, "container_name": name, "image": actual, "image_id": image_id}
                     run(["docker", "top", container, "-eo", "pid,comm,args"], f"process-{rep:02d}-{arm}-{service}")
+                database = subprocess.check_output(["docker", "compose", "-p", PROJECT, "ps", "-q", "mysql"], cwd=ROOT, env=arm_env, text=True).strip()
+                identities["mysql"] = json.loads(subprocess.check_output(["docker", "inspect", "--format", "{{json .}}", database], text=True))
                 (OUT / f"identities-{rep:02d}-{arm}.json").write_text(json.dumps(identities, indent=2) + "\n")
                 cli = [str(ROOT / "out/cadence-cli"), "--address", "127.0.0.1:7833", "--transport", "grpc", "--domain", "benchmark", "domain"]
                 for attempt in range(30):
@@ -206,14 +209,16 @@ def main():
                 run(["docker", "compose", "-p", PROJECT, "logs", "--no-color"],
                     f"services-{rep:02d}-{arm}", env=arm_env, check=False)
                 run(["docker", "compose", "-p", PROJECT, "down", "-v", "--remove-orphans"],
-                    f"down-after-{rep:02d}-{arm}", env=arm_env, check=False)
+                    f"down-after-{rep:02d}-{arm}", env=arm_env)
         write_summary(args.repetitions, concurrency)
     finally:
         run(["docker", "compose", "-p", PROJECT, "logs", "--no-color"],
             "final-compose-logs", env=base_env, check=False)
-        run(["docker", "compose", "-p", PROJECT, "down", "-v", "--remove-orphans"],
+        cleanup_status = run(["docker", "compose", "-p", PROJECT, "down", "-v", "--remove-orphans"],
             "cleanup", env=base_env, check=False)
         persist_events()
+        if cleanup_status:
+            raise RuntimeError("benchmark container cleanup failed")
 
 
 if __name__ == "__main__":

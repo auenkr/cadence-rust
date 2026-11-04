@@ -120,6 +120,7 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
                                    "peak_cgroup_memory_bytes": peak[name], "cgroup_version": version,
                                    "initial_cpu_ns": first[name]["cpu_ns"], "final_cpu_ns": last[name]["cpu_ns"]}
     result = {"schema_version": 2, "started_at_utc": started_at, "duration_seconds": elapsed,
+              "ended_at_utc": datetime.now(timezone.utc).isoformat(),
               "sampling_interval_seconds": interval, "samples": samples,
               "cpu_method": "exact delta of cumulative cgroup cpu usage counters",
               "memory_method": "peak sampled cgroup memory usage; includes charged cache and is not RSS",
