@@ -359,6 +359,9 @@ pub struct CallerMetadata {
     pub feature_version: String,
     /// Isolation group carried by Cadence's request context.
     pub isolation_group: String,
+    /// Partition config of Cadence's request context (Go
+    /// `isolationgroup.ConfigFromContext`), sent to History on start.
+    pub partition_config: Option<HashMap<String, String>>,
     /// Inbound request deadline. Go rejects long polls without one and polls
     /// whose remaining budget is shorter than two seconds.
     pub deadline: Option<std::time::Instant>,
@@ -1813,14 +1816,22 @@ impl<B: WorkflowBackend> Handler<B> {
             // These are the History service request envelopes constructed by
             // Go's WorkflowHandler. The domain name remains in the public
             // request, while the internal History call receives its UUID.
-            WorkflowOperation::StartWorkflowExecution => serde_json::json!({
-                "domainUUID": domain_id()?,
-                "startRequest": request,
-            }),
-            WorkflowOperation::SignalWithStartWorkflowExecution => serde_json::json!({
-                "domainUUID": domain_id()?,
-                "signalWithStartRequest": request,
-            }),
+            WorkflowOperation::StartWorkflowExecution => {
+                let mut envelope = serde_json::json!({
+                    "domainUUID": domain_id()?,
+                    "startRequest": request,
+                });
+                insert_partition_config(&mut envelope, caller);
+                envelope
+            }
+            WorkflowOperation::SignalWithStartWorkflowExecution => {
+                let mut envelope = serde_json::json!({
+                    "domainUUID": domain_id()?,
+                    "signalWithStartRequest": request,
+                });
+                insert_partition_config(&mut envelope, caller);
+                envelope
+            }
             WorkflowOperation::SignalWorkflowExecution => serde_json::json!({
                 "domainUUID": domain_id()?,
                 "signalRequest": request,
@@ -2310,10 +2321,17 @@ impl Drop for OutstandingPollGuard {
     }
 }
 
+fn insert_partition_config(envelope: &mut Value, caller: &CallerMetadata) {
+    if let Some(config) = caller.partition_config.as_ref().filter(|c| !c.is_empty()) {
+        envelope["partitionConfig"] = serde_json::json!(config);
+    }
+}
+
 fn poll_cancellation_request(operation: WorkflowOperation, request: &Value) -> Value {
     let task_list_type = match operation {
-        WorkflowOperation::PollForDecisionTask => 1,
-        WorkflowOperation::PollForActivityTask => 2,
+        // Go persistence.TaskListTypeDecision = 0, TaskListTypeActivity = 1.
+        WorkflowOperation::PollForDecisionTask => 0,
+        WorkflowOperation::PollForActivityTask => 1,
         _ => unreachable!("poll cancellation requested for non-poll operation"),
     };
     serde_json::json!({
@@ -4992,7 +5010,7 @@ mod tests {
             serde_json::json!({
                 "domainUUID": "domain-uuid",
                 "pollerID": "poller-id",
-                "taskListType": 2,
+                "taskListType": 1,
                 "taskList": {"name": "orders"}
             })
         );
@@ -5014,7 +5032,7 @@ mod tests {
                 serde_json::json!({
                     "domainUUID": "domain-uuid",
                     "pollerID": "poller-id",
-                    "taskListType": 2,
+                    "taskListType": 1,
                     "taskList": {"name": "orders"}
                 }),
                 Some("cluster-b".into())
