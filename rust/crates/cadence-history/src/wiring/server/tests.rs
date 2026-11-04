@@ -125,7 +125,7 @@ async fn thrift_close_shard_and_health() {
     let (_, app, res) = call(&mut c, 4, "cadence-history", "Meta::health", None).await;
     assert!(!app);
     assert!(res.unwrap().get(0).is_some());
-    let (k, _, _) = call(&mut c, 5, "cadence-history", "HistoryService::StartWorkflowExecution", None).await;
+    let (k, _, _) = call(&mut c, 5, "cadence-history", "HistoryService::ResetWorkflowExecution", None).await;
     assert_eq!(k, 0xff);
     let (k, _, _) = call(&mut c, 6, "other", "HistoryService::CloseShard", Some(shard_req(1))).await;
     assert_eq!(k, 0xff);
@@ -160,7 +160,7 @@ async fn grpc_admin_rpcs_and_unimplemented() {
     assert_eq!(r.into_inner().processing_queue_states, vec!["2:a".to_string()]);
     c.remove_task(pb::RemoveTaskRequest::default()).await.unwrap();
     assert_eq!(h.removed.load(Ordering::SeqCst), 1);
-    let err = c.get_mutable_state(pb::GetMutableStateRequest::default()).await.unwrap_err();
+    let err = c.reset_workflow_execution(pb::ResetWorkflowExecutionRequest::default()).await.unwrap_err();
     assert_eq!(err.code(), tonic::Code::Unimplemented);
     srv.shutdown().await;
     assert!(h.stopped.load(Ordering::SeqCst));
