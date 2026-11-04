@@ -53,7 +53,7 @@ failover 575, query 372, workflowcache 320.
 ## Paused 2026-11-04 (user request)
 - Also merged: sqlblobs Go-compatible codecs (41798998970), H3a2 decision replicate transitions (41799001510),
   ActivityInfo sqlblobs adapter (41804173705).
-- Unmerged / in-flight when paused: `history-h3a3-decision-x` (decision Add*Event port, WIP unverified, see branch);
+- Cancelled when paused: decision Add*Event worker (branch history-h3a3-decision-x never pushed, no code saved; re-dispatch with same explicit brief);
   `history-h1-sql-s1b`, `history-h3a3-decision` (no code, can be deleted).
 - Resume order: remaining 5 sqlblobs adapters (ChildExecution, Signal, RequestCancel, Timer, WorkflowExecutionInfo),
   then SQL slice 1-4 (memory/history-h1-sql-impl-guide.md), decision add-events (finish h3a3-decision-x), activity,
