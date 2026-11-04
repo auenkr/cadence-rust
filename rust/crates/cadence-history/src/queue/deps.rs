@@ -102,6 +102,7 @@ pub trait MetricsScope: Send + Sync {
     fn inc_counter(&self, name: &'static str);
     fn add_counter(&self, name: &'static str, delta: i64);
     fn record_timer(&self, name: &'static str, d: Duration);
+    fn int_exponential_histogram(&self, _name: &'static str, _v: i64) {}
 }
 
 /// Scope that drops everything (default until the metrics port lands).
@@ -118,11 +119,32 @@ pub trait Daemon: Send + Sync {
     fn stop(&self);
 }
 
+/// Errors surfaced by the queue package.
+/// `ShardClosed` is go `shard.ErrShardClosed`; `Transient` mirrors
+/// `persistence.IsBackgroundTransientError` (InternalServiceError / TimeoutError).
 #[derive(Debug, Clone)]
-pub struct QueueError(pub String);
+pub enum QueueError {
+    ShardClosed(String),
+    Transient(String),
+    EntityNotExists(String),
+    Other(String),
+}
+impl QueueError {
+    pub fn is_shard_closed(&self) -> bool {
+        matches!(self, QueueError::ShardClosed(_))
+    }
+    pub fn is_background_transient(&self) -> bool {
+        matches!(self, QueueError::Transient(_))
+    }
+}
 impl fmt::Display for QueueError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
+        match self {
+            QueueError::ShardClosed(m)
+            | QueueError::Transient(m)
+            | QueueError::EntityNotExists(m)
+            | QueueError::Other(m) => f.write_str(m),
+        }
     }
 }
 impl std::error::Error for QueueError {}
@@ -133,3 +155,108 @@ pub struct CrossClusterTaskRequest;
 /// TODO(link): replace by types::CrossClusterTaskResponse
 #[derive(Clone, Debug, Default)]
 pub struct CrossClusterTaskResponse;
+
+/// Go `persistence.Task` (task info read from the history task tables).
+/// TODO(link): replace by persistence::Task
+pub trait PersistenceTask: Send + Sync + fmt::Debug {
+    fn get_domain_id(&self) -> String;
+    fn get_workflow_id(&self) -> String;
+    fn get_run_id(&self) -> String;
+    fn get_task_id(&self) -> i64;
+    fn get_task_type(&self) -> i32;
+    fn get_version(&self) -> i64;
+    fn get_visibility_timestamp(&self) -> Time;
+    /// Go `persistence.IsTaskCorrupted`.
+    fn is_corrupted(&self) -> bool;
+}
+
+/// Go `GetHistoryTasksRequest` (only the fields the queue package sets).
+#[derive(Clone, Debug)]
+pub struct GetHistoryTasksRequest {
+    pub task_category: HistoryTaskCategory,
+    pub inclusive_min_task_key: HistoryTaskKey,
+    pub exclusive_max_task_key: HistoryTaskKey,
+    pub page_size: i64,
+    pub next_page_token: Vec<u8>,
+    pub shard_id: i32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HistoryTaskCategory {
+    Transfer,
+    Timer,
+}
+
+/// Go `persistence.HistoryTaskKey{ScheduledTime, TaskID}`.
+#[derive(Clone, Copy, Debug)]
+pub struct HistoryTaskKey {
+    pub scheduled_time: Time,
+    pub task_id: i64,
+}
+impl HistoryTaskKey {
+    /// Go `persistence.NewImmediateTaskKey`.
+    pub fn immediate(task_id: i64) -> Self {
+        HistoryTaskKey { scheduled_time: Time::ZERO, task_id }
+    }
+    /// Go `persistence.NewHistoryTaskKey`.
+    pub fn new(scheduled_time: Time, task_id: i64) -> Self {
+        HistoryTaskKey { scheduled_time, task_id }
+    }
+}
+
+pub struct GetHistoryTasksResponse {
+    pub tasks: Vec<Arc<dyn PersistenceTask>>,
+    pub next_page_token: Vec<u8>,
+}
+
+/// Subset of go `shard.Context` + `shard.Context.GetExecutionManager()` used by the queue package.
+/// TODO(link): replace by shard::Context
+#[async_trait::async_trait]
+pub trait ShardContext: Send + Sync {
+    fn get_shard_id(&self) -> i32;
+    fn now(&self) -> Time;
+    /// `GetConfig().RangeSizeBits`
+    fn range_size_bits(&self) -> u32;
+    /// `GetConfig().EnableDebugMode`
+    fn enable_debug_mode(&self) -> bool;
+    async fn get_history_tasks(&self, req: GetHistoryTasksRequest) -> Result<GetHistoryTasksResponse, QueueError>;
+}
+
+/// Go `task.Processor`. TODO(link): replace by task::Processor
+#[async_trait::async_trait]
+pub trait TaskProcessor: Send + Sync {
+    async fn try_submit(&self, task: TaskRef) -> Result<bool, QueueError>;
+}
+
+/// Go `task.Redispatcher`. TODO(link): replace by task::Redispatcher
+#[async_trait::async_trait]
+pub trait Redispatcher: Send + Sync {
+    fn start(&self);
+    fn stop(&self);
+    fn add_task(&self, task: TaskRef);
+    async fn redispatch(&self, target_size: usize);
+    fn redispatch_task(&self, task: TaskRef, t: Time);
+    fn size(&self) -> usize;
+}
+
+/// Go `task.Initializer`.
+pub type TaskInitializer = Arc<dyn Fn(Arc<dyn PersistenceTask>) -> TaskRef + Send + Sync>;
+
+/// Go `quotas.Limiter` (only `Wait` is used by the queue package).
+#[async_trait::async_trait]
+pub trait Limiter: Send + Sync {
+    async fn wait(&self, timeout: Duration) -> Result<(), QueueError>;
+}
+
+/// Go `metrics.ScopeIdx` values used by queue options.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MetricScopeIdx {
+    TransferActiveQueueProcessorScope,
+    TransferStandbyQueueProcessorScope,
+    TimerActiveQueueProcessorScope,
+    TimerStandbyQueueProcessorScope,
+    CrossClusterQueueProcessorScope,
+    ReplicatorQueueProcessorScope,
+}
+
+pub type BoxFut<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>;

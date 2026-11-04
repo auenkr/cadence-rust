@@ -6,4 +6,7 @@ pub mod domain_filter;
 pub mod processing_queue;
 pub mod processing_queue_collection;
 pub mod processing_queue_state;
+pub mod processor_base;
+pub mod processor_options;
 pub mod split_policy;
+pub mod util;
