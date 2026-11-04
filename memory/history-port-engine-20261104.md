@@ -1,45 +1,21 @@
 # history-port-engine checklist (2026-11-05)
 
-Branch: history-port-engine (merged origin/master, includes decision/events/query/reset/workflowcache/execution)
-Last green CI: https://github.com/auenkr/cadence-rust/actions/runs/41897923483 (package=cadence-history, conclusion success)
-Head SHA: see `git log` on branch (fix commit "Fix HistoryEvent field name in reset" + this checklist)
+Branch: `history-port-engine`; leave unmerged and undeleted.
 
-Status: PARTIAL. Merge conflicts resolved, compile error fixed (HistoryEvent.event_id), CI green.
-NOT done: grpc/thrift wrappers (only ratelimited exists), workflow/ (context/util), start_workflow_execution (1050 lines),
-handler.go (2289 lines; only interface.rs ported), history_engine.go, describe_workflow_execution, register_domain_failover_callback,
-reapply_events, notify_tasks, get_replication_messages, terminate/request_cancel, respond_activity_task_* (partly in activity_responses.rs).
+Current validation: https://github.com/auenkr/cadence-rust/actions/runs/41917909636
+Head: `dabe8eab4`; conclusion **success** (cadence-history clippy, all targets, warnings denied; package tests).
+Final fresh workspace gate pending.
 
-| Go file | Rust | state |
-|---|---|---|
-| engineimpl/describe_mutable_state.go | - | todo/partial (check engine/*.rs) |
-| engineimpl/describe_queues.go | - | todo/partial (check engine/*.rs) |
-| engineimpl/describe_workflow_execution.go | - | todo/partial (check engine/*.rs) |
-| engineimpl/dlq_operations.go | engine/dlq_operations.rs | ported |
-| engineimpl/get_replication_messages.go | - | todo/partial (check engine/*.rs) |
-| engineimpl/history_engine.go | - | todo/partial (check engine/*.rs) |
-| engineimpl/notify_tasks.go | - | todo/partial (check engine/*.rs) |
-| engineimpl/poll_mutable_state.go | engine/poll_mutable_state.rs | ported |
-| engineimpl/query_workflow.go | engine/query_workflow.rs | ported |
-| engineimpl/reapply_events.go | - | todo/partial (check engine/*.rs) |
-| engineimpl/record_activity_task_started.go | engine/record_activity_task_started.rs | ported |
-| engineimpl/record_child_execution_completed.go | engine/record_child_execution_completed.rs | ported |
-| engineimpl/record_decision_task_started.go | - | todo/partial (check engine/*.rs) |
-| engineimpl/refresh_workflow_tasks.go | - | todo/partial (check engine/*.rs) |
-| engineimpl/register_domain_failover_callback.go | - | todo/partial (check engine/*.rs) |
-| engineimpl/remove_signal_mutable_state.go | - | todo/partial (check engine/*.rs) |
-| engineimpl/request_cancel_workflow_execution.go | - | todo/partial (check engine/*.rs) |
-| engineimpl/reset_queues.go | - | todo/partial (check engine/*.rs) |
-| engineimpl/reset_sticky_tasklist.go | - | todo/partial (check engine/*.rs) |
-| engineimpl/reset_workflow_execution.go | engine/reset_workflow_execution.rs | ported |
-| engineimpl/respond_activity_task_canceled.go | - | todo/partial (check engine/*.rs) |
-| engineimpl/respond_activity_task_completed.go | - | todo/partial (check engine/*.rs) |
-| engineimpl/respond_activity_task_failed.go | - | todo/partial (check engine/*.rs) |
-| engineimpl/respond_activity_task_heartbeat.go | - | todo/partial (check engine/*.rs) |
-| engineimpl/respond_decision_task_completed.go | - | todo/partial (check engine/*.rs) |
-| engineimpl/respond_decision_task_failed.go | - | todo/partial (check engine/*.rs) |
-| engineimpl/signal_workflow_execution.go | engine/signal_workflow_execution.rs | ported |
-| engineimpl/start_workflow_execution.go | - | todo/partial (check engine/*.rs) |
-| engineimpl/terminate_workflow_execution.go | - | todo/partial (check engine/*.rs) |
+Source entry points for every requested non-test/non-mock engine, handler and
+wrapper file are represented below. The implementation uses the requested
+TODO(link) stand-ins for dependencies owned by concurrent package ports.
+This is **not service completion or SDK parity evidence**: concrete dependency
+adapters, transport conversion adapters and live server registration remain.
+No integration tests or mixed-cluster gates were run for this task.
+
+The function inventory below records named Rust methods and explicitly inlined
+helpers. Historical continuation notes follow; the inventory supersedes their
+old missing-file lists.
 
 ## Continuation checkpoint (2026-11-05)
 
@@ -259,3 +235,15 @@ import, RefreshWorkflowTasks field, misplaced decision metric block, shard width
 Fixed in 05394d39f; validation https://github.com/auenkr/cadence-rust/actions/runs/41917112333
 is pending. Applied formatting patch from that runner only to engine/handler/wrappers.
 No local Cargo, rustfmt, or Go validation commands were used.
+
+## Validation checkpoint 2026-11-05
+
+- Failed run 41917112333 reached Clippy after successful type checking; all 153
+  diagnostics were repeated needless closure borrows or mapper naming conventions.
+- Fixed closure borrows and renamed mapper `from_*` methods to `encode_*`.
+- Successful package run: https://github.com/auenkr/cadence-rust/actions/runs/41917909636
+  at dabe8eab4; conclusion success.
+- All formatting was performed on GitHub Actions; downloaded formatting patch was
+  applied only to this task's engine/handler/wrappers files.
+- Final validation will use `clean_target=true` with no package selector so Clippy
+  precedes workspace tests in a fresh uncached CI target.
