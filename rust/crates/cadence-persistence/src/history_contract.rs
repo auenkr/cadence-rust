@@ -19,7 +19,7 @@ pub enum ConflictResolveWorkflowMode { UpdateCurrent=0, BypassCurrent=1 }
 #[repr(i32)]
 pub enum WorkflowRequestMode { New=0, Replicated=1 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct WorkflowExecutionInfo {
     pub domain_id: String, pub workflow_id: String, pub run_id: String,
     pub first_execution_run_id:String, pub parent_domain_id:String, pub parent_workflow_id:String, pub parent_run_id:String,
@@ -44,7 +44,7 @@ pub struct WorkflowExecutionInfo {
     pub active_cluster_selection_policy:Option<DataBlob>,
     pub history_size: i64, pub is_cron: bool,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct WorkflowSnapshot {
     pub execution_info: WorkflowExecutionInfo, pub version_histories: Option<DataBlob>,
     pub start_version: i64, pub last_write_version: i64,
@@ -55,7 +55,7 @@ pub struct WorkflowSnapshot {
     pub tasks_by_category: BTreeMap<HistoryTaskCategory, Vec<Task>>, pub workflow_requests: Vec<WorkflowRequest>,
     pub condition: i64, pub checksum: Option<DataBlob>,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct WorkflowMutation {
     pub execution_info: WorkflowExecutionInfo, pub version_histories: Option<DataBlob>,
     pub start_version: i64, pub last_write_version: i64,
@@ -101,17 +101,17 @@ pub struct ReplicationTask {
 }
 pub type CrossClusterTask = TransferTask;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CreateWorkflowExecutionRequest { pub shard_id:i32, pub range_id:i64, pub mode:CreateWorkflowMode, pub previous_run_id:String, pub previous_last_write_version:i64, pub new_workflow_snapshot:WorkflowSnapshot, pub workflow_request_mode:WorkflowRequestMode, pub current_timestamp_unix_nanos:i64 }
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct UpdateWorkflowExecutionRequest { pub shard_id:i32, pub range_id:i64, pub mode:UpdateWorkflowMode, pub update_workflow_mutation:WorkflowMutation, pub new_workflow_snapshot:Option<WorkflowSnapshot>, pub workflow_request_mode:WorkflowRequestMode, pub current_timestamp_unix_nanos:i64 }
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ConflictResolveWorkflowExecutionRequest { pub shard_id:i32, pub range_id:i64, pub mode:ConflictResolveWorkflowMode, pub reset_workflow_snapshot:WorkflowSnapshot, pub new_workflow_snapshot:Option<WorkflowSnapshot>, pub current_workflow_mutation:Option<WorkflowMutation>, pub workflow_request_mode:WorkflowRequestMode, pub current_timestamp_unix_nanos:i64 }
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CurrentExecution { pub run_id:String, pub create_request_id:String, pub state:i32, pub close_status:i32, pub start_version:i64, pub last_write_version:i64 }
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ExecutionListFilter { pub shard_id:i32, pub domain_id:String, pub workflow_id:Option<String>, pub page_size:i32, pub next_page_token:Vec<u8> }
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct ExecutionPage { pub executions:Vec<WorkflowSnapshot>, pub next_page_token:Vec<u8> }
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TaskRange { pub shard_id:i32, pub min_task_id:i64, pub max_task_id:i64, pub batch_size:i32 }
