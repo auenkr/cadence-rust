@@ -840,6 +840,12 @@ pub struct ReadDLQMessagesResponse {
     )]
     pub replication_tasks: Vec<crate::types::ReplicationTask>,
     #[serde(
+        rename = "replicationTasksInfo",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub replication_tasks_info: Vec<ReplicationTaskInfo>,
+    #[serde(
         rename = "nextPageToken",
         default,
         skip_serializing_if = "Vec::is_empty",

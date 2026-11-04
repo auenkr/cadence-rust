@@ -819,6 +819,7 @@ async fn handle_read_dlq_messages(state: &AppState, body: &Struct) -> HandlerRes
     Ok(wrap_success(&cadence_api::admin::ReadDLQMessagesResponse {
         dlq_type: None,
         replication_tasks: tasks,
+        replication_tasks_info: Vec::new(),
         next_page_token,
     }))
 }

@@ -60,11 +60,24 @@ impl ToThrift for CloseShardResponse {
     }
 }
 
+/// Go persistence task types (Transfer=2, Timer=3, Replication=4,
+/// CrossCluster=6) to admin protobuf TaskType (1..=4); mirrors Go FromTaskType.
+/// Anything else is INVALID (absent).
+fn task_type_from_go_thrift(value: Option<i32>) -> Option<i32> {
+    match value? {
+        2 => Some(1),
+        3 => Some(2),
+        4 => Some(3),
+        6 => Some(4),
+        _ => None,
+    }
+}
+
 impl FromThrift for RemoveTaskRequest {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {
             shard_id: s.opt_i32(10)?.unwrap_or_default(),
-            task_type: s.opt_i32(20)?,
+            task_type: task_type_from_go_thrift(s.opt_i32(20)?),
             task_id: s.opt_i64(30)?.unwrap_or_default(),
             visibility_timestamp: s.opt_i64(40)?,
             cluster_name: s.req_string(50, "")?,
@@ -498,6 +511,7 @@ impl ToThrift for ReadDLQMessagesResponse {
         );
         f.olist(20, &self.replication_tasks);
         f.sbytes(30, &self.next_page_token);
+        f.olist(40, &self.replication_tasks_info);
         f.finish()
     }
 }
@@ -508,6 +522,7 @@ impl FromThrift for ReadDLQMessagesResponse {
             dlq_type: s.opt_i32(10)?.map(dlq_type_from_go_thrift),
             replication_tasks: s.opt_list(20)?.unwrap_or_default(),
             next_page_token: s.bytes_or_empty(30)?,
+            replication_tasks_info: s.opt_list(40)?.unwrap_or_default(),
         })
     }
 }
@@ -698,7 +713,7 @@ impl FromThrift for ResetQueueRequest {
         Ok(Self {
             shard_id: s.opt_i32(10)?.unwrap_or_default(),
             cluster_name: s.req_string(20, "")?,
-            task_type: s.opt_i32(30)?,
+            task_type: task_type_from_go_thrift(s.opt_i32(30)?),
         })
     }
 }
@@ -714,7 +729,7 @@ impl FromThrift for DescribeQueueRequest {
         Ok(Self {
             shard_id: s.opt_i32(10)?.unwrap_or_default(),
             cluster_name: s.req_string(20, "")?,
-            task_type: s.opt_i32(30)?,
+            task_type: task_type_from_go_thrift(s.opt_i32(30)?),
         })
     }
 }
@@ -7362,9 +7377,18 @@ mod timeout_wire_tests {
                 source_task_id: Some(11),
                 ..Default::default()
             }],
+            replication_tasks_info: vec![ReplicationTaskInfo {
+                domain_id: "d".into(),
+                task_id: 5,
+                ..Default::default()
+            }],
             next_page_token: vec![8, 9],
         };
         let encoded = response.to_thrift();
+        assert_eq!(
+            encoded.opt_list::<ReplicationTaskInfo>(40).unwrap().unwrap(),
+            response.replication_tasks_info
+        );
         assert_eq!(encoded.opt_i32(10).unwrap(), Some(1));
         assert_eq!(encoded.bytes_or_empty(30).unwrap(), vec![8, 9]);
         assert_eq!(
@@ -7953,5 +7977,21 @@ mod timeout_wire_tests {
             GetDLQReplicationMessagesResponse::from_thrift(&dlq_response_wire).unwrap(),
             dlq_response
         );
+    }
+
+    #[test]
+    fn fix_fe_admin_queue_task_types_follow_go_mapping() {
+        for (go, proto) in [(2, Some(1)), (3, Some(2)), (4, Some(3)), (6, Some(4)), (5, None), (0, None), (1, None)] {
+            let mut f = Fields::new();
+            f.oi32(30, Some(go));
+            let wire = f.finish();
+            assert_eq!(ResetQueueRequest::from_thrift(&wire).unwrap().task_type, proto, "reset {go}");
+            assert_eq!(DescribeQueueRequest::from_thrift(&wire).unwrap().task_type, proto, "describe {go}");
+        }
+        let mut f = Fields::new();
+        f.oi32(20, Some(3));
+        let wire = f.finish();
+        assert_eq!(RemoveTaskRequest::from_thrift(&wire).unwrap().task_type, Some(2));
+        assert_eq!(task_type_from_go_thrift(None), None);
     }
 }
