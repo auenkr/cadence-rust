@@ -19,6 +19,7 @@ pub mod history_reader;
 pub mod history_sql;
 pub mod history_contract;
 pub mod history_sql_queries;
+pub mod sql_execution_store;
 pub mod history_shard_sql;
 pub mod raw_history;
 pub mod schedules;
