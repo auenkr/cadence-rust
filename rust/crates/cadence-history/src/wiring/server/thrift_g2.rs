@@ -1,6 +1,5 @@
 //! Thrift dispatch for the group-2 History RPCs (history.thrift ids).
 use super::tchannel::Outcome;
-use super::thrift_types_g2::*;
 use super::{errors, ServerState};
 use crate::engine::deps::HistoryError;
 use cadence_api::CadenceError;
