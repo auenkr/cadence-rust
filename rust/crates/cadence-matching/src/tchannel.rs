@@ -823,7 +823,6 @@ async fn serve_listener(
                 let state = state.clone();
                 let matching = matching.clone();
                 let ringpop = ringpop.clone();
-                let history = history;
                 connections.spawn(async move {
                     let _ = connection(stream, state, matching, ringpop, history).await;
                 });
