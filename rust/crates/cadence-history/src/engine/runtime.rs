@@ -62,6 +62,10 @@ pub trait DecisionHandler: Send + Sync {
     async fn handle_decision_task_scheduled(&self, request: &ScheduleDecisionTaskRequest) -> HResult<()>;
 }
 pub trait EngineConfig: Send + Sync {
+    fn enable_consistent_query(&self) -> bool;
+    fn enable_consistent_query_by_domain(&self, domain: &str) -> bool;
+    fn enable_sticky_query(&self, domain: &str) -> bool;
+    fn max_buffered_query_count(&self) -> usize;
     fn long_poll_expiration_interval(&self, domain: &str) -> std::time::Duration;
     fn maximum_signals_per_execution(&self, domain: &str) -> i32;
     fn enable_history_corruption_check(&self, domain: &str) -> bool;
@@ -90,6 +94,12 @@ pub struct HistoryEngine {
     pub metrics: Arc<dyn EngineMetrics>,
     pub config: Arc<dyn EngineConfig>,
     pub execution_cache: Arc<dyn ExecutionCache>,
+    pub matching_client: Arc<dyn QueryMatchingClient>,
+    pub raw_matching_client: Arc<dyn QueryMatchingClient>,
+    pub client_checker: Arc<dyn ClientChecker>,
+    pub workflow_resetter: Arc<dyn WorkflowResetter>,
+    pub history_reader: Arc<dyn HistoryReader>,
+    pub current_execution_reader: Arc<dyn CurrentExecutionReader>,
     pub history_event_notifier: Arc<dyn HistoryEventNotifier>,
     pub task_refresher: Arc<dyn MutableStateTaskRefresher>,
 }
@@ -113,3 +123,35 @@ pub trait HistoryEventNotifier: Send + Sync {
     fn unwatch_history_event(&self, domain_id: &str, execution: &WorkflowExecution, subscriber: &str);
     fn notify_new_history_event(&self, event: HistoryNotification);
 }
+
+#[async_trait]
+pub trait CurrentExecutionReader: Send + Sync {
+    async fn get_current_execution(&self, domain_id: &str, workflow_id: &str, domain_name: &str) -> HResult<String>;
+}
+pub struct ResetWorkflow {
+    pub domain_id: String, pub workflow_id: String, pub base_run_id: String,
+    pub base_branch_token: Vec<u8>, pub rebuild_last_event_id: i64, pub rebuild_last_event_version: i64,
+    pub base_next_event_id: i64, pub reset_run_id: String, pub request_id: String,
+    pub current_context: ExecutionContextRef, pub current_state: MutableStateRef,
+    pub current_release: Option<ReleaseFunc>, pub reason: String,
+    pub events: Vec<cadence_api::service_types::HistoryEvent>, pub skip_signal_reapply: bool,
+}
+#[async_trait]
+pub trait WorkflowResetter: Send + Sync { async fn reset_workflow(&self, request: ResetWorkflow) -> HResult<()>; }
+#[async_trait]
+pub trait HistoryReader: Send + Sync {
+    async fn paginate_history(&self, first: i64, next: i64, branch: &[u8], token: &[u8], page_size: i32, domain: &str) -> HResult<(Vec<Vec<cadence_api::service_types::HistoryEvent>>, Vec<u8>)>;
+}
+
+pub enum QueryTermination { Completed(cadence_api::tasks::WorkflowQueryResult), Unblocked, Failed(HistoryError), Invalid }
+pub trait QueryRegistry: Send + Sync {
+    fn buffered_count(&self) -> usize;
+    fn buffer_query(&self, query: Option<&cadence_api::tasks::WorkflowQuery>) -> (String, tokio::sync::oneshot::Receiver<()>);
+    fn remove_query(&self, id: &str);
+    fn get_termination_state(&self, id: &str) -> HResult<QueryTermination>;
+}
+#[async_trait]
+pub trait QueryMatchingClient: Send + Sync {
+    async fn query_workflow(&self, domain_id: &str, request: &cadence_api::tasks::QueryWorkflowRequest, task_list: Option<&TaskList>) -> HResult<cadence_api::tasks::QueryWorkflowResponse>;
+}
+pub trait ClientChecker: Send + Sync { fn supports_sticky_query(&self, implementation: &str, feature_version: &str) -> bool; }

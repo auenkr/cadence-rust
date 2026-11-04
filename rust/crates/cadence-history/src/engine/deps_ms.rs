@@ -12,6 +12,16 @@ pub trait MutableState: Send + Sync {
     fn get_domain_entry(&self) -> DomainCacheEntry;
     fn get_activity_info(&self, schedule_id: i64) -> Option<ActivityInfo>;
     fn get_activity_by_activity_id(&self, activity_id: &str) -> Option<ActivityInfo>;
+    fn has_pending_decision(&self) -> bool;
+    fn has_in_flight_decision(&self) -> bool;
+    fn get_query_registry(&self) -> std::sync::Arc<dyn super::runtime::QueryRegistry>;
+    fn get_child_execution_info(&self, initiated_id: i64) -> Option<ChildExecutionInfo>;
+    fn add_child_workflow_execution_completed_event(&self, initiated_id: i64, execution: &WorkflowExecution, attrs: Option<&cadence_api::tasks::WorkflowExecutionCompletedEventAttributes>) -> HResult<()>;
+    fn add_child_workflow_execution_failed_event(&self, initiated_id: i64, execution: &WorkflowExecution, attrs: Option<&cadence_api::tasks::WorkflowExecutionFailedEventAttributes>) -> HResult<()>;
+    fn add_child_workflow_execution_canceled_event(&self, initiated_id: i64, execution: &WorkflowExecution, attrs: Option<&cadence_api::tasks::WorkflowExecutionCanceledEventAttributes>) -> HResult<()>;
+    fn add_child_workflow_execution_terminated_event(&self, initiated_id: i64, execution: &WorkflowExecution, attrs: Option<&cadence_api::service_types::WorkflowExecutionTerminatedEventAttributes>) -> HResult<()>;
+    fn add_child_workflow_execution_timed_out_event(&self, initiated_id: i64, execution: &WorkflowExecution, attrs: Option<&cadence_api::tasks::WorkflowExecutionTimedOutEventAttributes>) -> HResult<()>;
+    fn get_current_version(&self) -> i64;
     fn get_last_first_event_id(&self) -> i64;
     fn get_previous_started_event_id(&self) -> i64;
     fn get_current_branch_token(&self) -> HResult<Vec<u8>>;
@@ -48,3 +58,6 @@ pub trait ExecutionContext: Send + Sync {
     async fn load_workflow_execution(&self) -> HResult<super::deps::MutableStateRef>;
     async fn update_workflow_execution_tasks(&self, now: i64) -> HResult<()>;
 }
+
+#[derive(Debug, Clone, Default)]
+pub struct ChildExecutionInfo { pub started_id: i64, pub started_workflow_id: String }

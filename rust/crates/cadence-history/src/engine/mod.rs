@@ -13,3 +13,6 @@ pub mod signal_workflow_execution;
 pub mod mutable_state_admin;
 pub mod record_activity_task_started;
 pub mod poll_mutable_state;
+pub mod record_child_execution_completed;
+pub mod reset_workflow_execution;
+pub mod query_workflow;

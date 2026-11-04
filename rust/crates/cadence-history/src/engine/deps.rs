@@ -34,6 +34,8 @@ use futures_util::future::BoxFuture;
 pub enum HistoryError {
     #[error(transparent)]
     Cadence(Box<CadenceError>),
+    #[error(transparent)]
+    EventAlreadyStarted(#[from] EventAlreadyStartedError),
     /// `workflow.ErrStaleState`
     #[error("cache mutable state could potentially be stale")]
     StaleState,
@@ -72,6 +74,8 @@ pub enum HistoryError {
     PersistenceTimeout(String),
     #[error("{message}")]
     CurrentBranchChanged { message: String, current_branch_token: Vec<u8> },
+    #[error("sticky worker unavailable")]
+    StickyWorkerUnavailable,
     #[error("version histories do not exist")]
     MissingVersionHistories,
     /// Anything else (Go `errors.New` / `fmt.Errorf`).
@@ -88,7 +92,6 @@ macro_rules! history_error_from {
 }
 history_error_from!(
     AccessDeniedError,
-    EventAlreadyStartedError,
     BadRequestError,
     CancellationAlreadyRequestedError,
     ClientVersionNotSupportedError,
@@ -214,6 +217,8 @@ pub struct WorkflowExecutionInfo {
     pub workflow_id: String,
     pub run_id: String,
     pub first_execution_run_id: String,
+    pub create_request_id: String,
+    pub active_cluster_selection_policy: Option<cadence_api::types::ActiveClusterSelectionPolicy>,
     pub parent_workflow_id: String,
     pub parent_run_id: String,
     pub workflow_type_name: String,
@@ -274,6 +279,7 @@ pub struct DomainInfo {
 pub struct DomainCacheEntry {
     pub info: DomainInfo,
     pub is_global_domain: bool,
+    pub active_clusters: Vec<(Option<cadence_api::types::ClusterAttribute>, String)>,
 }
 impl DomainCacheEntry {
     pub fn get_info(&self) -> &DomainInfo {

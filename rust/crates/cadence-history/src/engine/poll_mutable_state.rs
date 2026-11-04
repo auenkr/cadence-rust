@@ -21,7 +21,7 @@ impl HistoryEngine {
             sticky_task_list_schedule_to_start_timeout: response.sticky_task_list_schedule_to_start_timeout, current_branch_token: response.current_branch_token,
             version_histories: response.version_histories, workflow_state: response.workflow_state, workflow_close_state: response.workflow_close_state })
     }
-    async fn load_mutable_state(&self, domain_id: &str, execution: &WorkflowExecution) -> HResult<GetMutableStateResponse> {
+    pub(super) async fn load_mutable_state(&self, domain_id: &str, execution: &WorkflowExecution) -> HResult<GetMutableStateResponse> {
         let (context, release) = self.execution_cache.get_or_create_workflow_execution(domain_id, execution).await?;
         let result = async {
             let state = context.load_workflow_execution().await?;
@@ -32,7 +32,7 @@ impl HistoryEngine {
                 execution: Some(execution), workflow_type: Some(WorkflowType { name: info.workflow_type_name }),
                 last_first_event_id: state.get_last_first_event_id(), next_event_id: state.get_next_event_id(), previous_started_event_id: Some(state.get_previous_started_event_id()),
                 task_list: Some(TaskList { name: info.task_list, ..Default::default() }),
-                sticky_task_list: Some(TaskList { name: info.sticky_task_list, kind: Some(TaskListKind::Sticky) }),
+                sticky_task_list: Some(TaskList { name: info.sticky_task_list, kind: Some(TaskListKind::Sticky), ..Default::default() }),
                 client_library_version: info.client_library_version, client_feature_version: info.client_feature_version, client_impl: info.client_impl,
                 is_workflow_running: state.is_workflow_execution_running(), sticky_task_list_schedule_to_start_timeout: Some(info.sticky_schedule_to_start_timeout),
                 current_branch_token, workflow_state: Some(info.state), workflow_close_state: Some(info.close_status),
@@ -45,7 +45,7 @@ impl HistoryEngine {
         if err.is_entity_not_exists() {
             if let Ok(active) = self.active_cluster_manager.active_cluster_by_workflow(domain_id, &execution.workflow_id, &execution.run_id).await {
                 let current = self.cluster_metadata.get_current_cluster_name();
-                if active != current { return EntityNotExistsError { message: "Workflow execution not found in non-active cluster".into(), active_cluster: active, current_cluster: current }.into(); }
+                if active != current { return EntityNotExistsError { message: "Workflow execution not found in non-active cluster".into(), active_cluster: active, current_cluster: current, ..Default::default() }.into(); }
             }
         }
         err
