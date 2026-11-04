@@ -124,3 +124,4 @@ pub mod events;
 pub mod query;
 pub mod reset;
 pub mod workflowcache;
+pub mod queuev2;
