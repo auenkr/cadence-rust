@@ -111,7 +111,7 @@ impl TimerActiveTaskExecutor {
    let Some(decision)=w.decision_info(task.event_id) else{return Ok(());};
    if !verify_task_version(&self.base.shard,&self.base.logger,task.get_domain_id(),decision.version,task.get_version(),task)?||decision.attempt!=task.schedule_attempt{return Ok(());}
    let mut schedule=false;
-   let timer_type=match task.timeout_type {0=>Some(TimerType::StartToClose),2=>Some(TimerType::ScheduleToStart),_=>None};
+   let timer_type=match task.timeout_type {0=>Some(TimerType::StartToClose),1=>Some(TimerType::ScheduleToStart),_=>None};
    if let Some(kind)=timer_type {
     if kind==TimerType::ScheduleToStart&&decision.started_id!=EMPTY_EVENT_ID{return Ok(());}
     self.emit_timeout_metric_scope_with_domain_tag(task.get_domain_id(),"TimerActiveTaskDecisionTimeoutScope",kind,vec![workflow_type_tag(&workflow_type),decision_type_tag(if w.sticky(){"sticky"}else{"normal"})]);
