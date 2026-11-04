@@ -1806,8 +1806,7 @@ impl crate::history_reader::HistoryNodeStore for MySqlTaskStore {
         domain_id: [u8; 16],
         workflow_id: &str,
         run_id: [u8; 16],
-    ) -> std::result::Result<Option<(Vec<u8>, String)>, crate::history_reader::HistoryReadError>
-    {
+    ) -> std::result::Result<Option<(Vec<u8>, String)>, crate::history_reader::HistoryReadError> {
         use crate::history_reader::HistoryReadError;
         let index = mysql_database_index(shard_id.max(0) as usize, self.pools.len());
         let mut connection = self.pools[index]

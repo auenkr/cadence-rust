@@ -61,11 +61,6 @@ mod tests {
         assert_eq!(c.acquire_shard_interval, "1m");
         assert_eq!(c.acquire_shard_concurrency, 1);
         assert_eq!(c.history_rps, 3000);
-        assert_eq!(
-            Config::from_yaml("numHistoryShards: 1024")
-                .unwrap()
-                .num_history_shards,
-            1024
-        );
+        assert_eq!(Config::from_yaml("numHistoryShards: 1024").unwrap().num_history_shards, 1024);
     }
 }

@@ -346,7 +346,9 @@ pub fn apply(rows: &mut Vec<WorkflowExecutionInfo>, query: &str) -> Result<()> {
         || select.having.is_some()
         || !matches!(&select.group_by,sqlparser::ast::GroupByExpr::Expressions(items,_) if items.is_empty())
     {
-        return Err(bad(OPERATION_NOT_SUPPORTED));
+        return Err(bad(
+            OPERATION_NOT_SUPPORTED,
+        ));
     }
     let mut known: HashSet<_> = cadence_api::search_attributes::default_indexed_keys()
         .into_keys()
@@ -378,7 +380,9 @@ pub fn apply(rows: &mut Vec<WorkflowExecutionInfo>, query: &str) -> Result<()> {
             .iter()
             .map(|o| {
                 if o.nulls_first.is_some() {
-                    return Err(bad(OPERATION_NOT_SUPPORTED));
+                    return Err(bad(
+                        OPERATION_NOT_SUPPORTED,
+                    ));
                 }
                 let key = name(&o.expr)
                     .ok_or_else(|| bad("Visibility ORDER BY requires field names."))?;

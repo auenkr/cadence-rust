@@ -1,9 +1,7 @@
 //! Go Cassandra history_node reader. Unlike SQL, Cassandra stores transaction
 //! IDs unchanged and orders them DESC (go/schema/cassandra/cadence/schema.cql).
 use crate::cassandra::CassandraBlockingSession;
-use crate::history_reader::{
-    CurrentExecutionRow, HistoryNodeRow, HistoryNodeStore, HistoryReadError,
-};
+use crate::history_reader::{CurrentExecutionRow, HistoryNodeRow, HistoryNodeStore, HistoryReadError};
 use scylla::value::CqlTimestamp;
 use scylla::DeserializeValue;
 use scylla::{response::PagingState, statement::Statement};
@@ -229,10 +227,7 @@ mod tests {
 
     #[test]
     fn go_execution_row_constants() {
-        assert_eq!(
-            PERMANENT_RUN_ID.to_string(),
-            "30000000-0000-f000-f000-000000000001"
-        );
+        assert_eq!(PERMANENT_RUN_ID.to_string(), "30000000-0000-f000-f000-000000000001");
         assert_eq!(DEFAULT_VISIBILITY_TS_MS, 946_684_800_000);
         assert!(SELECT_POLICY.starts_with("SELECT data, data_encoding FROM executions"));
     }

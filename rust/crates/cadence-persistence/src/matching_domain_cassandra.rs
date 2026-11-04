@@ -583,9 +583,7 @@ impl DomainMetadataPersistence for CassandraDomainMetadataPersistence {
         name: Option<&str>,
         id: Option<&str>,
     ) -> Result<MatchingDomainMetadata, crate::matching_domain_metadata::DomainReadError> {
-        self.metadata_reader
-            .get_domain(name, id)
-            .map_err(Into::into)
+        self.metadata_reader.get_domain(name, id).map_err(Into::into)
     }
 
     fn list_domains(

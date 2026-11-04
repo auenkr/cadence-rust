@@ -20,12 +20,12 @@ use cadence_api::admin::{
     PurgeDLQMessagesResponse, ReadDLQMessagesRequest, ReadDLQMessagesResponse,
     ReapplyEventsRequest, ReapplyEventsResponse, RemoveTaskRequest, RemoveTaskResponse,
     ReplicationMessages, ReplicationTaskInfo, ReplicationToken, ResendReplicationTasksRequest,
-    ResendReplicationTasksResponse, ResetQueueRequest, ResetQueueResponse,
-    RestoreDynamicConfigRequest, RestoreDynamicConfigResponse, RingInfo, SyncShardStatus,
-    UpdateDomainAsyncWorkflowConfiguratonRequest, UpdateDomainAsyncWorkflowConfiguratonResponse,
-    UpdateDomainIsolationGroupsRequest, UpdateDomainIsolationGroupsResponse,
-    UpdateDynamicConfigRequest, UpdateDynamicConfigResponse, UpdateGlobalIsolationGroupsRequest,
-    UpdateGlobalIsolationGroupsResponse,
+    ResendReplicationTasksResponse, ResetQueueRequest,
+    ResetQueueResponse, RestoreDynamicConfigRequest, RestoreDynamicConfigResponse, RingInfo,
+    SyncShardStatus, UpdateDomainAsyncWorkflowConfiguratonRequest,
+    UpdateDomainAsyncWorkflowConfiguratonResponse, UpdateDomainIsolationGroupsRequest,
+    UpdateDomainIsolationGroupsResponse, UpdateDynamicConfigRequest, UpdateDynamicConfigResponse,
+    UpdateGlobalIsolationGroupsRequest, UpdateGlobalIsolationGroupsResponse,
 };
 use cadence_api::enums::*;
 use cadence_api::errors::*;
@@ -7555,10 +7555,7 @@ mod timeout_wire_tests {
         };
         let encoded = response.to_thrift();
         assert_eq!(
-            encoded
-                .opt_list::<ReplicationTaskInfo>(40)
-                .unwrap()
-                .unwrap(),
+            encoded.opt_list::<ReplicationTaskInfo>(40).unwrap().unwrap(),
             response.replication_tasks_info
         );
         assert_eq!(encoded.opt_i32(10).unwrap(), Some(1));
@@ -8153,36 +8150,17 @@ mod timeout_wire_tests {
 
     #[test]
     fn fix_fe_admin_queue_task_types_follow_go_mapping() {
-        for (go, proto) in [
-            (2, Some(1)),
-            (3, Some(2)),
-            (4, Some(3)),
-            (6, Some(4)),
-            (5, None),
-            (0, None),
-            (1, None),
-        ] {
+        for (go, proto) in [(2, Some(1)), (3, Some(2)), (4, Some(3)), (6, Some(4)), (5, None), (0, None), (1, None)] {
             let mut f = Fields::new();
             f.oi32(30, Some(go));
             let wire = f.finish();
-            assert_eq!(
-                ResetQueueRequest::from_thrift(&wire).unwrap().task_type,
-                proto,
-                "reset {go}"
-            );
-            assert_eq!(
-                DescribeQueueRequest::from_thrift(&wire).unwrap().task_type,
-                proto,
-                "describe {go}"
-            );
+            assert_eq!(ResetQueueRequest::from_thrift(&wire).unwrap().task_type, proto, "reset {go}");
+            assert_eq!(DescribeQueueRequest::from_thrift(&wire).unwrap().task_type, proto, "describe {go}");
         }
         let mut f = Fields::new();
         f.oi32(20, Some(3));
         let wire = f.finish();
-        assert_eq!(
-            RemoveTaskRequest::from_thrift(&wire).unwrap().task_type,
-            Some(2)
-        );
+        assert_eq!(RemoveTaskRequest::from_thrift(&wire).unwrap().task_type, Some(2));
         assert_eq!(task_type_from_go_thrift(None), None);
     }
 }
