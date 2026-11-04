@@ -364,7 +364,7 @@ impl MutableStateBuilder {
         }
         let mut schedule_id = decision.schedule_id;
         let mut started_id = schedule_id + 1;
-        let mut timestamp = now_timestamp;
+        let timestamp = now_timestamp;
         let mut event = None;
         let non_transient = self.execution_info.get("last_write_version").and_then(Record::as_i64).is_some_and(|v| v != self.current_version());
         if decision.attempt > 0 && (decision.schedule_id != self.next_event_id || non_transient) {
@@ -382,7 +382,6 @@ impl MutableStateBuilder {
         if decision.attempt == 0 {
             let mut started = self.decision_event(EventType::DecisionTaskStarted, now_timestamp);
             started_id = started.event_id;
-            timestamp = now_timestamp;
             started.decision_task_started_event_attributes = Some(DecisionTaskStartedEventAttributes {
                 scheduled_event_id: schedule_id, request_id: request_id.clone(), identity: request.identity.clone(),
             });
@@ -502,6 +501,7 @@ impl MutableStateBuilder {
         Ok(event)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn add_decision_task_failed_event(
         &mut self, schedule_event_id: i64, started_event_id: i64,
         cause: DecisionTaskFailedCause, details: Vec<u8>, identity: String,
