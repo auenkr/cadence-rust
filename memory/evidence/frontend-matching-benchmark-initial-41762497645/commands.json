@@ -1,0 +1,658 @@
+[
+  {
+    "name": "down-00-go",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-00-go.log",
+    "started_unix": 1793761386.4367044,
+    "elapsed_seconds": 0.14210057258605957
+  },
+  {
+    "name": "up-00-go",
+    "command": "docker compose -p cadence-fm-benchmark up -d",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/up-00-go.log",
+    "started_unix": 1793761386.627025,
+    "elapsed_seconds": 29.274131536483765
+  },
+  {
+    "name": "domain-00-go",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-cli --address 127.0.0.1:7833 --transport grpc --domain benchmark domain register --rd 1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/domain-00-go.log",
+    "started_unix": 1793761416.3284984,
+    "elapsed_seconds": 0.03196120262145996
+  },
+  {
+    "name": "run-00-go-c1",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 100 -warmup 10 -concurrency 1 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-00-go-c1.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-00-go-c1.log",
+    "started_unix": 1793761421.3615339,
+    "elapsed_seconds": 5.626485824584961
+  },
+  {
+    "name": "run-00-go-c16",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 100 -warmup 10 -concurrency 16 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-00-go-c16.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-00-go-c16.log",
+    "started_unix": 1793761426.9892824,
+    "elapsed_seconds": 1.7192299365997314
+  },
+  {
+    "name": "run-00-go-c64",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 100 -warmup 10 -concurrency 64 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-00-go-c64.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-00-go-c64.log",
+    "started_unix": 1793761428.7093585,
+    "elapsed_seconds": 1.8721954822540283
+  },
+  {
+    "name": "services-00-go",
+    "command": "docker compose -p cadence-fm-benchmark logs --no-color",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/services-00-go.log",
+    "started_unix": 1793761430.582249,
+    "elapsed_seconds": 0.06600737571716309
+  },
+  {
+    "name": "down-after-00-go",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-after-00-go.log",
+    "started_unix": 1793761430.6487417,
+    "elapsed_seconds": 13.163726806640625
+  },
+  {
+    "name": "down-00-rust",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-00-rust.log",
+    "started_unix": 1793761443.8129578,
+    "elapsed_seconds": 0.034055471420288086
+  },
+  {
+    "name": "up-00-rust",
+    "command": "docker compose -p cadence-fm-benchmark up -d",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/up-00-rust.log",
+    "started_unix": 1793761443.8868294,
+    "elapsed_seconds": 16.599689245224
+  },
+  {
+    "name": "domain-00-rust",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-cli --address 127.0.0.1:7833 --transport grpc --domain benchmark domain register --rd 1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/domain-00-rust.log",
+    "started_unix": 1793761460.782944,
+    "elapsed_seconds": 0.03194904327392578
+  },
+  {
+    "name": "run-00-rust-c1",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 100 -warmup 10 -concurrency 1 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-00-rust-c1.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-00-rust-c1.log",
+    "started_unix": 1793761465.8158777,
+    "elapsed_seconds": 6.229089021682739
+  },
+  {
+    "name": "run-00-rust-c16",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 100 -warmup 10 -concurrency 16 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-00-rust-c16.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-00-rust-c16.log",
+    "started_unix": 1793761473.9836745,
+    "elapsed_seconds": 2.2690131664276123
+  },
+  {
+    "name": "run-00-rust-c64",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 100 -warmup 10 -concurrency 64 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-00-rust-c64.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-00-rust-c64.log",
+    "started_unix": 1793761476.2537253,
+    "elapsed_seconds": 2.219688653945923
+  },
+  {
+    "name": "services-00-rust",
+    "command": "docker compose -p cadence-fm-benchmark logs --no-color",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/services-00-rust.log",
+    "started_unix": 1793761478.4741127,
+    "elapsed_seconds": 0.11121273040771484
+  },
+  {
+    "name": "down-after-00-rust",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-after-00-rust.log",
+    "started_unix": 1793761478.5858064,
+    "elapsed_seconds": 8.454814910888672
+  },
+  {
+    "name": "down-01-rust",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-01-rust.log",
+    "started_unix": 1793761487.0411437,
+    "elapsed_seconds": 0.03666567802429199
+  },
+  {
+    "name": "up-01-rust",
+    "command": "docker compose -p cadence-fm-benchmark up -d",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/up-01-rust.log",
+    "started_unix": 1793761487.1209142,
+    "elapsed_seconds": 16.599412202835083
+  },
+  {
+    "name": "domain-01-rust",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-cli --address 127.0.0.1:7833 --transport grpc --domain benchmark domain register --rd 1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/domain-01-rust.log",
+    "started_unix": 1793761504.040676,
+    "elapsed_seconds": 0.03194832801818848
+  },
+  {
+    "name": "run-01-rust-c1",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 100 -warmup 10 -concurrency 1 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-01-rust-c1.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-01-rust-c1.log",
+    "started_unix": 1793761509.0777113,
+    "elapsed_seconds": 5.5266358852386475
+  },
+  {
+    "name": "run-01-rust-c16",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 100 -warmup 10 -concurrency 16 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-01-rust-c16.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-01-rust-c16.log",
+    "started_unix": 1793761514.6056206,
+    "elapsed_seconds": 2.070000171661377
+  },
+  {
+    "name": "run-01-rust-c64",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 100 -warmup 10 -concurrency 64 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-01-rust-c64.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-01-rust-c64.log",
+    "started_unix": 1793761516.676694,
+    "elapsed_seconds": 2.3204548358917236
+  },
+  {
+    "name": "services-01-rust",
+    "command": "docker compose -p cadence-fm-benchmark logs --no-color",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/services-01-rust.log",
+    "started_unix": 1793761518.9983327,
+    "elapsed_seconds": 0.11496090888977051
+  },
+  {
+    "name": "down-after-01-rust",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-after-01-rust.log",
+    "started_unix": 1793761519.1138077,
+    "elapsed_seconds": 3.099285840988159
+  },
+  {
+    "name": "down-01-go",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-01-go.log",
+    "started_unix": 1793761522.2136574,
+    "elapsed_seconds": 0.03352165222167969
+  },
+  {
+    "name": "up-01-go",
+    "command": "docker compose -p cadence-fm-benchmark up -d",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/up-01-go.log",
+    "started_unix": 1793761522.286843,
+    "elapsed_seconds": 16.547558784484863
+  },
+  {
+    "name": "domain-01-go",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-cli --address 127.0.0.1:7833 --transport grpc --domain benchmark domain register --rd 1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/domain-01-go.log",
+    "started_unix": 1793761539.1613429,
+    "elapsed_seconds": 0.032097816467285156
+  },
+  {
+    "name": "run-01-go-c1",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 100 -warmup 10 -concurrency 1 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-01-go-c1.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-01-go-c1.log",
+    "started_unix": 1793761544.1945055,
+    "elapsed_seconds": 4.474039793014526
+  },
+  {
+    "name": "run-01-go-c16",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 100 -warmup 10 -concurrency 16 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-01-go-c16.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-01-go-c16.log",
+    "started_unix": 1793761549.3084686,
+    "elapsed_seconds": 1.719261884689331
+  },
+  {
+    "name": "run-01-go-c64",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 100 -warmup 10 -concurrency 64 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-01-go-c64.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-01-go-c64.log",
+    "started_unix": 1793761551.325439,
+    "elapsed_seconds": 1.8686761856079102
+  },
+  {
+    "name": "services-01-go",
+    "command": "docker compose -p cadence-fm-benchmark logs --no-color",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/services-01-go.log",
+    "started_unix": 1793761553.3419209,
+    "elapsed_seconds": 0.057965755462646484
+  },
+  {
+    "name": "down-after-01-go",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-after-01-go.log",
+    "started_unix": 1793761553.400473,
+    "elapsed_seconds": 12.750839710235596
+  },
+  {
+    "name": "down-02-go",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-02-go.log",
+    "started_unix": 1793761566.1540782,
+    "elapsed_seconds": 0.03552603721618652
+  },
+  {
+    "name": "up-02-go",
+    "command": "docker compose -p cadence-fm-benchmark up -d",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/up-02-go.log",
+    "started_unix": 1793761566.2323291,
+    "elapsed_seconds": 16.602794408798218
+  },
+  {
+    "name": "domain-02-go",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-cli --address 127.0.0.1:7833 --transport grpc --domain benchmark domain register --rd 1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/domain-02-go.log",
+    "started_unix": 1793761583.178517,
+    "elapsed_seconds": 0.03188586235046387
+  },
+  {
+    "name": "run-02-go-c1",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 100 -warmup 10 -concurrency 1 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-02-go-c1.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-02-go-c1.log",
+    "started_unix": 1793761588.2114527,
+    "elapsed_seconds": 4.523154020309448
+  },
+  {
+    "name": "run-02-go-c16",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 100 -warmup 10 -concurrency 16 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-02-go-c16.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-02-go-c16.log",
+    "started_unix": 1793761592.7356126,
+    "elapsed_seconds": 1.7684741020202637
+  },
+  {
+    "name": "run-02-go-c64",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 100 -warmup 10 -concurrency 64 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-02-go-c64.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-02-go-c64.log",
+    "started_unix": 1793761594.5055385,
+    "elapsed_seconds": 1.9194517135620117
+  },
+  {
+    "name": "services-02-go",
+    "command": "docker compose -p cadence-fm-benchmark logs --no-color",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/services-02-go.log",
+    "started_unix": 1793761596.4257858,
+    "elapsed_seconds": 0.0678260326385498
+  },
+  {
+    "name": "down-after-02-go",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-after-02-go.log",
+    "started_unix": 1793761596.4940727,
+    "elapsed_seconds": 13.654624938964844
+  },
+  {
+    "name": "down-02-rust",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-02-rust.log",
+    "started_unix": 1793761610.1492686,
+    "elapsed_seconds": 0.034279584884643555
+  },
+  {
+    "name": "up-02-rust",
+    "command": "docker compose -p cadence-fm-benchmark up -d",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/up-02-rust.log",
+    "started_unix": 1793761610.2272158,
+    "elapsed_seconds": 16.54528522491455
+  },
+  {
+    "name": "domain-02-rust",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-cli --address 127.0.0.1:7833 --transport grpc --domain benchmark domain register --rd 1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/domain-02-rust.log",
+    "started_unix": 1793761627.0698383,
+    "elapsed_seconds": 0.031804561614990234
+  },
+  {
+    "name": "run-02-rust-c1",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 100 -warmup 10 -concurrency 1 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-02-rust-c1.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-02-rust-c1.log",
+    "started_unix": 1793761632.102693,
+    "elapsed_seconds": 6.679621458053589
+  },
+  {
+    "name": "run-02-rust-c16",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 100 -warmup 10 -concurrency 16 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-02-rust-c16.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-02-rust-c16.log",
+    "started_unix": 1793761640.2696776,
+    "elapsed_seconds": 2.3195769786834717
+  },
+  {
+    "name": "run-02-rust-c64",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 100 -warmup 10 -concurrency 64 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-02-rust-c64.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-02-rust-c64.log",
+    "started_unix": 1793761642.590443,
+    "elapsed_seconds": 2.1691102981567383
+  },
+  {
+    "name": "services-02-rust",
+    "command": "docker compose -p cadence-fm-benchmark logs --no-color",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/services-02-rust.log",
+    "started_unix": 1793761644.7604682,
+    "elapsed_seconds": 0.1129765510559082
+  },
+  {
+    "name": "down-after-02-rust",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-after-02-rust.log",
+    "started_unix": 1793761644.874039,
+    "elapsed_seconds": 3.423049211502075
+  },
+  {
+    "name": "down-03-rust",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-03-rust.log",
+    "started_unix": 1793761648.2976727,
+    "elapsed_seconds": 0.036295175552368164
+  },
+  {
+    "name": "up-03-rust",
+    "command": "docker compose -p cadence-fm-benchmark up -d",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/up-03-rust.log",
+    "started_unix": 1793761648.3817468,
+    "elapsed_seconds": 16.595986127853394
+  },
+  {
+    "name": "domain-03-rust",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-cli --address 127.0.0.1:7833 --transport grpc --domain benchmark domain register --rd 1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/domain-03-rust.log",
+    "started_unix": 1793761665.265293,
+    "elapsed_seconds": 0.03173947334289551
+  },
+  {
+    "name": "run-03-rust-c1",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 100 -warmup 10 -concurrency 1 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-03-rust-c1.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-03-rust-c1.log",
+    "started_unix": 1793761670.3004577,
+    "elapsed_seconds": 6.077502489089966
+  },
+  {
+    "name": "run-03-rust-c16",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 100 -warmup 10 -concurrency 16 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-03-rust-c16.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-03-rust-c16.log",
+    "started_unix": 1793761676.3792303,
+    "elapsed_seconds": 2.11904239654541
+  },
+  {
+    "name": "run-03-rust-c64",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 100 -warmup 10 -concurrency 64 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-03-rust-c64.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-03-rust-c64.log",
+    "started_unix": 1793761678.499279,
+    "elapsed_seconds": 2.2218828201293945
+  },
+  {
+    "name": "services-03-rust",
+    "command": "docker compose -p cadence-fm-benchmark logs --no-color",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/services-03-rust.log",
+    "started_unix": 1793761680.7220798,
+    "elapsed_seconds": 0.11524009704589844
+  },
+  {
+    "name": "down-after-03-rust",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-after-03-rust.log",
+    "started_unix": 1793761680.8379142,
+    "elapsed_seconds": 8.447049856185913
+  },
+  {
+    "name": "down-03-go",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-03-go.log",
+    "started_unix": 1793761689.2855637,
+    "elapsed_seconds": 0.034180641174316406
+  },
+  {
+    "name": "up-03-go",
+    "command": "docker compose -p cadence-fm-benchmark up -d",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/up-03-go.log",
+    "started_unix": 1793761689.362171,
+    "elapsed_seconds": 16.5956609249115
+  },
+  {
+    "name": "domain-03-go",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-cli --address 127.0.0.1:7833 --transport grpc --domain benchmark domain register --rd 1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/domain-03-go.log",
+    "started_unix": 1793761706.310004,
+    "elapsed_seconds": 0.06587767601013184
+  },
+  {
+    "name": "run-03-go-c1",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 100 -warmup 10 -concurrency 1 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-03-go-c1.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-03-go-c1.log",
+    "started_unix": 1793761711.3786645,
+    "elapsed_seconds": 4.473467588424683
+  },
+  {
+    "name": "run-03-go-c16",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 100 -warmup 10 -concurrency 16 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-03-go-c16.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-03-go-c16.log",
+    "started_unix": 1793761716.505796,
+    "elapsed_seconds": 1.719287395477295
+  },
+  {
+    "name": "run-03-go-c64",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 100 -warmup 10 -concurrency 64 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-03-go-c64.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-03-go-c64.log",
+    "started_unix": 1793761718.5211875,
+    "elapsed_seconds": 2.018883228302002
+  },
+  {
+    "name": "services-03-go",
+    "command": "docker compose -p cadence-fm-benchmark logs --no-color",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/services-03-go.log",
+    "started_unix": 1793761720.5408583,
+    "elapsed_seconds": 0.05962395668029785
+  },
+  {
+    "name": "down-after-03-go",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-after-03-go.log",
+    "started_unix": 1793761720.601056,
+    "elapsed_seconds": 18.656368017196655
+  },
+  {
+    "name": "down-04-go",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-04-go.log",
+    "started_unix": 1793761739.257987,
+    "elapsed_seconds": 0.03615546226501465
+  },
+  {
+    "name": "up-04-go",
+    "command": "docker compose -p cadence-fm-benchmark up -d",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/up-04-go.log",
+    "started_unix": 1793761739.3387759,
+    "elapsed_seconds": 16.594350576400757
+  },
+  {
+    "name": "domain-04-go",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-cli --address 127.0.0.1:7833 --transport grpc --domain benchmark domain register --rd 1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/domain-04-go.log",
+    "started_unix": 1793761756.2591982,
+    "elapsed_seconds": 0.033884525299072266
+  },
+  {
+    "name": "run-04-go-c1",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 100 -warmup 10 -concurrency 1 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-04-go-c1.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-04-go-c1.log",
+    "started_unix": 1793761761.2942495,
+    "elapsed_seconds": 4.42407751083374
+  },
+  {
+    "name": "run-04-go-c16",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 100 -warmup 10 -concurrency 16 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-04-go-c16.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-04-go-c16.log",
+    "started_unix": 1793761766.4119153,
+    "elapsed_seconds": 1.7686920166015625
+  },
+  {
+    "name": "run-04-go-c64",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 100 -warmup 10 -concurrency 64 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-04-go-c64.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-04-go-c64.log",
+    "started_unix": 1793761768.4263053,
+    "elapsed_seconds": 1.8702352046966553
+  },
+  {
+    "name": "services-04-go",
+    "command": "docker compose -p cadence-fm-benchmark logs --no-color",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/services-04-go.log",
+    "started_unix": 1793761770.4398415,
+    "elapsed_seconds": 0.0698404312133789
+  },
+  {
+    "name": "down-after-04-go",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-after-04-go.log",
+    "started_unix": 1793761770.5103443,
+    "elapsed_seconds": 12.81844973564148
+  },
+  {
+    "name": "down-04-rust",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-04-rust.log",
+    "started_unix": 1793761783.3294148,
+    "elapsed_seconds": 0.03390836715698242
+  },
+  {
+    "name": "up-04-rust",
+    "command": "docker compose -p cadence-fm-benchmark up -d",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/up-04-rust.log",
+    "started_unix": 1793761783.4058623,
+    "elapsed_seconds": 16.59721827507019
+  },
+  {
+    "name": "domain-04-rust",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-cli --address 127.0.0.1:7833 --transport grpc --domain benchmark domain register --rd 1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/domain-04-rust.log",
+    "started_unix": 1793761800.3107588,
+    "elapsed_seconds": 0.032048940658569336
+  },
+  {
+    "name": "run-04-rust-c1",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 100 -warmup 10 -concurrency 1 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-04-rust-c1.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-04-rust-c1.log",
+    "started_unix": 1793761805.3441644,
+    "elapsed_seconds": 6.527838945388794
+  },
+  {
+    "name": "run-04-rust-c16",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 100 -warmup 10 -concurrency 16 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-04-rust-c16.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-04-rust-c16.log",
+    "started_unix": 1793761813.5154564,
+    "elapsed_seconds": 2.2708685398101807
+  },
+  {
+    "name": "run-04-rust-c64",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 100 -warmup 10 -concurrency 64 -payload-bytes 1024 -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-04-rust-c64.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-04-rust-c64.log",
+    "started_unix": 1793761815.7875977,
+    "elapsed_seconds": 2.3696999549865723
+  },
+  {
+    "name": "services-04-rust",
+    "command": "docker compose -p cadence-fm-benchmark logs --no-color",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/services-04-rust.log",
+    "started_unix": 1793761818.1586747,
+    "elapsed_seconds": 0.12288904190063477
+  },
+  {
+    "name": "down-after-04-rust",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-after-04-rust.log",
+    "started_unix": 1793761818.2822704,
+    "elapsed_seconds": 3.159122943878174
+  },
+  {
+    "name": "final-compose-logs",
+    "command": "docker compose -p cadence-fm-benchmark logs --no-color",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/final-compose-logs.log",
+    "started_unix": 1793761821.4435453,
+    "elapsed_seconds": 0.03430533409118652
+  },
+  {
+    "name": "cleanup",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/cleanup.log",
+    "started_unix": 1793761821.4784706,
+    "elapsed_seconds": 0.03331804275512695
+  }
+]

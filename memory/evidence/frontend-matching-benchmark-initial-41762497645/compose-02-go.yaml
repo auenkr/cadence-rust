@@ -1,0 +1,123 @@
+name: cadence-fm-benchmark
+services:
+  frontend:
+    depends_on:
+      history:
+        condition: service_healthy
+        required: true
+    environment:
+      CADENCE_AUTO_SETUP: "false"
+      DB: mysql
+      DYNAMIC_CONFIG_FILE_PATH: dynamicconfig/development.yaml
+      MYSQL_PWD: root
+      MYSQL_SEEDS: mysql
+      MYSQL_USER: root
+      PRIMARY_FRONTEND_SERVICE: frontend
+      RINGPOP_SEEDS: frontend:7933,history:7934,matching:7935,worker:7939
+      SERVICES: frontend
+    image: cadence-go:ci
+    networks:
+      default: null
+    ports:
+      - mode: ingress
+        target: 7933
+        published: "7933"
+        protocol: tcp
+      - mode: ingress
+        target: 7833
+        published: "7833"
+        protocol: tcp
+  history:
+    depends_on:
+      mysql:
+        condition: service_healthy
+        required: true
+    environment:
+      CADENCE_AUTO_SETUP: "true"
+      DB: mysql
+      DYNAMIC_CONFIG_FILE_PATH: dynamicconfig/development.yaml
+      MYSQL_PWD: root
+      MYSQL_SEEDS: mysql
+      MYSQL_USER: root
+      PRIMARY_FRONTEND_SERVICE: frontend
+      RINGPOP_SEEDS: frontend:7933,history:7934,matching:7935,worker:7939
+      SERVICES: history
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -c
+        - echo > /dev/tcp/$$(hostname -i)/7934
+      interval: 5s
+      retries: 60
+    image: cadence-go:ci
+    networks:
+      default: null
+  matching:
+    depends_on:
+      history:
+        condition: service_healthy
+        required: true
+    environment:
+      CADENCE_AUTO_SETUP: "false"
+      DB: mysql
+      DYNAMIC_CONFIG_FILE_PATH: dynamicconfig/development.yaml
+      MYSQL_PWD: root
+      MYSQL_SEEDS: mysql
+      MYSQL_USER: root
+      PRIMARY_FRONTEND_SERVICE: frontend
+      RINGPOP_SEEDS: frontend:7933,history:7934,matching:7935,worker:7939
+      SERVICES: matching
+    image: cadence-go:ci
+    networks:
+      default: null
+  mysql:
+    cpus: 1.5
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+    healthcheck:
+      test:
+        - CMD
+        - mysqladmin
+        - ping
+        - -proot
+        - -h
+        - 127.0.0.1
+      interval: 5s
+      retries: 40
+    image: mysql:8.0
+    mem_limit: "1887436800"
+    memswap_limit: "1887436800"
+    networks:
+      default: null
+    pids_limit: 2048
+  worker:
+    depends_on:
+      history:
+        condition: service_healthy
+        required: true
+    environment:
+      CADENCE_AUTO_SETUP: "false"
+      DB: mysql
+      DYNAMIC_CONFIG_FILE_PATH: dynamicconfig/development.yaml
+      MYSQL_PWD: root
+      MYSQL_SEEDS: mysql
+      MYSQL_USER: root
+      PRIMARY_FRONTEND_SERVICE: frontend
+      RINGPOP_SEEDS: frontend:7933,history:7934,matching:7935,worker:7939
+      SERVICES: worker
+    image: cadence-go:ci
+    networks:
+      default: null
+networks:
+  default:
+    name: cadence-fm-benchmark_default
+x-env:
+  CADENCE_AUTO_SETUP: "false"
+  DB: mysql
+  DYNAMIC_CONFIG_FILE_PATH: dynamicconfig/development.yaml
+  MYSQL_PWD: root
+  MYSQL_SEEDS: mysql
+  MYSQL_USER: root
+  PRIMARY_FRONTEND_SERVICE: frontend
+  RINGPOP_SEEDS: frontend:7933,history:7934,matching:7935,worker:7939
