@@ -10,6 +10,7 @@ fn workflow_execution_started_event_attributes(
     p::WorkflowExecutionStartedEventAttributes {
         workflow_type: v.workflow_type.map(|t| p::WorkflowType { name: t.name }),
         parent_execution_info: parent_info(
+            None,
             v.parent_workflow_domain,
             v.parent_workflow_execution,
             v.parent_initiated_event_id,

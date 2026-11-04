@@ -405,6 +405,50 @@ pub struct ClusterAttribute {
     pub name: String,
 }
 
+/// shared.thrift `ActiveClusterSelectionPolicy`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActiveClusterSelectionPolicy {
+    #[serde(
+        rename = "clusterAttribute",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub cluster_attribute: Option<ClusterAttribute>,
+}
+
+/// shared.thrift `AutoConfigHint`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AutoConfigHint {
+    #[serde(rename = "enableAutoConfig", default)]
+    pub enable_auto_config: bool,
+    #[serde(rename = "pollerWaitTimeInMs", default)]
+    pub poller_wait_time_in_ms: i64,
+}
+
+/// shared.thrift `ResetPoints`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResetPoints {
+    #[serde(rename = "points", default, skip_serializing_if = "Vec::is_empty")]
+    pub points: Vec<ResetPointInfo>,
+}
+
+/// shared.thrift `ResetPointInfo`; times are Unix nanoseconds like Go.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResetPointInfo {
+    #[serde(rename = "binaryChecksum", default, skip_serializing_if = "String::is_empty")]
+    pub binary_checksum: String,
+    #[serde(rename = "runId", default, skip_serializing_if = "String::is_empty")]
+    pub run_id: String,
+    #[serde(rename = "firstDecisionCompletedId", default)]
+    pub first_decision_completed_id: i64,
+    #[serde(rename = "createdTimeNano", default, skip_serializing_if = "Option::is_none")]
+    pub created_time_nano: Option<i64>,
+    #[serde(rename = "expiringTimeNano", default, skip_serializing_if = "Option::is_none")]
+    pub expiring_time_nano: Option<i64>,
+    #[serde(rename = "resettable", default)]
+    pub resettable: bool,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FailoverDomainRequest {
     #[serde(
@@ -1069,6 +1113,12 @@ pub struct StartWorkflowExecutionRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub first_run_at_timestamp: Option<i64>,
+    #[serde(
+        rename = "activeClusterSelectionPolicy",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub active_cluster_selection_policy: Option<ActiveClusterSelectionPolicy>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

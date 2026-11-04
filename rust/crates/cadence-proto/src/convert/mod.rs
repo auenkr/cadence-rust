@@ -239,18 +239,19 @@ pub fn failure(
     })
 }
 pub fn parent_info(
+    domain_id: Option<String>,
     domain: Option<String>,
     execution: Option<t::WorkflowExecution>,
     initiated: Option<i64>,
 ) -> Option<p::ParentExecutionInfo> {
-    if domain.is_none() && execution.is_none() && initiated.is_none() {
+    if domain_id.is_none() && domain.is_none() && execution.is_none() && initiated.is_none() {
         return None;
     }
     Some(p::ParentExecutionInfo {
         domain_name: domain.unwrap_or_default(),
         workflow_execution: execution.map(execution_out),
         initiated_id: initiated.unwrap_or_default(),
-        domain_id: String::new(),
+        domain_id: domain_id.unwrap_or_default(),
     })
 }
 pub fn external_info(
@@ -290,8 +291,11 @@ pub fn decision_task(
         attempt: v.attempt,
         backlog_count_hint: v.backlog_count_hint,
         next_event_id: v.next_event_id,
-        scheduled_time: v.scheduled_timestamp.map(timestamp_nanos),
-        started_time: v.started_timestamp.map(timestamp_nanos),
+        // The Frontend decision model carries milliseconds (Thrift encoder multiplies).
+        scheduled_time: v.scheduled_timestamp.map(timestamp),
+        started_time: v.started_timestamp.map(timestamp),
+        total_history_bytes: v.total_history_bytes,
+        auto_config_hint: v.auto_config_hint.map(auto_config_hint_out),
         history: v.history.map(history).transpose()?,
         next_page_token: v.next_page_token,
         workflow_execution_task_list: v.workflow_execution_task_list.map(task_list_out),
@@ -336,17 +340,87 @@ pub fn activity_task(
         workflow_type: v.workflow_type.map(|t| p::WorkflowType { name: t.name }),
         workflow_domain: v.workflow_domain,
         header: v.header.map(header),
+        auto_config_hint: v.auto_config_hint.map(auto_config_hint_out),
         ..Default::default()
+    }
+}
+/// Go `proto.FromAutoConfigHint`.
+pub fn auto_config_hint_out(v: t::AutoConfigHint) -> p::AutoConfigHint {
+    p::AutoConfigHint {
+        enable_auto_config: v.enable_auto_config,
+        poller_wait_time_in_ms: v.poller_wait_time_in_ms,
+    }
+}
+/// Go `proto.ToAutoConfigHint`.
+pub fn auto_config_hint_in(v: p::AutoConfigHint) -> t::AutoConfigHint {
+    t::AutoConfigHint {
+        enable_auto_config: v.enable_auto_config,
+        poller_wait_time_in_ms: v.poller_wait_time_in_ms,
+    }
+}
+/// Go `proto.ToActiveClusterSelectionPolicy`.
+pub fn selection_policy_in(
+    v: p::ActiveClusterSelectionPolicy,
+) -> t::ActiveClusterSelectionPolicy {
+    t::ActiveClusterSelectionPolicy {
+        cluster_attribute: v.cluster_attribute.map(|a| t::ClusterAttribute {
+            scope: a.scope,
+            name: a.name,
+        }),
+    }
+}
+/// Go `proto.FromActiveClusterSelectionPolicy`.
+pub fn selection_policy_out(
+    v: t::ActiveClusterSelectionPolicy,
+) -> p::ActiveClusterSelectionPolicy {
+    p::ActiveClusterSelectionPolicy {
+        cluster_attribute: v.cluster_attribute.map(|a| p::ClusterAttribute {
+            scope: a.scope,
+            name: a.name,
+        }),
+    }
+}
+/// Go `proto.FromResetPoints` (times are Unix nanoseconds in the model).
+pub fn reset_points_out(v: t::ResetPoints) -> p::ResetPoints {
+    p::ResetPoints {
+        points: v
+            .points
+            .into_iter()
+            .map(|r| p::ResetPointInfo {
+                binary_checksum: r.binary_checksum,
+                run_id: r.run_id,
+                first_decision_completed_id: r.first_decision_completed_id,
+                created_time: r.created_time_nano.map(timestamp_nanos),
+                expiring_time: r.expiring_time_nano.map(timestamp_nanos),
+                resettable: r.resettable,
+            })
+            .collect(),
+    }
+}
+/// Go `proto.ToResetPoints`.
+pub fn reset_points_in(v: p::ResetPoints) -> t::ResetPoints {
+    t::ResetPoints {
+        points: v
+            .points
+            .into_iter()
+            .map(|r| t::ResetPointInfo {
+                binary_checksum: r.binary_checksum,
+                run_id: r.run_id,
+                first_decision_completed_id: r.first_decision_completed_id,
+                created_time_nano: r
+                    .created_time
+                    .map(|t| t.seconds * 1_000_000_000 + i64::from(t.nanos)),
+                expiring_time_nano: r
+                    .expiring_time
+                    .map(|t| t.seconds * 1_000_000_000 + i64::from(t.nanos)),
+                resettable: r.resettable,
+            })
+            .collect(),
     }
 }
 pub fn start(
     v: p::StartWorkflowExecutionRequest,
 ) -> Result<t::StartWorkflowExecutionRequest, Status> {
-    if v.active_cluster_selection_policy.is_some() {
-        return Err(Status::unimplemented(
-            "Active cluster selection policy has not been ported.",
-        ));
-    }
     Ok(t::StartWorkflowExecutionRequest {
         domain: v.domain,
         workflow_id: v.workflow_id,
@@ -379,10 +453,12 @@ pub fn start(
         }),
         delay_start_seconds: seconds(v.delay_start)?,
         jitter_start_seconds: seconds(v.jitter_start)?,
+        // Go `timeToUnixNano`: the request model carries Unix nanoseconds.
         first_run_at_timestamp: v
             .first_run_at
-            .map(|t| t.seconds * 1000 + i64::from(t.nanos) / 1_000_000),
+            .map(|t| t.seconds.saturating_mul(1_000_000_000) + i64::from(t.nanos)),
         cron_overlap_policy: enum_in(v.cron_overlap_policy, e::CronOverlapPolicy::from_i32)?,
+        active_cluster_selection_policy: v.active_cluster_selection_policy.map(selection_policy_in),
     })
 }
 pub fn info(v: st::WorkflowExecutionInfo) -> p::WorkflowExecutionInfo {
@@ -406,10 +482,15 @@ fn info_with_time(
         memo: v.memo.map(memo),
         search_attributes: v.search_attributes.map(search_attributes),
         parent_execution_info: parent_info(
+            v.parent_domain_id,
             v.parent_domain,
             v.parent_execution,
             v.parent_initiated_id,
         ),
+        auto_reset_points: v.auto_reset_points.map(reset_points_out),
+        active_cluster_selection_policy: v
+            .active_cluster_selection_policy
+            .map(selection_policy_out),
         execution_time: v.execution_time.map(time),
         task_list: v
             .task_list
@@ -454,10 +535,15 @@ pub fn describe(v: st::DescribeWorkflowExecutionResponse) -> p::DescribeWorkflow
                 last_started_time: a.last_started_timestamp.map(timestamp_nanos),
                 heartbeat_details: payload(a.heartbeat_details),
                 schedule_id: a.schedule_id,
-                last_failure: a.last_failure_reason.map(|reason| p::Failure {
-                    reason,
-                    ..Default::default()
-                }),
+                last_heartbeat_time: a.last_heartbeat_timestamp.map(timestamp_nanos),
+                expiration_time: a.expiration_timestamp.map(timestamp_nanos),
+                last_failure: failure(
+                    a.last_failure_reason,
+                    a.last_failure_details,
+                    a.last_failure_options,
+                ),
+                last_worker_identity: a.last_worker_identity,
+                started_worker_identity: a.started_worker_identity,
                 ..Default::default()
             })
             .collect(),
@@ -1373,21 +1459,57 @@ pub fn header_in(v: p::Header) -> t::Header {
 mod nanosecond_timestamp_tests {
     use super::*;
 
-    /// Go `unixNanoToTime`: the mixed-gate Go worker panicked with
-    /// "timestamp after 10000-01-01" when ns were treated as ms.
+    /// The decision-poll model carries milliseconds (the Thrift codec scales
+    /// them to ns), so gRPC must build the Timestamp from ms.
     #[test]
-    fn decision_task_and_history_event_times_are_nanoseconds() {
-        let ns = 1_793_743_359_616_951_114_i64;
-        let expected = timestamp_nanos(ns);
+    fn decision_task_times_are_milliseconds_and_carry_hint_and_bytes() {
+        let ms = 1_793_743_359_616_i64;
+        let expected = timestamp(ms);
         assert_eq!(expected.seconds, 1_793_743_359);
-        assert_eq!(expected.nanos, 616_951_114);
+        assert_eq!(expected.nanos, 616_000_000);
         let resp = decision_task(cadence_api::tasks::PollForDecisionTaskResponse {
-            scheduled_timestamp: Some(ns),
-            started_timestamp: Some(ns),
+            scheduled_timestamp: Some(ms),
+            started_timestamp: Some(ms),
+            total_history_bytes: 4242,
+            auto_config_hint: Some(t::AutoConfigHint {
+                enable_auto_config: true,
+                poller_wait_time_in_ms: 77,
+            }),
             ..Default::default()
         })
         .unwrap();
         assert_eq!(resp.scheduled_time, Some(expected));
         assert_eq!(resp.started_time, Some(expected));
+        assert_eq!(resp.total_history_bytes, 4242);
+        let hint = resp.auto_config_hint.unwrap();
+        assert!(hint.enable_auto_config);
+        assert_eq!(hint.poller_wait_time_in_ms, 77);
+    }
+
+    /// Go maps FirstRunAt with `Timestamp.AsTime().UnixNano()`.
+    #[test]
+    fn start_first_run_at_is_nanoseconds_and_policy_is_mapped() {
+        let policy = p::ActiveClusterSelectionPolicy {
+            cluster_attribute: Some(p::ClusterAttribute {
+                scope: "region".into(),
+                name: "us".into(),
+            }),
+        };
+        let out = start(p::StartWorkflowExecutionRequest {
+            first_run_at: Some(prost_types::Timestamp {
+                seconds: 1_793_743_359,
+                nanos: 616_951_114,
+            }),
+            active_cluster_selection_policy: Some(policy),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(out.first_run_at_timestamp, Some(1_793_743_359_616_951_114));
+        let attr = out
+            .active_cluster_selection_policy
+            .unwrap()
+            .cluster_attribute
+            .unwrap();
+        assert_eq!((attr.scope.as_str(), attr.name.as_str()), ("region", "us"));
     }
 }
