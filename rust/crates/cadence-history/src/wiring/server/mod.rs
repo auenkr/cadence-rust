@@ -1,3 +1,4 @@
+#![allow(clippy::result_large_err)]
 //! Serving layer for the History service (port of go/service/history/service.go
 //! and the thrift/grpc wrappers around handler/handler.go).
 //!

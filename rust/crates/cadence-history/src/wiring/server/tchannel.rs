@@ -93,7 +93,7 @@ impl<'a> Cur<'a> {
 }
 
 fn csum_len(kind: u8) -> Result<usize> {
-    match kind { 0 => Ok(0), 1 | 2 | 3 => Ok(4), _ => bail!("unsupported checksum type {kind}") }
+    match kind { 0 => Ok(0), 1..=3 => Ok(4), _ => bail!("unsupported checksum type {kind}") }
 }
 
 struct Call {
