@@ -45,6 +45,11 @@ pub trait DecisionManagerState {
 }
 pub struct DecisionTaskManager<'a, S> { pub state: &'a mut S }
 impl<S: DecisionManagerState> DecisionTaskManager<'_, S> {
+    pub fn create_transient_decision_events(&self, decision: &DecisionInfo, identity: String) -> (HistoryEvent, HistoryEvent) {
+        use super::history_builder::{new_decision_task_scheduled_event_with_info, new_decision_task_started_event_with_info};
+        (new_decision_task_scheduled_event_with_info(decision.schedule_id, decision.schedule_timestamp, self.state.task_list(), decision.start_to_close_timeout_seconds, decision.attempt),
+         new_decision_task_started_event_with_info(decision.started_id, decision.started_timestamp, decision.schedule_id, decision.request_id.clone(), identity))
+    }
     pub fn has_pending_decision(&self) -> bool { self.state.decision().schedule_id != 0 }
     pub fn get_pending_decision(&self) -> Option<DecisionInfo> { self.has_pending_decision().then(|| self.state.decision()) }
     pub fn has_in_flight_decision(&self) -> bool { self.state.decision().started_id > 0 }

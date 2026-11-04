@@ -8,6 +8,7 @@ use super::{child_workflow::ChildWorkflowError, timer::TimerError};
 pub enum StateBuilderError {
     #[error(transparent)] State(#[from] MutableStateError),
     #[error(transparent)] Timer(#[from] TimerError),
+    #[error(transparent)] Activity(#[from] crate::mutable_state_activity::ActivityTransitionError),
     #[error(transparent)] Child(#[from] ChildWorkflowError),
     #[error("unsupported or malformed replicated event {event_type:?} ({event_id})")]
     InvalidEvent { event_type: Option<EventType>, event_id: i64 },
@@ -28,6 +29,30 @@ impl StateBuilder {
                 Some(EventType::SignalExternalWorkflowExecutionInitiated) => { self.mutable_state.replicate_signal_external_workflow_execution_initiated_event(event.event_id, event, ""); }
                 Some(EventType::SignalExternalWorkflowExecutionFailed) => { self.mutable_state.replicate_signal_external_workflow_execution_failed_event(event); }
                 Some(EventType::ExternalWorkflowExecutionSignaled) => { self.mutable_state.replicate_external_workflow_execution_signaled_event(event); }
+                Some(EventType::DecisionTaskScheduled) => {
+                    let timestamp = event.timestamp.unwrap_or_default();
+                    self.mutable_state.replicate_decision_scheduled(event, event.version, timestamp, timestamp)
+                        .ok_or(StateBuilderError::InvalidEvent { event_type: event.event_type, event_id: event.event_id })?;
+                }
+                Some(EventType::DecisionTaskStarted) => {
+                    self.mutable_state.replicate_decision_started(event, event.version, event.timestamp.unwrap_or_default())
+                        .ok_or(StateBuilderError::InvalidEvent { event_type: event.event_type, event_id: event.event_id })?;
+                }
+                Some(EventType::DecisionTaskCompleted) => {
+                    if !self.mutable_state.replicate_decision_completed(event) { return Err(StateBuilderError::InvalidEvent { event_type: event.event_type, event_id: event.event_id }); }
+                }
+                Some(EventType::DecisionTaskTimedOut) => self.mutable_state.replicate_decision_timed_out(event),
+                Some(EventType::DecisionTaskFailed) => self.mutable_state.fail_decision(true),
+                Some(EventType::ActivityTaskScheduled) => {
+                    self.mutable_state.replicate_activity_task_scheduled(events[0].event_id, event, String::new())
+                        .ok_or(StateBuilderError::InvalidEvent { event_type: event.event_type, event_id: event.event_id })?;
+                }
+                Some(EventType::ActivityTaskStarted) => self.mutable_state.replicate_activity_task_started(event)?,
+                Some(EventType::ActivityTaskCompleted) => self.mutable_state.replicate_activity_task_completed(event),
+                Some(EventType::ActivityTaskFailed) => self.mutable_state.replicate_activity_task_failed(event),
+                Some(EventType::ActivityTaskTimedOut) => self.mutable_state.replicate_activity_task_timed_out(event),
+                Some(EventType::ActivityTaskCanceled) => self.mutable_state.replicate_activity_task_canceled(event),
+                Some(EventType::ActivityTaskCancelRequested) => self.mutable_state.replicate_activity_task_cancel_requested(event),
                 Some(EventType::TimerStarted) => { self.mutable_state.replicate_timer_started_event(event)?; }
                 Some(EventType::TimerFired) => self.mutable_state.replicate_timer_fired_event(event)?,
                 Some(EventType::TimerCanceled) => self.mutable_state.replicate_timer_canceled_event(event)?,
