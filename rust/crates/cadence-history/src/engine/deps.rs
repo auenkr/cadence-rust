@@ -279,6 +279,7 @@ pub struct DomainInfo {
 pub struct DomainCacheEntry {
     pub info: DomainInfo,
     pub is_global_domain: bool,
+    pub is_domain_pending_active: bool,
     pub active_clusters: Vec<(Option<cadence_api::types::ClusterAttribute>, String)>,
 }
 impl DomainCacheEntry {

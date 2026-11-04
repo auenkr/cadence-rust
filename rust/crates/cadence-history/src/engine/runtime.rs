@@ -72,6 +72,7 @@ pub trait EngineConfig: Send + Sync {
 }
 pub trait ShardClock: Send + Sync { fn set_current_time(&self, cluster: &str, timestamp: i64); }
 pub trait EngineMetrics: Send + Sync {
+    fn event_reapply_skipped(&self);
     fn stale_mutable_state(&self, operation: &str);
     fn activity_e2e_latency(&self, operation: &str, domain: &str, workflow_type: &str, activity_type: &str, task_list: &str, started_time: i64);
     fn replication_latency(&self, operation: &str, elapsed: std::time::Duration);
@@ -98,6 +99,7 @@ pub struct HistoryEngine {
     pub raw_matching_client: Arc<dyn QueryMatchingClient>,
     pub client_checker: Arc<dyn ClientChecker>,
     pub workflow_resetter: Arc<dyn WorkflowResetter>,
+    pub events_reapplier: Arc<dyn EventsReapplier>,
     pub history_reader: Arc<dyn HistoryReader>,
     pub current_execution_reader: Arc<dyn CurrentExecutionReader>,
     pub history_event_notifier: Arc<dyn HistoryEventNotifier>,
@@ -155,3 +157,9 @@ pub trait QueryMatchingClient: Send + Sync {
     async fn query_workflow(&self, domain_id: &str, request: &cadence_api::tasks::QueryWorkflowRequest, task_list: Option<&TaskList>) -> HResult<cadence_api::tasks::QueryWorkflowResponse>;
 }
 pub trait ClientChecker: Send + Sync { fn supports_sticky_query(&self, implementation: &str, feature_version: &str) -> bool; }
+
+/// TODO(link): ndc.EventsReapplier; implementations must maintain resource deduplication.
+#[async_trait]
+pub trait EventsReapplier: Send + Sync {
+    async fn reapply_events(&self, state: MutableStateRef, events: &[cadence_api::service_types::HistoryEvent], run_id: &str) -> HResult<Vec<cadence_api::service_types::HistoryEvent>>;
+}

@@ -21,6 +21,8 @@ pub trait MutableState: Send + Sync {
     fn add_child_workflow_execution_canceled_event(&self, initiated_id: i64, execution: &WorkflowExecution, attrs: Option<&cadence_api::tasks::WorkflowExecutionCanceledEventAttributes>) -> HResult<()>;
     fn add_child_workflow_execution_terminated_event(&self, initiated_id: i64, execution: &WorkflowExecution, attrs: Option<&cadence_api::service_types::WorkflowExecutionTerminatedEventAttributes>) -> HResult<()>;
     fn add_child_workflow_execution_timed_out_event(&self, initiated_id: i64, execution: &WorkflowExecution, attrs: Option<&cadence_api::tasks::WorkflowExecutionTimedOutEventAttributes>) -> HResult<()>;
+    fn get_last_write_version(&self) -> HResult<i64>;
+    fn is_event_reapplied(&self, run_id: &str, event_id: i64, version: i64) -> bool;
     fn get_current_version(&self) -> i64;
     fn get_last_first_event_id(&self) -> i64;
     fn get_previous_started_event_id(&self) -> i64;
