@@ -53,3 +53,43 @@ pub trait ExecutionContext: Send + Sync {
 pub fn fail_decision(_ms: &dyn MutableState, _decision: &DecisionInfo, _cause: &str) -> Result<()> {
     Err(TaskError::Other("fail_decision not linked".into()))
 }
+
+// ---- persistence DLQ request shims (TODO(link): replace by cadence-persistence types) ----
+#[derive(Clone, Debug)]
+pub struct CreateHistoryDLQTaskRequest {
+    pub shard_id: i32,
+    pub domain_id: String,
+    pub domain_name: String,
+    pub cluster_attribute_scope: String,
+    pub cluster_attribute_name: String,
+    pub task: Arc<dyn PersistenceTask>,
+}
+
+#[derive(Clone, Debug)]
+pub struct CreateHistoryDLQAckLevelRequest {
+    pub shard_id: i32,
+    pub domain_id: String,
+    pub cluster_attribute_scope: String,
+    pub cluster_attribute_name: String,
+    pub task_category: HistoryTaskCategory,
+}
+
+// ---- version histories shim ----
+#[derive(Clone, Copy, Debug, Default)]
+pub struct VersionHistoryItem {
+    pub event_id: i64,
+    pub version: i64,
+}
+
+pub trait VersionHistory: Send + Sync {
+    fn get_last_item(&self) -> Result<VersionHistoryItem>;
+}
+
+pub trait VersionHistories: Send + Sync {
+    fn get_current_version_history(&self) -> Result<Arc<dyn VersionHistory>>;
+}
+
+/// Extension used by standby executors; TODO(link): merge into `MutableState` when ported.
+pub trait MutableStateVersionHistories {
+    fn get_version_histories(&self) -> Option<Arc<dyn VersionHistories>>;
+}

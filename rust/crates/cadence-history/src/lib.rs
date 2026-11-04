@@ -119,3 +119,5 @@ mod rpc_tests {
         assert_eq!(grpc.len(), GRPC_HISTORY_METHODS.len());
     }
 }
+pub mod task;
+pub mod taskdlq;
