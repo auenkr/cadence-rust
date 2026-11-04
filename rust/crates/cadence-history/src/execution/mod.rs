@@ -4,4 +4,7 @@
 //! itself remains in the parent `mutable_state` module.
 
 pub mod timer;
+pub mod child_workflow;
+pub mod signal;
+pub mod retry;
 
