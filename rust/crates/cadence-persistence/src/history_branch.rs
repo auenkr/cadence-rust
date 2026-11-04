@@ -126,9 +126,9 @@ pub fn max_referred_node_ids(branches: &[crate::history_contract::HistoryTreeBra
     referred
 }
 
-/// Physical rows that Go's branch deletion considers, ordered from leaf back
-/// through ancestors. A shared ancestor is truncated at its greatest live
-/// reference; unshared ranges are removable from their begin node onward.
+/// Physical ranges Go's branch deletion considers, ordered from leaf back
+/// through ancestors. The caller combines these ranges with
+/// `max_referred_node_ids` to choose each deletion lower bound.
 pub fn deletion_ranges(branch: &crate::history_contract::HistoryBranchRequest) -> Vec<crate::history_contract::HistoryBranchRange> {
     let mut ranges = branch.ancestors.clone();
     ranges.push(crate::history_contract::HistoryBranchRange {
@@ -168,4 +168,36 @@ pub fn fork(source: &HistoryBranch, fork_node: i64, branch_id: &str) -> Result<H
         branch_id: branch_id.to_string(),
         ancestors,
     })
+}
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+    use crate::history_contract::{HistoryBranchRange as Range, HistoryBranchRequest as Request, HistoryTreeBranch};
+
+    fn source() -> Request {
+        Request { tree_id: "tree".into(), branch_id: "b2".into(), ancestors: vec![Range { branch_id: "b1".into(), begin_node_id: 1, end_node_id: 6 }], ..Default::default() }
+    }
+
+    #[test]
+    fn fork_appends_source_range_or_clips_existing_ancestor() {
+        let appended = fork_request(&source(), 8, "b3".into());
+        assert_eq!(appended.ancestors, vec![
+            Range { branch_id: "b1".into(), begin_node_id: 1, end_node_id: 6 },
+            Range { branch_id: "b2".into(), begin_node_id: 6, end_node_id: 8 },
+        ]);
+        let clipped = fork_request(&source(), 4, "b4".into());
+        assert_eq!(clipped.ancestors, vec![Range { branch_id: "b1".into(), begin_node_id: 1, end_node_id: 4 }]);
+    }
+
+    #[test]
+    fn delete_ranges_are_leaf_to_root_and_shared_end_is_maximized() {
+        let ranges = deletion_ranges(&source());
+        assert_eq!(ranges.iter().map(|range| range.branch_id.as_str()).collect::<Vec<_>>(), ["b2", "b1"]);
+        let branches = vec![
+            HistoryTreeBranch { ancestors: vec![Range { branch_id: "b1".into(), begin_node_id: 1, end_node_id: 5 }], ..Default::default() },
+            HistoryTreeBranch { ancestors: vec![Range { branch_id: "b1".into(), begin_node_id: 1, end_node_id: 9 }], ..Default::default() },
+        ];
+        assert_eq!(max_referred_node_ids(&branches).get("b1"), Some(&9));
+    }
 }
