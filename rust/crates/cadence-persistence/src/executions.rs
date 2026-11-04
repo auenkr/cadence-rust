@@ -11523,11 +11523,11 @@ mod transient_decision_tests {
         let (store, execution) = setup();
         let first = poll(&store);
         assert_eq!(
-            store.expire_due_decisions(first.started_timestamp.unwrap() + 999),
+            store.expire_due_decisions(first.started_timestamp.unwrap() / 1_000_000 + 999),
             0
         );
         assert_eq!(
-            store.expire_due_decisions(first.started_timestamp.unwrap() + 1000),
+            store.expire_due_decisions(first.started_timestamp.unwrap() / 1_000_000 + 1000),
             1
         );
         assert!(matches!(
@@ -11540,7 +11540,7 @@ mod transient_decision_tests {
         let retry = poll(&store);
         assert_eq!(retry.attempt, 1);
         assert_eq!(
-            store.expire_due_decisions(retry.started_timestamp.unwrap() + 1000),
+            store.expire_due_decisions(retry.started_timestamp.unwrap() / 1_000_000 + 1000),
             1
         );
         assert_eq!(events(&store, &execution).len(), 4);
