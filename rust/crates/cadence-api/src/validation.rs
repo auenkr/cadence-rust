@@ -117,16 +117,58 @@ pub fn check_execution(execution: Option<&WorkflowExecution>) -> Result<(), BadR
 }
 
 fn is_valid_uuid(s: &str) -> bool {
-    // Accept canonical 8-4-4-4-12 hex without pulling the `uuid` crate here.
-    let parts: Vec<&str> = s.split('-').collect();
-    const EXPECTED: [usize; 5] = [8, 4, 4, 4, 12];
-    if parts.len() != 5 {
+    // Mirrors github.com/google/uuid v1.6.0 `Parse`: canonical (36),
+    // `urn:uuid:` prefixed (45, case-insensitive), braced (38, the closing
+    // character is not inspected, like Go) and bare 32 hex digits.
+    let b = s.as_bytes();
+    let hex = |c: u8| c.is_ascii_hexdigit();
+    match b.len() {
+        36 => {}
+        45 => {
+            if !b[..9].eq_ignore_ascii_case(b"urn:uuid:") {
+                return false;
+            }
+            return is_valid_uuid(&s[9..]);
+        }
+        38 => {
+            // Go slices off the first byte without checking it either.
+            let rest = &b[1..];
+            return uuid_canonical_ok(rest, hex);
+        }
+        32 => return b.iter().all(|&c| hex(c)),
+        _ => return false,
+    }
+    uuid_canonical_ok(b, hex)
+}
+
+fn uuid_canonical_ok(b: &[u8], hex: impl Fn(u8) -> bool) -> bool {
+    if b.len() < 36 || b[8] != b'-' || b[13] != b'-' || b[18] != b'-' || b[23] != b'-' {
         return false;
     }
-    parts
+    [0usize, 2, 4, 6, 9, 11, 14, 16, 19, 21, 24, 26, 28, 30, 32, 34]
         .iter()
-        .zip(EXPECTED)
-        .all(|(p, n)| p.len() == n && p.chars().all(|c| c.is_ascii_hexdigit()))
+        .all(|&i| hex(b[i]) && hex(b[i + 1]))
+}
+
+#[cfg(test)]
+mod uuid_parse_tests {
+    use super::is_valid_uuid;
+
+    #[test]
+    fn matches_go_uuid_parse() {
+        let c = "123e4567-e89b-12d3-a456-426614174000";
+        assert!(is_valid_uuid(c));
+        assert!(is_valid_uuid(&c.to_uppercase()));
+        assert!(is_valid_uuid(&format!("urn:uuid:{c}")));
+        assert!(is_valid_uuid(&format!("URN:UUID:{c}")));
+        assert!(is_valid_uuid(&format!("{{{c}}}")));
+        assert!(is_valid_uuid(&c.replace('-', "")));
+        assert!(!is_valid_uuid(""));
+        assert!(!is_valid_uuid("123e4567-e89b-12d3-a456-42661417400"));
+        assert!(!is_valid_uuid("123e4567e89b-12d3-a456-4266141740000"));
+        assert!(!is_valid_uuid(&format!("urn:xxx:{c}")));
+        assert!(!is_valid_uuid(&c.replace('0', "g")));
+    }
 }
 
 // ---------------------------------------------------------------------------

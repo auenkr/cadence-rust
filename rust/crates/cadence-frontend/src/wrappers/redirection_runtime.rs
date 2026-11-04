@@ -231,8 +231,44 @@ impl RedirectRequestResolver for DomainCacheResolver {
             execution,
             requested_cluster_attribute: requested_cluster_attribute(operation, fields)
                 .filter(|_| selection_enabled),
-            consistency: Consistency::Eventual,
+            consistency: if matches!(
+                operation,
+                "DescribeWorkflowExecution" | "GetWorkflowExecutionHistory" | "QueryWorkflow"
+            ) && body_requests_strong(fields)
+            {
+                Consistency::Strong
+            } else {
+                Consistency::Eventual
+            },
         }))
+    }
+}
+
+/// Go `if req.GetQueryConsistencyLevel() == Strong { requested = Strong }`.
+fn body_requests_strong(fields: &Value) -> bool {
+    match fields.get("queryConsistencyLevel") {
+        Some(Value::String(s)) => s == "STRONG",
+        Some(Value::Number(n)) => n.as_i64() == Some(1),
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod body_consistency_tests {
+    use super::body_requests_strong;
+    use serde_json::json;
+
+    #[test]
+    fn strong_from_body() {
+        let f = |v: serde_json::Value| v;
+        assert!(body_requests_strong(&f(
+            json!({"queryConsistencyLevel":"STRONG"})
+        )));
+        assert!(body_requests_strong(&f(json!({"queryConsistencyLevel":1}))));
+        assert!(!body_requests_strong(&f(
+            json!({"queryConsistencyLevel":"EVENTUAL"})
+        )));
+        assert!(!body_requests_strong(&f(json!({}))));
     }
 }
 

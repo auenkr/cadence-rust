@@ -90,6 +90,79 @@ fn query(path: &str, pairs: &[(&str, &str)]) -> String {
     )
 }
 
+/// Go `types/mapper/proto/errors.go` `FromError` for a structured
+/// `CadenceError`: keeps every typed detail field (AlreadyStarted run id,
+/// DomainNotActive clusters, ServiceBusy reason, ...).
+pub(crate) fn status_from_cadence_error(error: &cadence_api::errors::CadenceError) -> Status {
+    use cadence_api::errors::CadenceError as E;
+    match error {
+        E::EntityNotExists(e) => detailed_status(
+            tonic::Code::NotFound,
+            e.message.clone(),
+            "EntityNotExistsError",
+            p::EntityNotExistsError {
+                current_cluster: e.current_cluster.clone(),
+                active_cluster: e.active_cluster.clone(),
+                active_clusters: e.active_clusters.clone(),
+            },
+        ),
+        E::DomainNotActive(e) => detailed_status(
+            tonic::Code::FailedPrecondition,
+            e.message.clone(),
+            "DomainNotActiveError",
+            p::DomainNotActiveError {
+                domain: e.domain_name.clone(),
+                current_cluster: e.current_cluster.clone(),
+                active_cluster: e.active_cluster.clone(),
+                active_clusters: e.active_clusters.clone(),
+            },
+        ),
+        E::WorkflowAlreadyStarted(e) => detailed_status(
+            tonic::Code::AlreadyExists,
+            e.message.clone(),
+            "WorkflowExecutionAlreadyStartedError",
+            p::WorkflowExecutionAlreadyStartedError {
+                start_request_id: e.start_request_id.clone(),
+                run_id: e.run_id.clone(),
+            },
+        ),
+        E::CancellationAlreadyRequested(e) => detailed_status(
+            tonic::Code::AlreadyExists,
+            e.message.clone(),
+            "CancellationAlreadyRequestedError",
+            p::CancellationAlreadyRequestedError {},
+        ),
+        E::ServiceBusy(e) => detailed_status(
+            tonic::Code::ResourceExhausted,
+            e.message.clone(),
+            "ServiceBusyError",
+            p::ServiceBusyError {
+                reason: e.reason.clone().unwrap_or_default(),
+            },
+        ),
+        E::LimitExceeded(e) => detailed_status(
+            tonic::Code::ResourceExhausted,
+            e.message.clone(),
+            "LimitExceededError",
+            p::LimitExceededError {},
+        ),
+        E::ClientVersionNotSupported(e) => detailed_status(
+            tonic::Code::FailedPrecondition,
+            "Client version not supported",
+            "ClientVersionNotSupportedError",
+            p::ClientVersionNotSupportedError {
+                feature_version: e.feature_version.clone(),
+                client_impl: e.client_impl.clone(),
+                supported_versions: e.supported_versions.clone(),
+            },
+        ),
+        other => {
+            let (name, _, message) = cadence_service_core::workflow_api::error_to_thrift(other);
+            status_from_error_type(name, &message)
+        }
+    }
+}
+
 fn status_from_error_type(kind: &str, message: &str) -> Status {
     match kind {
         "AccessDeniedError" => Status::permission_denied(message),
@@ -271,6 +344,9 @@ fn hook_operation(
         ("POST", "/api/v1/workflows/history") => "GetWorkflowExecutionHistory",
         ("POST", "/api/v1/workflows/signal") => "SignalWorkflowExecution",
         ("POST", "/api/v1/workflows/query") => "QueryWorkflow",
+        ("POST", "/api/v1/workflows/list-all") => "ListWorkflowExecutions",
+        ("POST", "/api/v1/workflows/scan-all") => "ScanWorkflowExecutions",
+        ("POST", "/api/v1/workflows/count-all") => "CountWorkflowExecutions",
         ("POST", "/api/v1/workflows/list-open") => "ListOpenWorkflowExecutions",
         ("POST", "/api/v1/workflows/list-closed") => "ListClosedWorkflowExecutions",
         ("POST", "/api/v1/workflows/archived") => "ListArchivedWorkflowExecutions",
@@ -469,11 +545,7 @@ impl Frontend {
                 let forwarded = api
                     .redirect(operation, &request, &ctx)
                     .await
-                    .map_err(|error| {
-                        let (name, _, message) =
-                            cadence_service_core::workflow_api::error_to_thrift(&error);
-                        status_from_error_type(name, &message)
-                    })?;
+                    .map_err(|error| status_from_cadence_error(&error))?;
                 if let Some(value) = forwarded {
                     return serde_json::from_value(value)
                         .map_err(|e| Status::internal(e.to_string()));
@@ -496,11 +568,7 @@ impl Frontend {
                         deadline,
                         headers: caller_headers,
                     };
-                    let value = api.call(operation, request, ctx).await.map_err(|error| {
-                        let (name, _, message) =
-                            cadence_service_core::workflow_api::error_to_thrift(&error);
-                        status_from_error_type(name, &message)
-                    })?;
+                    let value = api.call(operation, request, ctx).await.map_err(|error| status_from_cadence_error(&error))?;
                     return serde_json::from_value(value)
                         .map_err(|e| Status::internal(e.to_string()));
                 }
@@ -1898,6 +1966,22 @@ impl p::visibility_api_server::VisibilityApi for Frontend {
         &self,
         request: tonic::Request<p::ListWorkflowExecutionsRequest>,
     ) -> Result<Response<p::ListWorkflowExecutionsResponse>, Status> {
+        if self.state.workflow_api.as_ref().is_some_and(|api| api.serves("ListWorkflowExecutions")) {
+            let r = request.get_ref();
+            let input = st::ListWorkflowExecutionsRequest {
+                domain: r.domain.clone(),
+                page_size: r.page_size,
+                next_page_token: r.next_page_token.clone(),
+                query: r.query.clone(),
+            };
+            let v: st::ListWorkflowExecutionsResponse = self
+                .call_with_headers(Method::POST, "/api/v1/workflows/list-all", &input, &[])
+                .await?;
+            return Ok(Response::new(p::ListWorkflowExecutionsResponse {
+                executions: v.executions.into_iter().map(cv::info_nanos).collect(),
+                next_page_token: v.next_page_token,
+            }));
+        }
         let r = request.into_inner();
         let mut all = self.visible(&r.domain, None)?;
         visibility_query(&mut all, &r.query)?;
@@ -2079,6 +2163,22 @@ impl p::visibility_api_server::VisibilityApi for Frontend {
         &self,
         request: tonic::Request<p::ScanWorkflowExecutionsRequest>,
     ) -> Result<Response<p::ScanWorkflowExecutionsResponse>, Status> {
+        if self.state.workflow_api.as_ref().is_some_and(|api| api.serves("ScanWorkflowExecutions")) {
+            let r = request.get_ref();
+            let input = st::ListWorkflowExecutionsRequest {
+                domain: r.domain.clone(),
+                page_size: r.page_size,
+                next_page_token: r.next_page_token.clone(),
+                query: r.query.clone(),
+            };
+            let v: st::ListWorkflowExecutionsResponse = self
+                .call_with_headers(Method::POST, "/api/v1/workflows/scan-all", &input, &[])
+                .await?;
+            return Ok(Response::new(p::ScanWorkflowExecutionsResponse {
+                executions: v.executions.into_iter().map(cv::info_nanos).collect(),
+                next_page_token: v.next_page_token,
+            }));
+        }
         let r = request.into_inner();
         let mut all = self.visible(&r.domain, None)?;
         visibility_query(&mut all, &r.query)?;
@@ -2092,6 +2192,17 @@ impl p::visibility_api_server::VisibilityApi for Frontend {
         &self,
         request: tonic::Request<p::CountWorkflowExecutionsRequest>,
     ) -> Result<Response<p::CountWorkflowExecutionsResponse>, Status> {
+        if self.state.workflow_api.as_ref().is_some_and(|api| api.serves("CountWorkflowExecutions")) {
+            let r = request.get_ref();
+            let input = st::CountWorkflowExecutionsRequest {
+                domain: r.domain.clone(),
+                query: r.query.clone(),
+            };
+            let v: st::CountWorkflowExecutionsResponse = self
+                .call_with_headers(Method::POST, "/api/v1/workflows/count-all", &input, &[])
+                .await?;
+            return Ok(Response::new(p::CountWorkflowExecutionsResponse { count: v.count }));
+        }
         let r = request.into_inner();
         let mut all = self.visible(&r.domain, None)?;
         visibility_query(&mut all, &r.query)?;
@@ -2849,5 +2960,47 @@ mod workflow_hook_tests {
         assert_eq!(error.code(), tonic::Code::Internal);
         assert!(error.message().contains("hook failure"));
         assert_eq!(api.calls.lock().unwrap().len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod cadence_error_status_tests {
+    use super::*;
+    use cadence_api::errors::*;
+
+    fn detail_bytes(status: &Status) -> Vec<u8> {
+        status.details().to_vec()
+    }
+
+    #[test]
+    fn typed_details_are_preserved() {
+        let s = status_from_cadence_error(&CadenceError::WorkflowAlreadyStarted(
+            WorkflowExecutionAlreadyStartedError {
+                message: "started".into(),
+                start_request_id: "req-1".into(),
+                run_id: "run-1".into(),
+            },
+        ));
+        assert_eq!(s.code(), tonic::Code::AlreadyExists);
+        let d = String::from_utf8_lossy(&detail_bytes(&s)).to_string();
+        assert!(d.contains("run-1") && d.contains("req-1"), "{d}");
+
+        let s = status_from_cadence_error(&CadenceError::DomainNotActive(DomainNotActiveError {
+            message: "m".into(),
+            domain_name: "dom".into(),
+            current_cluster: "c1".into(),
+            active_cluster: "c2".into(),
+            active_clusters: vec![],
+        }));
+        assert_eq!(s.code(), tonic::Code::FailedPrecondition);
+        let d = String::from_utf8_lossy(&detail_bytes(&s)).to_string();
+        assert!(d.contains("c2") && d.contains("dom"), "{d}");
+
+        let s = status_from_cadence_error(&CadenceError::ServiceBusy(ServiceBusyError {
+            message: "busy".into(),
+            reason: Some("rate-limit-reason".into()),
+        }));
+        assert_eq!(s.code(), tonic::Code::ResourceExhausted);
+        assert!(String::from_utf8_lossy(&detail_bytes(&s)).contains("rate-limit-reason"));
     }
 }

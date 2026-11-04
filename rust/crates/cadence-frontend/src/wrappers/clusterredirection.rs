@@ -243,6 +243,9 @@ where
     M: ActiveClusterManager,
     F: FnMut(&str) -> Result<(), CadenceError>,
 {
+    if policy == ForwardingPolicy::Noop {
+        return call(current_cluster);
+    }
     if domain.deprecated_or_deleted && !allowed_on_deprecated_domain(operation) {
         return Err(CadenceError::DomainNotActive(DomainNotActiveError {
             message: "domain is deprecated or deleted.".into(),
@@ -251,9 +254,6 @@ where
             active_cluster: current_cluster.into(),
             active_clusters: Vec::new(),
         }));
-    }
-    if policy == ForwardingPolicy::Noop {
-        return call(current_cluster);
     }
     let auto_forward = domain.global && config.domain_auto_forwarding_enabled(&domain.name);
     let mut target = current_cluster.to_owned();
@@ -340,6 +340,9 @@ where
     F: FnMut(String) -> Fut,
     Fut: Future<Output = Result<T, CadenceError>>,
 {
+    if policy == ForwardingPolicy::Noop {
+        return call(current_cluster.to_owned()).await;
+    }
     if domain.deprecated_or_deleted && !allowed_on_deprecated_domain(operation) {
         return Err(CadenceError::DomainNotActive(DomainNotActiveError {
             message: "domain is deprecated or deleted.".into(),
@@ -348,9 +351,6 @@ where
             active_cluster: current_cluster.into(),
             active_clusters: Vec::new(),
         }));
-    }
-    if policy == ForwardingPolicy::Noop {
-        return call(current_cluster.to_owned()).await;
     }
     let auto_forward = domain.global && config.domain_auto_forwarding_enabled(&domain.name);
     let mut target = current_cluster.to_owned();
@@ -505,7 +505,11 @@ where
             route.execution.as_ref(),
             route.requested_cluster_attribute.as_deref(),
             operation,
-            consistency.unwrap_or(route.consistency),
+            if route.consistency == Consistency::Strong {
+                Consistency::Strong
+            } else {
+                consistency.unwrap_or(route.consistency)
+            },
             &self.config,
             &self.manager,
             self.metrics.as_ref(),
