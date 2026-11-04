@@ -23,24 +23,24 @@ pub fn execution_info_to_sql(info: &WorkflowExecutionInfo, start_version: i64) -
     let seconds = |nanos: i64| i32::try_from(nanos / NANOS_PER_SECOND).map_err(|_| PersistenceError::InvalidArgument("workflow timeout seconds out of range".into()));
     Ok(SqlWorkflowExecutionInfo {
         parent_domain_id: uuid_bytes(&info.parent_domain_id, "parent_domain_id")?, parent_workflow_id: info.parent_workflow_id.clone(),
-        parent_run_id: uuid_bytes(&info.parent_run_id, "parent_run_id")?, initiated_id: info.initiated_id, completion_event_batch_id: info.completion_event_batch_id,
+        parent_run_id: uuid_bytes(&info.parent_run_id, "parent_run_id")?, initiated_id: if info.parent_domain_id.is_empty(){-23}else{info.initiated_id}, completion_event_batch_id: info.completion_event_batch_id,
         completion_event: info.completion_event.as_ref().map_or_else(Vec::new, |v| v.data.clone()), completion_event_encoding: info.completion_event.as_ref().map_or_else(String::new, |v| v.encoding.clone()),
         task_list: info.task_list.clone(), task_list_kind: info.task_list_kind, workflow_type_name: info.workflow_type_name.clone(),
         workflow_timeout_seconds: seconds(info.workflow_timeout_nanos)?, decision_task_timeout_seconds: seconds(info.decision_start_to_close_timeout_nanos)?, execution_context: info.execution_context.clone(),
-        state: info.state, close_status: info.close_status, start_version, last_write_event_id: info.next_event_id.saturating_sub(1),
+        state: info.state, close_status: info.close_status, start_version, last_write_event_id: 0,
         last_event_task_id: info.last_event_task_id, last_first_event_id: info.last_first_event_id, last_processed_event: info.last_processed_event,
         start_time_unix_nanos: info.start_time_unix_nanos, last_updated_time_unix_nanos: info.last_updated_time_unix_nanos,
         decision_version: info.decision_version, decision_schedule_id: info.decision_schedule_id, decision_started_id: info.decision_started_id,
         decision_timeout_seconds: seconds(info.decision_timeout_nanos)?, decision_attempt: info.decision_attempt,
         decision_started_timestamp_unix_nanos: info.decision_started_time_unix_nanos, decision_scheduled_timestamp_unix_nanos: info.decision_scheduled_time_unix_nanos,
         cancel_requested: info.cancel_requested, decision_original_scheduled_timestamp_unix_nanos: info.decision_original_scheduled_time_unix_nanos,
-        create_request_id: info.create_request_id.clone(), decision_request_id: info.decision_request_id.clone(), cancel_request_id: info.cancel_request_id.clone(),
+        create_request_id: info.create_request_id.clone(), decision_request_id: info.decision_request_id.clone(), cancel_request_id: if info.cancel_requested{info.cancel_request_id.clone()}else{String::new()},
         sticky_task_list: info.sticky_task_list.clone(), sticky_schedule_to_start_timeout_seconds: info.sticky_schedule_to_start_timeout_nanos / NANOS_PER_SECOND,
         retry_attempt: i64::from(info.attempt), retry_initial_interval_seconds: seconds(info.initial_interval_nanos)?, retry_maximum_interval_seconds: seconds(info.maximum_interval_nanos)?,
         retry_maximum_attempts: info.maximum_attempts, retry_expiration_seconds: seconds(info.expiration_interval_nanos)?, retry_backoff_coefficient: info.backoff_coefficient,
         retry_jitter_coefficient: info.jitter_coefficient, retry_expiration_time_unix_nanos: info.expiration_time_unix_nanos,
         retry_non_retryable_errors: info.non_retriable_errors.clone(), has_retry_policy: info.has_retry_policy, cron_schedule: info.cron_schedule.clone(),
-        event_store_version: 0, event_branch_token: info.branch_token.clone(), signal_count: i64::from(info.signal_count), history_size: info.history_size,
+        event_store_version: 2, event_branch_token: info.branch_token.clone(), signal_count: i64::from(info.signal_count), history_size: info.history_size,
         client_library_version: info.client_library_version.clone(), client_feature_version: info.client_feature_version.clone(), client_impl: info.client_impl.clone(),
         auto_reset_points: info.auto_reset_points.as_ref().map_or_else(Vec::new, |v| v.data.clone()), auto_reset_points_encoding: info.auto_reset_points.as_ref().map_or_else(String::new, |v| v.encoding.clone()),
         search_attributes: info.search_attributes.clone(), memo: info.memo.clone(), version_histories: Vec::new(), version_histories_encoding: String::new(),
@@ -148,6 +148,14 @@ pub struct CreateExecutionRowRequest<'a> {
     pub previous_last_write_version: i64,
 }
 
+/// Conditional execution-row update used by Go's `lockAndCheckNextEventID`
+/// followed by `updateExecution`. Higher-level mutation/map/task writes must
+/// run in this same transaction when they are supplied by the caller.
+pub struct ConditionedExecutionUpdate<'a> {
+    pub row: &'a ExecutionRow,
+    pub condition: i64,
+}
+
 /// Statement source for the execution/current rows and concrete-execution
 /// cleanup. Placeholder spelling matches the Go SQL plugins.
 pub fn statement(dialect: Dialect, query: Statement) -> &'static str {
@@ -232,6 +240,18 @@ impl MySqlExecutionRows {
         tx.exec_drop(statement(Dialect::MySql, Statement::InsertExecution), (row.key.shard_id, row.key.domain_id.as_slice(), row.key.workflow_id.as_str(), row.key.run_id.as_slice(), row.next_event_id, row.last_write_version, row.data.as_slice(), row.data_encoding.as_str())).map_err(internal)?;
         tx.commit().map_err(internal)
     }
+
+    pub fn update_conditioned(&self, request: &ConditionedExecutionUpdate<'_>) -> Result<(), PersistenceError> {
+        let row = request.row;
+        let mut conn = self.pool.checkout().map_err(internal)?;
+        let mut tx = conn.start_transaction(mysql::TxOpts::default()).map_err(internal)?;
+        let current: Option<i64> = tx.exec_first(statement(Dialect::MySql, Statement::LockExecution), (row.key.shard_id, row.key.domain_id.as_slice(), row.key.workflow_id.as_str(), row.key.run_id.as_slice())).map_err(internal)?;
+        let Some(current) = current else { return Err(PersistenceError::EntityNotExists(format!("Workflow execution not found. WorkflowId: {}, RunId: {}", row.key.workflow_id, uuid::Uuid::from_bytes(row.key.run_id)))); };
+        if current != request.condition { return Err(PersistenceError::ConditionFailed(format!("NextEventID condition failed. Expected: {}, Actual: {}", request.condition, current))); }
+        tx.exec_drop(statement(Dialect::MySql, Statement::UpdateExecution), (row.next_event_id, row.last_write_version, row.data.as_slice(), row.data_encoding.as_str(), row.key.shard_id, row.key.domain_id.as_slice(), row.key.workflow_id.as_str(), row.key.run_id.as_slice())).map_err(internal)?;
+        if tx.affected_rows() != 1 { return Err(PersistenceError::ConditionFailed("execution row update affected no rows".into())); }
+        tx.commit().map_err(internal)
+    }
 }
 
 /// PostgreSQL execution-row operations share Matching's existing SQL pool.
@@ -302,6 +322,18 @@ impl PostgresExecutionRows {
             }
         }
         tx.execute(statement(Dialect::Postgres, Statement::InsertExecution), &[&row.key.shard_id, &&row.key.domain_id[..], &row.key.workflow_id, &&row.key.run_id[..], &row.next_event_id, &row.last_write_version, &row.data, &row.data_encoding]).map_err(internal)?;
+        tx.commit().map_err(internal)
+    }
+
+    pub fn update_conditioned(&self, request: &ConditionedExecutionUpdate<'_>) -> Result<(), PersistenceError> {
+        let row = request.row;
+        let mut conn = self.pool.checkout().map_err(internal)?;
+        let mut tx = conn.transaction().map_err(internal)?;
+        let current = tx.query_opt(statement(Dialect::Postgres, Statement::LockExecution), &[&row.key.shard_id, &&row.key.domain_id[..], &row.key.workflow_id, &&row.key.run_id[..]]).map_err(internal)?.map(|r| r.get::<_, i64>(0));
+        let Some(current) = current else { return Err(PersistenceError::EntityNotExists(format!("Workflow execution not found. WorkflowId: {}, RunId: {}", row.key.workflow_id, uuid::Uuid::from_bytes(row.key.run_id)))); };
+        if current != request.condition { return Err(PersistenceError::ConditionFailed(format!("NextEventID condition failed. Expected: {}, Actual: {}", request.condition, current))); }
+        let affected = tx.execute(statement(Dialect::Postgres, Statement::UpdateExecution), &[&row.next_event_id, &row.last_write_version, &row.data, &row.data_encoding, &row.key.shard_id, &&row.key.domain_id[..], &row.key.workflow_id, &&row.key.run_id[..]]).map_err(internal)?;
+        if affected != 1 { return Err(PersistenceError::ConditionFailed("execution row update affected no rows".into())); }
         tx.commit().map_err(internal)
     }
 }
