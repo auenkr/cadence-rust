@@ -343,7 +343,7 @@ impl MutableStateBuilder {
         let info = DecisionInfo {
             version: current_version, schedule_id, task_list,
             start_to_close_timeout_seconds: timeout, attempt,
-            schedule_timestamp, original_schedule_timestamp, ..Default::default()
+            schedule_timestamp, original_schedule_timestamp: original_scheduled_timestamp, ..Default::default()
         };
         self.persist_decision(info.clone());
         Ok(info)
