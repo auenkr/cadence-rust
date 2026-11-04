@@ -1,0 +1,49 @@
+name: Frontend soak binaries (release Rust server, Go server/CLI, soak driver)
+on:
+  workflow_dispatch:
+    inputs:
+      rust_ref:
+        description: branch/ref of the Rust sources
+        default: ""
+concurrency:
+  group: frontend-soak-build-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 85
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout Rust sources
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.rust_ref || github.ref_name }}
+          path: rustsrc
+          submodules: true
+      - name: IDL submodule
+        run: git submodule update --init go/idls
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: |
+            go/go.sum
+            tests/frontend-soak/go.sum
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        run: |
+          mkdir -p out
+          echo "rust_ref=${{ inputs.rust_ref || github.ref_name }} head=$(git -C rustsrc rev-parse HEAD) gate_head=$(git rev-parse HEAD)" | tee out/commit.txt
+          cargo build --release --manifest-path rustsrc/rust/Cargo.toml -p cadence-server -j2
+          cp rustsrc/rust/target/release/cadence-server out/cadence-server
+          (cd go/cmd/server && go build -ldflags='-s -w' -o "$GITHUB_WORKSPACE/out/cadence-go-server" .)
+          (cd go && go build -ldflags='-s -w' -o "$GITHUB_WORKSPACE/out/cadence-cli" ./cmd/tools/cli)
+          (cd tests/frontend-soak && go build -o "$GITHUB_WORKSPACE/out/frontend-soak-driver" .)
+          sha256sum out/* | tee out/SHA256SUMS
+          strip out/cadence-server || true
+          sha256sum out/cadence-server | tee -a out/SHA256SUMS
+          tar -C rustsrc -czf out/rust-config.tgz rust/config
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-soak-binaries
+          path: out/
+          retention-days: 3
