@@ -754,6 +754,17 @@ impl cadence_service_core::workflow_api::WorkflowApi for HandlerApi {
         WorkflowOperation::from_name(operation).is_some_and(|op| op != WorkflowOperation::Health)
     }
 
+    fn observe_local(
+        &self,
+        operation: &str,
+        request: &serde_json::Value,
+        elapsed: std::time::Duration,
+        error: Option<i32>,
+    ) {
+        self.handler
+            .observe_local(operation, request, elapsed, error);
+    }
+
     fn call<'a>(
         &'a self,
         operation: &'a str,

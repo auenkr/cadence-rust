@@ -32,6 +32,18 @@ const PER_TASK_LIST_OPERATIONS: &[&str] = &[
     "StartWorkflowExecutionAsync",
 ];
 
+/// Go `defs.go` scope operation tag for a metered API method. Identical to the
+/// method name except for the four scopes Go names differently.
+pub fn scope_operation(method: &str) -> &str {
+    match method {
+        "GetTaskListsByDomain" => "FrontendGetTaskListsByDomain",
+        "ListDomains" => "ListDomain",
+        "ListTaskListPartitions" => "FrontendListTaskListPartitions",
+        "RefreshWorkflowTasks" => "FrontendRefreshWorkflowTasks",
+        other => other,
+    }
+}
+
 pub struct SinkMetrics {
     sink: Arc<dyn MetricSink>,
 }
@@ -53,7 +65,10 @@ impl SinkMetrics {
             }
         };
         let mut out = BTreeMap::new();
-        out.insert("operation".to_owned(), operation.to_owned());
+        out.insert(
+            "operation".to_owned(),
+            scope_operation(operation).to_owned(),
+        );
         let mut domain = "";
         for tag in tags {
             match tag.key {
@@ -171,7 +186,7 @@ impl Metrics for SinkMetrics {
                 MetricKind::Histogram,
                 MetricValue::Duration(elapsed),
                 tl,
-                Some(HistogramSpec::GoDefault1ms100s),
+                Some(HistogramSpec::GoLow1ms100s),
             );
         }
         self.emit(
@@ -179,7 +194,7 @@ impl Metrics for SinkMetrics {
             MetricKind::Histogram,
             MetricValue::Duration(elapsed),
             Self::tags(operation, tags),
-            Some(HistogramSpec::GoDefault1ms100s),
+            Some(HistogramSpec::GoLow1ms100s),
         );
     }
 
@@ -208,7 +223,7 @@ impl Metrics for SinkMetrics {
             MetricKind::Histogram,
             MetricValue::Duration(elapsed),
             Self::tags(operation, &[]),
-            Some(HistogramSpec::GoDefault1ms100s),
+            Some(HistogramSpec::GoLow1ms100s),
         );
     }
 }
@@ -216,6 +231,139 @@ impl Metrics for SinkMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every Go `metered.apiHandler` method with the `operation` tag of the
+    /// `metrics.Frontend*Scope` it uses (go/common/metrics/defs.go).
+    const GO_FRONTEND_SCOPES: &[(&str, &str)] = &[
+        ("BackfillSchedule", "BackfillSchedule"),
+        ("CountWorkflowExecutions", "CountWorkflowExecutions"),
+        ("CreateSchedule", "CreateSchedule"),
+        ("CreateSemaphore", "CreateSemaphore"),
+        ("DeleteDomain", "DeleteDomain"),
+        ("DeleteSchedule", "DeleteSchedule"),
+        ("DeprecateDomain", "DeprecateDomain"),
+        ("DescribeDomain", "DescribeDomain"),
+        ("DescribeSchedule", "DescribeSchedule"),
+        ("DescribeTaskList", "DescribeTaskList"),
+        ("DescribeWorkflowExecution", "DescribeWorkflowExecution"),
+        ("DiagnoseWorkflowExecution", "DiagnoseWorkflowExecution"),
+        ("FailoverDomain", "FailoverDomain"),
+        ("GetClusterInfo", "GetClusterInfo"),
+        ("GetSearchAttributes", "GetSearchAttributes"),
+        ("GetTaskListsByDomain", "FrontendGetTaskListsByDomain"),
+        ("GetWorkflowExecutionHistory", "GetWorkflowExecutionHistory"),
+        (
+            "ListArchivedWorkflowExecutions",
+            "ListArchivedWorkflowExecutions",
+        ),
+        (
+            "ListClosedWorkflowExecutions",
+            "ListClosedWorkflowExecutions",
+        ),
+        ("ListDomains", "ListDomain"),
+        ("ListFailoverHistory", "ListFailoverHistory"),
+        ("ListOpenWorkflowExecutions", "ListOpenWorkflowExecutions"),
+        ("ListSchedules", "ListSchedules"),
+        ("ListTaskListPartitions", "FrontendListTaskListPartitions"),
+        ("ListWorkflowExecutions", "ListWorkflowExecutions"),
+        ("PauseSchedule", "PauseSchedule"),
+        ("PollForActivityTask", "PollForActivityTask"),
+        ("PollForDecisionTask", "PollForDecisionTask"),
+        ("QueryWorkflow", "QueryWorkflow"),
+        ("RecordActivityTaskHeartbeat", "RecordActivityTaskHeartbeat"),
+        (
+            "RecordActivityTaskHeartbeatByID",
+            "RecordActivityTaskHeartbeatByID",
+        ),
+        ("RefreshWorkflowTasks", "FrontendRefreshWorkflowTasks"),
+        ("RegisterDomain", "RegisterDomain"),
+        (
+            "RequestCancelWorkflowExecution",
+            "RequestCancelWorkflowExecution",
+        ),
+        ("ResetStickyTaskList", "ResetStickyTaskList"),
+        ("ResetWorkflowExecution", "ResetWorkflowExecution"),
+        ("RespondActivityTaskCanceled", "RespondActivityTaskCanceled"),
+        (
+            "RespondActivityTaskCanceledByID",
+            "RespondActivityTaskCanceledByID",
+        ),
+        (
+            "RespondActivityTaskCompleted",
+            "RespondActivityTaskCompleted",
+        ),
+        (
+            "RespondActivityTaskCompletedByID",
+            "RespondActivityTaskCompletedByID",
+        ),
+        ("RespondActivityTaskFailed", "RespondActivityTaskFailed"),
+        (
+            "RespondActivityTaskFailedByID",
+            "RespondActivityTaskFailedByID",
+        ),
+        (
+            "RespondDecisionTaskCompleted",
+            "RespondDecisionTaskCompleted",
+        ),
+        ("RespondDecisionTaskFailed", "RespondDecisionTaskFailed"),
+        ("RespondQueryTaskCompleted", "RespondQueryTaskCompleted"),
+        ("RestartWorkflowExecution", "RestartWorkflowExecution"),
+        ("ScanWorkflowExecutions", "ScanWorkflowExecutions"),
+        (
+            "SignalWithStartWorkflowExecution",
+            "SignalWithStartWorkflowExecution",
+        ),
+        (
+            "SignalWithStartWorkflowExecutionAsync",
+            "SignalWithStartWorkflowExecutionAsync",
+        ),
+        ("SignalWorkflowExecution", "SignalWorkflowExecution"),
+        ("StartWorkflowExecution", "StartWorkflowExecution"),
+        ("StartWorkflowExecutionAsync", "StartWorkflowExecutionAsync"),
+        ("TerminateWorkflowExecution", "TerminateWorkflowExecution"),
+        ("UnpauseSchedule", "UnpauseSchedule"),
+        ("UpdateDomain", "UpdateDomain"),
+        ("UpdateSchedule", "UpdateSchedule"),
+    ];
+
+    #[test]
+    fn every_go_metered_method_is_a_rust_operation() {
+        let rust: Vec<&str> = crate::handler_workflow::WorkflowOperation::ALL
+            .iter()
+            .map(|op| op.name())
+            .collect();
+        // Schedule APIs are metered by `Handler::observe_local` (served by the
+        // in-process router rather than `WorkflowOperation`).
+        let schedules = cadence_service_core::workflow_api::REDIRECTED_SCHEDULE_OPERATIONS;
+        // Domain and semaphore APIs are metered the same way (grpc.rs).
+        let local = [
+            "RegisterDomain",
+            "DescribeDomain",
+            "ListDomains",
+            "UpdateDomain",
+            "FailoverDomain",
+            "DeprecateDomain",
+            "DeleteDomain",
+            "ListFailoverHistory",
+            "CreateSemaphore",
+        ];
+        for (method, _) in GO_FRONTEND_SCOPES {
+            assert!(
+                rust.contains(method) || schedules.contains(method) || local.contains(method),
+                "missing Rust operation {method}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_frontend_scope_operation_matches_go_defs() {
+        assert_eq!(GO_FRONTEND_SCOPES.len(), 56);
+        for (method, operation) in GO_FRONTEND_SCOPES {
+            let tags = SinkMetrics::tags(method, &[]);
+            assert_eq!(&tags["operation"], operation, "method {method}");
+        }
+    }
+
     use cadence_service_core::matching_metrics::RecordingMetricSink;
 
     fn domain_tag() -> Vec<MetricTag> {

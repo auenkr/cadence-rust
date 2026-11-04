@@ -27,7 +27,7 @@ pub mod visibility_reader;
 
 pub use domains::{
     DomainRecord, FailoverError, FrontendDomainError, FrontendDomainManager, InMemoryDomainStore,
-    PersistedFrontendDomainManager,
+    PendingActiveDomain, PersistedFrontendDomainManager,
 };
 pub use executions::{
     AsyncRequest, AsyncRequestKind, ExecutionRecord, HistoryPageError, InMemoryExecutionStore,
