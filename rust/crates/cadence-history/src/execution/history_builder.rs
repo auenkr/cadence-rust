@@ -193,7 +193,7 @@ impl HistoryBuilder {
     /// Go `AddDecisionTaskScheduledEvent`.
     pub fn add_decision_task_scheduled(&mut self, task_list: &str, start_to_close_timeout_seconds: i32, attempt: i64) -> HistoryEvent {
         self.add_decision_task_scheduled_event(t::DecisionTaskScheduledEventAttributes {
-            task_list: Some(TaskList { name: task_list.to_string() }),
+            task_list: Some(TaskList { name: task_list.to_string(), ..Default::default() }),
             start_to_close_timeout_seconds: Some(start_to_close_timeout_seconds),
             attempt,
         })
