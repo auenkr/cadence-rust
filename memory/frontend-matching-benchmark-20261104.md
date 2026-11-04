@@ -108,3 +108,13 @@ Compact raw outputs/configs/hashes/command evidence and reproduced reports:
 `memory/evidence/frontend-matching-benchmark-initial-41762497645/`.
 Corrected integrated smoke 41764102198 is still building the release Rust image
 as last observed; no corrected resource result is accepted yet.
+
+## Resumed checkpoint — 2026-11-04 03:21 UTC
+
+Integration head before this checkpoint: `8f74d83c8`. CI smoke
+41764102198 remains in progress: Python validation and Go image passed;
+release Rust image is building. No corrected resource measurements accepted.
+The existing artifact-verifier delegate is pending completion; do not poll it.
+Host load 6.99 exceeds the <=6 start guard, so no new worker or local heavy
+work was started. Next: inspect terminal smoke artifacts, integrate the verifier,
+then dispatch the repeated capped comparison from the final source head.
