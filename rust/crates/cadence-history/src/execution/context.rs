@@ -212,7 +212,7 @@ impl<M: TransactionState, S: WorkflowContextStore<M>> WorkflowContext<M, S> {
         result
     }
     #[allow(clippy::too_many_arguments)]
-    async fn update_inner(&mut self, now: i64, mode: UpdateWorkflowMode, mut new: Option<&mut Self>, policy: TransactionPolicy, new_policy: Option<TransactionPolicy>, requests: WorkflowRequestMode) -> Result<(), M::Error> {
+    async fn update_inner(&mut self, now: i64, mode: UpdateWorkflowMode, new: Option<&mut Self>, policy: TransactionPolicy, new_policy: Option<TransactionPolicy>, requests: WorkflowRequestMode) -> Result<(), M::Error> {
         let state = self.mutable_state.as_mut().ok_or_else(|| self.store.internal_error("mutable state not loaded"))?;
         let (mut mutation, current_events) = state.close_mutation(now, policy)?;
         let domain = self.store.domain_name(&self.key.domain_id)?;
