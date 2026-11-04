@@ -8,6 +8,7 @@ pub mod engine;
 pub mod execution;
 pub mod mutable_state;
 pub mod mutable_state_activity;
+pub mod mutable_state_builder_ext;
 pub mod queue;
 pub mod shard;
 pub mod ndc;
