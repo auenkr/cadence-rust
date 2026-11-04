@@ -108,4 +108,27 @@ impl MutableStateBuilder {
         self.update_child_execution_infos.insert(attrs.initiated_event_id, value);
         Ok(())
     }
+
+    /// Remove the pending child record for any terminal child event. All eight
+    /// Go terminal transition methods use their event's initiated ID for this
+    /// common persistence action; local event construction remains owned by
+    /// the matching history handler.
+    pub fn replicate_child_workflow_terminal_event(&mut self, event: &HistoryEvent) -> Result<(), ChildWorkflowError> {
+        use cadence_api::types::EventType;
+        let valid = matches!(event.event_type.as_ref(), Some(EventType::StartChildWorkflowExecutionFailed | EventType::ChildWorkflowExecutionCompleted | EventType::ChildWorkflowExecutionFailed | EventType::ChildWorkflowExecutionCanceled | EventType::ChildWorkflowExecutionTimedOut | EventType::ChildWorkflowExecutionTerminated));
+        if !valid { return Err(ChildWorkflowError::InvalidEvent("event is not a terminal child transition")); }
+        let value = serde_json::to_value(event).map_err(|_| ChildWorkflowError::InvalidEvent("event is not serializable"))?;
+        let attrs_name = event.event_type.as_ref().map(|v| match v {
+            EventType::StartChildWorkflowExecutionFailed => "startChildWorkflowExecutionFailedEventAttributes",
+            EventType::ChildWorkflowExecutionCompleted => "childWorkflowExecutionCompletedEventAttributes",
+            EventType::ChildWorkflowExecutionFailed => "childWorkflowExecutionFailedEventAttributes",
+            EventType::ChildWorkflowExecutionCanceled => "childWorkflowExecutionCanceledEventAttributes",
+            EventType::ChildWorkflowExecutionTimedOut => "childWorkflowExecutionTimedOutEventAttributes",
+            EventType::ChildWorkflowExecutionTerminated => "childWorkflowExecutionTerminatedEventAttributes",
+            _ => "",
+        }).unwrap_or_default();
+        let initiated_id = value.get(attrs_name).and_then(|a| a.get("initiatedEventId")).and_then(serde_json::Value::as_i64).ok_or(ChildWorkflowError::InvalidEvent("terminal event missing initiated ID"))?;
+        if !self.delete_pending_child_execution(initiated_id) { return Err(ChildWorkflowError::Missing(initiated_id)); }
+        Ok(())
+    }
 }

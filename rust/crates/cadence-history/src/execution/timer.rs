@@ -1,6 +1,6 @@
 //! User timer transitions from `mutable_state_builder_methods_timer.go`.
 
-use cadence_api::{service_types::HistoryEvent, tasks::{TimerCanceledEventAttributes, TimerFiredEventAttributes, TimerStartedEventAttributes}, types::EventType};
+use cadence_api::{service_types::HistoryEvent, tasks::{CancelTimerFailedEventAttributes, TimerCanceledEventAttributes, TimerFiredEventAttributes, TimerStartedEventAttributes}, types::EventType};
 use serde::{Deserialize, Serialize};
 
 use crate::mutable_state::{MutableStateBuilder, MutableStateError, Record};
@@ -122,6 +122,17 @@ impl MutableStateBuilder {
         });
         self.replicate_timer_canceled_event(&event)?;
         Ok(event)
+    }
+
+    /// Emit the no-op failure event used when a cancel decision names an
+    /// unknown timer. This event does not mutate timer state.
+    pub fn add_cancel_timer_failed_event(&mut self, decision_completed_event_id: i64, timer_id: &str, cause: &str, identity: &str, timestamp_unix_nanos: i64, version: i64) -> HistoryEvent {
+        self.add_event(HistoryEvent {
+            event_type: Some(EventType::CancelTimerFailed), timestamp: Some(timestamp_unix_nanos), version,
+            cancel_timer_failed_event_attributes: Some(CancelTimerFailedEventAttributes {
+                timer_id: timer_id.to_owned(), cause: cause.to_owned(), decision_task_completed_event_id: decision_completed_event_id, identity: identity.to_owned(),
+            }), ..Default::default()
+        })
     }
 
     pub fn replicate_timer_canceled_event(&mut self, event: &HistoryEvent) -> Result<(), TimerError> {

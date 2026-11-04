@@ -10,4 +10,5 @@ pub mod retry;
 pub mod workflow_close;
 pub mod cancellation;
 pub mod markers;
+pub mod workflow_started;
 
