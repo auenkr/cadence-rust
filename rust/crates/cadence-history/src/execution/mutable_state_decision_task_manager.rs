@@ -36,6 +36,9 @@ pub trait DecisionManagerState {
     fn add_binary_checksum(&mut self, event: &HistoryEvent, max_reset_points: usize) -> Result<(), Self::Error>;
     fn set_last_processed_event(&mut self, id: i64);
     fn insert_reset_request(&mut self, request_id: String, version: i64);
+    /// Request ID from the persisted reset event; the public API projection
+    /// currently omits this internal field.
+    fn failed_reset_request_id(&self, event: &HistoryEvent) -> String;
     fn max_reset_points(&self) -> usize;
     fn invalid_action(&self, operation: &'static str) -> Self::Error;
     fn critical_retry(&mut self, attempt: i64);
@@ -90,7 +93,7 @@ impl<S: DecisionManagerState> DecisionTaskManager<'_, S> {
         self.state.set_last_processed_event(id); self.state.add_binary_checksum(event, max_reset_points)
     }
     pub fn replicate_decision_task_failed_event(&mut self, event: Option<&HistoryEvent>) -> Result<(), S::Error> {
-        if let Some(event) = event { if let Some(a) = &event.decision_task_failed_event_attributes { if a.cause == Some(DecisionTaskFailedCause::ResetWorkflow) { self.state.insert_reset_request(a.request_id.clone(), event.version); } } }
+        if let Some(event) = event { if let Some(a) = &event.decision_task_failed_event_attributes { if a.cause == Some(DecisionTaskFailedCause::ResetWorkflow) { self.state.insert_reset_request(self.state.failed_reset_request_id(event), event.version); } } }
         self.fail_decision(true); Ok(())
     }
     pub fn replicate_decision_task_timed_out_event(&mut self, event: &HistoryEvent) -> Result<(), S::Error> {

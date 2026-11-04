@@ -88,3 +88,19 @@ existing partial modules remain incomplete; this is not a parity sign-off.
 CI https://github.com/auenkr/cadence-rust/actions/runs/41886354555 at
 `74b125584` failed compilation on optional first-decision backoff fields;
 fixed by defaulting absent values to zero, matching Go getters.
+
+## Resume checkpoint 2026-11-05
+
+Continued in `/mnt/storage/service/wt-exec-sol` after fetch and worktree verification.
+CI https://github.com/auenkr/cadence-rust/actions/runs/41887402910
+(head d0b3cbc94) failed: missing failed-decision request ID API field and
+non-exhaustive continue-as-new initiator. Reset ID is now explicitly required
+from the state adapter, rather than silently dropping it. Unknown initiators
+follow the Go invalid-initiator error path.
+
+`context.go` -> `context.rs`: load/checksum-repair/start-transaction loop, history
+append, create/update/task-only updates, continue-as-new snapshot orchestration,
+conflict resolution, request validation, signal reapplication routing and error
+cleanup now have Rust policy implementations. Concrete shard persistence retry,
+notification, and mutable-state adapters remain required. This is not complete
+execution parity. No local Cargo commands or integration tests run.

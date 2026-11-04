@@ -89,7 +89,7 @@ impl<S: TaskGeneratorState> MutableStateTaskGenerator<'_, S> {
         let timeout_type = match attr.initiator {
             None | Some(ContinueAsNewInitiator::CronSchedule) => 1,
             Some(ContinueAsNewInitiator::RetryPolicy) => 0,
-            Some(ContinueAsNewInitiator::Decider) => return Err(self.state.internal_error("encounter continue as new iterator & first decision delay not 0".into())),
+            Some(ContinueAsNewInitiator::Decider) | Some(_) => return Err(self.state.internal_error("encounter continue as new iterator & first decision delay not 0".into())),
         };
         let timestamp = event.timestamp.unwrap_or_default() + i64::from(attr.first_decision_task_backoff_seconds.unwrap_or_default()) * 1_000_000_000;
         let task = self.task(event.version, Some(timestamp), self.state.execution().task_list, TaskKind::WorkflowBackoff { timeout_type });
