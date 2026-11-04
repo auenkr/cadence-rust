@@ -1,5 +1,8 @@
 name: Frontend soak binaries (release Rust server, Go server/CLI, soak driver)
 on:
+  push:
+    branches: [t3/fe-soak]
+    paths: ['.github/workflows/frontend-soak-build.yml', 'tests/frontend-soak/**']
   workflow_dispatch:
     inputs:
       rust_ref:
