@@ -7,6 +7,7 @@ pub mod mutable_state;
 pub mod mutable_state_activity;
 pub mod queue;
 pub mod shard;
+pub mod ndc;
 
 pub const SERVICE_NAME: &str = "history";
 
