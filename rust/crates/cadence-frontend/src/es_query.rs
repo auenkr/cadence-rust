@@ -977,9 +977,15 @@ fn process_sort(
     let _ = &mut arr;
     dsl["sort"] = Value::Array(arr);
     if token.should_search_after() {
-        let sort_value = search_after_value(&token.sort_value, attr_types(
-            field.trim_matches('`').strip_prefix("Attr.").unwrap_or(field.trim_matches('`')),
-        ));
+        let sort_value = search_after_value(
+            &token.sort_value,
+            attr_types(
+                field
+                    .trim_matches('`')
+                    .strip_prefix("Attr.")
+                    .unwrap_or(field.trim_matches('`')),
+            ),
+        );
         dsl["search_after"] = json!([sort_value, token.tie_breaker]);
         dsl.as_object_mut().map(|m| m.remove("from"));
     } else {
@@ -1255,7 +1261,10 @@ mod tests {
         let v: Value = serde_json::from_str(&s).unwrap();
         assert_eq!(v["search_after"], json!([i64::MAX, "run"]));
         assert_eq!(search_after_value(&json!(7), Some(2)), json!(7));
-        assert_eq!(search_after_value(&json!("Infinity"), Some(3)), json!("Infinity"));
+        assert_eq!(
+            search_after_value(&json!("Infinity"), Some(3)),
+            json!("Infinity")
+        );
         assert_eq!(search_after_value(&Value::Null, Some(1)), Value::Null);
     }
 
