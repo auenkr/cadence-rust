@@ -408,6 +408,7 @@ async fn handle_call(
     state: AppState,
     matching: Option<crate::grpc_matching::Matching>,
     ringpop: Option<RingpopHandler>,
+    history: bool,
 ) -> Result<()> {
     if call.service == "ringpop" {
         let Some(handler) = ringpop else {
@@ -507,7 +508,9 @@ async fn handle_call(
         };
     }
 
-    let expected_service = if matching.is_some() {
+    let expected_service = if history {
+        "cadence-history"
+    } else if matching.is_some() {
         "cadence-matching"
     } else {
         "cadence-frontend"
@@ -530,7 +533,13 @@ async fn handle_call(
         bail!("Unknown Cadence procedure");
     }
     let definition = cadence_thrift::service::find_method(procedure)
-        .filter(|definition| accepts_thrift_service(definition.service, matching.is_some()))
+        .filter(|definition| {
+            if history {
+                definition.service == "HistoryService" || definition.service == "Meta"
+            } else {
+                accepts_thrift_service(definition.service, matching.is_some())
+            }
+        })
         .ok_or_else(|| anyhow!("Unknown Cadence procedure"))?;
     let method = definition.method;
     let mut headers = Cursor::new(&call.args[1]);
@@ -556,9 +565,7 @@ async fn handle_call(
             }
             None => {
                 if definition.service == "HistoryService" {
-                    return Err(format!(
-                        "HistoryService::{method} is not implemented yet"
-                    ));
+                    return Err(format!("HistoryService::{method} is not implemented yet"));
                 }
                 let caller_headers = call
                     .headers
@@ -621,7 +628,10 @@ fn accepts_thrift_service(service: &str, has_matching_handler: bool) -> bool {
         || if has_matching_handler {
             service == "MatchingService"
         } else {
-            matches!(service, "WorkflowService" | "AdminService" | "HistoryService")
+            matches!(
+                service,
+                "WorkflowService" | "AdminService" | "HistoryService"
+            )
         }
 }
 
@@ -630,6 +640,7 @@ async fn connection(
     state: AppState,
     matching: Option<crate::grpc_matching::Matching>,
     ringpop: Option<RingpopHandler>,
+    history: bool,
 ) -> Result<()> {
     stream.set_nodelay(true)?;
     let local = stream.local_addr()?.to_string();
@@ -700,7 +711,7 @@ async fn connection(
                         if complete {
                             let call=calls.remove(&frame.id).expect("assembled call");let id=frame.id;let writer=writer.clone();let state=state.clone();let matching=matching.clone();let ringpop=ringpop.clone();
                             let abort=tasks.spawn(async move {
-                                let trace=call.trace;let result=handle_call(writer.clone(),id,call,state,matching,ringpop).await;
+                                let trace=call.trace;let result=handle_call(writer.clone(),id,call,state,matching,ringpop,history).await;
                                 let result=if let Err(e)=result {error(&writer,id,6,&trace,&e.to_string()).await} else {Ok(())};
                                 (id,result)
                             });aborts.insert(id,abort);
@@ -715,6 +726,18 @@ async fn connection(
 }
 pub async fn serve(addr: std::net::SocketAddr, state: AppState) -> Result<()> {
     serve_with(addr, state, None, None).await
+}
+/// Serve the History Thrift service on its dedicated TChannel endpoint.
+/// The shared dispatcher retains the Go-compatible Thrift method decoding and
+/// returns the same explicit unimplemented error until an engine method exists.
+pub async fn serve_history(addr: std::net::SocketAddr, state: AppState) -> Result<()> {
+    let listener = TcpListener::bind(addr)
+        .await
+        .context("bind History TChannel")?;
+    serve_history_listener(listener, state).await
+}
+pub async fn serve_history_listener(listener: TcpListener, state: AppState) -> Result<()> {
+    serve_listener(listener, state, None, None, true).await
 }
 pub async fn serve_matching(
     addr: std::net::SocketAddr,
@@ -749,6 +772,7 @@ pub async fn serve_matching_with_ringpop_listener(
         matching.frontend.state.clone(),
         Some(matching),
         Some(ringpop),
+        false,
     )
     .await
 }
@@ -760,7 +784,7 @@ pub async fn serve_frontend_with_ringpop_listener(
     state: AppState,
     ringpop: RingpopHandler,
 ) -> Result<()> {
-    serve_listener(listener, state, None, Some(ringpop)).await
+    serve_listener(listener, state, None, Some(ringpop), false).await
 }
 pub async fn serve_ringpop(addr: std::net::SocketAddr, handler: RingpopHandler) -> Result<()> {
     serve_with(addr, AppState::default(), None, Some(handler)).await
@@ -781,7 +805,7 @@ async fn serve_with(
     let listener = TcpListener::bind(addr)
         .await
         .context("bind TChannel frontend")?;
-    serve_listener(listener, state, matching, ringpop).await
+    serve_listener(listener, state, matching, ringpop, false).await
 }
 
 async fn serve_listener(
@@ -789,6 +813,7 @@ async fn serve_listener(
     state: AppState,
     matching: Option<crate::grpc_matching::Matching>,
     ringpop: Option<RingpopHandler>,
+    history: bool,
 ) -> Result<()> {
     let mut connections = tokio::task::JoinSet::new();
     loop {
@@ -799,7 +824,7 @@ async fn serve_listener(
                 let matching = matching.clone();
                 let ringpop = ringpop.clone();
                 connections.spawn(async move {
-                    let _ = connection(stream, state, matching, ringpop).await;
+                    let _ = connection(stream, state, matching, ringpop, history).await;
                 });
             }
             _ = connections.join_next(), if !connections.is_empty() => {}
