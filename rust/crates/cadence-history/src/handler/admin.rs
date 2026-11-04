@@ -9,8 +9,8 @@ use crate::engine::{
 };
 use async_trait::async_trait;
 use cadence_api::admin::*;
-use std::sync::Arc;
 use futures_util::StreamExt;
+use std::sync::Arc;
 
 /// TODO(link): host resources, failover coordinator and rate-limit RPC mapper.
 #[async_trait]
@@ -154,20 +154,34 @@ impl HistoryHandler {
             return (None, Some(error));
         }
         let force_fetch = request.is_some_and(|request| request.force_fetch);
-        let results = futures_util::stream::FuturesUnordered::from_iter(self.admin.shard_ids().into_iter().map(|shard| async move {
-            let result = async {
-                let engine = self.resources.engine_for_shard(shard)?;
-                engine.count_replication_dlq_messages(force_fetch).await
-            }.await.map_err(|error| HistoryError::Other(format!("dlq count for shard {shard}: {error}")));
-            (shard, result)
-        })).collect::<Vec<_>>().await;
+        let results = futures_util::stream::FuturesUnordered::from_iter(
+            self.admin.shard_ids().into_iter().map(|shard| async move {
+                let result = async {
+                    let engine = self.resources.engine_for_shard(shard)?;
+                    engine.count_replication_dlq_messages(force_fetch).await
+                }
+                .await
+                .map_err(|error| {
+                    HistoryError::Other(format!("dlq count for shard {shard}: {error}"))
+                });
+                (shard, result)
+            }),
+        )
+        .collect::<Vec<_>>()
+        .await;
         let mut entries = std::collections::HashMap::new();
         let mut failure = None;
         for (shard_id, result) in results {
             match result {
                 Ok(counts) => {
                     for (source_cluster, count) in counts {
-                        entries.insert(HistoryDLQCountKey { shard_id, source_cluster }, count);
+                        entries.insert(
+                            HistoryDLQCountKey {
+                                shard_id,
+                                source_cluster,
+                            },
+                            count,
+                        );
                     }
                 }
                 Err(error) => {

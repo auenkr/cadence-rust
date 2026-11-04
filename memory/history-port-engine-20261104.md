@@ -2,14 +2,13 @@
 
 Branch: `history-port-engine`; leave unmerged and undeleted.
 
-Current validation: https://github.com/auenkr/cadence-rust/actions/runs/41917909636
-Head: `dabe8eab4`; conclusion **success** (cadence-history clippy, all targets, warnings denied; package tests).
-Fresh uncached workspace gate: https://github.com/auenkr/cadence-rust/actions/runs/41921033898
-Head: `a5aa15449e2d429515b9ec125c15832721034976`; conclusion **success**.
+Current fresh validation: https://github.com/auenkr/cadence-rust/actions/runs/41924902412
+Head: `e6353b96f` (full SHA below); conclusion **success**.
 Inputs: `clean_target=true`, `format_all=true`, no package selector.
-Workspace Clippy (all targets, warnings denied) followed by workspace tests passed.
-Runner-generated formatting patch applied only to owned engine/handler/wrapper files.
-Final-head package gate pending after formatting/evidence commit.
+Fresh uncached dedicated target; workspace Clippy (all targets, warnings denied)
+followed by workspace tests passed. Runner-generated formatting patch applied
+only to owned engine/handler/wrapper files. Final formatting/documentation commit
+is also validated with the cadence-history package gate (see branch CI checks).
 
 Source entry points for every requested non-test/non-mock engine, handler and
 wrapper file are represented below. The implementation uses the requested
@@ -293,3 +292,15 @@ CountDLQ follow-up: corrected entries to HashMap<HistoryDLQCountKey, i64>
 (shard ID + source cluster); shard adapters return cluster counts directly.
 Collect futures in completion order to retain errgroup first-failure behavior.
 Outcome methods preserve partial successful counts alongside the mapped error.
+
+## Final source validation (including DLQ outcome correction)
+
+- Run: https://github.com/auenkr/cadence-rust/actions/runs/41924902412
+- Source head: `e6353b96fff355f4c4ebf33c743f4baa61ebb847`.
+- Conclusion: **success**; fresh uncached dedicated target, workspace Clippy then workspace tests.
+- Dispatch: `gh workflow run rust-ci.yml --ref history-port-engine -f clean_target=true -f format_all=true`.
+- Applied its exact format-all patch only to owned modules; no local Cargo/rustfmt.
+- Checklist cross-check found every engine/handler Go function name in this document.
+- 41924249507 was superseded by the DLQ source correction; it is not final evidence.
+- Branch stays unmerged and undeleted. Concrete dependency and transport adapters
+  remain TODO(link); no integration test or SDK parity claim.

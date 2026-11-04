@@ -540,7 +540,10 @@ impl<M: WireMapper> GrpcHandler<M> {
         request: M::CountDlqMessagesRequest,
     ) -> (Option<M::CountDlqMessagesResponse>, Option<M::Error>) {
         let request = self.mapper.to_count_dlq_messages_request(request);
-        let (response, error) = self.handler.count_dlq_messages_with_partial(request.as_ref()).await;
+        let (response, error) = self
+            .handler
+            .count_dlq_messages_with_partial(request.as_ref())
+            .await;
         (
             response.map(|response| self.mapper.encode_count_dlq_messages_response(response)),
             error.map(|error| self.mapper.error(error)),
