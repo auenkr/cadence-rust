@@ -72,7 +72,7 @@ pub fn handle_buffered_queries(registry: &Registry, observer: &impl QueryObserve
     for (id, result) in results {
         let state = match observer.check_blob_size(&result.answer) {
             Err(error) => TerminationState { termination_type: TerminationType::Failed, query_result: None, failure: Some(error) },
-            Ok(()) => TerminationState { termination_type: TerminationType::Completed, query_result: Some(result.clone()), failure: None },
+            Ok(()) => TerminationState { termination_type: TerminationType::Completed, query_result: Some(result.clone().into()), failure: None },
         };
         set(id, state);
     }

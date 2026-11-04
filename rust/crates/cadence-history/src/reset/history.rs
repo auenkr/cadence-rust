@@ -120,3 +120,29 @@ pub fn replay_reset_workflow<R: ResetRebuilder>(r: &R, request: &RebuildRequest<
     r.set_history_size(&mut context, size);
     Ok(r.new_workflow(context, state))
 }
+
+pub trait ResetEngineBackend: ResetRebuilder + ResetPersistence<Workflow = <Self as ResetRebuilder>::Workflow>
+where Self::MutableState: ResetPreparation + ResetTermination {
+    fn current_workflow_info(&self, workflow: &<Self as ResetRebuilder>::Workflow) -> Result<super::CurrentWorkflowInfo, ResetError>;
+    fn active_failover_version(&self, domain_id: &str, selection_policy: &[u8]) -> Result<i64, ResetError>;
+    fn mutable_state<'a>(&self, workflow: &'a mut <Self as ResetRebuilder>::Workflow) -> &'a mut Self::MutableState;
+    fn release_reset_workflow(&self, workflow: &<Self as ResetRebuilder>::Workflow, error: Option<&ResetError>);
+}
+/// Complete reset entry point; dependency traits expose only execution/store primitives.
+#[allow(clippy::too_many_arguments)]
+pub fn reset_workflow<R: ResetEngineBackend>(backend: &R, domain_id: &str, workflow_id: &str, base_run_id: &str, base_branch_token: &[u8], base_rebuild_last_event_id: i64, base_rebuild_last_event_version: i64, base_next_event_id: i64, reset_run_id: &str, reset_request_id: &str, current: &mut <R as ResetRebuilder>::Workflow, reason: &str, additional_events: &[HistoryEvent], skip_signal_reapply: bool) -> Result<(), ResetError>
+where R::MutableState: ResetPreparation + ResetTermination {
+    let current_info = backend.current_workflow_info(current)?;
+    let mut version = backend.active_failover_version(domain_id, &current_info.selection_policy)?;
+    let terminated = current_info.is_running;
+    if terminated {
+        let state = backend.mutable_state(current);
+        terminate_workflow(state, reason)?;
+        version = state.current_version();
+    }
+    let mut reset = replay_reset_workflow(backend, &RebuildRequest { domain_id, workflow_id, base_run_id, base_branch_token, last_event_id: base_rebuild_last_event_id, last_event_version: base_rebuild_last_event_version, reset_run_id, reset_request_id })?;
+    prepare_reset_workflow(backend, backend.mutable_state(&mut reset), domain_id, workflow_id, base_run_id, base_branch_token, base_rebuild_last_event_id, base_next_event_id, reset_run_id, reset_request_id, version, reason, additional_events, skip_signal_reapply, &current_info)?;
+    let result = persist_to_db(backend, terminated, current, &reset);
+    backend.release_reset_workflow(&reset, result.as_ref().err());
+    result
+}

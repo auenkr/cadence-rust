@@ -281,9 +281,9 @@ pub fn check_workflow_size(
     }
 }
 pub fn check_blob_size(blob_size: usize, limits: WorkflowSizeLimits) -> SizeAction {
-    if limits.blob_size_error > 0 && blob_size > limits.blob_size_error {
+    if blob_size > limits.blob_size_error {
         SizeAction::Fail
-    } else if limits.blob_size_warn > 0 && blob_size > limits.blob_size_warn {
+    } else if blob_size > limits.blob_size_warn.min(limits.blob_size_error) {
         SizeAction::Warn
     } else {
         SizeAction::Continue
@@ -553,7 +553,7 @@ pub fn normalize_activity_timeouts(
     } else if start && run {
         t.schedule_to_close_seconds = t
             .schedule_to_start_seconds
-            .saturating_add(t.start_to_close_seconds)
+            .wrapping_add(t.start_to_close_seconds)
             .min(workflow_timeout)
     } else {
         return Err(DecisionError::new(
@@ -573,7 +573,7 @@ pub fn validate_timer_timeout(
     if timer_id.is_empty() {
         return Err(DecisionError::new("TimerId is not set on decision."));
     }
-    if max_id_length > 0 && timer_id.len() > max_id_length {
+    if timer_id.len() > max_id_length {
         return Err(DecisionError::new("TimerId exceeds length limit."));
     }
     if start_to_fire_timeout_seconds <= 0 {
@@ -605,7 +605,7 @@ pub fn validated_task_list(
     {
         kind = default_kind
     }
-    if max_name_length > 0 && name.len() > max_name_length {
+    if name.len() > max_name_length {
         return Err(DecisionError::new(format!(
             "task list name exceeds length limit of {max_name_length}"
         )));
@@ -701,7 +701,7 @@ pub fn validate_activity_schedule_attributes(
     if a.activity_id.is_empty() {
         return Err(DecisionError::new("ActivityId is not set on decision."));
     }
-    if max_activity_id > 0 && a.activity_id.len() > max_activity_id {
+    if a.activity_id.len() > max_activity_id {
         return Err(DecisionError::new("ActivityID exceeds length limit."));
     }
     let activity_type = a
@@ -711,7 +711,7 @@ pub fn validate_activity_schedule_attributes(
     if activity_type.name.is_empty() {
         return Err(DecisionError::new("ActivityType is not set on decision."));
     }
-    if max_activity_type > 0 && activity_type.name.len() > max_activity_type {
+    if activity_type.name.len() > max_activity_type {
         return Err(DecisionError::new("ActivityType exceeds length limit."));
     }
     validate_retry_policy(a.retry_policy.as_ref())?;
@@ -850,7 +850,7 @@ pub fn validate_activity_cancel_attributes(
     if a.activity_id.is_empty() {
         return Err(DecisionError::new("ActivityId is not set on decision."));
     }
-    if max_id_length > 0 && a.activity_id.len() > max_id_length {
+    if a.activity_id.len() > max_id_length {
         return Err(DecisionError::new("ActivityId exceeds length limit."));
     }
     Ok(())
@@ -881,7 +881,7 @@ pub fn validate_record_marker_attributes(
     if a.marker_name.is_empty() {
         return Err(DecisionError::new("MarkerName is not set on decision."));
     }
-    if max_name_length > 0 && a.marker_name.len() > max_name_length {
+    if a.marker_name.len() > max_name_length {
         return Err(DecisionError::new("MarkerName exceeds length limit."));
     }
     Ok(())
@@ -962,6 +962,7 @@ fn search_value_matches(bytes: &[u8], kind: cadence_api::enums::IndexedValueType
     };
     fn scalar(v: &serde_json::Value, k: cadence_api::enums::IndexedValueType) -> bool {
         use cadence_api::enums::IndexedValueType as T;
+        if v.is_null() { return true; }
         match k {
             T::String | T::Keyword => v.is_string(),
             T::Int => v.as_i64().is_some(),
@@ -1074,7 +1075,7 @@ pub fn validate_continue_as_new_workflow_execution_attributes(
         })
     }
     let wt = a.workflow_type.as_ref().unwrap();
-    if max_workflow_type > 0 && wt.name.len() > max_workflow_type {
+    if wt.name.len() > max_workflow_type {
         return Err(DecisionError::new("WorkflowType exceeds length limit."));
     }
     let (task_name, task_kind) = a
@@ -1103,7 +1104,7 @@ pub fn validate_continue_as_new_workflow_execution_attributes(
     if a.backoff_start_interval_in_seconds.unwrap_or(0) < 0 {
         return Err(DecisionError::new("BackoffStartInterval is less than 0."));
     }
-    if let Some(sa) = a.search_attributes.as_ref() {
+    if let Some(sa) = a.search_attributes.as_ref().filter(|sa| sa.indexed_fields.as_ref().is_some_and(|f| !f.is_empty())) {
         let attrs = cadence_api::tasks::UpsertWorkflowSearchAttributesDecisionAttributes {
             search_attributes: Some(sa.clone()),
         };
@@ -1113,11 +1114,11 @@ pub fn validate_continue_as_new_workflow_execution_attributes(
 }
 
 #[derive(Debug,Clone,Default,PartialEq,Eq)]pub struct AcquireSemaphoreDecisionAttributes{pub semaphore_name:String,pub permits:i64,pub wait_timeout_seconds:Option<i32>}
-pub fn validate_acquire_semaphore_attributes(a:Option<&AcquireSemaphoreDecisionAttributes>,max_name_length:usize)->Result<(),DecisionError>{let a=a.ok_or_else(||DecisionError::new("AcquireSemaphoreDecisionAttributes is not set on decision."))?;if a.semaphore_name.is_empty(){return Err(DecisionError::new("SemaphoreName is not set on decision."))}if max_name_length>0&&a.semaphore_name.len()>max_name_length{return Err(DecisionError::new("SemaphoreName exceeds length limit."))}if a.wait_timeout_seconds.unwrap_or(0)<0{return Err(DecisionError::new(format!("Invalid WaitTimeoutSeconds: {}",a.wait_timeout_seconds.unwrap())))}Ok(())}
+pub fn validate_acquire_semaphore_attributes(a:Option<&AcquireSemaphoreDecisionAttributes>,max_name_length:usize)->Result<(),DecisionError>{let a=a.ok_or_else(||DecisionError::new("AcquireSemaphoreDecisionAttributes is not set on decision."))?;if a.semaphore_name.is_empty(){return Err(DecisionError::new("SemaphoreName is not set on decision."))}if a.semaphore_name.len()>max_name_length{return Err(DecisionError::new("SemaphoreName exceeds length limit."))}if a.wait_timeout_seconds.unwrap_or(0)<0{return Err(DecisionError::new(format!("Invalid WaitTimeoutSeconds: {}",a.wait_timeout_seconds.unwrap())))}Ok(())}
 pub fn fail_workflow_semaphore_not_found_details(name:&str,domain_name:&str)->String{format!("semaphore \"{name}\" does not exist in domain \"{domain_name}\"")}
 
-#[allow(clippy::too_many_arguments)]pub fn validate_cancel_external_workflow_execution_attributes(lookup:&impl DomainReplicationLookup,source_domain_id:&str,target_domain_id:&str,a:Option<&cadence_api::tasks::RequestCancelExternalWorkflowExecutionDecisionAttributes>,max_domain_length:usize,max_workflow_id_length:usize)->Result<(),DecisionError>{validate_cross_domain_call(lookup,source_domain_id,target_domain_id)?;let a=a.ok_or_else(||DecisionError::new("RequestCancelExternalWorkflowExecutionDecisionAttributes is not set on decision."))?;if a.workflow_id.is_empty(){return Err(DecisionError::new("WorkflowId is not set on decision."))}if max_domain_length>0&&a.domain.len()>max_domain_length{return Err(DecisionError::new("Domain exceeds length limit."))}if max_workflow_id_length>0&&a.workflow_id.len()>max_workflow_id_length{return Err(DecisionError::new("WorkflowId exceeds length limit."))}if !a.run_id.is_empty()&&uuid::Uuid::parse_str(&a.run_id).is_err(){return Err(DecisionError::new("Invalid RunId set on decision."))}Ok(())}
-#[allow(clippy::too_many_arguments)]pub fn validate_signal_external_workflow_execution_attributes(lookup:&impl DomainReplicationLookup,source_domain_id:&str,target_domain_id:&str,a:Option<&cadence_api::tasks::SignalExternalWorkflowExecutionDecisionAttributes>,max_domain_length:usize,max_workflow_id_length:usize)->Result<(),DecisionError>{validate_cross_domain_call(lookup,source_domain_id,target_domain_id)?;let a=a.ok_or_else(||DecisionError::new("SignalExternalWorkflowExecutionDecisionAttributes is not set on decision."))?;let execution=a.execution.as_ref().ok_or_else(||DecisionError::new("Execution is nil on decision."))?;if execution.workflow_id.is_empty(){return Err(DecisionError::new("WorkflowId is not set on decision."))}if max_domain_length>0&&a.domain.len()>max_domain_length{return Err(DecisionError::new("Domain exceeds length limit."))}if max_workflow_id_length>0&&execution.workflow_id.len()>max_workflow_id_length{return Err(DecisionError::new("WorkflowId exceeds length limit."))}if !execution.run_id.is_empty()&&uuid::Uuid::parse_str(&execution.run_id).is_err(){return Err(DecisionError::new("Invalid RunId set on decision."))}if a.signal_name.is_empty(){return Err(DecisionError::new("SignalName is not set on decision."))}Ok(())}
+#[allow(clippy::too_many_arguments)]pub fn validate_cancel_external_workflow_execution_attributes(lookup:&impl DomainReplicationLookup,source_domain_id:&str,target_domain_id:&str,a:Option<&cadence_api::tasks::RequestCancelExternalWorkflowExecutionDecisionAttributes>,max_domain_length:usize,max_workflow_id_length:usize)->Result<(),DecisionError>{validate_cross_domain_call(lookup,source_domain_id,target_domain_id)?;let a=a.ok_or_else(||DecisionError::new("RequestCancelExternalWorkflowExecutionDecisionAttributes is not set on decision."))?;if a.workflow_id.is_empty(){return Err(DecisionError::new("WorkflowId is not set on decision."))}if a.domain.len()>max_domain_length{return Err(DecisionError::new("Domain exceeds length limit."))}if a.workflow_id.len()>max_workflow_id_length{return Err(DecisionError::new("WorkflowId exceeds length limit."))}if !a.run_id.is_empty()&&uuid::Uuid::parse_str(&a.run_id).is_err(){return Err(DecisionError::new("Invalid RunId set on decision."))}Ok(())}
+#[allow(clippy::too_many_arguments)]pub fn validate_signal_external_workflow_execution_attributes(lookup:&impl DomainReplicationLookup,source_domain_id:&str,target_domain_id:&str,a:Option<&cadence_api::tasks::SignalExternalWorkflowExecutionDecisionAttributes>,max_domain_length:usize,max_workflow_id_length:usize)->Result<(),DecisionError>{validate_cross_domain_call(lookup,source_domain_id,target_domain_id)?;let a=a.ok_or_else(||DecisionError::new("SignalExternalWorkflowExecutionDecisionAttributes is not set on decision."))?;let execution=a.execution.as_ref().ok_or_else(||DecisionError::new("Execution is nil on decision."))?;if execution.workflow_id.is_empty(){return Err(DecisionError::new("WorkflowId is not set on decision."))}if a.domain.len()>max_domain_length{return Err(DecisionError::new("Domain exceeds length limit."))}if execution.workflow_id.len()>max_workflow_id_length{return Err(DecisionError::new("WorkflowId exceeds length limit."))}if !execution.run_id.is_empty()&&uuid::Uuid::parse_str(&execution.run_id).is_err(){return Err(DecisionError::new("Invalid RunId set on decision."))}if a.signal_name.is_empty(){return Err(DecisionError::new("SignalName is not set on decision."))}Ok(())}
 
 pub trait WorkflowSizeMutableState{fn next_event_id(&self)->i64;fn history_size(&self)->i64;fn add_fail_workflow_event(&mut self,completed_event_id:i64,reason:&str,details:&[u8])->Result<(),DecisionError>;}
 pub trait WorkflowSizeObserver{fn record_history_size(&self,_size:i64){}fn record_history_count(&self,_count:i64){}fn warn_history_limit(&self,_size:i64,_count:i64){}fn error_history_limit(&self,_size:i64,_count:i64){}}

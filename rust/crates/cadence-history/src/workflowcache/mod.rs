@@ -33,6 +33,7 @@ struct Item {
     external: Arc<dyn Limiter>,
     internal: Arc<dyn Limiter>,
     last_access: Instant,
+    created: Instant,
     external_count: WorkflowIdCountMetric,
     internal_count: WorkflowIdCountMetric,
 }
@@ -82,7 +83,7 @@ impl WorkflowCache {
         let key = (domain_name.clone(), workflow_id.to_owned());
         let now = Instant::now();
         let mut items = self.items.lock().unwrap();
-        items.retain(|_, v| now.duration_since(v.last_access) <= self.ttl);
+        items.retain(|_, v| self.ttl.is_zero() || now.duration_since(v.created) <= self.ttl);
         if let Some(v) = items.get_mut(&key) {
             v.last_access = now;
             return match kind {
@@ -106,6 +107,7 @@ impl WorkflowCache {
             external: self.external_factory.limiter(&domain_name),
             internal: self.internal_factory.limiter(&domain_name),
             last_access: now,
+            created: now,
             external_count: WorkflowIdCountMetric::default(),
             internal_count: WorkflowIdCountMetric::default(),
         };

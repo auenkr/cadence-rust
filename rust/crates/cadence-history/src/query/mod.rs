@@ -1,7 +1,7 @@
 //! In-memory workflow query registry, ported from Go `service/history/query`.
 use cadence_api::{
     enums::QueryResultType,
-    tasks::{WorkflowQuery, WorkflowQueryResult},
+    tasks::WorkflowQuery,
 };
 use std::{
     collections::HashMap,
@@ -10,6 +10,24 @@ use std::{
 use tokio::sync::watch;
 use uuid::Uuid;
 
+/// Preserve Go's distinction between a nil answer and a present empty answer.
+#[derive(Debug, Clone)]
+pub struct WorkflowQueryResult {
+    pub result_type: Option<QueryResultType>,
+    pub answer: Option<Vec<u8>>,
+    pub error_message: String,
+}
+impl From<cadence_api::tasks::WorkflowQueryResult> for WorkflowQueryResult {
+    fn from(result: cadence_api::tasks::WorkflowQueryResult) -> Self {
+        let answered = result.result_type.unwrap_or(QueryResultType::Answered) == QueryResultType::Answered;
+        Self { result_type: result.result_type, answer: if answered || !result.answer.is_empty() { Some(result.answer) } else { None }, error_message: result.error_message }
+    }
+}
+pub async fn wait_for_termination(mut channel: watch::Receiver<bool>) {
+    while !*channel.borrow_and_update() {
+        if channel.changed().await.is_err() { return; }
+    }
+}
 pub const TERMINATION_TYPE_COMPLETED: i32 = 0;
 pub const TERMINATION_TYPE_UNBLOCKED: i32 = 1;
 pub const TERMINATION_TYPE_FAILED: i32 = 2;
@@ -82,11 +100,11 @@ pub fn validate_termination_state(s: Option<&TerminationState>) -> Result<(), Qu
             if s.failure.is_some() {
                 return Err(QueryError(ERR_TERMINATION_STATE_INVALID));
             }
-            let answered = r.result_type == Some(QueryResultType::Answered)
-                && !r.answer.is_empty()
+            let answered = r.result_type.unwrap_or(QueryResultType::Answered) == QueryResultType::Answered
+                && r.answer.is_some()
                 && r.error_message.is_empty();
             let failed = r.result_type == Some(QueryResultType::Failed)
-                && r.answer.is_empty()
+                && r.answer.is_none()
                 && !r.error_message.is_empty();
             if answered || failed {
                 Ok(())
