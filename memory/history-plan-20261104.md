@@ -29,7 +29,7 @@ All Cargo on CI (`gh workflow run rust-ci.yml --ref <branch> -f package=cadence-
   parity audit doc; then remove Go dependency.
 
 ## Status
-- [ ] H1  - [ ] H2  - [ ] H3  - [ ] H4  - [ ] H5  - [ ] H6  - [ ] H7
+- [ ] H1  - [~] H2 (skeleton merged; TChannel+shard recovery pending)  - [ ] H3  - [ ] H4  - [ ] H5  - [ ] H6  - [ ] H7
 
 ## Go package sizes (non-test lines) for task breakdown
 execution 14167, task 8318, queuev2 5752, queue 5731, engine 5558, ndc 3952,
