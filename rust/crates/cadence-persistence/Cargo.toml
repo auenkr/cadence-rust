@@ -22,9 +22,9 @@ sqlparser = "0.53"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 rand = "0.8"
 rusqlite = { version = "0.32.1", features = ["bundled", "hooks"] }
-mysql = { version = "26.0.1", default-features = false, features = ["minimal-rust", "rustls-tls-ring"] }
+mysql = { version = "26.0.1", default-features = false, features = ["minimal-rust", "rustls-tls-ring", "chrono"] }
 mysql_async = { version = "=0.37.1", default-features = false, features = ["minimal-rust", "rustls-tls", "ring"] }
-postgres = { version = "0.19", default-features = false }
+postgres = { version = "0.19", default-features = false, features = ["with-chrono-0_4"] }
 postgres-openssl = "0.5"
 openssl = "0.10"
 farmhash = "1.1.5"

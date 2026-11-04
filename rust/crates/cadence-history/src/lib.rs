@@ -1,9 +1,11 @@
 //! History service bootstrap and shard ownership primitives.
 
 pub mod config;
+pub mod engine;
 pub mod execution;
 pub mod mutable_state;
 pub mod mutable_state_activity;
+pub mod queue;
 pub mod shard;
 
 pub const SERVICE_NAME: &str = "history";
@@ -122,6 +124,8 @@ mod rpc_tests {
 }
 pub mod task;
 pub mod taskdlq;
+pub mod handler;
+pub mod wrappers;
 pub mod decision;
 pub mod events;
 pub mod query;

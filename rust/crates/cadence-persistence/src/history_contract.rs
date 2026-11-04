@@ -58,7 +58,7 @@ pub struct ActivityInfo {
     pub retry_initial_interval_seconds:i32, pub retry_maximum_interval_seconds:i32, pub retry_maximum_attempts:i32,
     pub retry_expiration_time_unix_nanos:i64, pub retry_backoff_coefficient:f64, pub retry_jitter_coefficient:f64,
     pub retry_non_retriable_errors:Vec<String>, pub retry_last_failure_reason:String, pub retry_last_worker_identity:String,
-    pub retry_last_failure_details:Vec<u8>,
+    pub retry_last_failure_details:Vec<u8>, pub retry_last_failure_category:i32, pub retry_last_retry_interval_seconds:i32,
 }
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ChildExecutionInfo { pub version:i64, pub initiated_event_batch_id:i64, pub started_id:i64, pub initiated_event:Vec<u8>, pub initiated_event_encoding:String, pub started_workflow_id:String, pub started_run_id:Vec<u8>, pub started_event:Vec<u8>, pub started_event_encoding:String, pub create_request_id:String, pub domain_id:String, pub domain_name:String, pub workflow_type_name:String, pub parent_close_policy:i32 }
@@ -73,25 +73,31 @@ pub struct TimerInfo { pub version:i64, pub started_id:i64, pub expiry_time_unix
 pub struct SqlWorkflowExecutionInfo { pub parent_domain_id:Vec<u8>, pub parent_workflow_id:String, pub parent_run_id:Vec<u8>, pub initiated_id:i64, pub completion_event_batch_id:i64, pub completion_event:Vec<u8>, pub completion_event_encoding:String, pub task_list:String, pub task_list_kind:i32, pub workflow_type_name:String, pub workflow_timeout_seconds:i32, pub decision_task_timeout_seconds:i32, pub execution_context:Vec<u8>, pub state:i32, pub close_status:i32, pub start_version:i64, pub last_write_event_id:i64, pub last_event_task_id:i64, pub last_first_event_id:i64, pub last_processed_event:i64, pub start_time_unix_nanos:i64, pub last_updated_time_unix_nanos:i64, pub decision_version:i64, pub decision_schedule_id:i64, pub decision_started_id:i64, pub decision_timeout_seconds:i32, pub decision_attempt:i64, pub decision_started_timestamp_unix_nanos:i64, pub decision_scheduled_timestamp_unix_nanos:i64, pub cancel_requested:bool, pub decision_original_scheduled_timestamp_unix_nanos:i64, pub create_request_id:String, pub decision_request_id:String, pub cancel_request_id:String, pub sticky_task_list:String, pub sticky_schedule_to_start_timeout_seconds:i64, pub retry_attempt:i64, pub retry_initial_interval_seconds:i32, pub retry_maximum_interval_seconds:i32, pub retry_maximum_attempts:i32, pub retry_expiration_seconds:i32, pub retry_backoff_coefficient:f64, pub retry_jitter_coefficient:f64, pub retry_expiration_time_unix_nanos:i64, pub retry_non_retryable_errors:Vec<String>, pub has_retry_policy:bool, pub cron_schedule:String, pub event_store_version:i32, pub event_branch_token:Vec<u8>, pub signal_count:i64, pub history_size:i64, pub client_library_version:String, pub client_feature_version:String, pub client_impl:String, pub auto_reset_points:Vec<u8>, pub auto_reset_points_encoding:String, pub search_attributes:BTreeMap<String,Vec<u8>>, pub memo:BTreeMap<String,Vec<u8>>, pub version_histories:Vec<u8>, pub version_histories_encoding:String, pub first_execution_run_id:Vec<u8>, pub partition_config:BTreeMap<String,String>, pub checksum:Vec<u8>, pub checksum_encoding:String, pub cron_overlap_policy:i32, pub active_cluster_selection_policy:Vec<u8>, pub active_cluster_selection_policy_encoding:String }
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct WorkflowSnapshot {
+    pub activity_heartbeats: BTreeMap<i64, ActivityHeartbeat>, pub buffered_events: Vec<DataBlob>,
     pub execution_info: WorkflowExecutionInfo, pub version_histories: Option<DataBlob>,
     pub start_version: i64, pub last_write_version: i64,
-    pub activity_infos: Vec<DataBlob>, pub timer_infos: Vec<DataBlob>,
-    pub workflow_timer_tasks: Vec<HistoryTaskKey>, pub child_execution_infos: Vec<DataBlob>,
-    pub request_cancel_infos: Vec<DataBlob>, pub signal_infos: Vec<DataBlob>,
+    pub activity_infos: Vec<KeyedBlob<i64>>, pub timer_infos: Vec<KeyedBlob<String>>,
+    pub workflow_timer_tasks: Vec<HistoryTaskKey>, pub child_execution_infos: Vec<KeyedBlob<i64>>,
+    pub request_cancel_infos: Vec<KeyedBlob<i64>>, pub signal_infos: Vec<KeyedBlob<i64>>,
     pub semaphore_infos: Vec<DataBlob>, pub signal_requested_ids: Vec<String>,
     pub tasks_by_category: BTreeMap<HistoryTaskCategory, Vec<Task>>, pub workflow_requests: Vec<WorkflowRequest>,
     pub condition: i64, pub checksum: Option<DataBlob>,
 }
+/// A Go workflow-state map value keeps its identity in SQL key columns and
+/// serializes only the value into `data`/`data_encoding`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyedBlob<K> { pub key:K, pub value:DataBlob }
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct WorkflowMutation {
+    pub activity_heartbeats: BTreeMap<i64, ActivityHeartbeat>,
     pub execution_info: WorkflowExecutionInfo, pub version_histories: Option<DataBlob>,
     pub start_version: i64, pub last_write_version: i64,
-    pub upsert_activity_infos: Vec<DataBlob>, pub delete_activity_infos: Vec<i64>, pub rewrite_activity_infos: Vec<DataBlob>,
-    pub upsert_timer_infos: Vec<DataBlob>, pub delete_timer_infos: Vec<String>, pub rewrite_timer_infos: Vec<DataBlob>,
+    pub upsert_activity_infos: Vec<KeyedBlob<i64>>, pub delete_activity_infos: Vec<i64>, pub rewrite_activity_infos: Vec<KeyedBlob<i64>>,
+    pub upsert_timer_infos: Vec<KeyedBlob<String>>, pub delete_timer_infos: Vec<String>, pub rewrite_timer_infos: Vec<KeyedBlob<String>>,
     pub sentinel_write_enabled: bool, pub workflow_timer_tasks: Vec<HistoryTaskKey>,
-    pub upsert_child_execution_infos: Vec<DataBlob>, pub delete_child_execution_infos: Vec<i64>,
-    pub upsert_request_cancel_infos: Vec<DataBlob>, pub delete_request_cancel_infos: Vec<i64>,
-    pub upsert_signal_infos: Vec<DataBlob>, pub delete_signal_infos: Vec<i64>,
+    pub upsert_child_execution_infos: Vec<KeyedBlob<i64>>, pub delete_child_execution_infos: Vec<i64>,
+    pub upsert_request_cancel_infos: Vec<KeyedBlob<i64>>, pub delete_request_cancel_infos: Vec<i64>,
+    pub upsert_signal_infos: Vec<KeyedBlob<i64>>, pub delete_signal_infos: Vec<i64>,
     pub upsert_semaphore_infos: Vec<DataBlob>, pub delete_semaphore_infos: Vec<i64>,
     pub upsert_signal_requested_ids: Vec<String>, pub delete_signal_requested_ids: Vec<String>,
     pub new_buffered_events: Option<DataBlob>, pub clear_buffered_events: bool,
@@ -101,7 +107,7 @@ pub struct WorkflowMutation {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct HistoryTaskCategory { pub category_type: i32, pub category_id: i32 }
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct Task { pub task_type: i32, pub task_id: i64, pub data: DataBlob }
+pub struct Task { pub visibility_timestamp_unix_nanos: i64, pub task_type: i32, pub task_id: i64, pub data: DataBlob }
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct WorkflowRequest { pub request_id: String, pub data: DataBlob }
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -127,7 +133,8 @@ pub struct ReplicationTask {
     pub event_store_version:i32, pub new_run_event_store_version:i32,
     pub branch_token:Vec<u8>, pub new_run_branch_token:Vec<u8>, pub creation_time_unix_nanos:i64,
 }
-pub type CrossClusterTask = TransferTask;
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CrossClusterTask { pub transfer_task:TransferTask, pub target_cluster:String }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateWorkflowExecutionRequest { pub shard_id:i32, pub range_id:i64, pub mode:CreateWorkflowMode, pub previous_run_id:String, pub previous_last_write_version:i64, pub new_workflow_snapshot:WorkflowSnapshot, pub workflow_request_mode:WorkflowRequestMode, pub current_timestamp_unix_nanos:i64 }
@@ -188,6 +195,12 @@ pub trait GoExecutionStore: Send+Sync {
     async fn get_history_tasks(&self, range:TaskRange, category:HistoryTaskCategory)->Result<Vec<Task>,PersistenceError>;
     async fn complete_history_task(&self, shard_id:i32, category:HistoryTaskCategory, task_id:i64)->Result<(),PersistenceError>;
     async fn range_complete_history_tasks(&self, range:TaskRange, category:HistoryTaskCategory)->Result<u64,PersistenceError>;
+    async fn get_replication_dlq_page(&self, request:crate::history_task_sql::ReplicationDlqQuery)->Result<crate::history_task_sql::ReplicationDlqPage,PersistenceError>;
+    async fn range_delete_replication_dlq_page(&self, shard_id:i32, source_cluster:String, inclusive_min_id:i64, exclusive_max_id:i64, page_size:i32)->Result<u64,PersistenceError>;
+    async fn get_history_task_page(&self, request:crate::history_task_sql::HistoryTaskQuery)->Result<crate::history_task_sql::HistoryTaskPage,PersistenceError>;
+    async fn complete_history_task_batch(&self, shard_id:i32, category:HistoryTaskCategory, keys:Vec<(i64,i64)>)->Result<(),PersistenceError>;
+    async fn range_complete_history_task_page(&self, request:crate::history_task_sql::HistoryTaskQuery)->Result<u64,PersistenceError>;
+    async fn create_failover_markers_with_range(&self, shard_id:i32, range_id:i64, markers:Vec<Task>)->Result<(),PersistenceError>;
     async fn get_active_cluster_selection_policy(&self, shard_id:i32, domain_id:String, workflow_id:String, run_id:String)->Result<Option<DataBlob>,PersistenceError>;
     async fn delete_active_cluster_selection_policy(&self, shard_id:i32, domain_id:String, workflow_id:String, run_id:String)->Result<(),PersistenceError>;
 }
@@ -205,13 +218,20 @@ pub struct HistoryBranchRequest {
     pub fork_node_id:i64, pub source_branch_id:String, pub current_timestamp_unix_nanos:i64,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct HistoryBranchPage { pub nodes:Vec<DataBlob>, pub next_page_token:Vec<u8> }
+pub struct HistoryBranchPage { pub nodes:Vec<DataBlob>, pub next_page_token:Vec<u8>, pub last_node_id:i64, pub last_transaction_id:i64 }
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HistoryTreeBranch { pub shard_id:i32, pub tree_id:String, pub branch_id:String, pub fork_time_unix_nanos:i64, pub info:String, pub ancestors:Vec<HistoryBranchRange> }
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HistoryTreePage { pub branches:Vec<HistoryTreeBranch>, pub next_page_token:Vec<u8> }
 #[async_trait]
 pub trait GoHistoryV2Store: Send+Sync {
     async fn append_history_nodes(&self, request:HistoryBranchRequest)->Result<(),PersistenceError>;
     async fn read_history_branch(&self, request:HistoryBranchRequest)->Result<HistoryBranchPage,PersistenceError>;
-    async fn fork_history_branch(&self, request:HistoryBranchRequest, fork_node_id:i64, new_branch_id:String)->Result<String,PersistenceError>;
+    async fn fork_history_branch(&self, request:HistoryBranchRequest, fork_node_id:i64, new_branch_id:String)->Result<HistoryBranchRequest,PersistenceError>;
     async fn delete_history_branch(&self, request:HistoryBranchRequest)->Result<(),PersistenceError>;
-    async fn get_history_tree(&self, request:HistoryBranchRequest)->Result<DataBlob,PersistenceError>;
-    async fn get_all_history_tree_branches(&self, shard_id:i32, page_size:i32, next_page_token:Vec<u8>)->Result<HistoryBranchPage,PersistenceError>;
+    async fn get_history_tree(&self, request:HistoryBranchRequest)->Result<Vec<HistoryTreeBranch>,PersistenceError>;
+    async fn get_all_history_tree_branches(&self, shard_id:i32, page_size:i32, next_page_token:Vec<u8>)->Result<HistoryTreePage,PersistenceError>;
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ActivityHeartbeat { pub details: Vec<u8>, pub updated_time_unix_nanos: i64 }

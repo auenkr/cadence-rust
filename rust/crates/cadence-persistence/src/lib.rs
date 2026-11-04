@@ -17,6 +17,8 @@ pub mod history_branch;
 pub mod history_cassandra;
 pub mod history_reader;
 pub mod history_sql;
+pub mod history_state_maps_sql;
+pub mod history_state_non_maps_sql;
 pub mod history_contract;
 pub mod history_sql_queries;
 pub mod sql_execution_store;
@@ -65,3 +67,11 @@ pub mod matching_domain_metadata;
 pub mod matching_domain_mysql;
 pub mod matching_domain_postgres;
 pub mod matching_retry;
+
+pub mod history_sql_backend;
+pub mod sql_history_store;
+pub mod history_tree_token;
+
+pub mod history_task_sql;
+
+pub mod sql_workflow_store;

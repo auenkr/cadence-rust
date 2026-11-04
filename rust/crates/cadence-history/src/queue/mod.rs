@@ -1,0 +1,20 @@
+//! Port of `go/service/history/queue/` (history queue v1).
+pub mod action;
+pub mod constants;
+pub mod deps;
+pub mod domain_filter;
+pub mod processing_queue;
+pub mod processing_queue_collection;
+pub mod processing_queue_state;
+pub mod processor_base;
+pub mod processor_options;
+pub mod split_policy;
+pub mod util;
+pub mod config;
+pub mod processor_options_factory;
+pub mod transfer_queue_validator;
+pub mod task_allocator;
+pub mod transfer_queue_processor_base;
+pub mod interface;
+pub mod shard_deps;
+pub mod transfer_queue_processor;
