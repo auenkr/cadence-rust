@@ -69,6 +69,8 @@ pub enum HistoryError {
     /// `persistence.ShardOwnershipLostError`
     #[error("{0}")]
     PersistenceShardOwnershipLost(String),
+    #[error("{0}")]
+    TransactionSizeLimit(String),
     /// `persistence.TimeoutError`
     #[error("{0}")]
     PersistenceTimeout(String),
