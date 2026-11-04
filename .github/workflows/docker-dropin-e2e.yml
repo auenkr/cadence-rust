@@ -1,0 +1,172 @@
+name: Docker drop-in e2e (swap image name, run cadence-samples, restart)
+# Proves "I just change the image name of the container and it should work".
+# The compose file (tests/docker-drop-in/docker-compose.split.yml, the upstream
+# go/docker mysql compose split one-service-per-container) is rendered twice with
+# `docker compose config`; the diff between the Go and Rust rendering is asserted to be
+# ONLY the `image:` lines of frontend+matching. History and Worker stay Go: the Rust
+# History/Worker services are not ported yet, so the single all-in-one upstream
+# container (go/docker/docker-compose-mysql.yml `cadence`) cannot be a Rust image.
+on:
+  workflow_dispatch:
+    inputs:
+      samples_ref:
+        description: cadence-samples commit
+        default: cc365fe999740e61b1bca45816fedd5b6adaa876
+concurrency:
+  group: docker-dropin-e2e-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      DOMAIN: cadence-samples
+      CLI_FLAGS: --address 127.0.0.1:7833 --transport grpc --domain cadence-samples
+    steps:
+      - uses: actions/checkout@v4
+      - run: git submodule update --init go/idls
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+      - name: Build Go image
+        run: |
+          mkdir -p out
+          mkdir /tmp/gobuild
+          rsync -a --exclude .git go/ /tmp/gobuild/
+          git -C /tmp/gobuild init -q
+          git -C /tmp/gobuild add -A >/dev/null
+          git -C /tmp/gobuild -c user.email=ci@example.com -c user.name=ci commit -qm ci
+          docker build -f /tmp/gobuild/Dockerfile --target cadence-auto-setup -t cadence-go:ci /tmp/gobuild > out/go-build.log 2>&1 || { tail -40 out/go-build.log; exit 1; }
+          docker image inspect cadence-go:ci --format 'go image id={{.Id}} size={{.Size}}' | tee out/images.txt
+      - name: Build Rust image
+        run: |
+          set +e
+          docker build --pull=false -f rust/Dockerfile --build-arg GO_IMAGE=cadence-go:ci -t cadence-rust:ci . > out/rust-build.log 2>&1; echo $? > out/rust-build.exit
+          set -e
+          tail -10 out/rust-build.log
+          test "$(cat out/rust-build.exit)" = 0
+          docker image inspect cadence-rust:ci --format 'rust image id={{.Id}} size={{.Size}}' | tee -a out/images.txt
+          docker run --rm --entrypoint cat cadence-rust:ci /etc/cadence/cadence-server.sha256 | tee out/rust-binary.sha256
+      - name: Build CLI and samples
+        run: |
+          (cd go && go build -p 2 -ldflags='-s -w' -o "$GITHUB_WORKSPACE/out/cadence-cli" ./cmd/tools/cli)
+          git clone -q https://github.com/cadence-workflow/cadence-samples /tmp/cs
+          git -C /tmp/cs checkout -q "${{ inputs.samples_ref }}"
+          git -C /tmp/cs log -1 --format='samples %H' | tee out/samples.txt
+          mkdir -p /tmp/cs/bin
+          cd /tmp/cs
+          for s in helloworld signalcounter timer childworkflow query cancelactivity sleep; do
+            go build -p 2 -o bin/$s ./cmd/samples/recipes/$s
+          done
+          go build -p 2 -o bin/cron ./cmd/samples/cron
+          ls bin
+      - name: Image-name-only diff of the compose file
+        run: |
+          export COMPOSE_FILE=tests/docker-drop-in/docker-compose.split.yml
+          CADENCE_IMAGE_FRONTEND=cadence-go:ci CADENCE_IMAGE_MATCHING=cadence-go:ci docker compose config > out/compose-go.yml
+          CADENCE_IMAGE_FRONTEND=cadence-rust:ci CADENCE_IMAGE_MATCHING=cadence-rust:ci docker compose config > out/compose-rust.yml
+          diff out/compose-go.yml out/compose-rust.yml | tee out/compose.diff || true
+          # every changed line must be an image: line
+          test -z "$(grep '^[<>]' out/compose.diff | grep -v 'image: cadence-')"
+          test "$(grep -c '^>' out/compose.diff)" = 2
+      - name: Start cluster (Rust frontend+matching, Go history+worker)
+        run: |
+          export COMPOSE_FILE=tests/docker-drop-in/docker-compose.split.yml
+          export CADENCE_IMAGE_FRONTEND=cadence-rust:ci CADENCE_IMAGE_MATCHING=cadence-rust:ci
+          docker compose up -d > out/compose-up.log 2>&1 || { cat out/compose-up.log; docker compose logs > out/compose.log; exit 1; }
+          for i in $(seq 1 60); do (echo > /dev/tcp/127.0.0.1/7833) 2>/dev/null && break; sleep 5; done
+          echo "COMPOSE_FILE=$COMPOSE_FILE" >> $GITHUB_ENV
+          echo "CADENCE_IMAGE_FRONTEND=cadence-rust:ci" >> $GITHUB_ENV
+          echo "CADENCE_IMAGE_MATCHING=cadence-rust:ci" >> $GITHUB_ENV
+          docker compose ps | tee out/ps.txt
+          docker compose exec -T frontend cadence-server --version 2>&1 | head -3 || true
+      - name: Register domain
+        run: |
+          cli=$PWD/out/cadence-cli
+          for i in $(seq 1 40); do
+            $cli --address 127.0.0.1:7833 --transport grpc --domain $DOMAIN domain register --rd 1 && break; sleep 5
+          done
+          sleep 10
+          $cli --address 127.0.0.1:7833 --transport grpc --domain $DOMAIN domain describe | tee out/domain.txt
+      - name: Run SDK samples
+        run: |
+          cat > /tmp/lib.sh <<'EOF'
+          cli=$GITHUB_WORKSPACE/out/cadence-cli
+          C() { $cli $CLI_FLAGS "$@"; }
+          # wf_line <id-prefix>: newest list line (open+closed) mentioning that prefix
+          wf_lines() { { C workflow list --open --more --pagesize 200; C workflow list --more --pagesize 200; } 2>&1 | grep -- "$1" || true; }
+          wf_id() { wf_lines "$1" | grep -o "$1[0-9a-f-]*" | head -1; }
+          # wait_for <prefix> <regex> <timeout-s>
+          wait_for() {
+            for i in $(seq 1 $(( $3 / 3 ))); do
+              wf_lines "$1" | grep -qi -- "$2" && { echo "OK $1 ~ $2"; return 0; }; sleep 3
+            done
+            echo "FAIL $1 !~ $2"; wf_lines "$1"; return 1
+          }
+          EOF
+          sed -i 's/^          //' /tmp/lib.sh
+          source /tmp/lib.sh
+          cd /tmp/cs
+          mkdir -p $GITHUB_WORKSPACE/out/samples
+          for s in helloworld signalcounter timer childworkflow query cancelactivity sleep cron; do
+            nohup bin/$s -m worker > $GITHUB_WORKSPACE/out/samples/$s-worker.log 2>&1 &
+          done
+          sleep 15
+          fail=0
+          t() { bin/$1 "${@:2}" >> $GITHUB_WORKSPACE/out/samples/$1-client.log 2>&1; }
+          # helloworld
+          t helloworld -m trigger; wait_for helloworld_ "complete" 120 || fail=1
+          # timer
+          t timer -m trigger; wait_for timer_ "complete" 180 || fail=1
+          # child workflow
+          t childworkflow -m trigger; wait_for parentworkflow_ "complete" 120 || fail=1
+          # signal
+          t signalcounter -m trigger; sleep 5; id=$(wf_id signal_counter_); echo "signal id=$id"
+          t signalcounter -m signal -w "$id" -sig 3
+          sleep 5; C workflow show -w "$id" | tee $GITHUB_WORKSPACE/out/signal-history.txt | grep -ci signaled | tee /dev/stderr | grep -qv '^0$' || fail=1
+          C workflow terminate -w "$id" --reason done || true
+          # query
+          t query -m trigger; sleep 5; id=$(wf_id query_); echo "query id=$id"
+          t query -m query -w "$id" -t __stack_trace || fail=1
+          grep -qi "stack\|goroutine\|query" $GITHUB_WORKSPACE/out/samples/query-client.log || fail=1
+          C workflow terminate -w "$id" --reason done || true
+          # cancel
+          t cancelactivity -m trigger; sleep 5; id=$(wf_id cancel_); echo "cancel id=$id"
+          t cancelactivity -m cancel -w "$id"
+          wait_for cancel_ "cancel" 120 || fail=1
+          # cron: first run must roll over into the next run
+          t cron -m trigger; wait_for cron_ "continued\|completed\|cron" 150 || fail=1
+          id=$(wf_id cron_); C workflow terminate -w "$id" --reason done || true
+          echo $fail > $GITHUB_WORKSPACE/out/samples.exit
+          test "$fail" = 0
+      - name: Restart server containers mid-run
+        run: |
+          source /tmp/lib.sh
+          cd /tmp/cs
+          # sleep workflow in flight, plus a timer workflow, then restart Rust frontend+matching
+          bin/sleep -m trigger >> $GITHUB_WORKSPACE/out/samples/sleep-client.log 2>&1
+          bin/timer -m trigger >> $GITHUB_WORKSPACE/out/samples/timer-client.log 2>&1
+          bin/helloworld -m trigger >> $GITHUB_WORKSPACE/out/samples/helloworld-client.log 2>&1
+          docker compose restart frontend matching | tee $GITHUB_WORKSPACE/out/restart.log
+          for i in $(seq 1 60); do (echo > /dev/tcp/127.0.0.1/7833) 2>/dev/null && break; sleep 3; done
+          sleep 15
+          fail=0
+          wait_for sleep_ "complete" 240 || fail=1
+          wait_for timer_ "complete" 240 || fail=1
+          # new work after the restart still works
+          bin/childworkflow -m trigger >> $GITHUB_WORKSPACE/out/samples/childworkflow-client.log 2>&1
+          wait_for parentworkflow_ "complete" 120 || fail=1
+          { C workflow list --more --pagesize 50; } | tee $GITHUB_WORKSPACE/out/list-final.txt
+          test "$fail" = 0
+      - name: Collect logs
+        if: always()
+        run: |
+          docker compose logs --no-color > out/compose.log 2>&1 || true
+          pkill -f /tmp/cs/bin || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: docker-dropin-e2e-out
+          path: out
+          retention-days: 3
