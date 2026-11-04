@@ -149,9 +149,9 @@ const DATA = {
         {n:"Visibility", subs:[["Cassandra / MySQL visibility",400,"done"],["Postgres visibility store",300,"done"],["Elasticsearch advanced visibility (Postgres lane)",400,"done"],["ES on Cassandra lane / OpenSearch / ES restart",200,"none"]]},
         {n:"Mixed-cluster gate", subs:[["Domain CRUD",100,"done"],["Start/complete/signal",100,"done"],["Query / describe / list open+closed",100,"done"],["SIGKILL restart recovery",100,"done"],["Expanded APIs / child / backfill / IPv6",200,"done"],["Ringpop join + History-2 kill churn",100,"done"],["Kafka async + filestore archival",200,"done"],["OAuth/JWT gate",100,"done"],["Two-cluster redirection/failover",200,"done"],["S3/GCS archival (MinIO)",200,"part"],["Docker drop-in (swap image name only)",300,"part"],["Final parity audit sign-off",300,"part"]]}
       ]},
-    { name: "History", order: 3, status: "none",
-      acceptance: "Not started. Crate <code>cadence-history</code> is a 5-line stub.",
-      note: "Largest service (~75k Go lines, about 6x Matching). Only shared persistence pieces (executions, history_branch) exist.",
+    { name: "History", order: 3, status: "part",
+      acceptance: "H1a in progress: MySQL/PostgreSQL shard create/get/update adapters with range-ID ownership check. Execution SQL stores and History service remain unimplemented. See <code>memory/history-h1a-20261104.md</code>.",
+      note: "Largest service (~75k Go lines, about 6x Matching). H1 persistence contracts were added; this slice implements shard SQL only. H1a parity and CI evidence are incomplete.",
       components: [
         {n:"execution (mutable state, workflow ctx)", dir:"history/execution", d:"none"},
         {n:"task (transfer/timer processors)", dir:"history/task", d:"none"},
