@@ -1,5 +1,20 @@
 # Frontend + Matching comparison
 
+The comparison command can also emit a self-contained HTML report with charts;
+it reads the same comparison JSON and requires no external assets or network:
+
+```sh
+python3 tests/benchmark/compare.py --go go-1.json go-2.json --rust rust-1.json rust-2.json \
+  --json comparison.json --markdown comparison.md --html comparison.html
+```
+
+Open `comparison.html` in a browser to inspect median throughput and latency,
+paired per-run throughput variation, deployment metadata, and resource values
+when Go and Rust resource samples are comparable. Missing or incomparable
+resource collection is shown with its status and reason. Scope and workload
+metadata come from the comparison document; the report does not synthesize
+measurements.
+
 Compare only these deployments:
 
 | Arm | Frontend | Matching | History / system Worker | Persistence |

@@ -153,7 +153,16 @@ def markdown(report):
         p = s["median_latency_ms"]
         lines.append(f"| {arm} | {s['repetitions']} | {s['median_throughput_workflows_per_second']:.3f} | {p['p50']:.3f} | {p['p95']:.3f} | {p['p99']:.3f} |")
     resource = report.get("resources", {"status": "not_collected"})
-    lines += ["", f"Rust vs Go median throughput: {delta['throughput_percent']:+.2f}% ({delta['throughput_workflows_per_second']:+.3f} workflows/s). Latency deltas (Rust − Go): " + ", ".join(f"p{q} {delta['latency_ms'][f'p{q}']:+.3f} ms" for q in (50, 95, 99)) + ".", "", f"Resource comparison status: {resource['status']}.", "Raw run JSON, including successful latency samples, is preserved in the comparison JSON. These are closed-loop end-to-end measurements; SDK retries are included and client queue time is excluded. Memory reports cgroup usage, which includes charged cache and is not RSS.", ""]
+    lines += ["", f"Rust vs Go median throughput: {delta['throughput_percent']:+.2f}% ({delta['throughput_workflows_per_second']:+.3f} workflows/s). Latency deltas (Rust − Go): " + ", ".join(f"p{q} {delta['latency_ms'][f'p{q}']:+.3f} ms" for q in (50, 95, 99)) + ".", "", f"Resource comparison status: {resource['status']}."]
+    if resource["status"] == "comparable":
+        lines += ["", "## Median resources per run", "", "| Container | Go CPU (s) | Rust CPU (s) | Rust − Go CPU (s) | Go peak cgroup memory (MiB) | Rust peak cgroup memory (MiB) | Rust − Go memory (MiB) |", "|---|---:|---:|---:|---:|---:|---:|"]
+        for name, go_values in resource["arms"]["go"].items():
+            rust_values = resource["arms"]["rust"][name]
+            delta_values = resource["rust_minus_go"][name]
+            lines.append(f"| {name} | {go_values['cpu_seconds']:.3f} | {rust_values['cpu_seconds']:.3f} | {delta_values['cpu_seconds']:+.3f} | {go_values['peak_cgroup_memory_bytes'] / 1048576:.2f} | {rust_values['peak_cgroup_memory_bytes'] / 1048576:.2f} | {delta_values['peak_cgroup_memory_bytes'] / 1048576:+.2f} |")
+    elif resource.get("reason"):
+        lines.append(f"Resource details unavailable: {resource['reason']}.")
+    lines += ["", "Raw run JSON, including successful latency samples, is preserved in the comparison JSON. These are closed-loop end-to-end measurements; SDK retries are included and client queue time is excluded. Memory reports cgroup usage, which includes charged cache and is not RSS.", ""]
     return "\n".join(lines)
 
 
@@ -167,11 +176,15 @@ def main():
     ap.add_argument("--rust-resources", nargs="+", help="resource JSON paths in same order as Rust runs")
     ap.add_argument("--json", required=True, help="comparison JSON output")
     ap.add_argument("--markdown", required=True, help="Markdown report output")
+    ap.add_argument("--html", help="optional standalone HTML chart report output")
     args = ap.parse_args()
     load = lambda p: json.loads(Path(p).read_text(encoding="utf-8")) if p else None
     report = compare(args.go, args.rust, load(args.go_metadata), load(args.rust_metadata), args.go_resources, args.rust_resources)
     Path(args.json).write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     Path(args.markdown).write_text(markdown(report), encoding="utf-8")
+    if args.html:
+        from render_report import render_html
+        Path(args.html).write_text(render_html(report), encoding="utf-8")
 
 
 if __name__ == "__main__":
