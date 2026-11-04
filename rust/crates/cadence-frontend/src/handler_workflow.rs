@@ -3764,6 +3764,7 @@ mod tests {
                     client_impl: "go-sdk".to_owned(),
                     feature_version: "1.2".to_owned(),
                     isolation_group: String::new(),
+                    partition_config: None,
                     original_headers: HashMap::new(),
                     deadline: None,
                 },
@@ -4994,6 +4995,19 @@ mod tests {
             );
         }
         assert_ne!(calls[0].1["pollerID"], calls[1].1["pollerID"]);
+    }
+
+    #[test]
+    fn start_envelopes_carry_partition_config_only_when_present() {
+        let mut envelope = serde_json::json!({"domainUUID": "d"});
+        insert_partition_config(&mut envelope, &CallerMetadata::default());
+        assert!(envelope.get("partitionConfig").is_none());
+        let caller = CallerMetadata {
+            partition_config: Some(HashMap::from([("isolation-group".into(), "blue".into())])),
+            ..Default::default()
+        };
+        insert_partition_config(&mut envelope, &caller);
+        assert_eq!(envelope["partitionConfig"]["isolation-group"], "blue");
     }
 
     #[tokio::test]

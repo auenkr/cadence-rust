@@ -60,6 +60,8 @@ pub fn context_from_headers(
     Ok((group, config))
 }
 
+type BadBinaryLookup =
+    Arc<dyn Fn(&str) -> Result<Option<Vec<String>>, CadenceError> + Send + Sync>;
 type DomainConfigLookup = Arc<dyn Fn(&str) -> Result<Option<IsolationGroupConfiguration>, String> + Send + Sync>;
 type GlobalConfigLookup = Arc<dyn Fn() -> Option<IsolationGroupConfiguration> + Send + Sync>;
 type EnabledLookup = Arc<dyn Fn(&str) -> bool + Send + Sync>;
@@ -120,7 +122,7 @@ impl PollIsolationGroupWaiter for DomainIsolationState {
                 // Lookup errors are surfaced; the handler fails open like Go.
                 let drained = self
                     .is_drained(domain, isolation_group)
-                    .map_err(|e| CadenceError::Unknown(e))?;
+                    .map_err(CadenceError::Unknown)?;
                 if !drained {
                     return Ok(true);
                 }
@@ -142,13 +144,13 @@ impl PollIsolationGroupWaiter for DomainIsolationState {
 /// Go `checkBadBinary`: reject decision polls from a binary checksum listed in
 /// the domain's BadBinaries.
 pub struct BadBinaryAdmission {
-    bad_binaries: Arc<dyn Fn(&str) -> Result<Option<Vec<String>>, CadenceError> + Send + Sync>,
+    bad_binaries: BadBinaryLookup,
     metrics: Arc<dyn Metrics + Send + Sync>,
 }
 
 impl BadBinaryAdmission {
     pub fn new(
-        bad_binaries: Arc<dyn Fn(&str) -> Result<Option<Vec<String>>, CadenceError> + Send + Sync>,
+        bad_binaries: BadBinaryLookup,
         metrics: Arc<dyn Metrics + Send + Sync>,
     ) -> Self {
         Self { bad_binaries, metrics }
