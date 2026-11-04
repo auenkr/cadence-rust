@@ -130,3 +130,5 @@ pub mod query;
 pub mod reset;
 pub mod workflowcache;
 pub mod queuev2;
+pub mod failover;
+pub mod replication;
