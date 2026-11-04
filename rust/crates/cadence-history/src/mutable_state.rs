@@ -184,13 +184,12 @@ impl MutableStateBuilder {
             || self.decision_info.is_some()
     }
     pub fn update_decision(&mut self, info: DecisionInfo) { self.decision_info = Some(info); }
-    pub fn delete_decision(&mut self) { self.decision_info = None; }
+    pub fn delete_decision(&mut self) { self.delete_decision_preserving_heartbeat(); }
     pub fn fail_decision(&mut self, increment_attempt: bool) {
-        self.decision_info = None;
-        if increment_attempt {
-            let attempt = self.execution_info.get("decision_attempt").and_then(serde_json::Value::as_i64).unwrap_or_default() + 1;
-            self.execution_info["decision_attempt"] = attempt.into();
-        }
+        let attempt = self.execution_info.get("decision_attempt").and_then(serde_json::Value::as_i64).unwrap_or_default()
+            + i64::from(increment_attempt);
+        let reset = DecisionInfo { attempt, ..Default::default() };
+        self.persist_decision(reset);
     }
 
     /// Reconstruct the decision view from the canonical execution record. The
@@ -240,7 +239,7 @@ impl MutableStateBuilder {
             task_list: Some(TaskList { name: task_list.clone(), ..Default::default() }), start_to_close_timeout_seconds: Some(timeout), attempt,
         });
         let info = DecisionInfo { schedule_id: event.event_id, version, task_list, start_to_close_timeout_seconds: timeout, attempt, schedule_timestamp, original_schedule_timestamp, ..Default::default() };
-        self.decision_info = Some(info.clone()); (event, info)
+        self.persist_decision(info.clone()); (event, info)
     }
     pub fn start_decision(&mut self, schedule_id: i64, request_id: String, version: i64) -> Option<(HistoryEvent, DecisionInfo)> {
         use cadence_api::{enums::EventType, tasks::DecisionTaskStartedEventAttributes};
@@ -249,7 +248,57 @@ impl MutableStateBuilder {
         let mut event = self.add_event(HistoryEvent { event_type: Some(EventType::DecisionTaskStarted), ..Default::default() });
         event.decision_task_started_event_attributes = Some(DecisionTaskStartedEventAttributes { scheduled_event_id: schedule_id, request_id: request_id.clone(), ..Default::default() });
         info.started_id = event.event_id; info.request_id = request_id; info.version = version;
-        self.decision_info = Some(info.clone()); Some((event, info))
+        self.persist_decision(info.clone()); Some((event, info))
+    }
+
+    /// Apply a replicated scheduled event. Schedule IDs are supplied by the
+    /// authoritative history event and may not be regenerated locally.
+    pub fn replicate_decision_scheduled(&mut self, event: &HistoryEvent, version: i64, schedule_timestamp: i64, original_schedule_timestamp: i64) -> Option<DecisionInfo> {
+        let attrs = event.decision_task_scheduled_event_attributes.as_ref()?;
+        let task_list = attrs.task_list.as_ref().map(|v| v.name.clone()).unwrap_or_default();
+        let info = DecisionInfo {
+            version, schedule_id: event.event_id, task_list,
+            start_to_close_timeout_seconds: attrs.start_to_close_timeout_seconds.unwrap_or_default(),
+            attempt: attrs.attempt, schedule_timestamp, original_schedule_timestamp,
+            ..Default::default()
+        };
+        self.persist_decision(info.clone());
+        Some(info)
+    }
+
+    /// Apply a replicated started event to the matching scheduled decision.
+    /// A mismatched schedule is ignored so callers can enforce Cadence's
+    /// event-specific invalid-history policy.
+    pub fn replicate_decision_started(&mut self, event: &HistoryEvent, version: i64, started_timestamp: i64) -> Option<DecisionInfo> {
+        let attrs = event.decision_task_started_event_attributes.as_ref()?;
+        let mut info = self.decision_snapshot();
+        if info.schedule_id != attrs.scheduled_event_id { return None; }
+        info.started_id = event.event_id;
+        info.version = version;
+        info.request_id = attrs.request_id.clone();
+        info.started_timestamp = started_timestamp;
+        self.persist_decision(info.clone());
+        Some(info)
+    }
+
+    /// Replicated timeout handling preserves attempts for sticky schedule to
+    /// start timeouts, which avoids converting repeated sticky timeouts into
+    /// transient decision retries.
+    pub fn replicate_decision_timed_out(&mut self, event: &HistoryEvent) {
+        let attrs = event.decision_task_timed_out_event_attributes.as_ref();
+        let sticky_schedule_timeout = attrs.is_some_and(|a| {
+            a.timeout_type.as_ref().is_some_and(|v| v.to_string() == "SCHEDULE_TO_START")
+        }) && !self.execution_info.get("sticky_task_list").and_then(serde_json::Value::as_str).unwrap_or_default().is_empty();
+        self.fail_decision(!sticky_schedule_timeout);
+    }
+
+    /// Replicated completion drops the in-flight decision before subsequent
+    /// history events are applied, matching the transaction ordering in Go.
+    pub fn replicate_decision_completed(&mut self, event: &HistoryEvent) -> bool {
+        let Some(attrs) = event.decision_task_completed_event_attributes.as_ref() else { return false };
+        self.execution_info["last_processed_event"] = attrs.started_event_id.into();
+        self.delete_decision_preserving_heartbeat();
+        true
     }
 
     /// Apply an activity schedule event to the pending activity indexes.
@@ -347,7 +396,7 @@ mod tests {
         assert_eq!(started.started_id, 2);
         assert!(s.in_flight_decision().is_some());
         s.fail_decision(true);
-        assert!(s.decision_info.is_none());
+        assert_eq!(s.decision_snapshot().schedule_id, 0);
         assert_eq!(s.execution_info["decision_attempt"], 1);
     }
 
@@ -379,6 +428,27 @@ mod tests {
         let mutation = s.close_as_mutation(None);
         assert_eq!(mutation.decision_info, Some(info));
         assert_eq!(mutation.activity_id_to_event_id.get("a"), Some(&12));
+    }
+
+    #[test]
+    fn replicated_decision_events_preserve_authoritative_ids_and_sticky_timeout_attempt() {
+        let mut s = MutableStateBuilder::default();
+        let (scheduled, _) = s.add_decision_scheduled(11, "normal".into(), 30, 0, 50, 25);
+        let info = s.replicate_decision_scheduled(&scheduled, 12, 50, 25).unwrap();
+        assert_eq!(info.schedule_id, scheduled.event_id);
+        let (started_event, _) = s.start_decision(info.schedule_id, "request".into(), 12).unwrap();
+        let started = s.replicate_decision_started(&started_event, 13, 75).unwrap();
+        assert_eq!(started.started_id, started_event.event_id);
+        assert_eq!(started.started_timestamp, 75);
+        s.execution_info["sticky_task_list"] = "sticky".into();
+        let timeout = HistoryEvent {
+            decision_task_timed_out_event_attributes: Some(cadence_api::tasks::DecisionTaskTimedOutEventAttributes {
+                timeout_type: Some(cadence_api::enums::TimeoutType::ScheduleToStart), ..Default::default()
+            }), ..Default::default()
+        };
+        s.replicate_decision_timed_out(&timeout);
+        assert_eq!(s.decision_snapshot().attempt, 0);
+        assert_eq!(s.decision_snapshot().schedule_id, 0);
     }
 
     #[test]
