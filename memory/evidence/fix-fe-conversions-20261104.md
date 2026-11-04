@@ -10,4 +10,8 @@ Residual: decision-poll model is ms so sub-ms precision of scheduled/started tim
 to_thrift multiplies raw-ns values by 1e6 (out of scope).
 
 ## CI evidence
-(pending)
+Head SHA tested: d30df78f69ebbd5320a91bc074d3a7e3c7a4f28e
+- rust-ci (clippy + tests): https://github.com/auenkr/cadence-rust/actions/runs/41750005714 -> success
+  (earlier runs 41748978099 failed clippy needless_update; 41749422423 failed rustfmt; both fixed)
+- frontend-mixed-gate: https://github.com/auenkr/cadence-rust/actions/runs/41751579918 -> success
+  (runs 41751253517 and 41751258846 were cancelled by the concurrency group; re-dispatched)
