@@ -202,14 +202,14 @@ impl ExecutionManager for SqlExecutionManager {
             ..Default::default()
         };
         self.store
-            .put_replication_task_to_dlq_for_shard(req.shard_id, req.source_cluster_name, task)
+            .put_replication_task_to_dlq(req.source_cluster_name, task)
             .await
             .map_err(map_persistence_error)
     }
 
-    async fn get_replication_dlq_size(&self, shard_id: i32, source_cluster: &str) -> Result<i64> {
+    async fn get_replication_dlq_size(&self, _shard_id: i32, source_cluster: &str) -> Result<i64> {
         self.store
-            .get_replication_dlq_size_for_shard(shard_id, source_cluster.to_string())
+            .get_replication_dlq_size(source_cluster.to_string())
             .await
             .map_err(map_persistence_error)
     }

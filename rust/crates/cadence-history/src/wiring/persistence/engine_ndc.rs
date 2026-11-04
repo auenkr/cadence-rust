@@ -73,6 +73,8 @@ pub fn to_history_error(err: PersistenceError) -> HistoryError {
         PersistenceError::AlreadyExists(m) => HistoryError::Other(m),
         PersistenceError::InvalidPersistenceRequest(m) | PersistenceError::InvalidArgument(m) => HistoryError::bad_request(m),
         PersistenceError::InternalDataInconsistency(m) | PersistenceError::Internal(m) => HistoryError::internal(m),
+        PersistenceError::Timeout(m) => HistoryError::internal(m),
+        PersistenceError::ServiceBusy(m) => HistoryError::internal(m),
     }
 }
 
