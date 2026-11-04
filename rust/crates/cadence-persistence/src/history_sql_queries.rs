@@ -55,6 +55,16 @@ impl Dialect {
             (Self::Postgres, Statement::DeleteSignalsRequested) => "DELETE FROM signals_requested WHERE shard_id=$1 AND domain_id=$2 AND workflow_id=$3 AND run_id=$4",
             (Self::MySql, Statement::DeleteBufferedEvents) => "DELETE FROM buffered_events WHERE shard_id=? AND domain_id=? AND workflow_id=? AND run_id=?",
             (Self::Postgres, Statement::DeleteBufferedEvents) => "DELETE FROM buffered_events WHERE shard_id=$1 AND domain_id=$2 AND workflow_id=$3 AND run_id=$4",
+            (Self::MySql, Statement::InsertBufferedEvent) => "INSERT INTO buffered_events(shard_id,domain_id,workflow_id,run_id,data,data_encoding) VALUES(?,?,?,?,?,?)",
+            (Self::Postgres, Statement::InsertBufferedEvent) => "INSERT INTO buffered_events(shard_id,domain_id,workflow_id,run_id,data,data_encoding) VALUES($1,$2,$3,$4,$5,$6)",
+            (Self::MySql, Statement::SelectBufferedEvents) => "SELECT data,data_encoding FROM buffered_events WHERE shard_id=? AND domain_id=? AND workflow_id=? AND run_id=?",
+            (Self::Postgres, Statement::SelectBufferedEvents) => "SELECT data,data_encoding FROM buffered_events WHERE shard_id=$1 AND domain_id=$2 AND workflow_id=$3 AND run_id=$4",
+            (Self::MySql, Statement::InsertSignalRequested) => "INSERT IGNORE INTO signals_requested_sets(shard_id,domain_id,workflow_id,run_id,signal_id) VALUES(?,?,?,?,?)",
+            (Self::Postgres, Statement::InsertSignalRequested) => "INSERT INTO signals_requested_sets(shard_id,domain_id,workflow_id,run_id,signal_id) VALUES($1,$2,$3,$4,$5) ON CONFLICT (shard_id,domain_id,workflow_id,run_id,signal_id) DO NOTHING",
+            (Self::MySql, Statement::SelectSignalRequested) => "SELECT signal_id FROM signals_requested_sets WHERE shard_id=? AND domain_id=? AND workflow_id=? AND run_id=?",
+            (Self::Postgres, Statement::SelectSignalRequested) => "SELECT signal_id FROM signals_requested_sets WHERE shard_id=$1 AND domain_id=$2 AND workflow_id=$3 AND run_id=$4",
+            (Self::MySql, Statement::DeleteSignalRequested) => "DELETE FROM signals_requested_sets WHERE shard_id=? AND domain_id=? AND workflow_id=? AND run_id=?",
+            (Self::Postgres, Statement::DeleteSignalRequested) => "DELETE FROM signals_requested_sets WHERE shard_id=$1 AND domain_id=$2 AND workflow_id=$3 AND run_id=$4",
             (Self::MySql, Statement::InsertHistoryNode) => "INSERT INTO history_node(shard_id,tree_id,branch_id,node_id,txn_id,data,data_encoding) VALUES(?,?,?,?,?,?,?)",
             (Self::Postgres, Statement::InsertHistoryNode) => "INSERT INTO history_node(shard_id,tree_id,branch_id,node_id,txn_id,data,data_encoding) VALUES($1,$2,$3,$4,$5,$6,$7)",
             (Self::MySql, Statement::ReadHistoryNodes) => "SELECT node_id,txn_id,data,data_encoding FROM history_node WHERE shard_id=? AND tree_id=? AND branch_id=? AND node_id>=? AND node_id<? ORDER BY shard_id,tree_id,branch_id,node_id,txn_id LIMIT ?",
@@ -132,6 +142,11 @@ pub enum Statement {
     DeleteSignalInfoMaps,
     DeleteSignalsRequested,
     DeleteBufferedEvents,
+    InsertBufferedEvent,
+    SelectBufferedEvents,
+    InsertSignalRequested,
+    SelectSignalRequested,
+    DeleteSignalRequested,
     InsertHistoryNode,
     ReadHistoryNodes,
     DeleteHistoryNodes,
@@ -221,6 +236,17 @@ fn where_workflow_key(dialect: Dialect) -> &'static str {
     }
 }
 
+/// Go `DeleteFromSignalsRequestedSets`, with the IN-list expanded before the
+/// query reaches the SQL driver.
+pub fn delete_signal_requested_keys_statement(dialect: Dialect, key_count: usize) -> String {
+    let markers = (0..key_count).map(|index| match dialect {
+        Dialect::MySql => "?".to_string(),
+        Dialect::Postgres => format!("${}", index + 5),
+    }).collect::<Vec<_>>();
+    let keys = if markers.is_empty() { "NULL".to_string() } else { markers.join(",") };
+    format!("DELETE FROM signals_requested_sets WHERE {} AND signal_id IN ({keys})", where_workflow_key(dialect))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,5 +289,8 @@ mod tests {
         assert!(postgres.contains("ON CONFLICT (shard_id,domain_id,workflow_id,run_id,timer_id) DO UPDATE"));
         let delete = workflow_state_map_statement(Dialect::Postgres, WorkflowStateMap::Signal, WorkflowMapOperation::DeleteKeys, 2);
         assert!(delete.ends_with("initiated_id IN ($5,$6)"));
+        assert!(Dialect::MySql.statement(Statement::InsertSignalRequested).starts_with("INSERT IGNORE"));
+        assert!(Dialect::Postgres.statement(Statement::InsertSignalRequested).contains("DO NOTHING"));
+        assert!(delete_signal_requested_keys_statement(Dialect::Postgres, 1).ends_with("signal_id IN ($5)"));
     }
 }
