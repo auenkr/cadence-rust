@@ -212,8 +212,7 @@ impl ProcessorImpl {
     }
 
     fn sweep_interval(&self) -> Duration {
-        let mut rng = rand::thread_rng();
-        jit_duration(&mut rng, (self.interval)(self.shard_id), SWEEP_INTERVAL_JITTER_COEFFICIENT)
+        jit_duration((self.interval)(self.shard_id), SWEEP_INTERVAL_JITTER_COEFFICIENT)
     }
 
     async fn process_loop(self: Arc<Self>, mut failover_rx: mpsc::Receiver<()>) {
