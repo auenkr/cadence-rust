@@ -1135,8 +1135,13 @@ mod tests {
         };
         let row =
             snapshot_to_execution_row(&snapshot, 5, crate::sqlblobs::Encoding::ThriftRW).unwrap();
-        let wire = crate::sqlblobs::Encoding::ThriftRW.decode(&row.data).unwrap();
-        assert!(wire.get(44).is_none(), "NDC writes must not activate legacy replication state");
+        let wire = crate::sqlblobs::Encoding::ThriftRW
+            .decode(&row.data)
+            .unwrap();
+        assert!(
+            wire.get(44).is_none(),
+            "NDC writes must not activate legacy replication state"
+        );
         assert_eq!(wire.get(102), Some(&cadence_thrift::Value::I32(2)));
         let (decoded, start_version, histories, checksum) = decode_execution_info(&row).unwrap();
         assert_eq!(decoded.workflow_id, snapshot.execution_info.workflow_id);
@@ -1241,7 +1246,7 @@ mod tests {
                 0,
                 Some(&current())
             ),
-            Err(PersistenceError::CurrentWorkflowConditionFailed(_))
+            Err(PersistenceError::ConditionFailed(_))
         ));
     }
 

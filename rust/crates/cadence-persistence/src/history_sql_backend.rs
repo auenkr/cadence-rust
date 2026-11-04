@@ -46,9 +46,17 @@ pub fn internal(error: impl std::fmt::Display) -> PersistenceError {
 }
 fn mysql_error(error: mysql::Error) -> PersistenceError {
     match &error {
-        mysql::Error::MySqlError(e) if e.code == 1062 => PersistenceError::ConditionFailed(error.to_string()),
-        mysql::Error::MySqlError(e) if matches!(e.code, 1159 | 1161 | 1205 | 1613 | 3024 | 3133 | 3699) => PersistenceError::Timeout(error.to_string()),
-        mysql::Error::MySqlError(e) if matches!(e.code, 1040 | 1203 | 1637 | 3634) => PersistenceError::ServiceBusy(error.to_string()),
+        mysql::Error::MySqlError(e) if e.code == 1062 => {
+            PersistenceError::ConditionFailed(error.to_string())
+        }
+        mysql::Error::MySqlError(e)
+            if matches!(e.code, 1159 | 1161 | 1205 | 1613 | 3024 | 3133 | 3699) =>
+        {
+            PersistenceError::Timeout(error.to_string())
+        }
+        mysql::Error::MySqlError(e) if matches!(e.code, 1040 | 1203 | 1637 | 3634) => {
+            PersistenceError::ServiceBusy(error.to_string())
+        }
         _ => internal(error),
     }
 }
@@ -167,7 +175,10 @@ impl SqlTx for postgres::Transaction<'_> {
                     .map(|(i, col)| match col {
                         Column::I32 => row.try_get(i).map(Value::I32).map_err(internal),
                         Column::I64 => row.try_get(i).map(Value::I64).map_err(internal),
-                        Column::Bytes => row.try_get::<_, Option<Vec<u8>>>(i).map(|value| Value::Bytes(value.unwrap_or_default())).map_err(internal),
+                        Column::Bytes => row
+                            .try_get::<_, Option<Vec<u8>>>(i)
+                            .map(|value| Value::Bytes(value.unwrap_or_default()))
+                            .map_err(internal),
                         Column::Text => row.try_get(i).map(Value::Text).map_err(internal),
                         Column::Timestamp => row.try_get(i).map(Value::Timestamp).map_err(internal),
                     })
