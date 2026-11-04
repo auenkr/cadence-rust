@@ -280,6 +280,7 @@ pub fn acquire_wait_timeout_seconds(supplied: Option<i32>, configured: std::time
 
 /// TODO(link): cadence-api has not yet exposed semaphore decision attributes.
 /// Keep them lossless in this package until the shared wire type is extended.
+#[allow(clippy::large_enum_variant)]
 pub enum PortDecision {
     Decision(Decision),
     AcquireSemaphore(Option<AcquireSemaphoreDecisionAttributes>),

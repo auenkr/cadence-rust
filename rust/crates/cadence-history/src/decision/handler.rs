@@ -153,7 +153,7 @@ pub fn handle_decision_task_completed<S: CompletionState>(state: &mut S, request
             state.add_decision_failed(&decision, cause, details, &request.identity, &request.checksum)?;
             let max = state.decision_retry_max_attempts();
             if max > 0 && state.decision_attempt() > max {
-                let message = format!("Decision attempt exceeds limit. Last decision failure cause and details: {} - {}", cause, format!("[{}]", details.iter().map(u8::to_string).collect::<Vec<_>>().join(" ")));
+                let message = format!("Decision attempt exceeds limit. Last decision failure cause and details: {} - [{}]", cause, details.iter().map(u8::to_string).collect::<Vec<_>>().join(" "));
                 state.metric("DecisionRetriesExceededCounter");
                 state.terminate("DECISION_ATTEMPTS_EXCEEDS_LIMIT", message.as_bytes())?;
             }
