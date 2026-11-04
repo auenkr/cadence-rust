@@ -5,11 +5,11 @@ Usage: admin_probe.py <grpc-address> <domain> <idl-proto-dir> <work-dir>
 Prints one JSON object per check: {"name", "ok", "detail"}; exit 0 when all ok.
 Expected values mirror Go (go/service/frontend/adminHandler.go):
   GetCrossClusterTasks("")      -> INVALID_ARGUMENT "Cluster name is not set."
-  GetCrossClusterTasks("c")     -> INVALID_ARGUMENT "The cross-cluster feature has been deprecated."
+  GetCrossClusterTasks("c")     -> INTERNAL "The cross-cluster feature has been deprecated." (Go History quirk)
   ReapplyEvents validation     -> INVALID_ARGUMENT "Domain not set on request." /
                                   "Execution is not set on request." / "WorkflowId is not set on request."
   ReapplyEvents unknown domain -> NOT_FOUND
-  ReapplyEvents unknown wf     -> NOT_FOUND (History EntityNotExists forwarded unchanged)
+  ReapplyEvents bad batch      -> INTERNAL DeserializeBatchEvents (Go History, forwarded unchanged)
 """
 import importlib, json, subprocess, sys
 from pathlib import Path
@@ -44,7 +44,7 @@ req = svc.GetCrossClusterTasksRequest
 check('get-cross-cluster-tasks-empty-cluster', lambda **k: stub.GetCrossClusterTasks(req(), **k),
       'INVALID_ARGUMENT', 'Cluster name is not set.')
 check('get-cross-cluster-tasks-deprecated', lambda **k: stub.GetCrossClusterTasks(req(target_cluster='cluster0'), **k),
-      'INVALID_ARGUMENT', 'The cross-cluster feature has been deprecated')
+      'INTERNAL', 'The cross-cluster feature has been deprecated')  # Go History returns a value-typed BadRequestError, which its gRPC mapper does not convert -> INTERNAL
 
 blob = api.DataBlob(encoding_type=api.ENCODING_TYPE_JSON, data=b'[]')
 rq = svc.ReapplyEventsRequest
@@ -58,7 +58,8 @@ check('reapply-events-no-workflow-id', lambda **k: stub.ReapplyEvents(rq(domain=
 check('reapply-events-unknown-domain', lambda **k: stub.ReapplyEvents(
     rq(domain='no-such-domain-probe', workflow_execution=exe(workflow_id='w'), events=blob), **k), 'NOT_FOUND')
 check('reapply-events-unknown-workflow', lambda **k: stub.ReapplyEvents(
-    rq(domain=domain, workflow_execution=exe(workflow_id='no-such-wf-probe'), events=blob), **k), 'NOT_FOUND')
+    rq(domain=domain, workflow_execution=exe(workflow_id='no-such-wf-probe'), events=blob), **k),
+      'INTERNAL', 'DeserializeBatchEvents')  # Go History deserializes the batch as ThriftRW before the workflow lookup
 
 for r in results:
     print(json.dumps(r))
