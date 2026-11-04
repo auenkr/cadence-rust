@@ -60,9 +60,9 @@ pub fn context_from_headers(
     Ok((group, config))
 }
 
-type BadBinaryLookup =
-    Arc<dyn Fn(&str) -> Result<Option<Vec<String>>, CadenceError> + Send + Sync>;
-type DomainConfigLookup = Arc<dyn Fn(&str) -> Result<Option<IsolationGroupConfiguration>, String> + Send + Sync>;
+type BadBinaryLookup = Arc<dyn Fn(&str) -> Result<Option<Vec<String>>, CadenceError> + Send + Sync>;
+type DomainConfigLookup =
+    Arc<dyn Fn(&str) -> Result<Option<IsolationGroupConfiguration>, String> + Send + Sync>;
 type GlobalConfigLookup = Arc<dyn Fn() -> Option<IsolationGroupConfiguration> + Send + Sync>;
 type EnabledLookup = Arc<dyn Fn(&str) -> bool + Send + Sync>;
 
@@ -78,7 +78,11 @@ pub struct DomainIsolationState {
 }
 
 impl DomainIsolationState {
-    pub fn new(enabled: EnabledLookup, domain: DomainConfigLookup, global: GlobalConfigLookup) -> Self {
+    pub fn new(
+        enabled: EnabledLookup,
+        domain: DomainConfigLookup,
+        global: GlobalConfigLookup,
+    ) -> Self {
         Self {
             enabled,
             domain,
@@ -149,11 +153,11 @@ pub struct BadBinaryAdmission {
 }
 
 impl BadBinaryAdmission {
-    pub fn new(
-        bad_binaries: BadBinaryLookup,
-        metrics: Arc<dyn Metrics + Send + Sync>,
-    ) -> Self {
-        Self { bad_binaries, metrics }
+    pub fn new(bad_binaries: BadBinaryLookup, metrics: Arc<dyn Metrics + Send + Sync>) -> Self {
+        Self {
+            bad_binaries,
+            metrics,
+        }
     }
 }
 
@@ -204,9 +208,9 @@ impl OutstandingPollCanceller for ProductionPollCanceller {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
     use cadence_api::enums::IsolationGroupState as S;
     use cadence_api::types::IsolationGroupPartition;
+    use std::sync::Mutex;
 
     fn cfg(name: &str, state: S) -> Option<IsolationGroupConfiguration> {
         Some(IsolationGroupConfiguration {
@@ -217,7 +221,11 @@ mod tests {
         })
     }
 
-    fn state(enabled: bool, domain: Option<IsolationGroupConfiguration>, global: Option<IsolationGroupConfiguration>) -> DomainIsolationState {
+    fn state(
+        enabled: bool,
+        domain: Option<IsolationGroupConfiguration>,
+        global: Option<IsolationGroupConfiguration>,
+    ) -> DomainIsolationState {
         DomainIsolationState::new(
             Arc::new(move |_| enabled),
             Arc::new(move |_| Ok(domain.clone())),
@@ -242,7 +250,10 @@ mod tests {
             (CLIENT_ISOLATION_GROUP_HEADER.to_owned(), "blue".to_owned()),
             (FORWARDING_CLUSTER_HEADER.to_owned(), "c2".to_owned()),
             (WORKER_ISOLATION_GROUP_HEADER.to_owned(), "red".to_owned()),
-            (PARTITION_CONFIG_HEADER.to_owned(), r#"{"isolation-group":"red","wf-id":"x"}"#.to_owned()),
+            (
+                PARTITION_CONFIG_HEADER.to_owned(),
+                r#"{"isolation-group":"red","wf-id":"x"}"#.to_owned(),
+            ),
         ]);
         let (g, c) = context_from_headers(&h).unwrap();
         assert_eq!(g, "red");
@@ -256,18 +267,31 @@ mod tests {
 
     #[test]
     fn drained_by_global_or_domain_and_flag() {
-        assert!(state(true, None, cfg("a", S::Drained)).is_drained("d", "a").unwrap());
-        assert!(state(true, cfg("a", S::Drained), None).is_drained("d", "a").unwrap());
-        assert!(!state(true, cfg("a", S::Healthy), None).is_drained("d", "a").unwrap());
-        assert!(!state(true, cfg("a", S::Drained), None).is_drained("d", "b").unwrap());
-        assert!(!state(false, cfg("a", S::Drained), None).is_drained("d", "a").unwrap());
+        assert!(state(true, None, cfg("a", S::Drained))
+            .is_drained("d", "a")
+            .unwrap());
+        assert!(state(true, cfg("a", S::Drained), None)
+            .is_drained("d", "a")
+            .unwrap());
+        assert!(!state(true, cfg("a", S::Healthy), None)
+            .is_drained("d", "a")
+            .unwrap());
+        assert!(!state(true, cfg("a", S::Drained), None)
+            .is_drained("d", "b")
+            .unwrap());
+        assert!(!state(false, cfg("a", S::Drained), None)
+            .is_drained("d", "a")
+            .unwrap());
     }
 
     #[tokio::test]
     async fn waiter_times_out_when_drained_and_passes_when_healthy() {
         let s = state(true, cfg("a", S::Drained), None);
         let deadline = Instant::now() + Duration::from_millis(60);
-        assert!(!s.wait_until_healthy("d", "a", Some(deadline)).await.unwrap());
+        assert!(!s
+            .wait_until_healthy("d", "a", Some(deadline))
+            .await
+            .unwrap());
         let ok = state(true, None, None);
         assert!(ok.wait_until_healthy("d", "a", None).await.unwrap());
     }
@@ -288,7 +312,9 @@ mod tests {
             metrics.clone(),
         );
         let err = a.admit("d", "", "bad", true).await.unwrap_err();
-        assert!(err.to_string().contains("binary bad already marked as bad deployment"));
+        assert!(err
+            .to_string()
+            .contains("binary bad already marked as bad deployment"));
         assert_eq!(metrics.0.lock().unwrap().as_slice(), &[Counter::BadBinary]);
         a.admit("d", "", "good", true).await.unwrap();
         a.admit("d", "", "bad", false).await.unwrap();

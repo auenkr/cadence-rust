@@ -1428,10 +1428,11 @@ pub fn build_workflow_api(
         let manager = ctx.state.domain_manager.clone();
         crate::production_hooks::BadBinaryAdmission::new(
             std::sync::Arc::new(move |domain: &str| {
-                let described = manager.describe(&cadence_api::service_types::DescribeDomainRequest {
-                    name: Some(domain.to_owned()),
-                    ..Default::default()
-                })?;
+                let described =
+                    manager.describe(&cadence_api::service_types::DescribeDomainRequest {
+                        name: Some(domain.to_owned()),
+                        ..Default::default()
+                    })?;
                 Ok(described
                     .configuration
                     .and_then(|c| c.bad_binaries)

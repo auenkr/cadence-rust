@@ -501,7 +501,10 @@ impl ProductionBackend {
         request: &serde_json::Value,
     ) -> Result<(), CadenceError> {
         let task_list: Option<ty::TaskList> = typed(request, "taskList")?;
-        let name = task_list.as_ref().map_or("", |t| t.name.as_str()).to_owned();
+        let name = task_list
+            .as_ref()
+            .map_or("", |t| t.name.as_str())
+            .to_owned();
         let mut fields = vec![(10, domain_uuid(request, "domainUUID")?)];
         if let Some(kind) = request
             .get("taskListType")
