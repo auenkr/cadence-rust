@@ -1669,7 +1669,7 @@ async fn admin_reapply_replication_dlq_and_cross_cluster() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(resp["message"].as_str().unwrap().contains("WorkflowID"));
+    assert!(resp["message"].as_str().unwrap().contains("WorkflowId"));
 
     // Replication fetches require a History client; this local router has none.
     let (status, resp) = call(
