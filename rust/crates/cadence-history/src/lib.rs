@@ -1,5 +1,59 @@
-//! Cadence history service. Not migrated to Rust yet: the crate and binary exist so
-//! the workspace layout is ready and a Go history can be mixed with Rust services.
+//! History service bootstrap and shard ownership primitives.
 
-/// Service name as used by `--services`.
+pub mod config;
+pub mod shard;
+
 pub const SERVICE_NAME: &str = "history";
+
+/// Exact RPC method identifiers present in Go's `HistoryService` Thrift IDL.
+/// The shared server's HistoryAPI gRPC service is generated from the upstream
+/// IDL and registered by the shared launcher.
+pub const THRIFT_HISTORY_METHODS: &[&str] = &[
+    "StartWorkflowExecution", "GetMutableState", "PollMutableState",
+    "ResetStickyTaskList", "RecordDecisionTaskStarted", "RecordActivityTaskStarted",
+    "RespondDecisionTaskCompleted", "RespondDecisionTaskFailed",
+    "RecordActivityTaskHeartbeat", "RespondActivityTaskCompleted",
+    "RespondActivityTaskFailed", "RespondActivityTaskCanceled", "SignalWorkflowExecution",
+    "SignalWithStartWorkflowExecution", "RemoveSignalMutableState", "TerminateWorkflowExecution",
+    "ResetWorkflowExecution", "RequestCancelWorkflowExecution", "ScheduleDecisionTask",
+    "RecordChildExecutionCompleted", "DescribeWorkflowExecution", "ReplicateEventsV2",
+    "SyncShardStatus", "SyncActivity", "DescribeMutableState", "DescribeHistoryHost",
+    "CloseShard", "RemoveTask", "ResetQueue", "DescribeQueue", "GetReplicationMessages",
+    "GetDLQReplicationMessages", "QueryWorkflow", "ReapplyEvents", "RefreshWorkflowTasks",
+    "ReadDLQMessages", "PurgeDLQMessages", "MergeDLQMessages", "NotifyFailoverMarkers",
+    "GetCrossClusterTasks", "RespondCrossClusterTasksCompleted", "GetFailoverInfo",
+    "RatelimitUpdate",
+];
+
+/// Exact gRPC methods in `uber.cadence.history.v1.HistoryAPI`.
+pub const GRPC_HISTORY_METHODS: &[&str] = &[
+    "StartWorkflowExecution", "SignalWorkflowExecution", "SignalWithStartWorkflowExecution",
+    "ResetWorkflowExecution", "TerminateWorkflowExecution", "DescribeWorkflowExecution",
+    "QueryWorkflow", "ResetStickyTaskList", "GetMutableState", "PollMutableState",
+    "RecordDecisionTaskStarted", "RespondDecisionTaskCompleted", "RespondDecisionTaskFailed",
+    "RecordActivityTaskStarted", "RespondActivityTaskCompleted", "RespondActivityTaskFailed",
+    "RespondActivityTaskCanceled", "RecordActivityTaskHeartbeat", "RequestCancelWorkflowExecution",
+    "RemoveSignalMutableState", "ScheduleDecisionTask", "RecordChildExecutionCompleted",
+    "ReplicateEventsV2", "SyncShardStatus", "SyncActivity", "DescribeMutableState",
+    "DescribeHistoryHost", "CloseShard", "RemoveTask", "ResetQueue", "DescribeQueue",
+    "GetReplicationMessages", "GetDLQReplicationMessages", "ReapplyEvents", "RefreshWorkflowTasks",
+    "CountDLQMessages", "ReadDLQMessages", "PurgeDLQMessages", "MergeDLQMessages",
+    "NotifyFailoverMarkers", "GetCrossClusterTasks", "RespondCrossClusterTasksCompleted",
+    "GetFailoverInfo", "RatelimitUpdate",
+];
+
+#[cfg(test)]
+mod rpc_tests {
+    use super::{GRPC_HISTORY_METHODS, THRIFT_HISTORY_METHODS};
+    #[test]
+    fn history_thrift_wire_names_are_unique() {
+        let mut names = THRIFT_HISTORY_METHODS.to_vec();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), THRIFT_HISTORY_METHODS.len());
+        let mut grpc = GRPC_HISTORY_METHODS.to_vec();
+        grpc.sort_unstable();
+        grpc.dedup();
+        assert_eq!(grpc.len(), GRPC_HISTORY_METHODS.len());
+    }
+}
