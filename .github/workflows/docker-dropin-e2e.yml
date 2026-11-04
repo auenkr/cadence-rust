@@ -7,6 +7,10 @@ name: Docker drop-in e2e (swap image name, run cadence-samples, restart)
 # History/Worker services are not ported yet, so the single all-in-one upstream
 # container (go/docker/docker-compose-mysql.yml `cadence`) cannot be a Rust image.
 on:
+  # TEMPORARY: dispatch needs the file on the default branch; remove after merge.
+  push:
+    branches: [t3/docker-dropin-e2e]
+    paths: [.github/workflows/docker-dropin-e2e.yml]
   workflow_dispatch:
     inputs:
       samples_ref:
@@ -52,7 +56,7 @@ jobs:
         run: |
           (cd go && go build -p 2 -ldflags='-s -w' -o "$GITHUB_WORKSPACE/out/cadence-cli" ./cmd/tools/cli)
           git clone -q https://github.com/cadence-workflow/cadence-samples /tmp/cs
-          git -C /tmp/cs checkout -q "${{ inputs.samples_ref }}"
+          git -C /tmp/cs checkout -q "${{ inputs.samples_ref || 'cc365fe999740e61b1bca45816fedd5b6adaa876' }}"
           git -C /tmp/cs log -1 --format='samples %H' | tee out/samples.txt
           mkdir -p /tmp/cs/bin
           cd /tmp/cs
