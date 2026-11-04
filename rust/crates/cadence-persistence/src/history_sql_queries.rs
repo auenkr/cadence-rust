@@ -23,6 +23,10 @@ impl Dialect {
             (Self::Postgres, Statement::UpdateShard) => "UPDATE shards SET range_id = $1, data = $2, data_encoding = $3 WHERE shard_id = $4",
             (Self::MySql, Statement::GetExecution) => "SELECT shard_id, domain_id, workflow_id, run_id, next_event_id, last_write_version, data, data_encoding FROM executions WHERE shard_id = ? AND domain_id = ? AND workflow_id = ? AND run_id = ?",
             (Self::Postgres, Statement::GetExecution) => "SELECT shard_id, domain_id, workflow_id, run_id, next_event_id, last_write_version, data, data_encoding FROM executions WHERE shard_id = $1 AND domain_id = $2 AND workflow_id = $3 AND run_id = $4",
+            (Self::MySql, Statement::LockExecution) => "SELECT next_event_id FROM executions WHERE shard_id = ? AND domain_id = ? AND workflow_id = ? AND run_id = ? FOR UPDATE",
+            (Self::Postgres, Statement::LockExecution) => "SELECT next_event_id FROM executions WHERE shard_id = $1 AND domain_id = $2 AND workflow_id = $3 AND run_id = $4 FOR UPDATE",
+            (Self::MySql, Statement::UpdateExecution) => "UPDATE executions SET next_event_id = ?, last_write_version = ?, data = ?, data_encoding = ? WHERE shard_id = ? AND domain_id = ? AND workflow_id = ? AND run_id = ?",
+            (Self::Postgres, Statement::UpdateExecution) => "UPDATE executions SET next_event_id = $1, last_write_version = $2, data = $3, data_encoding = $4 WHERE shard_id = $5 AND domain_id = $6 AND workflow_id = $7 AND run_id = $8",
             (Self::MySql, Statement::DeleteExecution) => "DELETE FROM executions WHERE shard_id = ? AND domain_id = ? AND workflow_id = ? AND run_id = ?",
             (Self::Postgres, Statement::DeleteExecution) => "DELETE FROM executions WHERE shard_id = $1 AND domain_id = $2 AND workflow_id = $3 AND run_id = $4",
             (Self::MySql, Statement::GetCurrentExecution) => "SELECT run_id, create_request_id, state, close_status, start_version, last_write_version FROM current_executions WHERE shard_id = ? AND domain_id = ? AND workflow_id = ?",
@@ -51,6 +55,22 @@ impl Dialect {
             (Self::Postgres, Statement::DeleteSignalsRequested) => "DELETE FROM signals_requested WHERE shard_id=$1 AND domain_id=$2 AND workflow_id=$3 AND run_id=$4",
             (Self::MySql, Statement::DeleteBufferedEvents) => "DELETE FROM buffered_events WHERE shard_id=? AND domain_id=? AND workflow_id=? AND run_id=?",
             (Self::Postgres, Statement::DeleteBufferedEvents) => "DELETE FROM buffered_events WHERE shard_id=$1 AND domain_id=$2 AND workflow_id=$3 AND run_id=$4",
+            (Self::MySql, Statement::InsertHistoryNode) => "INSERT INTO history_node(shard_id,tree_id,branch_id,node_id,txn_id,data,data_encoding) VALUES(?,?,?,?,?,?,?)",
+            (Self::Postgres, Statement::InsertHistoryNode) => "INSERT INTO history_node(shard_id,tree_id,branch_id,node_id,txn_id,data,data_encoding) VALUES($1,$2,$3,$4,$5,$6,$7)",
+            (Self::MySql, Statement::ReadHistoryNodes) => "SELECT node_id,txn_id,data,data_encoding FROM history_node WHERE shard_id=? AND tree_id=? AND branch_id=? AND node_id>=? AND node_id<? ORDER BY shard_id,tree_id,branch_id,node_id,txn_id LIMIT ?",
+            (Self::Postgres, Statement::ReadHistoryNodes) => "SELECT node_id,txn_id,data,data_encoding FROM history_node WHERE shard_id=$1 AND tree_id=$2 AND branch_id=$3 AND node_id >= $4 AND node_id < $5 ORDER BY shard_id,tree_id,branch_id,node_id,txn_id LIMIT $6",
+            (Self::MySql, Statement::DeleteHistoryNodes) => "DELETE FROM history_node WHERE shard_id=? AND tree_id=? AND branch_id=? AND node_id>=?",
+            (Self::Postgres, Statement::DeleteHistoryNodes) => "DELETE FROM history_node WHERE shard_id=$1 AND tree_id=$2 AND branch_id=$3 AND node_id >= $4",
+            (Self::MySql, Statement::RangeDeleteHistoryNodes) => "DELETE FROM history_node WHERE shard_id=? AND tree_id=? AND branch_id=? AND node_id>=? ORDER BY shard_id,tree_id,branch_id,node_id,txn_id LIMIT ?",
+            (Self::Postgres, Statement::RangeDeleteHistoryNodes) => "DELETE FROM history_node WHERE shard_id=$1 AND tree_id=$2 AND branch_id=$3 AND (node_id,txn_id) IN (SELECT node_id,txn_id FROM history_node WHERE shard_id=$1 AND tree_id=$2 AND branch_id=$3 AND node_id >= $4 LIMIT $5)",
+            (Self::MySql, Statement::InsertHistoryTree) => "INSERT INTO history_tree(shard_id,tree_id,branch_id,data,data_encoding) VALUES(?,?,?,?,?)",
+            (Self::Postgres, Statement::InsertHistoryTree) => "INSERT INTO history_tree(shard_id,tree_id,branch_id,data,data_encoding) VALUES($1,$2,$3,$4,$5)",
+            (Self::MySql, Statement::GetHistoryTree) => "SELECT branch_id,data,data_encoding FROM history_tree WHERE shard_id=? AND tree_id=?",
+            (Self::Postgres, Statement::GetHistoryTree) => "SELECT branch_id,data,data_encoding FROM history_tree WHERE shard_id=$1 AND tree_id=$2",
+            (Self::MySql, Statement::GetAllHistoryTreeBranches) => "SELECT shard_id,tree_id,branch_id,data,data_encoding FROM history_tree WHERE (shard_id=? AND tree_id=? AND branch_id>?) OR (shard_id=? AND tree_id>?) OR (shard_id>?) ORDER BY shard_id,tree_id,branch_id LIMIT ?",
+            (Self::Postgres, Statement::GetAllHistoryTreeBranches) => "SELECT shard_id,tree_id,branch_id,data,data_encoding FROM history_tree WHERE (shard_id=$1 AND tree_id=$2 AND branch_id>$3) OR (shard_id=$4 AND tree_id>$5) OR (shard_id>$6) ORDER BY shard_id,tree_id,branch_id LIMIT $7",
+            (Self::MySql, Statement::DeleteHistoryTree) => "DELETE FROM history_tree WHERE shard_id=? AND tree_id=? AND branch_id=?",
+            (Self::Postgres, Statement::DeleteHistoryTree) => "DELETE FROM history_tree WHERE shard_id=$1 AND tree_id=$2 AND branch_id=$3",
         }
     }
 }
@@ -62,6 +82,8 @@ pub enum Statement {
     LockShard,
     UpdateShard,
     GetExecution,
+    LockExecution,
+    UpdateExecution,
     DeleteExecution,
     GetCurrentExecution,
     DeleteCurrentExecution,
@@ -76,6 +98,14 @@ pub enum Statement {
     DeleteSignalInfoMaps,
     DeleteSignalsRequested,
     DeleteBufferedEvents,
+    InsertHistoryNode,
+    ReadHistoryNodes,
+    DeleteHistoryNodes,
+    RangeDeleteHistoryNodes,
+    InsertHistoryTree,
+    GetHistoryTree,
+    GetAllHistoryTreeBranches,
+    DeleteHistoryTree,
 }
 
 #[cfg(test)]
@@ -94,5 +124,20 @@ mod tests {
     fn mysql_and_postgres_bind_markers_match_their_drivers() {
         assert!(Dialect::MySql.statement(Statement::GetExecution).contains("?"));
         assert!(Dialect::Postgres.statement(Statement::GetExecution).contains("$4"));
+    }
+
+    #[test]
+    fn execution_mutation_and_history_v2_statements_keep_go_predicates() {
+        for dialect in [Dialect::MySql, Dialect::Postgres] {
+            assert!(dialect.statement(Statement::LockExecution).ends_with("FOR UPDATE"));
+            assert!(dialect.statement(Statement::UpdateExecution).contains("WHERE"));
+            let read = dialect.statement(Statement::ReadHistoryNodes);
+            assert!(read.contains("node_id") && read.contains("txn_id") && read.contains("ORDER BY") && read.contains("LIMIT"));
+            assert!(dialect.statement(Statement::DeleteHistoryNodes).contains("node_id"));
+            assert!(dialect.statement(Statement::GetHistoryTree).contains("tree_id"));
+            assert!(dialect.statement(Statement::GetAllHistoryTreeBranches).contains("ORDER BY shard_id,tree_id,branch_id"));
+        }
+        assert!(Dialect::MySql.statement(Statement::RangeDeleteHistoryNodes).contains("ORDER BY shard_id,tree_id,branch_id,node_id,txn_id LIMIT ?"));
+        assert!(Dialect::Postgres.statement(Statement::RangeDeleteHistoryNodes).contains("(node_id,txn_id) IN (SELECT"));
     }
 }
