@@ -202,6 +202,12 @@ pub enum TaskError {
     BadRequest(String),
     #[error("internal service error: {0}")]
     InternalService(String),
+    #[error("workflow execution already started: {0}")]
+    WorkflowExecutionAlreadyStarted(String),
+    #[error("cancellation already requested: {0}")]
+    CancellationAlreadyRequested(String),
+    #[error("sticky worker unavailable: {0}")]
+    StickyWorkerUnavailable(String),
     #[error("retry task v2: {0}")]
     RetryTaskV2(String),
     #[error("unknown task: {0}")]
@@ -503,6 +509,8 @@ pub struct DomainConfig {
 pub struct DomainReplicationConfig {
     pub active_cluster_name: String,
     pub active_active: bool,
+    /// Go `ReplicationConfig.Clusters` (cluster names).
+    pub clusters: Vec<String>,
 }
 
 impl DomainReplicationConfig {

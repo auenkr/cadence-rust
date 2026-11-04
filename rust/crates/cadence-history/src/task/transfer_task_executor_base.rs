@@ -10,7 +10,7 @@ pub const DEFAULT_DOMAIN_NAME:&str="defaultDomainName";
 #[derive(Clone,Debug,Default)]
 pub struct StartEvent {pub timestamp:i64,pub first_decision_task_backoff_seconds:i32,pub headers:Option<BytesMap>}
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
-pub enum WorkflowExecutionStatus {Pending,Started}
+pub enum WorkflowExecutionStatus {Pending,Started,Completed,Failed,Canceled,Terminated,ContinuedAsNew,TimedOut}
 /// TODO(link): replace by execution::MutableState decision accessors.
 pub trait DecisionState:Send+Sync {
  fn has_pending_decision(&self)->bool;
