@@ -16,6 +16,10 @@ pub trait MutableState: Send + Sync {
     fn has_in_flight_decision(&self) -> bool;
     fn get_query_registry(&self) -> std::sync::Arc<dyn super::runtime::QueryRegistry>;
     fn get_child_execution_info(&self, initiated_id: i64) -> Option<ChildExecutionInfo>;
+    fn get_pending_activity_infos(&self) -> Vec<ActivityInfo>;
+    fn get_pending_child_execution_infos(&self) -> Vec<ChildExecutionInfo>;
+    fn get_pending_decision(&self) -> Option<PendingDecision>;
+    async fn get_completion_event(&self) -> HResult<cadence_api::service_types::HistoryEvent>;
     fn add_child_workflow_execution_completed_event(&self, initiated_id: i64, execution: &WorkflowExecution, attrs: Option<&cadence_api::tasks::WorkflowExecutionCompletedEventAttributes>) -> HResult<()>;
     fn add_child_workflow_execution_failed_event(&self, initiated_id: i64, execution: &WorkflowExecution, attrs: Option<&cadence_api::tasks::WorkflowExecutionFailedEventAttributes>) -> HResult<()>;
     fn add_child_workflow_execution_canceled_event(&self, initiated_id: i64, execution: &WorkflowExecution, attrs: Option<&cadence_api::tasks::WorkflowExecutionCanceledEventAttributes>) -> HResult<()>;
@@ -62,4 +66,13 @@ pub trait ExecutionContext: Send + Sync {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct ChildExecutionInfo { pub started_id: i64, pub started_workflow_id: String }
+pub struct ChildExecutionInfo {
+    pub started_id: i64, pub started_workflow_id: String, pub started_run_id: String,
+    pub domain_id: String, pub domain_name_deprecated: String, pub workflow_type_name: String,
+    pub initiated_id: i64, pub parent_close_policy: cadence_api::enums::ParentClosePolicy,
+}
+#[derive(Debug, Clone, Default)]
+pub struct PendingDecision {
+    pub scheduled_timestamp: i64, pub started_timestamp: i64, pub original_scheduled_timestamp: i64,
+    pub attempt: i64, pub schedule_id: i64, pub started_id: i64,
+}

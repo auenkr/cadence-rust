@@ -51,3 +51,9 @@ Added `engine/notify_tasks.rs`: NotifyNewHistoryEvent, NotifyNewTransferTasks,
 NotifyNewTimerTasks, including empty batches, first-task failover version resolution,
 lookup failure logging and missing processor behavior. NotifyNewReplicationTasks and
 hydrateReplicationTask remain unported. This is a checkpoint, not a parity claim.
+
+Continuation commits: a391d9999 adds start validation, timeout override, reuse policy,
+shouldTerminateAndStart and termination details; start orchestration remains missing.
+9f8fa838e adds ReapplyEvents including filtering, reset, cron and failure mapping;
+new stand-in dependency methods need adapters. DescribeWorkflowExecution and its
+response mapping helpers added next; CI pending. Do not infer service parity.

@@ -19,3 +19,4 @@ pub mod query_workflow;
 pub mod notify_tasks;
 pub mod start_workflow_execution;
 pub mod reapply_events;
+pub mod describe_workflow_execution;
