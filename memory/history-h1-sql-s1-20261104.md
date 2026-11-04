@@ -44,7 +44,10 @@ and codec work only; no execution SQL CRUD implementation was reusable.
   failed clippy on `type_complexity` for the execution row tuple. Fixed with
   named row type aliases and added the transactional create path in
   `bff02f76209a5f4a19a8ede20ae35a427305b77d`.
-- Validation for `bff02f76209a5f4a19a8ede20ae35a427305b77d` is currently
-  pending: [run 41869474110](https://github.com/auenkr/cadence-rust/actions/runs/41869474110).
-  Replace this status with the final head SHA, run URL, and conclusion before
-  handing off.
+- Validation for `bff02f76209a5f4a19a8ede20ae35a427305b77d` failed clippy on
+  `too_many_arguments` for backend create methods. The create arguments were
+  grouped in `CreateExecutionRowRequest`.
+- Clippy and tests passed for code head
+  `0ddcf3c1b4ac43a0a96d02d0747a00888ae19a7a`:
+  [run 41870825957](https://github.com/auenkr/cadence-rust/actions/runs/41870825957),
+  conclusion `success`.
