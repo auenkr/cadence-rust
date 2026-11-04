@@ -22,15 +22,26 @@ pub enum WorkflowRequestMode { New=0, Replicated=1 }
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct WorkflowExecutionInfo {
     pub domain_id: String, pub workflow_id: String, pub run_id: String,
+    pub first_execution_run_id:String, pub parent_domain_id:String, pub parent_workflow_id:String, pub parent_run_id:String,
+    pub initiated_id:i64, pub completion_event_batch_id:i64,
     pub create_request_id: String, pub state: i32, pub close_status: i32,
     pub next_event_id: i64, pub last_first_event_id: i64, pub last_event_task_id: i64,
-    pub last_write_version: i64, pub start_time_unix_nanos: i64, pub execution_time_unix_nanos: i64,
-    pub workflow_timeout_seconds: i32, pub decision_start_to_close_timeout_seconds: i32,
-    pub task_list: String, pub sticky_task_list: String, pub client_library_version: String,
+    pub last_processed_event:i64, pub last_write_version: i64, pub start_time_unix_nanos: i64, pub last_updated_time_unix_nanos:i64,
+    pub workflow_timeout_nanos:i64, pub decision_start_to_close_timeout_nanos:i64,
+    pub execution_context:Vec<u8>, pub signal_count:i32, pub decision_version:i64, pub decision_schedule_id:i64,
+    pub decision_started_id:i64, pub decision_request_id:String, pub decision_timeout_nanos:i64, pub decision_attempt:i64,
+    pub decision_started_time_unix_nanos:i64, pub decision_scheduled_time_unix_nanos:i64,
+    pub decision_original_scheduled_time_unix_nanos:i64, pub cancel_requested:bool, pub cancel_request_id:String,
+    pub task_list: String, pub task_list_kind:i32, pub workflow_type_name:String, pub sticky_task_list: String,
+    pub sticky_schedule_to_start_timeout_nanos:i64, pub client_library_version: String,
     pub client_feature_version: String, pub client_impl: String, pub cron_schedule: String,
-    pub parent_domain_id: String, pub parent_workflow_id: String, pub parent_run_id: String,
-    pub initiated_id: i64, pub completion_event: Option<DataBlob>, pub auto_reset_points: Option<DataBlob>,
+    pub cron_overlap_policy:i32, pub expiration_interval_nanos:i64,
+    pub completion_event: Option<DataBlob>, pub auto_reset_points: Option<DataBlob>, pub branch_token:Vec<u8>,
+    pub attempt:i32, pub has_retry_policy:bool, pub initial_interval_nanos:i64, pub backoff_coefficient:f64,
+    pub jitter_coefficient:f64, pub maximum_interval_nanos:i64, pub expiration_time_unix_nanos:i64,
+    pub maximum_attempts:i32, pub non_retriable_errors:Vec<String>, pub memo:BTreeMap<String,Vec<u8>>,
     pub search_attributes: BTreeMap<String, Vec<u8>>, pub partition_config: BTreeMap<String,String>,
+    pub active_cluster_selection_policy:Option<DataBlob>,
     pub history_size: i64, pub is_cron: bool,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -69,13 +80,27 @@ pub struct WorkflowRequest { pub request_id: String, pub data: DataBlob }
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct HistoryTaskKey { pub task_id: i64, pub version: i64 }
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct TransferTask { pub task_id:i64, pub task_type:i32, pub domain_id:String, pub workflow_id:String, pub run_id:String, pub data:DataBlob }
+pub struct TransferTask {
+    pub domain_id:String, pub workflow_id:String, pub run_id:String, pub visibility_time_unix_nanos:i64,
+    pub task_id:i64, pub target_domain_id:String, pub target_domain_ids:Vec<String>, pub target_workflow_id:String,
+    pub target_run_id:String, pub target_child_workflow_only:bool, pub task_list:String, pub task_type:i32,
+    pub schedule_id:i64, pub version:i64, pub record_visibility:bool, pub original_task_list:String,
+    pub original_task_list_kind:i32,
+}
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct TimerTask { pub task_id:i64, pub visibility_timestamp_unix_nanos:i64, pub task_type:i32, pub domain_id:String, pub workflow_id:String, pub run_id:String, pub data:DataBlob }
+pub struct TimerTask {
+    pub domain_id:String, pub workflow_id:String, pub run_id:String, pub visibility_timestamp_unix_nanos:i64,
+    pub task_id:i64, pub task_type:i32, pub timeout_type:i32, pub event_id:i64, pub schedule_attempt:i64,
+    pub version:i64, pub task_list:String,
+}
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ReplicationTask { pub task_id:i64, pub task_type:i32, pub first_event_id:i64, pub next_event_id:i64, pub version:i64, pub data:DataBlob }
+pub struct ReplicationTask {
+    pub domain_id:String, pub workflow_id:String, pub run_id:String, pub task_id:i64, pub task_type:i32,
+    pub first_event_id:i64, pub next_event_id:i64, pub version:i64, pub scheduled_id:i64,
+    pub branch_token:Vec<u8>, pub new_run_branch_token:Vec<u8>, pub creation_time_unix_nanos:i64,
+}
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct CrossClusterTask { pub task_id:i64, pub task_type:i32, pub data:DataBlob }
+pub type CrossClusterTask = TransferTask;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateWorkflowExecutionRequest { pub shard_id:i32, pub range_id:i64, pub mode:CreateWorkflowMode, pub previous_run_id:String, pub previous_last_write_version:i64, pub new_workflow_snapshot:WorkflowSnapshot, pub workflow_request_mode:WorkflowRequestMode, pub current_timestamp_unix_nanos:i64 }
@@ -108,26 +133,26 @@ pub trait GoExecutionStore: Send+Sync {
     async fn is_workflow_execution_exists(&self, shard_id:i32, domain_id:String, workflow_id:String, run_id:String)->Result<bool,PersistenceError>;
     async fn list_concrete_executions(&self, filter:ExecutionListFilter)->Result<ExecutionPage,PersistenceError>;
     async fn list_current_executions(&self, filter:ExecutionListFilter)->Result<ExecutionPage,PersistenceError>;
-    async fn create_transfer_tasks(&self, shard_id:i32, tasks:Vec<Task>)->Result<(),PersistenceError>;
-    async fn get_transfer_tasks(&self, shard_id:i32, min_id:i64, max_id:i64, batch_size:i32)->Result<Vec<Task>,PersistenceError>;
+    async fn create_transfer_tasks(&self, shard_id:i32, tasks:Vec<TransferTask>)->Result<(),PersistenceError>;
+    async fn get_transfer_tasks(&self, shard_id:i32, min_id:i64, max_id:i64, batch_size:i32)->Result<Vec<TransferTask>,PersistenceError>;
     async fn complete_transfer_task(&self, shard_id:i32, task_id:i64)->Result<(),PersistenceError>;
     async fn create_failover_marker_tasks(&self, shard_id:i32, tasks:Vec<Task>)->Result<(),PersistenceError>;
     async fn create_history_tasks(&self, shard_id:i32, tasks:Vec<Task>)->Result<(),PersistenceError>;
-    async fn create_timer_tasks(&self, shard_id:i32, tasks:Vec<Task>)->Result<(),PersistenceError>;
-    async fn select_timer_tasks(&self, shard_id:i32, min_timestamp:i64, max_timestamp:i64, batch_size:i32)->Result<Vec<Task>,PersistenceError>;
+    async fn create_timer_tasks(&self, shard_id:i32, tasks:Vec<TimerTask>)->Result<(),PersistenceError>;
+    async fn select_timer_tasks(&self, shard_id:i32, min_timestamp:i64, max_timestamp:i64, batch_size:i32)->Result<Vec<TimerTask>,PersistenceError>;
     async fn complete_timer_task(&self, shard_id:i32, visibility_timestamp:i64, task_id:i64)->Result<(),PersistenceError>;
-    async fn create_replication_tasks(&self, shard_id:i32, tasks:Vec<Task>)->Result<(),PersistenceError>;
-    async fn get_replication_tasks(&self, shard_id:i32, min_id:i64, max_id:i64, batch_size:i32)->Result<Vec<Task>,PersistenceError>;
+    async fn create_replication_tasks(&self, shard_id:i32, tasks:Vec<ReplicationTask>)->Result<(),PersistenceError>;
+    async fn get_replication_tasks(&self, shard_id:i32, min_id:i64, max_id:i64, batch_size:i32)->Result<Vec<ReplicationTask>,PersistenceError>;
     async fn complete_replication_task(&self, shard_id:i32, task_id:i64)->Result<(),PersistenceError>;
     async fn get_replication_dlq_size(&self, source_cluster:String)->Result<i64,PersistenceError>;
     async fn delete_replication_task_from_dlq(&self, source_cluster:String, task_id:i64)->Result<(),PersistenceError>;
-    async fn put_replication_task_to_dlq(&self, source_cluster:String, task:Task)->Result<(),PersistenceError>;
-    async fn get_replication_tasks_from_dlq(&self, source_cluster:String, min_id:i64, max_id:i64, batch_size:i32)->Result<Vec<Task>,PersistenceError>;
+    async fn put_replication_task_to_dlq(&self, source_cluster:String, task:ReplicationTask)->Result<(),PersistenceError>;
+    async fn get_replication_tasks_from_dlq(&self, source_cluster:String, min_id:i64, max_id:i64, batch_size:i32)->Result<Vec<ReplicationTask>,PersistenceError>;
     async fn range_delete_replication_tasks_from_dlq(&self, source_cluster:String, inclusive_max_id:i64, page_size:i32)->Result<u64,PersistenceError>;
-    async fn create_cross_cluster_tasks(&self, shard_id:i32, tasks:Vec<Task>)->Result<(),PersistenceError>;
-    async fn get_cross_cluster_tasks(&self, shard_id:i32, min_id:i64, max_id:i64, batch_size:i32)->Result<Vec<Task>,PersistenceError>;
+    async fn create_cross_cluster_tasks(&self, shard_id:i32, tasks:Vec<CrossClusterTask>)->Result<(),PersistenceError>;
+    async fn get_cross_cluster_tasks(&self, shard_id:i32, min_id:i64, max_id:i64, batch_size:i32)->Result<Vec<CrossClusterTask>,PersistenceError>;
     async fn complete_cross_cluster_task(&self, shard_id:i32, task_id:i64)->Result<(),PersistenceError>;
-    async fn create_replication_tasks_from_dlq(&self, source_cluster:String, tasks:Vec<Task>)->Result<(),PersistenceError>;
+    async fn create_replication_tasks_from_dlq(&self, source_cluster:String, tasks:Vec<ReplicationTask>)->Result<(),PersistenceError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
