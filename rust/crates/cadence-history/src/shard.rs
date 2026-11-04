@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShardInfo {
@@ -103,6 +104,46 @@ impl ShardController {
     }
     pub fn close(&self, shard_id: u32) { if let Ok(mut open) = self.open.lock() { open.remove(&shard_id); } }
     pub fn owned_shards(&self) -> Vec<u32> { self.open.lock().map(|x| x.iter().copied().collect()).unwrap_or_default() }
+
+    /// Go controller's acquireShards pass: reconcile every shard against the
+    /// current History membership ring, closing local state when ownership moves.
+    pub fn acquire_shards(&self, members: &[cadence_common::membership::Host]) -> Result<(), ShardError> {
+        for id in 0..self.num_history_shards {
+            if let Err(error) = self.acquire(id, members) {
+                if matches!(error, ShardError::ShardOwnershipLost { .. }) {
+                    self.close(id);
+                    continue;
+                }
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+
+    /// Run the controller's periodic reconciliation and membership-change
+    /// handling. Sending a new member snapshot wakes reconciliation immediately.
+    pub async fn run(
+        self: Arc<Self>,
+        mut membership: tokio::sync::watch::Receiver<Vec<cadence_common::membership::Host>>,
+        mut shutdown: tokio::sync::watch::Receiver<bool>,
+        interval: Duration,
+    ) -> Result<(), ShardError> {
+        let mut ticker = tokio::time::interval(interval.max(Duration::from_millis(1)));
+        loop {
+            tokio::select! {
+                _ = ticker.tick() => self.acquire_shards(&membership.borrow())?,
+                changed = membership.changed() => {
+                    if changed.is_err() { break; }
+                    self.acquire_shards(&membership.borrow())?;
+                }
+                changed = shutdown.changed() => {
+                    if changed.is_err() || *shutdown.borrow() { break; }
+                }
+            }
+        }
+        for shard_id in self.owned_shards() { self.close(shard_id); }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -143,5 +184,16 @@ mod tests {
         let controller = ShardController::new(100, "history-a", Arc::new(InMemoryShardStore::default()));
         let err = controller.check_ownership(id, &members).unwrap_err();
         assert_eq!(err, ShardError::ShardOwnershipLost { shard_id: id, owner: "history-b:7934".into() });
+    }
+
+    #[test]
+    fn acquire_shards_reconciles_membership_and_closes_removed_shards() {
+        let members = hosts();
+        let store = Arc::new(InMemoryShardStore::default());
+        let controller = ShardController::new(100, "a", store);
+        controller.acquire_shards(&members).unwrap();
+        assert!(!controller.owned_shards().is_empty());
+        controller.acquire_shards(&members[1..]).unwrap();
+        assert!(controller.owned_shards().is_empty());
     }
 }
