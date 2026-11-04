@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use rand::Rng;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use super::action::ActionType;

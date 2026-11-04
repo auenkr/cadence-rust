@@ -15,3 +15,6 @@ pub mod processor_options_factory;
 pub mod transfer_queue_validator;
 pub mod task_allocator;
 pub mod transfer_queue_processor_base;
+pub mod interface;
+pub mod shard_deps;
+pub mod transfer_queue_processor;

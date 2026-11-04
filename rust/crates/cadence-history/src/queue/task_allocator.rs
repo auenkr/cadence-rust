@@ -18,6 +18,13 @@ pub struct DomainEntry {
     /// `GetInfo().Status` is deprecated or deleted
     pub is_deprecated_or_deleted: bool,
     pub has_info: bool,
+    /// `GetReplicationConfig().Clusters` names (for `HasReplicationCluster`)
+    pub replication_clusters: Vec<String>,
+}
+impl DomainEntry {
+    pub fn has_replication_cluster(&self, cluster: &str) -> bool {
+        self.replication_clusters.iter().any(|c| c == cluster)
+    }
 }
 
 /// TODO(link): replace by cache::DomainCache
@@ -40,7 +47,7 @@ pub trait ActiveClusterManager: Send + Sync {
 }
 
 /// Go `htask.ErrTaskPendingActive`; carried as `QueueError::Other` with this message.
-pub const ERR_TASK_PENDING_ACTIVE: &str = "Task is pending active";
+pub const ERR_TASK_PENDING_ACTIVE: &str = "redispatch the task while the domain is pending-active";
 
 /// TaskAllocator verifies if a task should be processed or not
 #[async_trait]
@@ -60,15 +67,19 @@ pub trait TaskAllocator: Send + Sync {
         wf_id: &str,
         r_id: &str,
     ) -> Result<bool, QueueError>;
-    /// Block all task allocation; returns guard-less: use `lock_guard`.
-    async fn lock(&self) -> tokio::sync::RwLockWriteGuard<'_, ()>;
+    /// Block all task allocation (Go `Lock`); paired with `unlock`.
+    async fn lock(&self);
+    /// Resume the task allocator (Go `Unlock`).
+    fn unlock(&self);
 }
 
 pub struct TaskAllocatorImpl {
     current_cluster_name: String,
     domain_cache: Arc<dyn DomainCache>,
     active_cluster_mgr: Arc<dyn ActiveClusterManager>,
-    locker: RwLock<()>,
+    locker: Arc<RwLock<()>>,
+    /// write guard held between `lock` and `unlock`
+    held: std::sync::Mutex<Option<tokio::sync::OwnedRwLockWriteGuard<()>>>,
 }
 
 /// Go `NewTaskAllocator`.
@@ -77,7 +88,9 @@ pub fn new_task_allocator(
     domain_cache: Arc<dyn DomainCache>,
     active_cluster_mgr: Arc<dyn ActiveClusterManager>,
 ) -> Arc<TaskAllocatorImpl> {
-    Arc::new(TaskAllocatorImpl { current_cluster_name, domain_cache, active_cluster_mgr, locker: RwLock::new(()) })
+    Arc::new(TaskAllocatorImpl { current_cluster_name, domain_cache, active_cluster_mgr, locker: Arc::new(RwLock::new(())),
+        held: std::sync::Mutex::new(None),
+    })
 }
 
 impl TaskAllocatorImpl {
@@ -166,8 +179,13 @@ impl TaskAllocator for TaskAllocatorImpl {
         self.verify_task_activeness(standby_cluster, domain_id, wf_id, r_id, true).await
     }
 
-    async fn lock(&self) -> tokio::sync::RwLockWriteGuard<'_, ()> {
-        self.locker.write().await
+    async fn lock(&self) {
+        let g = self.locker.clone().write_owned().await;
+        *self.held.lock().unwrap() = Some(g);
+    }
+
+    fn unlock(&self) {
+        self.held.lock().unwrap().take();
     }
 }
 

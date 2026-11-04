@@ -165,6 +165,7 @@ pub trait PersistenceTask: Send + Sync + fmt::Debug {
     fn get_run_id(&self) -> String;
     fn get_task_id(&self) -> i64;
     fn get_task_type(&self) -> i32;
+    fn get_task_category(&self) -> HistoryTaskCategory;
     fn get_version(&self) -> i64;
     fn get_visibility_timestamp(&self) -> Time;
     /// Go `persistence.IsTaskCorrupted`.
