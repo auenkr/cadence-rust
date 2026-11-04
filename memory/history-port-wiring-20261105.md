@@ -10,10 +10,37 @@ Base: master 6bcc45d8d. CI: `gh workflow run rust-ci.yml --ref <branch> -f packa
 - D assembly (after A,B): shard controller, shard context, engine factory, queue processors, replication, failover, main.rs startup.
 
 ## Stubs replaced
-(none yet)
+Unit B (branch history-wiring-resources, rust/crates/cadence-history/src/wiring/resources/):
+- clock.rs `SystemClock`: engine::TimeSource, task::TimeSource, replication::TimeSource, failover::TimeSource, queuev2::TimeSource (+ `TokioTimer`, `TokioTimerGate` for queuev2 Timer/TimerGate).
+- cluster.rs `ClusterMetadataImpl` (cadence_common::cluster::Metadata): engine::ClusterMetadata, task::ClusterMetadata.
+- domain_cache.rs `HistoryDomainCache` (wraps cadence-matching MatchingDomainCache; caller builds/starts it with a persistence source): engine/task/replication/failover DomainCache.
+- metrics.rs `MetricsRegistry` + `Scope` + `MetricsClientImpl` + `DomainMetricsScopeCacheImpl`: task::MetricsScope/MetricsClient/DomainMetricsScopeCache, queue::MetricsScope, queuev2::MetricsScope/MetricsClient/Stopwatch, ReplicationMetrics, FailoverMetrics, EngineMetrics (real counters; replaces NoopScope/NoopMetrics once assembly uses them).
+- dynconfig.rs `FileDynamicClient`: config_collection::DynamicClient from YAML file (constraint matching, reload).
+- membership.rs `MembershipResolver`: Ringpop-compatible ring (cadence_common::membership::Ring) lookup/who_am_i/members/owns.
+- client_checker.rs `VersionChecker`: engine::ClientChecker (sticky query).
+
+Unit B part 2 (branch history-wiring-resources2, same dir):
+- config_adapters.rs `ConfigAdapter(Arc<Config>)`: task::HistoryConfig, engine::EngineConfig, failover::FailoverConfig, replication::ReplicationConfig.
+- domain_source.rs `open_domain_metadata_source`: DomainMetadataSource for SQLite/MySQL/Postgres/Cassandra via cadence-matching `open_configured_default_store` (blocking; call in spawn_blocking).
+- failover_domain_manager.rs `PersistenceDomainManager`: failover::DomainManager (Go CleanPendingActiveState, retry 50ms x2, 2 attempts).
+- membership_feed.rs: Ringpop events/snapshot -> `MembershipResolver::update_hosts`.
+- persistent_dynconfig.rs `PersistentDynamicClient`: DynamicClient over cadence-persistence `ConfigStoreClient` (+ poller).
+- replication_clients.rs `GrpcAdminClient`, `GrpcFrontendClient` (SignalWithStart data-corruption scan), `ReplicationClientBean` (remote gRPC channels from cluster metadata; HistoryClient injected).
+- query_matching.rs `GrpcQueryMatchingClient`: engine::QueryMatchingClient over Matching gRPC, channel resolver injected.
+
+## Unit B gaps (not done, need follow-up)
+- Replication `HistoryClient` (SyncActivity / ReplicateEventsV2 / etc.): no proto conversions in cadence-proto; bean takes an injected impl.
+- Visibility WRITE client: cadence-persistence only has a visibility reader; no writer to wrap. Archival client: only primitives in cadence-common (archiver, cloud_archiver, archival_state); no history-facing client written.
+- Channel resolver for GrpcQueryMatchingClient (task list -> matching host via MembershipResolver) must be supplied by assembly; tchannel remotes unsupported in replication bean.
+- None of the new impls is exercised by tests yet (compile + clippy only).
 
 ## Stubs remaining
 Per-module local trait universes (engine/deps.rs, task/deps.rs, queue/deps.rs, queuev2/deps.rs, replication/deps.rs, ...), NoopScope/NoopMetrics/NoopObserver, InMemoryShardStore, InMemoryClient, main.rs delegating to cadence_matching::launcher.
 
 ## CI runs
-(none yet)
+- 41924739463 head e0aa7a3fe (history-wiring-resources, unit B part 1): see earlier result.
+- 41926280725 (resources2 batch 1): failure, clippy while_let in membership_feed.
+- 41927175770: failure, missing tonic/cadence-proto deps.
+- 41927893949: failure, clippy result_large_err.
+- 41928648196: success (cadence-history clippy+test).
+- 41929681628 head 5c2cae3fd (adds query_matching.rs): success. https://github.com/auenkr/cadence-rust/actions/runs/41929681628
