@@ -19,4 +19,4 @@ Branch `history-port-shard`. Validation: CI only (`gh workflow run rust-ci.yml -
 - domain cache test constants
 
 ## CI
-Last green run: none yet. Latest dispatched: https://github.com/auenkr/cadence-rust/actions/runs/41900828938
+Last green run: https://github.com/auenkr/cadence-rust/actions/runs/41902401867 (head 8fe83b4162e76a591abad37ae56041242647ae06, clippy+test cadence-history: success). Covers config, config_collection, constants, shard_context.
