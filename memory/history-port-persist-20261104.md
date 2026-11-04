@@ -14,9 +14,11 @@ New trait methods expose full scheduled task keys/pages, failover range IDs, DLQ
 
 - https://github.com/auenkr/cadence-rust/actions/runs/41887514632 — `26c42b7acbb08703d5c59608ad6a5f322eb5bf53`, failed Clippy (`items_after_test_module`), fixed by moving the codec test module.
 - https://github.com/auenkr/cadence-rust/actions/runs/41888820179 — `3c81a2386ecf4df44a1fdcf9836842ad8ba32119`, **success**, cadence-persistence clippy then tests; CI formatting artifact applied only to this port's files.
-- Final fresh-target run: https://github.com/auenkr/cadence-rust/actions/runs/41911404098, head `374ce4a1707ed336fb993554373cc24f42dd01d4`, conclusion **failure**: Clippy passed; 424 tests passed and one stale zombie collision assertion failed (updated to Go `ConditionFailed`). Final rerun pending.
+- Final fresh-target run: https://github.com/auenkr/cadence-rust/actions/runs/41911404098, head `374ce4a1707ed336fb993554373cc24f42dd01d4`, conclusion **failure**: Clippy passed; 424 tests passed and one stale zombie collision assertion failed (updated to Go `ConditionFailed`). Superseded by successful fresh-target rerun below.
 - Static SQL catalog table-name check against `go/schema/mysql/v8/cadence/schema.sql`: no unknown table names; `git diff --check`: pass.
 - Final audit corrections include `signals_requested_sets` cleanup, SQL timeout/throttling categories, nullable heartbeat payload reads, omission of deprecated `LastWriteEventID` from NDC writes, and the matching regression assertion.
+- https://github.com/auenkr/cadence-rust/actions/runs/41924189215 — head `5933bcf0f6e70194c5d40feaedb9dcc4e660f7ff`, **success**. `clean_target=true`, dedicated `/home/runner/work/_temp/cargo-target-final`, cadence-persistence clippy (`--all-targets -- -D warnings`) followed by tests. This is the final implementation source head; subsequent changes only record this evidence and dashboard status.
+- Machine-readable run identities are saved in `memory/evidence/history-port-persist-20261104/`.
 - All Cargo commands ran on GitHub Actions; no local Cargo or Go builds/tests. No integration test evidence is claimed.
 
 ## Go function to Rust mapping

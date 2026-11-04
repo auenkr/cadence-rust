@@ -150,7 +150,7 @@ const DATA = {
         {n:"Mixed-cluster gate", subs:[["Domain CRUD",100,"done"],["Start/complete/signal",100,"done"],["Query / describe / list open+closed",100,"done"],["SIGKILL restart recovery",100,"done"],["Expanded APIs / child / backfill / IPv6",200,"done"],["Ringpop join + History-2 kill churn",100,"done"],["Kafka async + filestore archival",200,"done"],["OAuth/JWT gate",100,"done"],["Two-cluster redirection/failover",200,"done"],["S3/GCS archival (MinIO)",200,"part"],["Docker drop-in (swap image name only)",300,"part"],["Final parity audit sign-off",300,"part"]]}
       ]},
     { name: "History", order: 3, status: "part",
-      acceptance: "SQL persistence implementation port now includes workflow mutations/conflict resolution, state maps, tasks/DLQ and History-v2 for MySQL/PostgreSQL on history-port-persist. Crate CI passed before final audit fixes; fresh final validation pending. No SQL integration or service acceptance claimed. See <code>memory/history-port-persist-20261104.md</code>.",
+      acceptance: "SQL persistence implementation port now includes workflow mutations/conflict resolution, state maps, tasks/DLQ and History-v2 for MySQL/PostgreSQL on history-port-persist. Fresh-target crate Clippy and tests passed at 5933bcf0f (run 41924189215). No SQL integration or service acceptance claimed. See <code>memory/history-port-persist-20261104.md</code>.",
       note: "Largest service (~75k Go lines, about 6x Matching). History SQL contracts and store implementations are wired. Mixed Go/Rust History service acceptance remains incomplete.",
       components: [
         {n:"execution (mutable state, workflow ctx)", dir:"history/execution", d:"none"},
