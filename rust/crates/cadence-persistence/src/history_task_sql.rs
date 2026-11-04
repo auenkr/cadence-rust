@@ -12,6 +12,13 @@ pub struct HistoryTaskQuery {
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 struct TimerCursor { #[serde(rename="TaskID")] task_id:i64, #[serde(rename="Timestamp")] timestamp:chrono::DateTime<chrono::Utc> }
+#[derive(Debug, Clone, Default)]
+pub struct ReplicationDlqQuery {
+    pub shard_id:i32, pub source_cluster:String, pub read_level:i64, pub max_read_level:i64,
+    pub page_size:i32, pub next_page_token:Vec<u8>,
+}
+#[derive(Debug, Clone, Default)]
+pub struct ReplicationDlqPage { pub tasks:Vec<ReplicationTask>, pub next_page_token:Vec<u8> }
 impl SqlHistoryTasks {
     pub fn insert_tx(tx: &mut dyn SqlTx, dialect: Dialect, shard_id: i32, category: &HistoryTaskCategory, tasks: &[Task]) -> Result<(),PersistenceError> {
         let statement = match (category.category_type, category.category_id) { (1,1) => Statement::InsertTransferTask, (1,3) => Statement::InsertReplicationTask, (2,2) => Statement::InsertTimerTask, _ => return Ok(()) };
@@ -90,6 +97,14 @@ impl SqlHistoryTasks {
     pub fn get_dlq(&self, source_cluster:&str, min:i64, max:i64, page_size:i32) -> Result<Vec<ReplicationTask>,PersistenceError> {
         let rows = self.backend.transaction(|tx| tx.query(self.backend.dialect().statement(Statement::SelectReplicationTasksDLQ), &[Value::Text(source_cluster.into()),Value::I32(self.shard_id),Value::I64(min),Value::I64(max),Value::I32(page_size)], &[Column::I64,Column::Bytes,Column::Text]))?;
         rows.into_iter().map(|row| { let mut task = crate::sqlblobs::Encoding::parse(&row[2].text()?).and_then(|e| e.decode(&row[1].bytes().map_err(|e| cadence_thrift::Error::Invalid(e.to_string()))?)).and_then(|v| crate::sqlblobs::replication_task_from_struct(&v)).map_err(internal)?; task.task_id = row[0].integer()?; Ok(task) }).collect()
+    }
+    pub fn get_dlq_page(&self, request:&ReplicationDlqQuery) -> Result<ReplicationDlqPage,PersistenceError> {
+        let min=if request.next_page_token.is_empty(){request.read_level}else{crate::history_sql::decode_history_node_page_token(&request.next_page_token).map_err(internal)?};
+        let max=request.max_read_level.max(min.wrapping_add(i64::from(request.page_size)));
+        let mut store=self.clone();store.shard_id=request.shard_id;
+        let tasks=store.get_dlq(&request.source_cluster,min,max,request.page_size)?;
+        let next_page_token=tasks.last().map(|task|task.task_id.wrapping_add(1)).filter(|next|*next<max).map(crate::history_sql::encode_history_node_page_token).unwrap_or_default();
+        Ok(ReplicationDlqPage{tasks,next_page_token})
     }
     pub fn dlq_size(&self, source_cluster:&str) -> Result<i64,PersistenceError> {
         let rows = self.backend.transaction(|tx| tx.query(self.backend.dialect().statement(Statement::CountReplicationTasksDLQ), &[Value::Text(source_cluster.into()),Value::I32(self.shard_id)], &[Column::I64]))?;

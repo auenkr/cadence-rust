@@ -83,6 +83,20 @@ pub fn decode(token: &[u8]) -> Result<HistoryTreeCursor, PersistenceError> {
     parse().ok_or_else(|| PersistenceError::Internal("unable to decode next page token".into()))
 }
 
+/// Go sqlplugin.ExecutionsFilter gob. The cursor intentionally includes only
+/// ShardID and WorkflowID, exactly as ListConcreteExecutions constructs it.
+pub fn encode_execution(shard_id:i32, workflow_id:&str)->Vec<u8>{
+    let mut ty=Vec::new();int(&mut ty,-64);ty.extend([3,1,1]);bytes(&mut ty,b"ExecutionsFilter");ty.push(1);int(&mut ty,64);ty.push(0);ty.push(1);uint(&mut ty,5);
+    for (name,id)in [("ShardID",2),("DomainID",5),("WorkflowID",6),("RunID",5),("Size",2)]{ty.push(1);bytes(&mut ty,name.as_bytes());ty.push(1);int(&mut ty,id);ty.push(0);}ty.extend([0,0]);
+    let mut out=Vec::new();message(&mut out,&ty);let mut body=Vec::new();int(&mut body,64);let mut previous=-1;
+    if shard_id!=0{body.push(1);int(&mut body,i64::from(shard_id));previous=0;}
+    if !workflow_id.is_empty(){uint(&mut body,(2-previous) as u64);bytes(&mut body,workflow_id.as_bytes());}body.push(0);message(&mut out,&body);out
+}
+pub fn decode_execution(token:&[u8])->Result<(i32,String),PersistenceError>{
+    let parse=||->Option<(i32,String)>{let mut stream=Reader(token);while !stream.0.is_empty(){let mut msg=Reader(stream.bytes()?);if msg.int()?<0{continue;}let mut shard=0;let mut workflow=String::new();let mut field=-1i64;loop{let delta=msg.uint()?;if delta==0{break;}field=field.checked_add(i64::try_from(delta).ok()?)?;match field{0=>shard=i32::try_from(msg.int()?).ok()?,1|3=>{msg.bytes()?;},2=>workflow=String::from_utf8(msg.bytes()?.to_vec()).ok()?,4=>{msg.int()?;},_=>return None}}return Some((shard,workflow));}None};
+    parse().ok_or_else(||PersistenceError::Internal("ListConcreteExecutions failed. Invalid page token".into()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -97,16 +111,3 @@ mod tests {
     }
 }
 
-/// Go sqlplugin.ExecutionsFilter gob. The cursor intentionally includes only
-/// ShardID and WorkflowID, exactly as ListConcreteExecutions constructs it.
-pub fn encode_execution(shard_id:i32, workflow_id:&str)->Vec<u8>{
-    let mut ty=Vec::new();int(&mut ty,-64);ty.extend([3,1,1]);bytes(&mut ty,b"ExecutionsFilter");ty.push(1);int(&mut ty,64);ty.push(0);ty.push(1);uint(&mut ty,5);
-    for (name,id)in [("ShardID",2),("DomainID",5),("WorkflowID",6),("RunID",5),("Size",2)]{ty.push(1);bytes(&mut ty,name.as_bytes());ty.push(1);int(&mut ty,id);ty.push(0);}ty.extend([0,0]);
-    let mut out=Vec::new();message(&mut out,&ty);let mut body=Vec::new();int(&mut body,64);let mut previous=-1;
-    if shard_id!=0{body.push(1);int(&mut body,i64::from(shard_id));previous=0;}
-    if !workflow_id.is_empty(){uint(&mut body,(2-previous) as u64);bytes(&mut body,workflow_id.as_bytes());}body.push(0);message(&mut out,&body);out
-}
-pub fn decode_execution(token:&[u8])->Result<(i32,String),PersistenceError>{
-    let parse=||->Option<(i32,String)>{let mut stream=Reader(token);while !stream.0.is_empty(){let mut msg=Reader(stream.bytes()?);if msg.int()?<0{continue;}let mut shard=0;let mut workflow=String::new();let mut field=-1i64;loop{let delta=msg.uint()?;if delta==0{break;}field=field.checked_add(i64::try_from(delta).ok()?)?;match field{0=>shard=i32::try_from(msg.int()?).ok()?,1|3=>{msg.bytes()?;},2=>workflow=String::from_utf8(msg.bytes()?.to_vec()).ok()?,4=>{msg.int()?;},_=>return None}}return Some((shard,workflow));}None};
-    parse().ok_or_else(||PersistenceError::Internal("ListConcreteExecutions failed. Invalid page token".into()))
-}
