@@ -14,6 +14,12 @@ Branch: `history-port-persist`, based on `origin/master` after fetch. Worktree: 
 - `0d133fba3`: added the Go little-endian int64 History node page token codec and row-order/transaction validation, including duplicate-transaction selection and corruption errors.
 - `7ab12e019`, `2a92b9d4d`: added branch fork ancestry, shared-ancestor reference maxima and deletion-range helpers.
 
+## New implementation in progress
+
+- Added `history_state_maps_sql.rs` with MySQL/PostgreSQL upsert, select and delete operations for activity, timer, child, request-cancel and signal maps. Activity rows preserve heartbeat details and timestamp columns.
+- Added `history_state_non_maps_sql.rs` with MySQL/PostgreSQL requested-signal set and buffered-event operations. Signal inserts are idempotent and requested-signal deletions use the Go-style expanded `IN` list.
+- These helpers are standalone and are **not yet wired into full execution mutation transactions or `GoExecutionStore`**. They are not evidence of parity completion.
+
 ## CI
 
 - `rust-ci` run https://github.com/auenkr/cadence-rust/actions/runs/41876876946 was dispatched at the earlier `883bccce2` head; it was superseded before validation and is not evidence.

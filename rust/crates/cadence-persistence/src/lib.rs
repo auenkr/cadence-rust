@@ -17,6 +17,8 @@ pub mod history_branch;
 pub mod history_cassandra;
 pub mod history_reader;
 pub mod history_sql;
+pub mod history_state_maps_sql;
+pub mod history_state_non_maps_sql;
 pub mod history_contract;
 pub mod history_sql_queries;
 pub mod sql_execution_store;
