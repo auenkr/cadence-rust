@@ -1,5 +1,34 @@
 # Frontend + Matching comparison
 
+## Paired cluster benchmark on CI
+
+Run the paired workflow manually (numeric ID also works before the workflow is
+merged into the default branch):
+
+```sh
+gh workflow run 406441092 --ref benchmark-frontend-matching-integration \
+  -f requests=1000 -f warmup=100 -f repetitions=5 -f concurrency=1,16,64 -f payload_bytes=1024
+```
+
+Use `requests=100`, `warmup=10`, `repetitions=1`, `concurrency=16` for an initial
+smoke comparison. Full defaults are 1000 measured workflows, 10 warmups,
+five repetitions and concurrency levels 1, 16, 64. The workflow builds release
+Rust and Go images on a standard public-repository runner and runs the arms
+serially, alternating order by repetition. Each arm gets a fresh MySQL schema;
+the same Go History/system Worker and SDK driver remain in both arms. Only
+Frontend and Matching images change. Effective configs, process inventories,
+image/binary hashes, commands, exits, service logs and runner details are kept.
+Cadence containers use identical 1 CPU/1400 MiB limits; MySQL uses 1.5 CPU/1800 MiB.
+
+SDK warmup finishes before the collector baseline. A ready-file handshake holds
+measured traffic until cumulative CPU counters are captured. The collector samples
+cgroup memory every 50 ms and captures final CPU counters on completion. Resource
+windows include bounded marker-observation delay; they are not exact CPU profiles
+of individual requests. `comparison-c*.json`, `.md` and `.html` contain one validated
+report per concurrency, with raw workflow samples retained. Any driver, collector
+or comparison validation failure fails the job. Artifacts expire after three days;
+retain compact actual-result evidence in `memory/` before then.
+
 The comparison command can also emit a self-contained HTML report with charts;
 it reads the same comparison JSON and requires no external assets or network:
 
@@ -54,9 +83,9 @@ closed-loop workload, so latency excludes client queue time and cannot describe
 open-loop overload. SDK retries are included in end-to-end latency.
 
 CPU-heavy cluster comparisons run on standard public-repository Actions runners.
-Capture per-service CPU seconds and RSS alongside each measured interval before
-claiming resource improvements. The driver does not yet collect those metrics or
-provision either cluster. Do not compare results from dissimilar hosted runners
+Capture per-service CPU seconds and cgroup memory alongside each measured interval before
+claiming resource improvements. The paired launcher provisions both deployments
+and connects the SDK markers to the collector. Do not compare results from dissimilar hosted runners
 as if they were controlled measurements. Long low-CPU soaks of prebuilt binaries
 run locally in tmux `cadence-rust`, through `work-safe`, nice/ionice and resource
 guards specified by AGENTS.md.
@@ -88,19 +117,22 @@ collector waits for the start marker, snapshots cumulative counters, samples
 until the end marker appears, then takes a final counter snapshot:
 
 ```sh
-rm -f go-1.start go-1.end
+rm -f go-1.start go-1.end go-1.ready
 python3 tests/benchmark/collect_resources.py --start-event go-1.start \
-  --end-event go-1.end --interval 1 --containers frontend matching history worker \
+  --end-event go-1.end --ready-event go-1.ready --interval .05 \
+  --containers frontend matching history worker \
   --output go-1.resources.json &
 collector=$!
-# Create go-1.start at measured-workload start and go-1.end when it completes.
-./cadence-benchmark ... -output go-1.json
+./cadence-benchmark -label go -domain benchmark -output go-1.json \
+  -measurement-start-file go-1.start -measurement-end-file go-1.end \
+  -collector-ready-file go-1.ready
 wait "$collector"
 ```
 
-These markers are an integration contract; the standalone SDK driver does not
-currently emit them. A launcher without measured-phase hooks can use the fixed
-duration fallback, which is approximate. Use the same service set in both arms.
+The SDK driver emits these markers when requested and waits for the baseline
+readiness signal. A launcher without measured-phase hooks can use the fixed
+duration fallback, which is approximate. Use actual Docker container names,
+not Compose service labels, and the same service set in both arms.
 The collector reads cumulative cgroup v2 or v1 CPU counters for exact CPU
 consumption deltas. Memory is peak sampled cgroup usage, includes charged cache,
 and is not RSS. Keep sampling interval and duration with the evidence.

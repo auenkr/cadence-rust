@@ -1,37 +1,109 @@
-name: Frontend Matching benchmark driver
+name: Frontend + Matching paired benchmark
 on:
   workflow_dispatch:
-  push:
-    branches: [benchmark-frontend-matching]
-    paths:
-      - tests/frontend-gate/benchmark/**
-      - .github/workflows/frontend-matching-benchmark.yml
+    inputs:
+      requests:
+        description: Measured workflows per concurrency and arm
+        type: number
+        default: 1000
+      warmup:
+        description: Warmup workflows per concurrency and arm
+        type: number
+        default: 10
+      repetitions:
+        description: Alternating Go/Rust fresh database repetitions
+        type: number
+        default: 5
+      concurrency:
+        description: Comma separated closed-loop concurrency levels
+        type: string
+        default: "1,16,64"
+      payload_bytes:
+        description: Activity payload size in bytes
+        type: number
+        default: 1024
 concurrency:
   group: frontend-matching-benchmark-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  driver:
+  paired-benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - uses: actions/setup-go@v5
         with:
           go-version-file: tests/frontend-gate/go.mod
-          cache-dependency-path: tests/frontend-gate/go.sum
-      - name: Format, vet and build shared SDK workload
+          cache-dependency-path: |
+            go/go.sum
+            tests/frontend-gate/go.sum
+      - name: Validate benchmark tools
+        run: |
+          mkdir -p out
+          python3 -m unittest discover -s tests/benchmark -p 'test_*.py' > out/python-tests.log 2>&1
+          python3 -m py_compile tests/frontend-gate/benchmark/paired-run.py
+      - name: Build Go server image
+        run: |
+          mkdir -p out
+          mkdir /tmp/gobuild
+          rsync -a --exclude .git go/ /tmp/gobuild/
+          git -C /tmp/gobuild init -q
+          git -C /tmp/gobuild add -A >/dev/null
+          git -C /tmp/gobuild -c user.email=ci@example.com -c user.name=ci commit -qm ci
+          docker build -f /tmp/gobuild/Dockerfile --target cadence-auto-setup -t cadence-go:ci /tmp/gobuild > out/go-image-build.log 2>&1 || { tail -60 out/go-image-build.log; exit 1; }
+          docker image inspect cadence-go:ci --format '{{.Id}} {{.Size}}' > out/go-image.txt
+          docker run --entrypoint sha256sum cadence-go:ci /usr/local/bin/cadence-server > out/go-binary.sha256
+      - name: Build optimized Rust server image
+        run: |
+          docker build --pull=false -f rust/Dockerfile --build-arg GO_IMAGE=cadence-go:ci -t cadence-rust:ci . > out/rust-image-build.log 2>&1 || { tail -80 out/rust-image-build.log; exit 1; }
+          docker image inspect cadence-rust:ci --format '{{.Id}} {{.Size}}' > out/rust-image.txt
+          docker run --entrypoint cat cadence-rust:ci /etc/cadence/cadence-server.sha256 > out/rust-binary.sha256
+          docker run --entrypoint sha256sum cadence-rust:ci /usr/local/bin/cadence-server >> out/rust-binary.sha256
+      - name: Build CLI and SDK benchmark driver
         working-directory: tests/frontend-gate
         run: |
-          mkdir -p ../../out
           gofmt -w benchmark/main.go
-          git diff -- benchmark/main.go > ../../out/format.diff
+          git diff -- benchmark/main.go > ../../out/benchmark-format.diff
           go vet ./benchmark
           go build -trimpath -o ../../out/cadence-benchmark ./benchmark
-          sha256sum ../../out/cadence-benchmark > ../../out/driver.sha256
-          git rev-parse HEAD > ../../out/head.txt
+          (cd ../../go && go build -p 2 -ldflags='-s -w' -o "$GITHUB_WORKSPACE/out/cadence-cli" ./cmd/tools/cli)
+          sha256sum ../../out/cadence-benchmark ../../out/cadence-cli > ../../out/drivers.sha256
+          git rev-parse HEAD > ../../out/source-head.txt
+          go version > ../../out/go-version.txt
+          docker version > ../../out/docker-version.txt
+      - name: Run paired Go and Rust workload
+        env:
+          REQUESTS: ${{ inputs.requests || 1000 }}
+          WARMUP: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.warmup) || '10' }}
+          REPETITIONS: ${{ inputs.repetitions || 5 }}
+          CONCURRENCY: ${{ inputs.concurrency || '1,16,64' }}
+          PAYLOAD_BYTES: ${{ inputs.payload_bytes || 1024 }}
+        run: |
+          set +e
+          python3 tests/frontend-gate/benchmark/paired-run.py \
+            --requests "$REQUESTS" --warmup "$WARMUP" \
+            --repetitions "$REPETITIONS" --concurrency "$CONCURRENCY" \
+            --payload-bytes "$PAYLOAD_BYTES" > out/paired-runner.log 2>&1
+          status=$?
+          echo "$status" > out/paired-runner.exit
+          cat out/paired-runner.log
+          exit "$status"
+      - name: Capture CI runner details
+        if: always()
+        run: |
+          uname -a > out/runner-uname.txt
+          lscpu > out/runner-cpu.txt
+          free -h > out/runner-memory.txt
+          git rev-parse HEAD > out/head-sha.txt
+          git status --short > out/worktree-status.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: cadence-benchmark-driver
-          path: out/
+          name: frontend-matching-paired-benchmark
+          path: |
+            out/
+            !out/cadence-benchmark
+            !out/cadence-cli
           retention-days: 3

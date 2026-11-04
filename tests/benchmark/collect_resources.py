@@ -117,7 +117,8 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
         except ValueError as error:
             raise RuntimeError(f"{error} for {name}") from error
         containers_result[name] = {"cpu_seconds": consumed_cpu_seconds, "average_cpu_cores": consumed_cpu_seconds / elapsed,
-                                   "peak_cgroup_memory_bytes": peak[name], "cgroup_version": version}
+                                   "peak_cgroup_memory_bytes": peak[name], "cgroup_version": version,
+                                   "initial_cpu_ns": first[name]["cpu_ns"], "final_cpu_ns": last[name]["cpu_ns"]}
     result = {"schema_version": 2, "started_at_utc": started_at, "duration_seconds": elapsed,
               "sampling_interval_seconds": interval, "samples": samples,
               "cpu_method": "exact delta of cumulative cgroup cpu usage counters",
