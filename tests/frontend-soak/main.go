@@ -153,7 +153,7 @@ func main() {
 				return e
 			}
 			var s string
-			if e = resp.QueryResult.Get(&s); e != nil {
+			if e = resp.Get(&s); e != nil {
 				return e
 			}
 			if s != "w-"+id {
