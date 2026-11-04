@@ -86,7 +86,7 @@ pub fn fork_request(
     source: &crate::history_contract::HistoryBranchRequest,
     fork_node_id: i64,
     new_branch_id: String,
-) -> std::result::Result<crate::history_contract::HistoryBranchRequest, crate::history_contract::PersistenceError> {
+) -> crate::history_contract::HistoryBranchRequest {
     let begin = source.ancestors.last().map_or(1, |range| range.end_node_id);
     let mut ancestors = Vec::with_capacity(source.ancestors.len().saturating_add(1));
     if begin >= fork_node_id {
@@ -109,7 +109,7 @@ pub fn fork_request(
     result.branch_id = new_branch_id;
     result.ancestors = ancestors;
     result.fork_node_id = fork_node_id;
-    Ok(result)
+    result
 }
 
 /// Go `GetBranchesMaxReferredNodeIDs`: maximum exclusive end node among all
