@@ -90,6 +90,14 @@ jobs:
           echo "$status" > out/paired-runner.exit
           cat out/paired-runner.log
           exit "$status"
+      - name: Verify complete paired benchmark evidence
+        run: |
+          set +e
+          python3 tests/benchmark/verify_artifacts.py --out out --expected-head "$GITHUB_SHA" > out/artifact-verification.json
+          status=$?
+          echo "$status" > out/artifact-verification.exit
+          cat out/artifact-verification.json
+          exit "$status"
       - name: Capture CI runner details
         if: always()
         run: |

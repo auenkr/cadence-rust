@@ -118,3 +118,14 @@ The existing artifact-verifier delegate is pending completion; do not poll it.
 Host load 6.99 exceeds the <=6 start guard, so no new worker or local heavy
 work was started. Next: inspect terminal smoke artifacts, integrate the verifier,
 then dispatch the repeated capped comparison from the final source head.
+
+## Artifact verifier integrated
+
+Worker commit `5963c15c9` integrated as `154669d0a`. All 33 benchmark
+Python tests passed through work-safe (log/exit in the integration evidence
+directory). The paired workflow now requires artifact verification against
+GITHUB_SHA before acceptance. Smoke run 41764102198 has completed its Rust
+release-image build and is building the CLI/SDK driver as last observed.
+The smoke source predates the final identity and MySQL inspection hardening,
+so it cannot satisfy the new full artifact verifier; the final repeated run
+must use the newly integrated workflow. No local Go/Cargo commands were run.
