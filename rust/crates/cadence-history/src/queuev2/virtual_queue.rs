@@ -31,12 +31,12 @@ pub trait VirtualQueue: Daemon {
     async fn merge_slices(&self, slices: SliceVec);
     async fn merge_with_last_slice(&self, slice: Arc<dyn VirtualSlice>);
     async fn append_slices(&self, slices: SliceVec);
-    async fn iterate_slices(&self, f: &mut (dyn FnMut(&Arc<dyn VirtualSlice>) + Send));
-    async fn clear_slices(&self, f: &mut (dyn FnMut(&Arc<dyn VirtualSlice>) -> bool + Send));
+    async fn iterate_slices(&self, f: &mut (dyn for<'a> FnMut(&'a Arc<dyn VirtualSlice>) + Send));
+    async fn clear_slices(&self, f: &mut (dyn for<'a> FnMut(&'a Arc<dyn VirtualSlice>) -> bool + Send));
     /// `f` returns (remaining slices, split).
     async fn split_slices(
         &self,
-        f: &mut (dyn FnMut(&Arc<dyn VirtualSlice>) -> (SliceVec, bool) + Send),
+        f: &mut (dyn for<'a> FnMut(&'a Arc<dyn VirtualSlice>) -> (SliceVec, bool) + Send),
     );
     fn pause(&self, d: Duration);
 }
@@ -254,14 +254,14 @@ impl VirtualQueue for VirtualQueueImpl {
         self.reset_next_read_slice_locked(&mut inner);
     }
 
-    async fn iterate_slices(&self, f: &mut (dyn FnMut(&Arc<dyn VirtualSlice>) + Send)) {
+    async fn iterate_slices(&self, f: &mut (dyn for<'a> FnMut(&'a Arc<dyn VirtualSlice>) + Send)) {
         let inner = self.inner.lock().await;
         for s in &inner.virtual_slices {
             f(s);
         }
     }
 
-    async fn clear_slices(&self, f: &mut (dyn FnMut(&Arc<dyn VirtualSlice>) -> bool + Send)) {
+    async fn clear_slices(&self, f: &mut (dyn for<'a> FnMut(&'a Arc<dyn VirtualSlice>) -> bool + Send)) {
         let mut inner = self.inner.lock().await;
         for slice in &inner.virtual_slices {
             if f(slice) {
@@ -275,7 +275,7 @@ impl VirtualQueue for VirtualQueueImpl {
 
     async fn split_slices(
         &self,
-        f: &mut (dyn FnMut(&Arc<dyn VirtualSlice>) -> (SliceVec, bool) + Send),
+        f: &mut (dyn for<'a> FnMut(&'a Arc<dyn VirtualSlice>) -> (SliceVec, bool) + Send),
     ) {
         let mut inner = self.inner.lock().await;
         let mut remaining_slices: SliceVec = Vec::new();

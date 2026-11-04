@@ -346,7 +346,7 @@ impl CachedQueueReaderBase {
         };
         let exclusive_max_task_key = req.progress.range.exclusive_max_task_key;
 
-        let (tasks, next_task_key, log_state) = {
+        let cached = {
             let g = self.lock();
             let covered = Self::is_range_covered(&g, inclusive_min_task_key, exclusive_max_task_key);
             let log_state = format!(
@@ -354,19 +354,25 @@ impl CachedQueueReaderBase {
                 inclusive_min_task_key,
                 Self::get_state(&g)
             );
-            if !covered {
-                drop(g);
+            if covered {
+                let (tasks, next) = g.queue.get_tasks(
+                    inclusive_min_task_key,
+                    exclusive_max_task_key,
+                    &req.predicate,
+                    req.page_size as i64,
+                );
+                Ok((tasks, next, log_state))
+            } else {
+                Err(log_state)
+            }
+        };
+        let (tasks, next_task_key, log_state) = match cached {
+            Ok(x) => x,
+            Err(log_state) => {
                 self.metrics.inc_counter(metric::CACHED_QUEUE_MISSES_COUNTER);
                 self.logger.debug(&format!("cache miss {log_state}"));
                 return self.base.get_task(req).await;
             }
-            let (tasks, next) = g.queue.get_tasks(
-                inclusive_min_task_key,
-                exclusive_max_task_key,
-                &req.predicate,
-                req.page_size as i64,
-            );
-            (tasks, next, log_state)
         };
 
         self.metrics.inc_counter(metric::CACHED_QUEUE_HITS_COUNTER);

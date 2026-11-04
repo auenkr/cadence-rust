@@ -39,7 +39,7 @@ pub struct CachedScheduledQueueReader {
 }
 
 fn to_chrono(d: Duration) -> chrono::Duration {
-    chrono::Duration::from_std(d).unwrap_or_else(|_| chrono::Duration::max_value())
+    chrono::Duration::from_std(d).unwrap_or_else(|_| chrono::Duration::MAX)
 }
 
 pub fn new_cached_scheduled_queue_reader(
