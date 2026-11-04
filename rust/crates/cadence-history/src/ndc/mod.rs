@@ -6,6 +6,7 @@
 //! will provide adapters for these traits. All algorithms follow the Go files 1:1.
 //!
 //! Time values are Unix nanoseconds (`i64`), matching Go `time.Unix(0, n)`.
+#![allow(clippy::result_large_err)]
 
 pub mod activity_replicator;
 pub mod branch_manager;
@@ -87,6 +88,7 @@ impl NdcError {
 pub type NdcResult<T> = Result<T, NdcError>;
 
 /// Go `newNDCRetryTaskErrorWithHint`.
+#[allow(clippy::too_many_arguments)]
 pub fn new_ndc_retry_task_error_with_hint(
     message: &str,
     domain_id: &str,

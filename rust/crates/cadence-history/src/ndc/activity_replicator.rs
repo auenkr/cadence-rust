@@ -74,12 +74,9 @@ impl<'a> ActivityReplicatorImpl<'a> {
                 return Ok(());
             }
         }
-        let mut reset_activity_timer_task_status = false;
-        if !self.cluster_metadata.is_version_from_same_cluster(version, ai.version) {
-            reset_activity_timer_task_status = true;
-        } else if ai.attempt < request.attempt {
-            reset_activity_timer_task_status = true;
-        }
+        let reset_activity_timer_task_status =
+            !self.cluster_metadata.is_version_from_same_cluster(version, ai.version)
+                || ai.attempt < request.attempt;
         let attempt_incremented = ai.attempt < request.attempt;
         let activity_not_started = request.started_id == EMPTY_EVENT_ID;
 
