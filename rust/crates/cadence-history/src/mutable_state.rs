@@ -22,6 +22,7 @@ pub struct DecisionInfo {
     pub request_id: String,
     pub task_list: String,
     pub start_to_close_timeout_seconds: i32,
+    pub started_timestamp: i64,
     pub attempt: i64,
     pub schedule_timestamp: i64,
     pub original_schedule_timestamp: i64,
@@ -118,6 +119,11 @@ pub struct MutableStateBuilder {
     pub next_event_id: i64,
     pub next_event_id_in_db: i64,
     pub checksum: Option<Vec<u8>>,
+    /// Current decision task state. The execution record is persisted as JSON,
+    /// while this typed copy is used by decision scheduling transitions.
+    pub decision_info: Option<DecisionInfo>,
+    /// Activity ID to schedule event ID index used by mutable state lookups.
+    pub activity_id_to_event_id: BTreeMap<String, i64>,
 }
 
 impl Default for MutableStateBuilder {
@@ -187,9 +193,48 @@ impl MutableStateBuilder {
         }
     }
 
+    /// Reconstruct the decision view from the canonical execution record. The
+    /// sticky task list is selected for an outstanding decision exactly as in
+    /// Go's manager; normal task list remains on the workflow record.
+    pub fn decision_snapshot(&self) -> DecisionInfo {
+        let get_i64 = |key: &str| self.execution_info.get(key).and_then(serde_json::Value::as_i64).unwrap_or_default();
+        let get_string = |key: &str| self.execution_info.get(key).and_then(serde_json::Value::as_str).unwrap_or_default().to_owned();
+        let sticky = get_string("sticky_task_list");
+        DecisionInfo {
+            version: get_i64("decision_version"), schedule_id: get_i64("decision_schedule_id"),
+            started_id: get_i64("decision_started_id"), request_id: get_string("decision_request_id"),
+            start_to_close_timeout_seconds: get_i64("decision_timeout") as i32,
+            attempt: get_i64("decision_attempt"), started_timestamp: get_i64("decision_started_timestamp"),
+            schedule_timestamp: get_i64("decision_scheduled_timestamp"),
+            original_schedule_timestamp: get_i64("decision_original_scheduled_timestamp"),
+            task_list: if sticky.is_empty() { get_string("task_list") } else { sticky },
+        }
+    }
+
+    /// Copy decision manager state into the execution record, mirroring
+    /// UpdateDecision. Task list deliberately is not overwritten here.
+    pub fn persist_decision(&mut self, info: DecisionInfo) {
+        self.execution_info["decision_version"] = info.version.into();
+        self.execution_info["decision_schedule_id"] = info.schedule_id.into();
+        self.execution_info["decision_started_id"] = info.started_id.into();
+        self.execution_info["decision_request_id"] = info.request_id.clone().into();
+        self.execution_info["decision_timeout"] = info.start_to_close_timeout_seconds.into();
+        self.execution_info["decision_attempt"] = info.attempt.into();
+        self.execution_info["decision_started_timestamp"] = info.started_timestamp.into();
+        self.execution_info["decision_scheduled_timestamp"] = info.schedule_timestamp.into();
+        self.execution_info["decision_original_scheduled_timestamp"] = info.original_schedule_timestamp.into();
+        self.decision_info = Some(info);
+    }
+
+    /// Clear decision execution state while preserving the heartbeat origin.
+    pub fn delete_decision_preserving_heartbeat(&mut self) {
+        let original = self.decision_snapshot().original_schedule_timestamp;
+        self.persist_decision(DecisionInfo { original_schedule_timestamp: original, ..Default::default() });
+    }
+
     /// Schedule a decision event and retain its mutable manager state.
     pub fn add_decision_scheduled(&mut self, version: i64, task_list: String, timeout: i32, attempt: i64, schedule_timestamp: i64, original_schedule_timestamp: i64) -> (HistoryEvent, DecisionInfo) {
-        use cadence_api::{enums::EventType, tasks::{DecisionTaskScheduledEventAttributes, TaskList}};
+        use cadence_api::{enums::EventType, tasks::DecisionTaskScheduledEventAttributes, types::TaskList};
         let mut event = self.add_event(HistoryEvent { event_type: Some(EventType::DecisionTaskScheduled), ..Default::default() });
         event.decision_task_scheduled_event_attributes = Some(DecisionTaskScheduledEventAttributes {
             task_list: Some(TaskList { name: task_list.clone() }), start_to_close_timeout_seconds: Some(timeout), attempt,
@@ -233,6 +278,8 @@ impl MutableStateBuilder {
             upsert_signal_requested_ids: self.update_signal_requested_ids.iter().cloned().collect(), delete_signal_requested_ids: self.delete_signal_requested_ids.iter().cloned().collect(),
             new_buffered_events: self.update_buffered_events.clone(), clear_buffered_events: self.clear_buffered_events,
             condition: self.next_event_id_in_db, checksum,
+            decision_info: self.decision_info.clone(),
+            activity_id_to_event_id: self.activity_id_to_event_id.clone(),
         }
     }
 
@@ -302,6 +349,35 @@ mod tests {
         s.fail_decision(true);
         assert!(s.decision_info.is_none());
         assert_eq!(s.execution_info["decision_attempt"], 1);
+    }
+
+    #[test]
+    fn decision_execution_state_round_trips_and_keeps_heartbeat_timestamp() {
+        let mut s = MutableStateBuilder::default();
+        let info = DecisionInfo {
+            schedule_id: 8, started_id: 9, version: 3, request_id: "req".into(),
+            task_list: "sticky".into(), start_to_close_timeout_seconds: 17,
+            started_timestamp: 120, attempt: 2, schedule_timestamp: 100,
+            original_schedule_timestamp: 40,
+        };
+        s.persist_decision(info.clone());
+        assert_eq!(s.decision_snapshot(), info);
+        s.delete_decision_preserving_heartbeat();
+        let cleared = s.decision_snapshot();
+        assert_eq!(cleared.schedule_id, 0);
+        assert_eq!(cleared.started_id, 0);
+        assert_eq!(cleared.original_schedule_timestamp, 40);
+    }
+
+    #[test]
+    fn mutation_contains_decision_and_activity_index() {
+        let mut s = MutableStateBuilder::default();
+        let info = DecisionInfo { schedule_id: 4, ..Default::default() };
+        s.persist_decision(info.clone());
+        s.activity_id_to_event_id.insert("a".into(), 12);
+        let mutation = s.close_as_mutation(None);
+        assert_eq!(mutation.decision_info, Some(info));
+        assert_eq!(mutation.activity_id_to_event_id.get("a"), Some(&12));
     }
 
     #[test]
