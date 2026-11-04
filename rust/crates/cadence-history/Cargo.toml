@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [[bin]]
+name = "cadence-history"
 path = "src/main.rs"
 
 [dependencies]
