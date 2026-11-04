@@ -162,6 +162,7 @@ impl ProcessingQueueCollection {
         self.reset_active_queue();
     }
 
+    #[allow(dead_code)]
     pub(crate) fn queues_mut(&mut self) -> &mut Vec<ProcessingQueue> {
         &mut self.queues
     }

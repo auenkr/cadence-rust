@@ -114,7 +114,7 @@ impl ProcessorBase {
     /// Go `updateAckLevel`: (processFinished, minAckLevel, err).
     pub async fn update_ack_level(
         &self,
-        colls: &mut Vec<ProcessingQueueCollection>,
+        colls: &mut [ProcessingQueueCollection],
     ) -> (bool, Option<TaskKey>, Option<QueueError>) {
         self.metrics_scope.inc_counter("AckLevelUpdateCounter");
         let mut min_ack_level: Option<TaskKey> = None;
@@ -147,12 +147,14 @@ impl ProcessorBase {
         self.metrics_scope.record_timer(timer_name, Duration::from_nanos(total_pending as u64));
         self.metrics_scope.int_exponential_histogram(hist_name, total_pending);
 
-        if (self.options.enable_persist_queue_states)() && self.update_processing_queue_states.is_some() {
+        if let (true, Some(update_states)) =
+            ((self.options.enable_persist_queue_states)(), self.update_processing_queue_states.as_ref())
+        {
             let states = Self::get_processing_queue_states(colls)
                 .get_state_action_result
                 .expect("get state result")
                 .states;
-            if let Err(e) = (self.update_processing_queue_states.as_ref().unwrap())(states).await {
+            if let Err(e) = update_states(states).await {
                 tracing::error!(error = %e, "Error persisting processing queue states");
                 self.metrics_scope.inc_counter("AckLevelUpdateFailedCounter");
                 return (false, Some(min_ack_level), Some(e));

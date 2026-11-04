@@ -61,6 +61,7 @@ pub struct TransferQueueDeps {
 
 pub struct TransferQueueProcessor {
     shard: Arc<dyn QueueShardContext>,
+    #[allow(dead_code)]
     task_processor: Arc<dyn TaskProcessor>,
     metrics: Arc<dyn MetricsScope>,
     current_cluster_name: String,

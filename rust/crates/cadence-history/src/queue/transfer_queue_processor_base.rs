@@ -183,7 +183,7 @@ impl TransferQueueProcessorBase {
         }
         {
             let mut p = self.processing.lock().unwrap();
-            for (_, h) in p.backoff_timer.iter() {
+            for h in p.backoff_timer.values() {
                 h.abort();
             }
             for v in p.should_process.values_mut() {
