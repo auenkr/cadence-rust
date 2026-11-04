@@ -66,15 +66,34 @@ collector=$!
 wait "$collector"
 ```
 
-Estimate the sampling duration from a pilot run; use an interval that covers
-the complete measured workload while excluding warmup. Repeat this alongside
-each driver run and keep both files. Container names accepted by Docker may
-include Compose prefixes; run `docker ps --format '{{.Names}}'` to find them.
-Use the same service set in both arms. The collector samples all specified
-containers at one-second intervals by default. RSS is sampled Docker memory
-usage (peak across samples); CPU seconds are an estimate from trapezoidal
-integration of sampled CPU percentage, so record the sampling interval and
-duration and do not present it as exact cgroup accounting.
+For precise interval alignment, have the benchmark orchestrator create distinct
+start and end marker files immediately before and after the driver's measured
+phase, excluding warmup. Remove stale marker files before each run. The
+collector waits for the start marker, snapshots cumulative counters, samples
+until the end marker appears, then takes a final counter snapshot:
+
+```sh
+rm -f go-1.start go-1.end
+python3 tests/benchmark/collect_resources.py --start-event go-1.start \
+  --end-event go-1.end --interval 1 --containers frontend matching history worker \
+  --output go-1.resources.json &
+collector=$!
+# Create go-1.start at measured-workload start and go-1.end when it completes.
+./cadence-benchmark ... -output go-1.json
+wait "$collector"
+```
+
+These markers are an integration contract; the standalone SDK driver does not
+currently emit them. A launcher without measured-phase hooks can use the fixed
+duration fallback, which is approximate. Use the same service set in both arms.
+The collector reads cumulative cgroup v2 or v1 CPU counters for exact CPU
+consumption deltas. Memory is peak sampled cgroup usage, includes charged cache,
+and is not RSS. Keep sampling interval and duration with the evidence.
+
+```sh
+python3 tests/benchmark/collect_resources.py --duration 65 --interval 1 \
+  --containers frontend matching history worker --output go-1.resources.json
+```
 
 For every arm/repetition, retain a metadata JSON document with at least source
 commit, Go/Rust service image or binary identifiers and SHA256s, benchmark
@@ -93,12 +112,19 @@ python3 tests/benchmark/compare.py \
   --go go-1.json go-2.json go-3.json go-4.json go-5.json \
   --rust rust-1.json rust-2.json rust-3.json rust-4.json rust-5.json \
   --go-metadata go-metadata.json --rust-metadata rust-metadata.json \
+  --go-resources go-1.resources.json go-2.resources.json go-3.resources.json go-4.resources.json go-5.resources.json \
+  --rust-resources rust-1.resources.json rust-2.resources.json rust-3.resources.json rust-4.resources.json rust-5.resources.json \
   --json comparison.json --markdown comparison.md
 ```
 
 JSON embeds the full original run objects and latency samples, paired per-run
 values, median throughput and median per-run p50/p95/p99 latency, plus Rust
-minus Go deltas. Markdown summarizes the same results. These are combined
+minus Go deltas. Resource files are optional and follow run order; resource
+objects can also be embedded in each run as `resources`. Resource deltas are
+reported only for complete schema version 2 samples with matching container
+sets. Otherwise the report says `not_collected`, `incomplete`, or
+`incomparable`. Metrics are CPU seconds, average CPU cores and peak cgroup
+memory bytes. Markdown summarizes the same results. These are combined
 Frontend+Matching SDK workflow measurements, never isolated service RPC
 throughput. The driver is closed-loop: latency excludes client queue time and
 includes SDK retry time. No benchmark numbers are checked in until they come
