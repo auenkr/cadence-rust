@@ -126,7 +126,7 @@ pub fn activity_info_to_struct(info: &ActivityInfo) -> Struct {
     use Value::*;
     let bytes = |v: &str| Bytes(v.as_bytes().to_vec());
     let blob = |v: &[u8]| Bytes(v.to_vec());
-    Struct { fields: vec![
+    cadence_thrift::Struct { fields: vec![
         (10, I64(info.version)), (12, I64(info.scheduled_event_batch_id)), (14, blob(&info.scheduled_event)),
         (16, bytes(&info.scheduled_event_encoding)), (18, I64(info.scheduled_time_unix_nanos)), (20, I64(info.started_id)),
         (22, blob(&info.started_event)), (24, bytes(&info.started_event_encoding)), (26, I64(info.started_time_unix_nanos)),
