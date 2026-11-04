@@ -1,5 +1,6 @@
 //! Workflow reset operation orchestration, ported from Go resetter.go.
 //! TODO(link): replace execution reset traits with execution::Workflow and execution::StateRebuilder.
+pub mod history;
 use cadence_api::service_types::HistoryEvent;
 use std::sync::Arc;
 #[derive(Debug, Clone, PartialEq, Eq)]

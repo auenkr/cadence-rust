@@ -7,7 +7,7 @@ use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
 };
-use tokio::sync::Notify;
+use tokio::sync::watch;
 use uuid::Uuid;
 
 pub const TERMINATION_TYPE_COMPLETED: i32 = 0;
@@ -41,7 +41,7 @@ pub struct TerminationState {
 struct Query {
     id: String,
     input: WorkflowQuery,
-    term: Arc<Notify>,
+    term: watch::Sender<bool>,
     state: Mutex<Option<TerminationState>>,
 }
 impl Query {
@@ -49,7 +49,7 @@ impl Query {
         Self {
             id: Uuid::new_v4().to_string(),
             input,
-            term: Arc::new(Notify::new()),
+            term: watch::channel(false).0,
             state: Mutex::new(None),
         }
     }
@@ -67,7 +67,7 @@ impl Query {
             return Err(QueryError(ERR_ALREADY_IN_TERMINAL_STATE));
         }
         *state = Some(s);
-        self.term.notify_waiters();
+        self.term.send_replace(true);
         Ok(())
     }
 }
@@ -138,10 +138,10 @@ impl Registry {
     pub fn get_failed_ids(&self) -> Vec<String> {
         ids(&self.state.lock().unwrap().failed)
     }
-    pub fn buffer_query(&self, input: WorkflowQuery) -> (String, Arc<Notify>) {
+    pub fn buffer_query(&self, input: WorkflowQuery) -> (String, watch::Receiver<bool>) {
         let q = Arc::new(Query::new(input));
         let id = q.id.clone();
-        let ch = q.term.clone();
+        let ch = q.term.subscribe();
         self.state.lock().unwrap().buffered.insert(id.clone(), q);
         (id, ch)
     }
@@ -156,8 +156,8 @@ impl Registry {
             .cloned()
             .ok_or(QueryError(ERR_QUERY_NOT_EXISTS))
     }
-    pub fn get_query_term_ch(&self, id: &str) -> Result<Arc<Notify>, QueryError> {
-        Ok(self.get(id)?.term.clone())
+    pub fn get_query_term_ch(&self, id: &str) -> Result<watch::Receiver<bool>, QueryError> {
+        Ok(self.get(id)?.term.subscribe())
     }
     pub fn get_query_input(&self, id: &str) -> Result<WorkflowQuery, QueryError> {
         Ok(self.get(id)?.input.clone())

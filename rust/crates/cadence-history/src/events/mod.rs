@@ -23,7 +23,7 @@ pub struct EventCache<R>{reader:Arc<R>,state:Mutex<EventCacheState>,max_count:us
 impl<R:HistoryEventReader> EventCache<R>{pub fn new(reader:Arc<R>,max_count:usize)->Self{Self::new_with_ttl(reader,max_count,Duration::from_secs(300))}pub fn new_with_ttl(reader:Arc<R>,max_count:usize,ttl:Duration)->Self{Self{reader,state:Mutex::new(EventCacheState{events:HashMap::new(),lru:VecDeque::new()}),max_count,ttl,disabled:false}}
  pub fn disabled(mut self,disabled:bool)->Self{self.disabled=disabled;self}
  #[allow(clippy::too_many_arguments)]
- pub fn get_event(&self,shard_id:i32,domain_id:&str,workflow_id:&str,run_id:&str,first_event_id:i64,event_id:i64,branch_token:&[u8])->Result<Arc<HistoryEvent>,EventCacheError>{let key=EventKey{domain_id:domain_id.into(),workflow_id:workflow_id.into(),run_id:run_id.into(),event_id};if !self.disabled {if let Some(e)=self.cached(&key){return Ok(e)}}let event=Arc::new(self.reader.read_event(shard_id,domain_id,first_event_id,event_id,branch_token)?);if !self.disabled{self.put(key,event.clone())}Ok(event)}
+ pub fn get_event(&self,shard_id:i32,domain_id:&str,workflow_id:&str,run_id:&str,first_event_id:i64,event_id:i64,branch_token:&[u8])->Result<Arc<HistoryEvent>,EventCacheError>{let key=EventKey{domain_id:domain_id.into(),workflow_id:workflow_id.into(),run_id:run_id.into(),event_id};if !self.disabled {if let Some(e)=self.cached(&key){return Ok(e)}}let event=Arc::new(self.reader.read_event(shard_id,domain_id,first_event_id,event_id,branch_token)?);self.put(key,event.clone())Ok(event)}
  pub fn put_event(&self,domain_id:&str,workflow_id:&str,run_id:&str,event_id:i64,event:HistoryEvent){self.put(EventKey{domain_id:domain_id.into(),workflow_id:workflow_id.into(),run_id:run_id.into(),event_id},Arc::new(event))}
  fn cached(&self,key:&EventKey)->Option<Arc<HistoryEvent>>{let mut c=self.state.lock().unwrap();if let Some(entry)=c.events.get(key){if entry.inserted.elapsed()<=self.ttl{let event=entry.event.clone();c.lru.retain(|k|k!=key);c.lru.push_back(key.clone());return Some(event)}}c.events.remove(key);c.lru.retain(|k|k!=key);None}
  fn put(&self,key:EventKey,event:Arc<HistoryEvent>){let mut c=self.state.lock().unwrap();if c.events.contains_key(&key){c.lru.retain(|k|k!=&key);}while self.max_count>0&&c.events.len()>=self.max_count{if let Some(oldest)=c.lru.pop_front(){c.events.remove(&oldest);}else{break}}c.events.insert(key.clone(),CachedEvent{event,inserted:Instant::now()});c.lru.push_back(key);}
@@ -41,4 +41,17 @@ impl Notifier{pub const EVENTS_CHAN_SIZE:usize=1000;pub fn new()->Arc<Self>{let(
  pub async fn dispatch_one(&self)->bool{let event={self.events_rx.lock().await.recv().await};let Some(event)=event else{return false};if let Some(subs)=self.subscribers.lock().unwrap().get(&event.id){for tx in subs.values(){let _=tx.try_send(event.clone());}}true}
  pub fn start(self:&Arc<Self>){if self.status.compare_exchange(0,1,Ordering::SeqCst,Ordering::SeqCst).is_err(){return}let this=self.clone();tokio::spawn(async move{this.run().await;});}
  async fn run(self:Arc<Self>){loop{let mut receiver=self.events_rx.lock().await;let next=tokio::select!{event=receiver.recv()=>event,_=self.stop_signal.notified()=>None};drop(receiver);let Some(event)=next else{break};if let Some(subs)=self.subscribers.lock().unwrap().get(&event.id){for tx in subs.values(){let _=tx.try_send(event.clone());}}}self.status.store(2,Ordering::SeqCst);}
- pub fn stop(&self){if self.status.compare_exchange(1,2,Ordering::SeqCst,Ordering::SeqCst).is_ok(){self.stop_signal.notify_waiters();}}pub fn is_running(&self)->bool{self.status.load(Ordering::SeqCst)==1} }
+ pub fn stop(&self){if self.status.compare_exchange(1,2,Ordering::SeqCst,Ordering::SeqCst).is_ok(){self.stop_signal.notify_one();}}pub fn is_running(&self)->bool{self.status.load(Ordering::SeqCst)==1} }
+
+/// TODO(link): HistoryManager adapter; request limits and batch selection remain here.
+pub trait HistoryBranchStore: Send + Sync {
+    fn domain_name(&self, domain_id: &str) -> Result<String, EventCacheError>;
+    fn read_history_branch(&self, shard_id: i32, domain_name: &str, branch_token: &[u8], min_event_id: i64, max_event_id: i64, page_size: usize) -> Result<Vec<HistoryEvent>, EventCacheError>;
+}
+pub struct StoreEventReader<S>(pub S);
+impl<S: HistoryBranchStore> HistoryEventReader for StoreEventReader<S> {
+    fn read_event(&self, shard_id: i32, domain_id: &str, first_event_id: i64, event_id: i64, branch_token: &[u8]) -> Result<HistoryEvent, EventCacheError> {
+        let domain_name = self.0.domain_name(domain_id)?;
+        self.0.read_history_branch(shard_id, &domain_name, branch_token, first_event_id, event_id + 1, 1)?.into_iter().find(|event| event.event_id == event_id).ok_or_else(|| EventCacheError(ERR_EVENT_NOT_FOUND_IN_BATCH.into()))
+    }
+}
