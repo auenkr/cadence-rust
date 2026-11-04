@@ -10,4 +10,5 @@ pub mod domain_source;
 pub mod failover_domain_manager;
 pub mod membership_feed;
 pub mod persistent_dynconfig;
+pub mod query_matching;
 pub mod replication_clients;
