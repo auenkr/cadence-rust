@@ -81,13 +81,14 @@ jobs:
             --go-cli "$PWD/bin/cadence-cli" --driver "$PWD/bin/frontend-soak-driver" \
             --rust-root "$PWD" > res/gate.log 2>&1
           echo $? > res/gate.exit
-          grep -E '^(GATE|DRIVER|---|panic)' res/gate.log | cut -c1-300 | tail -80
+          echo "lane exit $(cat res/gate.exit)"; tail -n 80 res/gate.log | cut -c1-300
+          mkdir -p res/up/logs; tail -n 300 res/gate.log > res/up/gate-tail.log
           python3 tests/gates/soak-analyze.py run --dir res/lane/run --label "${{ matrix.mode }}" \
-            --restart-at "$SOAK_RESTART_AT" --out res/analysis
-          mkdir -p res/up/logs
-          cp res/analysis/* res/up/; cp res/lane/run/{steps.json,summary.json,soak-driver.log,rust-binary.sha256} res/up/ 2>/dev/null || true
+            --restart-at "$SOAK_RESTART_AT" --out res/analysis || true
+          cp res/analysis/* res/up/ 2>/dev/null; cp res/lane/run/{steps.json,summary.json,soak-driver.log,rust-binary.sha256} res/up/ 2>/dev/null || true
           cp bin/SHA256SUMS bin/commit.txt res/up/
-          for f in res/lane/run/*.log; do tail -n 300 "$f" > "res/up/logs/$(basename "$f")"; done
+          for f in res/lane/run/*.log; do [ -f "$f" ] && tail -n 300 "$f" > "res/up/logs/$(basename "$f")"; done
+          test -f res/analysis/summary.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
