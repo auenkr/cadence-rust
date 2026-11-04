@@ -110,7 +110,7 @@ impl ShardController {
     pub fn acquire_shards(&self, members: &[cadence_common::membership::Host]) -> Result<(), ShardError> {
         for id in 0..self.num_history_shards {
             if let Err(error) = self.acquire(id, members) {
-                if matches!(error, ShardError::ShardOwnershipLost { .. }) {
+                if matches!(&error, ShardError::ShardOwnershipLost { .. }) {
                     self.close(id);
                     continue;
                 }
