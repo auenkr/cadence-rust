@@ -28,6 +28,126 @@ fn task_type(v: i32) -> Option<i32> {
 
 #[tonic::async_trait]
 impl HistoryApi for GrpcHistory {
+    async fn start_workflow_execution(&self, request: Request<pb::StartWorkflowExecutionRequest>) -> Result<Response<pb::StartWorkflowExecutionResponse>, Status> {
+        super::grpc_g1::start_workflow_execution(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn signal_with_start_workflow_execution(&self, request: Request<pb::SignalWithStartWorkflowExecutionRequest>) -> Result<Response<pb::SignalWithStartWorkflowExecutionResponse>, Status> {
+        super::grpc_g1::signal_with_start_workflow_execution(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn signal_workflow_execution(&self, request: Request<pb::SignalWorkflowExecutionRequest>) -> Result<Response<pb::SignalWorkflowExecutionResponse>, Status> {
+        super::grpc_g1::signal_workflow_execution(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn terminate_workflow_execution(&self, request: Request<pb::TerminateWorkflowExecutionRequest>) -> Result<Response<pb::TerminateWorkflowExecutionResponse>, Status> {
+        super::grpc_g1::terminate_workflow_execution(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn request_cancel_workflow_execution(&self, request: Request<pb::RequestCancelWorkflowExecutionRequest>) -> Result<Response<pb::RequestCancelWorkflowExecutionResponse>, Status> {
+        super::grpc_g1::request_cancel_workflow_execution(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn reset_sticky_task_list(&self, request: Request<pb::ResetStickyTaskListRequest>) -> Result<Response<pb::ResetStickyTaskListResponse>, Status> {
+        super::grpc_g1::reset_sticky_task_list(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn query_workflow(&self, request: Request<pb::QueryWorkflowRequest>) -> Result<Response<pb::QueryWorkflowResponse>, Status> {
+        super::grpc_g1::query_workflow(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn describe_workflow_execution(&self, request: Request<pb::DescribeWorkflowExecutionRequest>) -> Result<Response<pb::DescribeWorkflowExecutionResponse>, Status> {
+        super::grpc_g1::describe_workflow_execution(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn reapply_events(&self, request: Request<pb::ReapplyEventsRequest>) -> Result<Response<pb::ReapplyEventsResponse>, Status> {
+        super::grpc_g1::reapply_events(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn refresh_workflow_tasks(&self, request: Request<pb::RefreshWorkflowTasksRequest>) -> Result<Response<pb::RefreshWorkflowTasksResponse>, Status> {
+        super::grpc_g1::refresh_workflow_tasks(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn schedule_decision_task(&self, request: Request<pb::ScheduleDecisionTaskRequest>) -> Result<Response<pb::ScheduleDecisionTaskResponse>, Status> {
+        super::grpc_g1::schedule_decision_task(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn get_mutable_state(&self, request: Request<pb::GetMutableStateRequest>) -> Result<Response<pb::GetMutableStateResponse>, Status> {
+        super::grpc_g2::get_mutable_state(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn poll_mutable_state(&self, request: Request<pb::PollMutableStateRequest>) -> Result<Response<pb::PollMutableStateResponse>, Status> {
+        super::grpc_g2::poll_mutable_state(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn describe_mutable_state(&self, request: Request<pb::DescribeMutableStateRequest>) -> Result<Response<pb::DescribeMutableStateResponse>, Status> {
+        super::grpc_g2::describe_mutable_state(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn record_decision_task_started(&self, request: Request<pb::RecordDecisionTaskStartedRequest>) -> Result<Response<pb::RecordDecisionTaskStartedResponse>, Status> {
+        super::grpc_g2::record_decision_task_started(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn record_activity_task_started(&self, request: Request<pb::RecordActivityTaskStartedRequest>) -> Result<Response<pb::RecordActivityTaskStartedResponse>, Status> {
+        super::grpc_g2::record_activity_task_started(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn respond_decision_task_completed(&self, request: Request<pb::RespondDecisionTaskCompletedRequest>) -> Result<Response<pb::RespondDecisionTaskCompletedResponse>, Status> {
+        super::grpc_g2::respond_decision_task_completed(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn respond_decision_task_failed(&self, request: Request<pb::RespondDecisionTaskFailedRequest>) -> Result<Response<pb::RespondDecisionTaskFailedResponse>, Status> {
+        super::grpc_g2::respond_decision_task_failed(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn respond_activity_task_completed(&self, request: Request<pb::RespondActivityTaskCompletedRequest>) -> Result<Response<pb::RespondActivityTaskCompletedResponse>, Status> {
+        super::grpc_g2::respond_activity_task_completed(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn respond_activity_task_failed(&self, request: Request<pb::RespondActivityTaskFailedRequest>) -> Result<Response<pb::RespondActivityTaskFailedResponse>, Status> {
+        super::grpc_g2::respond_activity_task_failed(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn respond_activity_task_canceled(&self, request: Request<pb::RespondActivityTaskCanceledRequest>) -> Result<Response<pb::RespondActivityTaskCanceledResponse>, Status> {
+        super::grpc_g2::respond_activity_task_canceled(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn record_activity_task_heartbeat(&self, request: Request<pb::RecordActivityTaskHeartbeatRequest>) -> Result<Response<pb::RecordActivityTaskHeartbeatResponse>, Status> {
+        super::grpc_g2::record_activity_task_heartbeat(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn record_child_execution_completed(&self, request: Request<pb::RecordChildExecutionCompletedRequest>) -> Result<Response<pb::RecordChildExecutionCompletedResponse>, Status> {
+        super::grpc_g2::record_child_execution_completed(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn remove_signal_mutable_state(&self, request: Request<pb::RemoveSignalMutableStateRequest>) -> Result<Response<pb::RemoveSignalMutableStateResponse>, Status> {
+        super::grpc_g2::remove_signal_mutable_state(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn replicate_events_v2(&self, request: Request<pb::ReplicateEventsV2Request>) -> Result<Response<pb::ReplicateEventsV2Response>, Status> {
+        super::grpc_g3::replicate_events_v2(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn sync_activity(&self, request: Request<pb::SyncActivityRequest>) -> Result<Response<pb::SyncActivityResponse>, Status> {
+        super::grpc_g3::sync_activity(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn sync_shard_status(&self, request: Request<pb::SyncShardStatusRequest>) -> Result<Response<pb::SyncShardStatusResponse>, Status> {
+        super::grpc_g3::sync_shard_status(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn notify_failover_markers(&self, request: Request<pb::NotifyFailoverMarkersRequest>) -> Result<Response<pb::NotifyFailoverMarkersResponse>, Status> {
+        super::grpc_g3::notify_failover_markers(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn get_failover_info(&self, request: Request<pb::GetFailoverInfoRequest>) -> Result<Response<pb::GetFailoverInfoResponse>, Status> {
+        super::grpc_g3::get_failover_info(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn ratelimit_update(&self, request: Request<pb::RatelimitUpdateRequest>) -> Result<Response<pb::RatelimitUpdateResponse>, Status> {
+        super::grpc_g3::ratelimit_update(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn describe_history_host(&self, request: Request<pb::DescribeHistoryHostRequest>) -> Result<Response<pb::DescribeHistoryHostResponse>, Status> {
+        super::grpc_g3::describe_history_host(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn count_dlq_messages(&self, request: Request<pb::CountDlqMessagesRequest>) -> Result<Response<pb::CountDlqMessagesResponse>, Status> {
+        super::grpc_g3::count_dlq_messages(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn get_cross_cluster_tasks(&self, request: Request<pb::GetCrossClusterTasksRequest>) -> Result<Response<pb::GetCrossClusterTasksResponse>, Status> {
+        super::grpc_g3::get_cross_cluster_tasks(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn respond_cross_cluster_tasks_completed(&self, request: Request<pb::RespondCrossClusterTasksCompletedRequest>) -> Result<Response<pb::RespondCrossClusterTasksCompletedResponse>, Status> {
+        super::grpc_g3::respond_cross_cluster_tasks_completed(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn get_replication_messages(&self, request: Request<pb::GetReplicationMessagesRequest>) -> Result<Response<pb::GetReplicationMessagesResponse>, Status> {
+        super::grpc_g3::get_replication_messages(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn get_dlq_replication_messages(&self, request: Request<pb::GetDlqReplicationMessagesRequest>) -> Result<Response<pb::GetDlqReplicationMessagesResponse>, Status> {
+        super::grpc_g3::get_dlq_replication_messages(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn read_dlq_messages(&self, request: Request<pb::ReadDlqMessagesRequest>) -> Result<Response<pb::ReadDlqMessagesResponse>, Status> {
+        super::grpc_g3::read_dlq_messages(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn purge_dlq_messages(&self, request: Request<pb::PurgeDlqMessagesRequest>) -> Result<Response<pb::PurgeDlqMessagesResponse>, Status> {
+        super::grpc_g3::purge_dlq_messages(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn merge_dlq_messages(&self, request: Request<pb::MergeDlqMessagesRequest>) -> Result<Response<pb::MergeDlqMessagesResponse>, Status> {
+        super::grpc_g3::merge_dlq_messages(&self.state, request.into_inner()).await.map(Response::new)
+    }
+    async fn reset_workflow_execution(&self, _request: Request<pb::ResetWorkflowExecutionRequest>) -> Result<Response<pb::ResetWorkflowExecutionResponse>, Status> {
+        Err(Status::unimplemented("ResetWorkflowExecution is not implemented"))
+    }
     async fn close_shard(&self, request: Request<pb::CloseShardRequest>) -> Result<Response<pb::CloseShardResponse>, Status> {
         gate(&self.state)?;
         let r = request.into_inner();

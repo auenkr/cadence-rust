@@ -237,6 +237,8 @@ pub enum Outcome {
     Ok(Struct),
     /// Declared exception: (name, field id, message).
     Exception(&'static str, i16, String),
+    /// Declared exception with its full body: (name, message, whole result struct).
+    Rich(&'static str, String, Struct),
 }
 
 fn exception_id(name: &str) -> i16 {
@@ -279,9 +281,22 @@ pub async fn dispatch(state: &ServerState, procedure: &str, args: &Struct) -> Re
         s.fields.push((0, Value::Struct(inner)));
         return Ok(Outcome::Ok(s));
     }
+    // g2/g3 apply the rate-limit gate themselves.
+    if let Some(r) = super::thrift_g2::dispatch(state, method, args).await {
+        return r;
+    }
+    if let Some(r) = super::thrift_g3::dispatch(state, method, args).await {
+        return r;
+    }
     if !state.limiter.allow() {
         let (name, msg) = errors::thrift_exception(&errors::busy());
         return Ok(Outcome::Exception(name, 2, msg));
+    }
+    if let Some(r) = super::thrift_g1::dispatch_rich(state, method, args).await {
+        return Ok(match r? {
+            super::thrift_g1::G1Outcome::Ok(s) => Outcome::Ok(s),
+            super::thrift_g1::G1Outcome::Exception(x) => Outcome::Rich(x.name, x.msg.clone(), x.result_struct()),
+        });
     }
     let req = match args.get(1) {
         Some(Value::Struct(s)) => s.clone(),
@@ -331,6 +346,11 @@ async fn handle_call(w: Arc<Mutex<OwnedWriteHalf>>, id: u32, call: Call, state: 
     let mut meta = vec![("$rpc$-service", SERVICE_NAME.to_string())];
     let (result, app) = match outcome {
         Outcome::Ok(s) => (s, false),
+        Outcome::Rich(name, msg, result) => {
+            meta.push(("$rpc$-application-error-name", name.to_string()));
+            meta.push(("$rpc$-application-error-details", msg.chars().take(200).collect()));
+            (result, true)
+        }
         Outcome::Exception(name, fid, msg) => {
             meta.push(("$rpc$-application-error-name", name.to_string()));
             meta.push(("$rpc$-application-error-details", msg.chars().take(200).collect()));
