@@ -474,6 +474,9 @@ pub struct MySqlTaskStore {
 }
 
 impl MySqlTaskStore {
+    pub(crate) fn history_pool(&self) -> Arc<SyncConnectionPool> {
+        self.pools[0].clone()
+    }
     /// Encode new rows with Go's dynamic `history.serializationEncoding`
     /// instead of the (Go-ignored) SQL `encodingType` setting.
     pub fn with_encoding_source(mut self, source: crate::matching_blob::EncodingSource) -> Self {

@@ -322,6 +322,9 @@ const DELETE_TASK: &str =
 const RANGE_DELETE_TASKS: &str = "DELETE FROM tasks WHERE domain_id = $1 AND task_list_name = $2 AND task_type = $3 AND task_id IN (SELECT task_id FROM tasks WHERE domain_id = $1 AND task_list_name = $2 AND task_type = $3 AND task_id <= $4 ORDER BY domain_id,task_list_name,task_type,task_id LIMIT $5 )";
 
 impl PostgresTaskStore {
+    pub(crate) fn history_pool(&self) -> Arc<PostgresConnectionPool> {
+        self.pools[0].clone()
+    }
     /// Encode new rows with Go's dynamic `history.serializationEncoding`
     /// instead of the (Go-ignored) SQL `encodingType` setting.
     pub fn with_encoding_source(mut self, source: crate::matching_blob::EncodingSource) -> Self {
