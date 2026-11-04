@@ -36,11 +36,8 @@ impl Handler {
         }
         if state
             .domain_manager
-            .describe(&DescribeDomainRequest {
-                name: Some(request.name.clone()),
-                uuid: None,
-            })
-            .is_ok()
+            .exists_for_register(&request.name)
+            .map_err(|error| DomainHandlerError::Internal(error.to_string()))?
         {
             return Err(DomainHandlerError::AlreadyExists(
                 DomainAlreadyExistsError::new("Domain already exists."),
@@ -83,14 +80,25 @@ impl Handler {
         )
         .map_err(DomainHandlerError::BadRequest)?;
 
+        let mut history_archival_status = request.history_archival_status;
+        let mut history_archival_uri = request.history_archival_uri.clone();
+        let mut visibility_archival_status = request.visibility_archival_status;
+        let mut visibility_archival_uri = request.visibility_archival_uri.clone();
+        cadence_service_core::handlers::apply_archival_registration_policy(
+            &mut history_archival_status,
+            &mut history_archival_uri,
+            &mut visibility_archival_status,
+            &mut visibility_archival_uri,
+        )
+        .map_err(|message| DomainHandlerError::BadRequest(bad(message)))?;
         let configuration = DomainConfiguration {
             workflow_execution_retention_period_in_days: request
                 .workflow_execution_retention_period_in_days,
             emit_metric: request.emit_metric.unwrap_or(true),
-            history_archival_status: request.history_archival_status,
-            history_archival_uri: request.history_archival_uri.clone(),
-            visibility_archival_status: request.visibility_archival_status,
-            visibility_archival_uri: request.visibility_archival_uri.clone(),
+            history_archival_status,
+            history_archival_uri,
+            visibility_archival_status,
+            visibility_archival_uri,
             ..Default::default()
         };
         let policy = state.domain_policy(&request.name);

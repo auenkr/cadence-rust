@@ -874,10 +874,12 @@ fn standard_processing(dsl: &mut Value, domain_id: &str) -> Result<(), QueryErro
     if compact.contains("{\"range\":{\"ExecutionTime\":") {
         add_must(dsl, json!({"range": {"ExecutionTime": {"gt": "0"}}}));
     }
-    add_must(
-        dsl,
-        json!({"match_phrase": {"DomainID": {"query": domain_id}}}),
-    );
+    if !domain_id.is_empty() {
+        add_must(
+            dsl,
+            json!({"match_phrase": {"DomainID": {"query": domain_id}}}),
+        );
+    }
     process_values(dsl)
 }
 
@@ -964,7 +966,7 @@ fn process_sort(
             let name = bare.strip_prefix("Attr.").unwrap_or(bare);
             if attr_types(name) == Some(0) {
                 return Err(bad(
-                    "Not able to sort by IndexedValueTypeString field, use IndexedValueTypeKeyword field",
+                    "not able to sort by IndexedValueTypeString field, use IndexedValueTypeKeyword field",
                 ));
             }
             let mut a = a;
@@ -975,13 +977,34 @@ fn process_sort(
     let _ = &mut arr;
     dsl["sort"] = Value::Array(arr);
     if token.should_search_after() {
-        dsl["search_after"] = json!([token.sort_value, token.tie_breaker]);
+        let sort_value = search_after_value(&token.sort_value, attr_types(
+            field.trim_matches('`').strip_prefix("Attr.").unwrap_or(field.trim_matches('`')),
+        ));
+        dsl["search_after"] = json!([sort_value, token.tie_breaker]);
         dsl.as_object_mut().map(|m| m.remove("from"));
     } else {
         dsl["from"] = json!(token.from);
     }
-    let _ = field;
     Ok(())
+}
+
+/// Go `getValueOfSearchAfterInJSON`: Int/Datetime/Bool sort values are
+/// integers; a missing field makes ES return +-9.223372036854776E18, which Go
+/// clamps to MinInt64/MaxInt64 by sign.
+fn search_after_value(value: &Value, field_type: Option<i32>) -> Value {
+    if matches!(field_type, Some(2) | Some(4) | Some(5)) {
+        if let Value::Number(n) = value {
+            if let Some(i) = n.as_i64() {
+                return json!(i);
+            }
+            return if n.to_string().starts_with('-') {
+                json!(i64::MIN)
+            } else {
+                json!(i64::MAX)
+            };
+        }
+    }
+    value.clone()
 }
 
 /// `getESQueryDSL` (ListWorkflowExecutions): returns the serialised body.
@@ -1208,6 +1231,49 @@ mod tests {
             s.contains("{\"range\":{\"ExecutionTime\":{\"gt\":\"0\"}}}"),
             "{s}"
         );
+    }
+
+    #[test]
+    fn search_after_converts_by_field_type() {
+        let ty = |f: &str| match f {
+            "CloseTime" => Some(5),
+            "WorkflowID" => Some(0),
+            _ => None,
+        };
+        let tok = |v: Value| PageToken {
+            from: 0,
+            sort_value: v,
+            tie_breaker: "run".into(),
+            scroll_id: String::new(),
+        };
+        let neg: Value = serde_json::from_str("-9.223372036854776E18").unwrap();
+        let s = dsl_for_list("order by CloseTime desc", "d", 5, &tok(neg), &ty).unwrap();
+        let v: Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(v["search_after"], json!([i64::MIN, "run"]));
+        let pos: Value = serde_json::from_str("9.223372036854776E18").unwrap();
+        let s = dsl_for_list("order by CloseTime asc", "d", 5, &tok(pos), &ty).unwrap();
+        let v: Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(v["search_after"], json!([i64::MAX, "run"]));
+        assert_eq!(search_after_value(&json!(7), Some(2)), json!(7));
+        assert_eq!(search_after_value(&json!("Infinity"), Some(3)), json!("Infinity"));
+        assert_eq!(search_after_value(&Value::Null, Some(1)), Value::Null);
+    }
+
+    #[test]
+    fn sort_string_error_is_lowercase_and_empty_domain_skipped() {
+        let e = dsl_for_list(
+            "order by WorkflowID desc",
+            "d",
+            5,
+            &PageToken::default(),
+            &|f| if f == "WorkflowID" { Some(0) } else { None },
+        )
+        .unwrap_err();
+        assert!(matches!(e, QueryError::BadRequest(m) if m.starts_with("not able to sort")));
+        let s = dsl_for_list("", "", 5, &PageToken::default(), &|_| None).unwrap();
+        assert!(!s.contains("DomainID"));
+        let s = dsl_for_list("", "d", 5, &PageToken::default(), &|_| None).unwrap();
+        assert!(s.contains("DomainID"));
     }
 
     #[test]

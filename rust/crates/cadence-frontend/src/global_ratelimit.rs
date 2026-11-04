@@ -208,15 +208,19 @@ impl Bucket {
     fn new(rps: f64) -> Self {
         Self {
             rps,
-            tokens: rps.max(1.0),
+            tokens: Self::burst_for(rps),
             last: Instant::now(),
         }
+    }
+    /// Go fallback limiter: burst = max(1, int(limit)).
+    fn burst_for(rps: f64) -> f64 {
+        (rps.trunc()).max(1.0)
     }
     fn set_rps(&mut self, rps: f64) {
         self.rps = rps;
     }
     fn take(&mut self) -> bool {
-        let burst = self.rps.max(1.0);
+        let burst = Self::burst_for(self.rps);
         let now = Instant::now();
         let elapsed = now.saturating_duration_since(self.last).as_secs_f64();
         self.tokens = (self.tokens + elapsed * self.rps).min(burst);
@@ -230,7 +234,7 @@ impl Bucket {
     }
     /// Go `rate.Reservation.Cancel`: return an unused token.
     fn give_back(&mut self) {
-        self.tokens = (self.tokens + 1.0).min(self.rps.max(1.0));
+        self.tokens = (self.tokens + 1.0).min(Self::burst_for(self.rps));
     }
     fn wait_time(&self) -> Duration {
         let need = ((1.0 - self.tokens) / self.rps.max(1e-9)).max(0.001);
@@ -770,6 +774,18 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn fallback_burst_is_max_one_int_limit() {
+        let mut b = Bucket::new(2.9);
+        assert_eq!(b.tokens, 2.0);
+        assert!(b.take() && b.take() && !b.take());
+        b.give_back();
+        b.give_back();
+        b.give_back();
+        assert!(b.tokens <= 2.0);
+        assert_eq!(Bucket::new(0.4).tokens, 1.0);
+    }
+
     use super::*;
 
     #[test]

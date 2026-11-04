@@ -287,6 +287,17 @@ pub trait FrontendDomainManager: std::fmt::Debug + Send + Sync {
         request: &DescribeDomainRequest,
     ) -> Result<DescribeDomainResponse, EntityNotExistsError>;
 
+    /// Go RegisterDomain: `GetDomain` errors other than EntityNotExists abort
+    /// registration instead of being treated as "not found".
+    fn exists_for_register(&self, name: &str) -> Result<bool, FrontendDomainError> {
+        Ok(self
+            .describe(&DescribeDomainRequest {
+                name: Some(name.to_string()),
+                uuid: None,
+            })
+            .is_ok())
+    }
+
     fn domain_id(&self, name: &str) -> Result<String, EntityNotExistsError>;
 
     fn is_active_in(&self, uuid: &str, cluster: &str) -> Result<bool, EntityNotExistsError>;
@@ -1866,6 +1877,27 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
         }
     }
 
+    fn exists_for_register(&self, name: &str) -> Result<bool, FrontendDomainError> {
+        let request = DescribeDomainRequest {
+            name: Some(name.to_string()),
+            uuid: None,
+        };
+        if self.cache.describe(&request).is_ok() {
+            return Ok(true);
+        }
+        if name.is_empty() {
+            return Ok(false);
+        }
+        match self.persistence.get_domain(Some(name), None) {
+            Ok(metadata) => {
+                self.cache.insert_matching_metadata_if_missing(&metadata);
+                Ok(true)
+            }
+            Err(message) if message.contains("does not exist") => Ok(false),
+            Err(message) => Err(FrontendDomainError::Persistence(message)),
+        }
+    }
+
     fn domain_id(&self, name: &str) -> Result<String, EntityNotExistsError> {
         match self.cache.domain_id(name) {
             Ok(id) => Ok(id),
@@ -1911,7 +1943,12 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
             .cache
             .update_with_notification(request, metadata, policy, false)
             .map_err(FrontendDomainError::from)?;
-        let updated = self.cache.record_by_name(&request.name)?;
+        let mut updated = self.cache.record_by_name(&request.name)?;
+        if updated.failover_version != old.failover_version {
+            // Go domain/handler.go: failover captures the metadata notification version.
+            updated.failover_notification_version = version;
+            self.cache.restore_record(updated.clone());
+        }
         if let Err(error) = self.persist_record(&updated, version, false) {
             self.cache.restore_record(old);
             return Err(error);
@@ -1955,7 +1992,9 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
             .cache
             .failover_with_notification(request, current_cluster, metadata, policy, false)
             .map_err(FrontendDomainError::from)?;
-        let updated = self.cache.record_by_name(&request.domain_name)?;
+        let mut updated = self.cache.record_by_name(&request.domain_name)?;
+        updated.failover_notification_version = version;
+        self.cache.restore_record(updated.clone());
         if let Err(error) = self.persist_record(&updated, version, false) {
             self.cache.restore_record(old);
             return Err(error);
@@ -2955,6 +2994,29 @@ mod page_tests {
 #[cfg(test)]
 mod go_sql_frontend_manager_tests {
     use super::*;
+
+    #[test]
+    fn exists_for_register_distinguishes_not_found_from_backend_errors() {
+        let connection = rusqlite::Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE domains (shard_id INTEGER, id BLOB, name TEXT, is_global BOOLEAN, data BLOB, data_encoding TEXT, PRIMARY KEY (shard_id, id));
+                 CREATE TABLE domain_metadata (id INTEGER PRIMARY KEY, notification_version INTEGER);
+                 INSERT INTO domain_metadata VALUES (1, 7);",
+            )
+            .unwrap();
+        let persistence = std::sync::Arc::new(
+            crate::matching_domain_metadata::MatchingDomainMetadataStore::from_connection(
+                connection, "cluster-a",
+            ),
+        );
+        let manager = PersistedFrontendDomainManager::new(
+            InMemoryDomainStore::new(),
+            persistence,
+            std::sync::Arc::new(|| "thriftrw_snappy".to_string()),
+        );
+        assert_eq!(manager.exists_for_register("missing").unwrap(), false);
+    }
 
     #[test]
     fn sqlite_domain_manager_survives_cache_restart() {
