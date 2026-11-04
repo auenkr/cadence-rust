@@ -1,5 +1,7 @@
 //! Decision task validation and dispatch logic ported from Go `service/history/decision`.
 //! TODO(link): execution-facing callbacks become `execution::MutableState` methods once that port lands.
+pub mod task_handler;
+pub mod handler;
 use cadence_api::{enums::DecisionType, tasks::Decision};
 use std::time::Duration;
 
