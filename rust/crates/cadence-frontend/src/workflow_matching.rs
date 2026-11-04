@@ -312,8 +312,8 @@ impl DecisionTask {
             transient: transient_of(s, 90),
             task_list: s.opt_struct(100).map_err(e)?,
             branch_token: s.bytes_or_empty(120).map_err(e)?,
-            scheduled_timestamp: s.opt_i64(130).map_err(e)?.map(|n| n / 1_000_000),
-            started_timestamp: s.opt_i64(140).map_err(e)?.map(|n| n / 1_000_000),
+            scheduled_timestamp: s.opt_i64(130).map_err(e)?,
+            started_timestamp: s.opt_i64(140).map_err(e)?,
             queries: s.opt_map_str(150).map_err(e)?,
             total_history_bytes: s.opt_i64(160).map_err(e)?.unwrap_or(0),
             auto_config_hint: s.opt_struct(170).map_err(e)?,
@@ -342,8 +342,8 @@ impl DecisionTask {
             transient: transient_of(s, 80),
             task_list: s.opt_struct(90).map_err(e)?,
             branch_token: s.bytes_or_empty(110).map_err(e)?,
-            scheduled_timestamp: s.opt_i64(120).map_err(e)?.map(|n| n / 1_000_000),
-            started_timestamp: s.opt_i64(130).map_err(e)?.map(|n| n / 1_000_000),
+            scheduled_timestamp: s.opt_i64(120).map_err(e)?,
+            started_timestamp: s.opt_i64(130).map_err(e)?,
             queries: s.opt_map_str(140).map_err(e)?,
             total_history_bytes: s.opt_i64(150).map_err(e)?.unwrap_or(0),
             auto_config_hint: None,
@@ -1025,5 +1025,46 @@ impl crate::archive_readers::ExecutionProbe for ProductionBackend {
                 Err(e) => Err(e),
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod decision_time_precision_tests {
+    use super::*;
+    use cadence_thrift::value::{Struct, Value};
+
+    fn with_times(execution_field: i16, scheduled: (i16, i64), started: (i16, i64)) -> Struct {
+        let execution = Struct {
+            fields: vec![
+                (10, Value::Bytes(b"wf".to_vec())),
+                (20, Value::Bytes(b"run".to_vec())),
+            ],
+        };
+        Struct {
+            fields: vec![
+                (execution_field, Value::Struct(execution)),
+                (scheduled.0, Value::I64(scheduled.1)),
+                (started.0, Value::I64(started.1)),
+            ],
+        }
+    }
+
+    #[test]
+    fn decision_task_times_keep_nanosecond_precision_from_matching_and_history() {
+        let scheduled = 1_793_743_359_616_951_114_i64;
+        let started = 1_793_743_359_700_000_001_i64;
+        let matching = with_times(20, (130, scheduled), (140, started));
+        let task = DecisionTask::from_matching(&matching).unwrap().unwrap();
+        assert_eq!(task.scheduled_timestamp, Some(scheduled));
+        assert_eq!(task.started_timestamp, Some(started));
+
+        let history = with_times(10, (120, scheduled), (130, started));
+        let exec = ty::WorkflowExecution {
+            workflow_id: "wf".into(),
+            run_id: "run".into(),
+        };
+        let task = DecisionTask::from_started(&history, exec, vec![]).unwrap();
+        assert_eq!(task.scheduled_timestamp, Some(scheduled));
+        assert_eq!(task.started_timestamp, Some(started));
     }
 }

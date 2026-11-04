@@ -4349,8 +4349,9 @@ impl FromThrift for PollForDecisionTaskResponse {
             attempt: s.opt_i64(51)?.unwrap_or(0),
             backlog_count_hint: s.opt_i64(54)?.unwrap_or(0),
             next_event_id: s.opt_i64(130)?.unwrap_or_default(),
-            scheduled_timestamp: s.opt_i64(100)?.map(|n| n / 1_000_000),
-            started_timestamp: s.opt_i64(110)?.map(|n| n / 1_000_000),
+            // Go carries decision-task times as unix nanoseconds end to end.
+            scheduled_timestamp: s.opt_i64(100)?,
+            started_timestamp: s.opt_i64(110)?,
             history: s.opt_struct(60)?,
             next_page_token: s.bytes_or_empty(70)?,
             workflow_execution_task_list: s.opt_struct(90)?,
@@ -4385,8 +4386,8 @@ impl ToThrift for PollForDecisionTaskResponse {
         f.sbytes(70, &self.next_page_token);
         f.ostruct(80, self.query.as_ref());
         f.ostruct(90, self.workflow_execution_task_list.as_ref());
-        f.oi64(100, millis_to_nanos(self.scheduled_timestamp));
-        f.oi64(110, millis_to_nanos(self.started_timestamp));
+        f.oi64(100, self.scheduled_timestamp);
+        f.oi64(110, self.started_timestamp);
         if let Some(q) = &self.queries {
             let mut items: Vec<(Value, Value)> = q
                 .iter()
@@ -6719,7 +6720,8 @@ mod tests {
             poller_wait_time_in_ms: 9,
         };
         let decision = PollForDecisionTaskResponse {
-            scheduled_timestamp: Some(1_700_000_000_123),
+            scheduled_timestamp: Some(1_700_000_000_123_456_789),
+            started_timestamp: Some(1_700_000_000_987_654_321),
             total_history_bytes: 321,
             auto_config_hint: Some(hint.clone()),
             ..Default::default()

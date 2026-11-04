@@ -291,9 +291,9 @@ pub fn decision_task(
         attempt: v.attempt,
         backlog_count_hint: v.backlog_count_hint,
         next_event_id: v.next_event_id,
-        // The Frontend decision model carries milliseconds (Thrift encoder multiplies).
-        scheduled_time: v.scheduled_timestamp.map(timestamp),
-        started_time: v.started_timestamp.map(timestamp),
+        // The decision model carries unix nanoseconds like Go.
+        scheduled_time: v.scheduled_timestamp.map(timestamp_nanos),
+        started_time: v.started_timestamp.map(timestamp_nanos),
         total_history_bytes: v.total_history_bytes,
         auto_config_hint: v.auto_config_hint.map(auto_config_hint_out),
         history: v.history.map(history).transpose()?,
@@ -1458,11 +1458,11 @@ mod nanosecond_timestamp_tests {
     /// The decision-poll model carries milliseconds (the Thrift codec scales
     /// them to ns), so gRPC must build the Timestamp from ms.
     #[test]
-    fn decision_task_times_are_milliseconds_and_carry_hint_and_bytes() {
-        let ms = 1_793_743_359_616_i64;
-        let expected = timestamp(ms);
+    fn decision_task_times_are_nanoseconds_and_carry_hint_and_bytes() {
+        let ms = 1_793_743_359_616_951_114_i64;
+        let expected = timestamp_nanos(ms);
         assert_eq!(expected.seconds, 1_793_743_359);
-        assert_eq!(expected.nanos, 616_000_000);
+        assert_eq!(expected.nanos, 616_951_114);
         let resp = decision_task(cadence_api::tasks::PollForDecisionTaskResponse {
             scheduled_timestamp: Some(ms),
             started_timestamp: Some(ms),

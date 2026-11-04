@@ -3050,8 +3050,9 @@ impl InMemoryExecutionStore {
             } else {
                 started_event_id + 1
             },
-            scheduled_timestamp,
-            started_timestamp,
+            // Decision-task times are unix nanoseconds like Go.
+            scheduled_timestamp: scheduled_timestamp.map(|ms| ms.saturating_mul(1_000_000)),
+            started_timestamp: started_timestamp.map(|ms| ms.saturating_mul(1_000_000)),
             workflow_execution_task_list: Some(task_list),
             query: head_query,
             query_id: head_query_id,
@@ -11459,8 +11460,14 @@ mod transient_decision_tests {
                 .attempt,
             2
         );
-        assert_eq!(history[4].timestamp, third.scheduled_timestamp);
-        assert_eq!(history[5].timestamp, third.started_timestamp);
+        assert_eq!(
+            history[4].timestamp,
+            third.scheduled_timestamp.map(|ns| ns / 1_000_000)
+        );
+        assert_eq!(
+            history[5].timestamp,
+            third.started_timestamp.map(|ns| ns / 1_000_000)
+        );
         assert_eq!(
             history[6]
                 .decision_task_completed_event_attributes
@@ -11607,8 +11614,14 @@ mod transient_decision_tests {
             })
             .unwrap();
         let history = events(&restored, &execution);
-        assert_eq!(history[4].timestamp, retry.scheduled_timestamp);
-        assert_eq!(history[5].timestamp, retry.started_timestamp);
+        assert_eq!(
+            history[4].timestamp,
+            retry.scheduled_timestamp.map(|ns| ns / 1_000_000)
+        );
+        assert_eq!(
+            history[5].timestamp,
+            retry.started_timestamp.map(|ns| ns / 1_000_000)
+        );
         assert_eq!(history.len(), 7);
     }
     #[test]
