@@ -1,4 +1,5 @@
 //! Test mock Handler.
+#![allow(unused_variables)]
 use crate::engine::deps::{HResult, HistoryError};
 use crate::handler::Handler;
 use async_trait::async_trait;

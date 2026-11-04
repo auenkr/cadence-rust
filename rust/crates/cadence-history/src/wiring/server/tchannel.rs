@@ -413,7 +413,7 @@ async fn connection(stream: TcpStream, state: ServerState) -> Result<()> {
 pub async fn serve(listener: TcpListener, state: ServerState, mut stop: watch::Receiver<bool>) {
     loop {
         tokio::select! {
-            _ = stop.wait_for(|v| *v) => return,
+            _ = async { let _ = stop.wait_for(|v| *v).await; } => return,
             acc = listener.accept() => {
                 if let Ok((s, _)) = acc {
                     let st = state.clone();
@@ -421,7 +421,7 @@ pub async fn serve(listener: TcpListener, state: ServerState, mut stop: watch::R
                     tokio::spawn(async move {
                         tokio::select! {
                             _ = connection(s, st) => {},
-                            _ = stop.wait_for(|v| *v) => {},
+                            _ = async { let _ = stop.wait_for(|v| *v).await; } => {},
                         }
                     });
                 }
