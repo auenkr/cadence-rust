@@ -66,3 +66,14 @@ workflow repairer, mocks excluded) were not ported in this progress slice.
 
 This note must be updated with the final head SHA, run URL/conclusion, and a
 complete parity checklist before the work is considered done.
+
+## Continuation by implementation worker
+
+Worktree: `/mnt/storage/service/wt-exec-sol`; main checkout detached before
+attaching the existing branch here. Added `integrity.rs` (both resurrected
+entity scans with paginated error propagation), `timer_sequence.rs` (user and
+all four activity timer orderings, expiry, mask conversion and generation),
+and `workflow.rs` (vector-clock conflict resolution, revive, suppress,
+buffered-event flushing and termination). These use explicit context/reader/
+task sink traits; concrete context integration remains pending and must not
+be represented as completed service parity. No local Cargo commands.
