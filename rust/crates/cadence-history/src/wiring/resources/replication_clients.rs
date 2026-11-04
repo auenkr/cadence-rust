@@ -174,6 +174,7 @@ impl ReplicationClientBean {
         Self { history, clusters, caller: caller.into(), channels: Mutex::new(HashMap::new()) }
     }
 
+    #[allow(clippy::result_large_err)]
     fn remote(&self, cluster: &str) -> Result<(Channel, ClusterInformation)> {
         let info = self
             .clusters
