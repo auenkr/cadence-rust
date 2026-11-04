@@ -277,15 +277,6 @@ impl FromThrift for HistoryRefreshWorkflowTasksRequest {
     }
 }
 
-impl ToThrift for HistoryRefreshWorkflowTasksRequest {
-    fn to_thrift(&self) -> Struct {
-        let mut f = Fields::new();
-        f.sstr(10, &self.domain_uuid);
-        f.ostruct(20, self.request.as_ref());
-        f.finish()
-    }
-}
-
 impl FromThrift for ScheduleDecisionTaskRequest {
     fn from_thrift(s: &Struct) -> Result<Self, Error> {
         Ok(Self {

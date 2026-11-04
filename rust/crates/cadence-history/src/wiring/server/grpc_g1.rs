@@ -321,9 +321,8 @@ mod tests {
             }),
         };
         let out = query_response_out(v);
-        let back = cadence_proto::convert::client::query_response_in(out).unwrap();
-        assert_eq!(back.query_result, vec![1, 2]);
-        assert_eq!(back.query_rejected.unwrap().close_status, Some(e::WorkflowExecutionCloseStatus::Completed));
+        assert_eq!(out.query_result.unwrap().data, vec![1, 2]);
+        assert_eq!(out.query_rejected.unwrap().close_status, e::WorkflowExecutionCloseStatus::Completed as i32 + 1);
     }
 
     #[test]
