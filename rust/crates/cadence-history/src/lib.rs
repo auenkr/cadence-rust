@@ -2,6 +2,7 @@
 
 pub mod config;
 pub mod engine;
+pub mod execution;
 pub mod mutable_state;
 pub mod mutable_state_activity;
 pub mod shard;
@@ -122,3 +123,8 @@ mod rpc_tests {
 }
 pub mod handler;
 pub mod wrappers;
+pub mod decision;
+pub mod events;
+pub mod query;
+pub mod reset;
+pub mod workflowcache;
