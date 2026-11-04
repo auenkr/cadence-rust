@@ -34,7 +34,7 @@ impl StateBuilder {
                 Some(EventType::StartChildWorkflowExecutionInitiated) => { self.mutable_state.replicate_start_child_workflow_execution_initiated_event(event.event_id, event, "")?; }
                 Some(EventType::ChildWorkflowExecutionStarted) => self.mutable_state.replicate_child_workflow_execution_started_event(event)?,
                 Some(EventType::StartChildWorkflowExecutionFailed | EventType::ChildWorkflowExecutionCompleted | EventType::ChildWorkflowExecutionFailed | EventType::ChildWorkflowExecutionCanceled | EventType::ChildWorkflowExecutionTimedOut | EventType::ChildWorkflowExecutionTerminated) => self.mutable_state.replicate_child_workflow_terminal_event(event)?,
-                Some(EventType::RequestCancelExternalWorkflowExecutionInitiated) => { self.mutable_state.replicate_request_cancel_external_workflow_execution_initiated_event(event.event_id, event); }
+                Some(EventType::RequestCancelExternalWorkflowExecutionInitiated) => { self.mutable_state.replicate_request_cancel_external_workflow_execution_initiated_event(event.event_id, event, ""); }
                 Some(EventType::ExternalWorkflowExecutionCancelRequested) => { self.mutable_state.replicate_external_workflow_execution_cancel_requested(event); }
                 Some(EventType::RequestCancelExternalWorkflowExecutionFailed) => { self.mutable_state.replicate_request_cancel_external_workflow_execution_failed_event(event); }
                 Some(EventType::MarkerRecorded) => { self.mutable_state.replicate_marker_recorded_event(event); }

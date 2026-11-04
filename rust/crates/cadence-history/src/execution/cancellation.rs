@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::mutable_state::MutableStateBuilder;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RequestCancelInfo { pub version: i64, pub initiated_id: i64, pub initiated_event_batch_id: i64 }
+pub struct RequestCancelInfo { pub version: i64, pub initiated_id: i64, pub initiated_event_batch_id: i64, pub cancel_request_id: String }
 
 impl MutableStateBuilder {
     pub fn is_cancel_requested(&self) -> (bool, String) {
@@ -24,14 +24,14 @@ impl MutableStateBuilder {
         self.execution_info["cancel_request_id"] = attrs.request_id.clone().into();
         true
     }
-    pub fn add_request_cancel_external_workflow_execution_initiated_event(&mut self, attributes: RequestCancelExternalWorkflowExecutionInitiatedEventAttributes, first_event_id: i64, timestamp_unix_nanos: i64, version: i64) -> (HistoryEvent, RequestCancelInfo) {
+    pub fn add_request_cancel_external_workflow_execution_initiated_event(&mut self, attributes: RequestCancelExternalWorkflowExecutionInitiatedEventAttributes, cancel_request_id: impl Into<String>, first_event_id: i64, timestamp_unix_nanos: i64, version: i64) -> (HistoryEvent, RequestCancelInfo) {
         let event = self.add_event(HistoryEvent { event_type: Some(EventType::RequestCancelExternalWorkflowExecutionInitiated), timestamp: Some(timestamp_unix_nanos), version, request_cancel_external_workflow_execution_initiated_event_attributes: Some(attributes), ..Default::default() });
-        let info = self.replicate_request_cancel_external_workflow_execution_initiated_event(first_event_id, &event).expect("attributes were set");
+        let info = self.replicate_request_cancel_external_workflow_execution_initiated_event(first_event_id, &event, cancel_request_id).expect("attributes were set");
         (event, info)
     }
-    pub fn replicate_request_cancel_external_workflow_execution_initiated_event(&mut self, first_event_id: i64, event: &HistoryEvent) -> Option<RequestCancelInfo> {
+    pub fn replicate_request_cancel_external_workflow_execution_initiated_event(&mut self, first_event_id: i64, event: &HistoryEvent, cancel_request_id: impl Into<String>) -> Option<RequestCancelInfo> {
         event.request_cancel_external_workflow_execution_initiated_event_attributes.as_ref()?;
-        let info = RequestCancelInfo { version: event.version, initiated_id: event.event_id, initiated_event_batch_id: first_event_id };
+        let info = RequestCancelInfo { version: event.version, initiated_id: event.event_id, initiated_event_batch_id: first_event_id, cancel_request_id: cancel_request_id.into() };
         let value = serde_json::to_value(&info).expect("RequestCancelInfo is serializable");
         self.pending_request_cancel_infos.insert(info.initiated_id, value.clone());
         self.update_request_cancel_infos.insert(info.initiated_id, value);
