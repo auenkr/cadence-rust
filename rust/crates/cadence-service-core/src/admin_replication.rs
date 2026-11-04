@@ -347,6 +347,11 @@ pub async fn read_dlq_messages(
         dlq_type: convert::dlq_type_in(response.r#type).map_err(ProxyError::Internal)?,
         replication_tasks: convert::replication_tasks_in(response.replication_tasks)
             .map_err(ProxyError::Internal)?,
+        replication_tasks_info: response
+            .replication_tasks_info
+            .into_iter()
+            .map(convert::replication_task_info_in)
+            .collect(),
         next_page_token: response.next_page_token,
     })
 }

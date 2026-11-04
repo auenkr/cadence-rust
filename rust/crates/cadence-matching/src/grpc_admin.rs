@@ -47,10 +47,18 @@ impl Admin {
 
 use cadence_proto::convert::cross_cluster as xc;
 
+fn encoding_type_out(v: Option<cadence_api::enums::EncodingType>) -> i32 {
+    // Go FromDataBlob: ThriftRW=1, JSON=2, anything else/unset=0 (invalid).
+    match v {
+        Some(cadence_api::enums::EncodingType::ThriftRW) => 1,
+        Some(cadence_api::enums::EncodingType::JSON) => 2,
+        _ => 0,
+    }
+}
+
 fn data_blob_out(v: cadence_api::types::DataBlob) -> cadence_proto::api::DataBlob {
-    // Admin DataBlobs carry JSON bytes, mirroring Go's json.Marshal wrapper.
     cadence_proto::api::DataBlob {
-        encoding_type: 2, // JSON
+        encoding_type: encoding_type_out(v.encoding_type),
         data: v.data,
     }
 }
@@ -64,6 +72,16 @@ fn data_blob_in(v: Option<cadence_proto::api::DataBlob>) -> Option<cadence_api::
         },
         data: b.data,
     })
+}
+
+/// Wire values are identical in Thrift and protobuf (INVALID=0, HEALTHY=1,
+/// DRAINED=2); Go casts directly, so no offset is applied.
+fn isolation_state_out(v: Option<cadence_api::enums::IsolationGroupState>) -> i32 {
+    v.map_or(0, |s| s as i32)
+}
+
+fn isolation_state_in(v: i32) -> Option<cadence_api::enums::IsolationGroupState> {
+    cadence_api::enums::IsolationGroupState::from_i32(v)
 }
 
 fn filters_in(v: Vec<a::DynamicConfigFilter>) -> Vec<cadence_api::admin::DynamicConfigFilter> {
@@ -414,7 +432,7 @@ impl a::admin_api_server::AdminApi for Admin {
                         .into_iter()
                         .map(|g| cadence_proto::api::IsolationGroupPartition {
                             name: g.name,
-                            state: g.state.map_or(0, |s| s as i32 + 1),
+                            state: isolation_state_out(g.state),
                         })
                         .collect(),
                 }
@@ -435,9 +453,7 @@ impl a::admin_api_server::AdminApi for Admin {
                         .into_iter()
                         .map(|g| cadence_api::types::IsolationGroupPartition {
                             name: g.name,
-                            state: cadence_api::enums::IsolationGroupState::from_i32(
-                                g.state.checked_sub(1).unwrap_or(-1),
-                            ),
+                            state: isolation_state_in(g.state),
                         })
                         .collect(),
                 }
@@ -469,7 +485,7 @@ impl a::admin_api_server::AdminApi for Admin {
                         .into_iter()
                         .map(|g| cadence_proto::api::IsolationGroupPartition {
                             name: g.name,
-                            state: g.state.map_or(0, |s| s as i32 + 1),
+                            state: isolation_state_out(g.state),
                         })
                         .collect(),
                 }
@@ -494,9 +510,7 @@ impl a::admin_api_server::AdminApi for Admin {
                         .into_iter()
                         .map(|g| cadence_api::types::IsolationGroupPartition {
                             name: g.name,
-                            state: cadence_api::enums::IsolationGroupState::from_i32(
-                                g.state.checked_sub(1).unwrap_or(-1),
-                            ),
+                            state: isolation_state_in(g.state),
                         })
                         .collect(),
                 }
@@ -844,10 +858,7 @@ impl a::admin_api_server::AdminApi for Admin {
                 workflow_id: execution.workflow_id,
                 run_id: execution.run_id,
             }),
-            events: Some(cadence_api::types::DataBlob {
-                encoding_type: None,
-                data: events.data,
-            }),
+            events: data_blob_in(Some(events)),
         };
         let _: cadence_api::admin::ReapplyEventsResponse = self
             .call("/api/v1/admin/workflows/reapply-events", &input)
@@ -1060,10 +1071,10 @@ impl a::admin_api_server::AdminApi for Admin {
             workflow_id: execution.workflow_id,
             run_id: execution.run_id,
             remote_cluster: r.remote_cluster,
-            start_event_id: None,
-            start_version: None,
-            end_event_id: None,
-            end_version: None,
+            start_event_id: r.start_event.as_ref().map(|i| i.event_id),
+            start_version: r.start_event.as_ref().map(|i| i.version),
+            end_event_id: r.end_event.as_ref().map(|i| i.event_id),
+            end_version: r.end_event.as_ref().map(|i| i.version),
         };
         let _: cadence_api::admin::ResendReplicationTasksResponse = self
             .call("/api/v1/admin/replication/resend", &input)
@@ -1141,4 +1152,31 @@ pub async fn serve(
         .serve(addr)
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod fix_fe_admin_tests {
+    use super::*;
+    use cadence_api::enums::{EncodingType, IsolationGroupState};
+
+    #[test]
+    fn isolation_state_has_no_offset() {
+        assert_eq!(isolation_state_out(Some(IsolationGroupState::Healthy)), 1);
+        assert_eq!(isolation_state_out(Some(IsolationGroupState::Drained)), 2);
+        assert_eq!(isolation_state_out(None), 0);
+        assert_eq!(isolation_state_in(1), Some(IsolationGroupState::Healthy));
+        assert_eq!(isolation_state_in(2), Some(IsolationGroupState::Drained));
+        assert_eq!(isolation_state_in(0), Some(IsolationGroupState::Invalid));
+    }
+
+    #[test]
+    fn data_blob_preserves_encoding() {
+        for (enc, wire) in [(Some(EncodingType::ThriftRW), 1), (Some(EncodingType::JSON), 2), (None, 0)] {
+            let out = data_blob_out(cadence_api::types::DataBlob { encoding_type: enc, data: vec![7] });
+            assert_eq!(out.encoding_type, wire);
+            assert_eq!(out.data, vec![7]);
+            let back = data_blob_in(Some(out)).unwrap();
+            assert_eq!(back.encoding_type, enc);
+        }
+    }
 }
