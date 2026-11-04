@@ -93,3 +93,23 @@ pub trait VersionHistories: Send + Sync {
 pub trait MutableStateVersionHistories {
     fn get_version_histories(&self) -> Option<Arc<dyn VersionHistories>>;
 }
+
+// ---- quotas shim. TODO(link): replace by cadence_common::quotas Collection / Limiter ----
+#[async_trait]
+pub trait Limiter: Send + Sync {
+    fn allow(&self) -> bool;
+    async fn wait(&self, ctx: &tokio_util::sync::CancellationToken) -> Result<()>;
+}
+
+/// Go `quotas.ICollection[string]`.
+pub trait LimiterCollection: Send + Sync {
+    fn for_key(&self, key: &str) -> Arc<dyn Limiter>;
+}
+
+/// Go `quotas.NewCollection(dynamicquotas.NewSimpleDynamicRateLimiterFactory(rps))`.
+/// TODO(link): construct from cadence_common::rate_limiter once the dynamic limiter factory is exposed.
+pub fn new_simple_dynamic_collection(
+    _rps: Arc<dyn Fn(&str) -> i64 + Send + Sync>,
+) -> Arc<dyn LimiterCollection> {
+    unimplemented!("TODO(link): quotas::Collection")
+}
