@@ -239,6 +239,16 @@ pub struct WorkflowExecutionInfo {
     pub client_impl: String,
     pub sticky_schedule_to_start_timeout: i32,
     pub auto_reset_points: Option<cadence_api::types::ResetPoints>,
+    pub workflow_timeout: i32,
+    pub decision_start_to_close_timeout: i32,
+    pub task_list_kind: Option<cadence_api::enums::TaskListKind>,
+    pub memo: Option<std::collections::HashMap<String, Vec<u8>>>,
+    pub search_attributes: Option<std::collections::HashMap<String, Vec<u8>>>,
+    pub partition_config: Option<std::collections::HashMap<String, String>>,
+    pub cron_overlap_policy: Option<cadence_api::enums::CronOverlapPolicy>,
+    pub last_updated_timestamp: i64,
+    pub parent_domain_id: String,
+    pub initiated_id: i64,
 }
 impl WorkflowExecutionInfo {
     /// `IsRunning`
@@ -265,6 +275,14 @@ pub struct ActivityInfo {
     pub version: i64,
     pub started_identity: String,
     pub task_list: String,
+    pub last_heart_beat_updated_time: i64,
+    pub expiration_time: i64,
+    pub maximum_attempts: i32,
+    pub last_failure_reason: String,
+    pub last_failure_details: Vec<u8>,
+    pub last_failure_category: Option<cadence_api::enums::FailureCategory>,
+    pub last_retry_interval_seconds: i32,
+    pub last_worker_identity: String,
 }
 
 /// `cache.DomainCacheEntry` info (TODO(link): common/cache).
@@ -280,8 +298,14 @@ pub struct DomainCacheEntry {
     pub info: DomainInfo,
     pub is_global_domain: bool,
     pub active_clusters: Vec<(Option<cadence_api::types::ClusterAttribute>, String)>,
+    /// `failoverEndTime`; non-nil means the domain is pending active.
+    pub failover_end_time: Option<i64>,
 }
 impl DomainCacheEntry {
+    /// `IsDomainPendingActive`
+    pub fn is_domain_pending_active(&self) -> bool {
+        self.failover_end_time.is_some()
+    }
     pub fn get_info(&self) -> &DomainInfo {
         &self.info
     }

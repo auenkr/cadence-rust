@@ -1,90 +1,143 @@
-# History SQL persistence port — 2026-11-04
+# History SQL persistence port — 2026-11-04 (continued 2026-11-05)
 
-Branch: `history-port-persist`, based on `origin/master` after fetch. Worktree: `/home/auenkr/.t3/worktrees/cadence-rust/t3-cee2bc69`.
+Branch: `history-port-persist`. Worktree: `/home/auenkr/.t3/worktrees/cadence-rust/t3-cee2bc69`.
 
-## Current status
+## Scope and status
 
-**Incomplete.** This is a working progress record, not Slice 2/3/4 completion evidence. No MySQL or PostgreSQL store implementation currently implements `GoExecutionStore` or `GoHistoryV2Store`; the Rust changes so far establish missing contract/query/helper groundwork only. No database integration gate has run.
+Implementation is now wired into `GoExecutionStore` (`SqlWorkflowStore`) and `GoHistoryV2Store` (`SqlHistoryV2Store`) for MySQL and PostgreSQL via `SqlBackend`. This supersedes the earlier incomplete helper-only checklist. This is an implementation/compilation port, **not service parity acceptance**. No integration or mixed-cluster tests were added/run in this task, as requested. History service lifecycle, deployment wiring and SDK compatibility acceptance remain outside this worker's validation.
 
-## Changes committed and pushed
+Transaction writes use a single connection and commit, shared shard ownership locks, current row locks, execution condition locks, then the same mutation/reset/new ordering. State maps remain separate Go-schema rows; map payloads are Go sqlblobs supplied as keyed data/encoding blobs. Activity heartbeats retain separate SQL columns. Task tables retain the plugin-specific bounds (including the existing PostgreSQL replication unbounded-delete quirk), timer lookahead/JSON pagination, little-endian immediate/DLQ/history-node cursors and gob tree/execution cursors. Cross-cluster task rows preserve target cluster. Visibility/other task insertion stays a Go no-op; CreateHistoryTasks, list-current, exists and workflow-timer selection retain original SQL unimplemented/TODO behavior.
 
-- `883bccce2`: added execution row lock/update SQL and History-v2 node/tree SQL statements to `history_sql_queries.rs` for MySQL and PostgreSQL.
-- `2d172bf93`: added conditional execution row update methods. They lock and compare `next_event_id` before updating the row in a transaction. Added transfer, timer, replication and cross-cluster SQL query templates.
-- `4ca25f248`: added keyed blobs to workflow state map contracts; changed History-v2 tree results to represent branch metadata; added Go-compatible `HistoryTreeInfo` sqlblobs codec helpers.
-- `0d133fba3`: added the Go little-endian int64 History node page token codec and row-order/transaction validation, including duplicate-transaction selection and corruption errors.
-- `7ab12e019`, `2a92b9d4d`: added branch fork ancestry, shared-ancestor reference maxima and deletion-range helpers.
+New trait methods expose full scheduled task keys/pages, failover range IDs, DLQ pages and explicit DLQ delete bounds while retaining existing convenience methods. History-v2 preserves negated SQL transaction IDs, duplicate history condition failures, corruption checks, ancestor fork selection and bottom-up batched deletion. Execution serialization uses Go event-store version/default initiated ID and preserves activity retry FailureOptions.
 
-## New implementation in progress
+## Validation
 
-- Added `history_state_maps_sql.rs` with MySQL/PostgreSQL upsert, select and delete operations for activity, timer, child, request-cancel and signal maps. Activity rows preserve heartbeat details and timestamp columns.
-- Added `history_state_non_maps_sql.rs` with MySQL/PostgreSQL requested-signal set and buffered-event operations. Signal inserts are idempotent and requested-signal deletions use the Go-style expanded `IN` list.
-- These helpers are standalone and are **not yet wired into full execution mutation transactions or `GoExecutionStore`**. They are not evidence of parity completion.
+- https://github.com/auenkr/cadence-rust/actions/runs/41887514632 — `26c42b7acbb08703d5c59608ad6a5f322eb5bf53`, failed Clippy (`items_after_test_module`), fixed by moving the codec test module.
+- https://github.com/auenkr/cadence-rust/actions/runs/41888820179 — `3c81a2386ecf4df44a1fdcf9836842ad8ba32119`, **success**, cadence-persistence clippy then tests; CI formatting artifact applied only to this port's files.
+- Final fresh-target run: https://github.com/auenkr/cadence-rust/actions/runs/41911404098, head `374ce4a1707ed336fb993554373cc24f42dd01d4`, conclusion **failure**: Clippy passed; 424 tests passed and one stale zombie collision assertion failed (updated to Go `ConditionFailed`). Superseded by successful fresh-target rerun below.
+- Static SQL catalog table-name check against `go/schema/mysql/v8/cadence/schema.sql`: no unknown table names; `git diff --check`: pass.
+- Final audit corrections include `signals_requested_sets` cleanup, SQL timeout/throttling categories, nullable heartbeat payload reads, omission of deprecated `LastWriteEventID` from NDC writes, and the matching regression assertion.
+- https://github.com/auenkr/cadence-rust/actions/runs/41924189215 — head `5933bcf0f6e70194c5d40feaedb9dcc4e660f7ff`, **success**. `clean_target=true`, dedicated `/home/runner/work/_temp/cargo-target-final`, cadence-persistence clippy (`--all-targets -- -D warnings`) followed by tests. This is the final implementation source head; subsequent changes only record this evidence and dashboard status.
+- Machine-readable run identities are saved in `memory/evidence/history-port-persist-20261104/`.
+- All Cargo commands ran on GitHub Actions; no local Cargo or Go builds/tests. No integration test evidence is claimed.
 
-## CI
+## Go function to Rust mapping
 
-- `rust-ci` run https://github.com/auenkr/cadence-rust/actions/runs/41876876946 was dispatched at the earlier `883bccce2` head; it was superseded before validation and is not evidence.
-- Push-triggered run https://github.com/auenkr/cadence-rust/actions/runs/41878446427 targets `7ab12e01913ca2f654eb2cb1026cffeb8c605f04`; it was queued when last checked. Later head `2a92b9d4d` still needs a fresh final run.
-- The old run https://github.com/auenkr/cadence-rust/actions/runs/41876865312 remained reported `in_progress` despite all visible steps ending at 17:23 UTC; its clippy and test steps were skipped after cancellation, so it is not validation evidence.
-- No successful CI head or run URL yet.
-
-## Function parity checklist
-
-Legend: **partial** = supporting contract/query/helper exists but no equivalent complete persistence method is wired; **missing** = no Rust implementation.
+Each source function in the requested five Go files is listed below. Constructors and shard resolution are represented by required Rust fields and typed constructors; there is one configured backend pool per store.
 
 ### `sql_execution_store.go`
 
-| Go function(s) | Rust mapping/status |
+| Go function | Rust implementation |
 |---|---|
-| `resolveShardID`, `effectiveShardID`, `txExecuteShardLocked` | Missing; shard row CRUD exists in `history_shard_sql.rs`, but no shard-aware execution transaction dispatcher. |
-| `CreateWorkflowExecution`, `createWorkflowExecutionTx` | Partial row helper `MySqlExecutionRows::create` / `PostgresExecutionRows::create`; mutable-state maps/tasks/workflow requests and full trait wiring missing. |
-| `getExecutions`, `GetWorkflowExecution`, `populateWorkflowMutableState` | Partial row/blob helpers in `sql_execution_store.rs`; mutable map, requested-signal and buffered-event reads missing. |
-| `UpdateWorkflowExecution`, `updateWorkflowExecutionTx` | Partial `update_conditioned`; mutation helpers, maps/tasks/current transitions are missing. |
-| `ConflictResolveWorkflowExecution`, `conflictResolveWorkflowExecutionTx` | Missing. |
-| `DeleteWorkflowExecution`, `DeleteCurrentWorkflowExecution`, `GetCurrentExecution`, `IsWorkflowExecutionExists` | Partial inherent row methods in `MySqlExecutionRows` / `PostgresExecutionRows`; trait wiring absent. |
-| `ListCurrentExecutions`, `ListConcreteExecutions`, `populateInternalListConcreteExecutions` | Missing; Go gob pagination compatibility absent. |
-| `CreateFailoverMarkerTasks`, `CreateHistoryTasks` | Missing. |
-| `GetReplicationTasksFromDLQ`, `GetReplicationDLQSize`, `DeleteReplicationTaskFromDLQ`, `RangeDeleteReplicationTaskFromDLQ`, `PutReplicationTaskToDLQ` | Missing. |
-| `GetHistoryTasks`, `getImmediateHistoryTasks`, `getScheduledHistoryTasks`, `CompleteHistoryTask`, `completeScheduledHistoryTask`, `completeImmediateHistoryTask`, `RangeCompleteHistoryTask`, `rangeCompleteScheduledHistoryTask`, `rangeCompleteImmediateHistoryTask` | Missing. |
-| `SelectWorkflowTimerTasks` | Missing. |
-| `GetActiveClusterSelectionPolicy`, `DeleteActiveClusterSelectionPolicy` | Partial query/catalog groundwork only; no operations. |
+| `NewSQLExecutionStore` | `SqlWorkflowStore::new` / explicit required `i32` shard fields / `lock_shard` inside `SqlBackend::transaction` |
+| `resolveShardID` | `SqlWorkflowStore::new` / explicit required `i32` shard fields / `lock_shard` inside `SqlBackend::transaction` |
+| `effectiveShardID` | `SqlWorkflowStore::new` / explicit required `i32` shard fields / `lock_shard` inside `SqlBackend::transaction` |
+| `txExecuteShardLocked` | `SqlWorkflowStore::new` / explicit required `i32` shard fields / `lock_shard` inside `SqlBackend::transaction` |
+| `CreateWorkflowExecution` | `SqlWorkflowStore::create` + `validate_create_transition` |
+| `createWorkflowExecutionTx` | `SqlWorkflowStore::create` + `validate_create_transition` |
+| `getExecutions` | `SqlWorkflowStore::get` / trait `get_workflow_execution`; maps first, execution/checksum last, discard checksum on range change |
+| `GetWorkflowExecution` | `SqlWorkflowStore::get` / trait `get_workflow_execution`; maps first, execution/checksum last, discard checksum on range change |
+| `UpdateWorkflowExecution` | `SqlWorkflowStore::update` / `validate_update` (all three modes) |
+| `updateWorkflowExecutionTx` | `SqlWorkflowStore::update` / `validate_update` (all three modes) |
+| `ConflictResolveWorkflowExecution` | `SqlWorkflowStore::conflict_resolve` / `validate_conflict` (both modes, optional current/new writes) |
+| `conflictResolveWorkflowExecutionTx` | `SqlWorkflowStore::conflict_resolve` / `validate_conflict` (both modes, optional current/new writes) |
+| `DeleteWorkflowExecution` | corresponding `GoExecutionStore` methods in `sql_workflow_store.rs` |
+| `DeleteCurrentWorkflowExecution` | corresponding `GoExecutionStore` methods in `sql_workflow_store.rs` |
+| `GetCurrentExecution` | corresponding `GoExecutionStore` methods in `sql_workflow_store.rs` |
+| `ListCurrentExecutions` | corresponding trait methods retain Go SQL `Not yet implemented` error |
+| `IsWorkflowExecutionExists` | corresponding trait methods retain Go SQL `Not yet implemented` error |
+| `ListConcreteExecutions` | trait `list_concrete_executions`, `decode_execution_info`, `history_tree_token::{encode_execution,decode_execution}` |
+| `getReadLevels` | `SqlHistoryTasks::get_dlq_page` / `get_dlq`, trait `get_replication_dlq_page`; retain max(read+batch,max), little-endian cursor |
+| `GetReplicationTasksFromDLQ` | `SqlHistoryTasks::get_dlq_page` / `get_dlq`, trait `get_replication_dlq_page`; retain max(read+batch,max), little-endian cursor |
+| `GetReplicationDLQSize` | `SqlHistoryTasks::{dlq_size,delete_dlq,range_delete_dlq,put_dlq}`; trait full-range `range_delete_replication_dlq_page` |
+| `DeleteReplicationTaskFromDLQ` | `SqlHistoryTasks::{dlq_size,delete_dlq,range_delete_dlq,put_dlq}`; trait full-range `range_delete_replication_dlq_page` |
+| `RangeDeleteReplicationTaskFromDLQ` | `SqlHistoryTasks::{dlq_size,delete_dlq,range_delete_dlq,put_dlq}`; trait full-range `range_delete_replication_dlq_page` |
+| `CreateFailoverMarkerTasks` | `SqlWorkflowStore::create_failover_markers`, trait `create_failover_markers_with_range`; shard lock and sentinel metadata |
+| `CreateHistoryTasks` | `SqlHistoryTasks::create_history_tasks`: retain Go SQL unsupported error |
+| `serialize` | `TimerCursor` serde JSON (`TaskID`, RFC3339 `Timestamp`) |
+| `deserialize` | `TimerCursor` serde JSON (`TaskID`, RFC3339 `Timestamp`) |
+| `PutReplicationTaskToDLQ` | `SqlHistoryTasks::{dlq_size,delete_dlq,range_delete_dlq,put_dlq}`; trait full-range `range_delete_replication_dlq_page` |
+| `populateWorkflowMutableState` | `SqlWorkflowStore::get` / trait `get_workflow_execution`; maps first, execution/checksum last, discard checksum on range change |
+| `populateInternalListConcreteExecutions` | trait `list_concrete_executions`, `decode_execution_info`, `history_tree_token::{encode_execution,decode_execution}` |
+| `GetHistoryTasks` | `SqlHistoryTasks::get_page`, trait `get_history_task_page`; immediate cursor and timer lookahead |
+| `getImmediateHistoryTasks` | `SqlHistoryTasks::get_page`, trait `get_history_task_page`; immediate cursor and timer lookahead |
+| `getScheduledHistoryTasks` | `SqlHistoryTasks::get_page`, trait `get_history_task_page`; immediate cursor and timer lookahead |
+| `CompleteHistoryTask` | `SqlWorkflowStore::complete_history_task_keys`, trait `complete_history_task_batch`, `SqlHistoryTasks::complete` |
+| `completeScheduledHistoryTask` | `SqlWorkflowStore::complete_history_task_keys`, trait `complete_history_task_batch`, `SqlHistoryTasks::complete` |
+| `completeImmediateHistoryTask` | `SqlWorkflowStore::complete_history_task_keys`, trait `complete_history_task_batch`, `SqlHistoryTasks::complete` |
+| `RangeCompleteHistoryTask` | `SqlHistoryTasks::range_complete`, trait `range_complete_history_task_page`; bounded and unbounded backend-specific deletes |
+| `rangeCompleteScheduledHistoryTask` | `SqlHistoryTasks::range_complete`, trait `range_complete_history_task_page`; bounded and unbounded backend-specific deletes |
+| `rangeCompleteImmediateHistoryTask` | `SqlHistoryTasks::range_complete`, trait `range_complete_history_task_page`; bounded and unbounded backend-specific deletes |
+| `GetActiveClusterSelectionPolicy` | corresponding trait methods in `sql_workflow_store.rs` |
+| `DeleteActiveClusterSelectionPolicy` | corresponding trait methods in `sql_workflow_store.rs` |
+| `SelectWorkflowTimerTasks` | trait `select_workflow_timer_tasks`: empty result, matching Go SQL TODO |
 
 ### `sql_execution_store_util.go`
 
-| Go function(s) | Rust mapping/status |
+| Go function | Rust implementation |
 |---|---|
-| `applyWorkflowMutationTx`, `applyWorkflowSnapshotTxAsReset`, `applyWorkflowSnapshotTxAsNew`, `applyTasks` | Missing. |
-| `lockCurrentExecutionIfExists`, `createOrUpdateCurrentExecution`, `lockAndCheckNextEventID`, `lockNextEventID` | Partial `update_conditioned` for next-event lock/check only; current transition helpers missing. |
-| `createImmediateTasks`, `createScheduledTasks`, `createTransferTasks`, `createReplicationTasks`, `createTimerTasks` | Missing; query statements only for queue families. |
-| `assertNotCurrentExecution`, `assertRunIDAndUpdateCurrentExecution`, `assertCurrentExecution`, `assertRunIDMismatch`, `updateCurrentExecution` | Missing. |
-| `buildExecutionRow`, `createExecution`, `updateExecution`, `insertActiveClusterSelectionPolicy` | Partial `snapshot_to_execution_row`, `create`, and `update_conditioned`; active policy and complete execution write helpers missing. |
+| `applyWorkflowMutationTx` | `SqlWorkflowStore::apply_mutation_tx` |
+| `applyWorkflowSnapshotTxAsReset` | `SqlWorkflowStore::apply_snapshot_tx(reset=true/false)` |
+| `applyWorkflowSnapshotTxAsNew` | `SqlWorkflowStore::apply_snapshot_tx(reset=true/false)` |
+| `applyTasks` | `SqlWorkflowStore::tasks` / `SqlHistoryTasks::insert_tx`; unsupported category insertion remains Go no-op |
+| `lockCurrentExecutionIfExists` | `SqlWorkflowStore::{current_tx,current_write,create}` |
+| `createOrUpdateCurrentExecution` | `SqlWorkflowStore::{current_tx,current_write,create}` |
+| `lockAndCheckNextEventID` | `SqlWorkflowStore::lock_condition` |
+| `lockNextEventID` | `SqlWorkflowStore::lock_condition` |
+| `createImmediateTasks` | `SqlWorkflowStore::tasks` / `SqlHistoryTasks::insert_tx`; unsupported category insertion remains Go no-op |
+| `createScheduledTasks` | `SqlWorkflowStore::tasks` / `SqlHistoryTasks::insert_tx`; unsupported category insertion remains Go no-op |
+| `createTransferTasks` | `SqlWorkflowStore::tasks` / `SqlHistoryTasks::insert_tx`; unsupported category insertion remains Go no-op |
+| `createReplicationTasks` | `SqlWorkflowStore::tasks` / `SqlHistoryTasks::insert_tx`; unsupported category insertion remains Go no-op |
+| `createTimerTasks` | `SqlWorkflowStore::tasks` / `SqlHistoryTasks::insert_tx`; unsupported category insertion remains Go no-op |
+| `assertNotCurrentExecution` | `SqlWorkflowStore::assert_current` and `validate_create_transition` |
+| `assertRunIDAndUpdateCurrentExecution` | `SqlWorkflowStore::assert_current` and `validate_create_transition` |
+| `assertCurrentExecution` | `SqlWorkflowStore::assert_current` and `validate_create_transition` |
+| `assertRunIDMismatch` | `SqlWorkflowStore::assert_current` and `validate_create_transition` |
+| `updateCurrentExecution` | `SqlWorkflowStore::{current_tx,current_write,create}` |
+| `buildExecutionRow` | `snapshot_to_execution_row`, `SqlWorkflowStore::{execution_write,apply_snapshot_tx}` |
+| `createExecution` | `snapshot_to_execution_row`, `SqlWorkflowStore::{execution_write,apply_snapshot_tx}` |
+| `updateExecution` | `snapshot_to_execution_row`, `SqlWorkflowStore::{execution_write,apply_snapshot_tx}` |
+| `insertActiveClusterSelectionPolicy` | `snapshot_to_execution_row`, `SqlWorkflowStore::{execution_write,apply_snapshot_tx}` |
 
-### `workflow_state_maps.go` / `workflow_state_non_maps.go`
+### `workflow_state_maps.go`
 
-| Go functions | Rust mapping/status |
+| Go function | Rust implementation |
 |---|---|
-| `updateActivityInfos`, `getActivityInfoMap`, `deleteActivityInfoMap` | Partial: `KeyedBlob<i64>` contract values; no SQL CRUD/codecs wired. |
-| `updateTimerInfos`, `getTimerInfoMap`, `deleteTimerInfoMap` | Partial: `KeyedBlob<String>` contract values; no SQL CRUD/codecs wired. |
-| `updateChildExecutionInfos`, `getChildExecutionInfoMap`, `deleteChildExecutionInfoMap` | Partial keyed contract; no SQL CRUD/codecs wired. |
-| `updateRequestCancelInfos`, `getRequestCancelInfoMap`, `deleteRequestCancelInfoMap` | Partial keyed contract; no SQL CRUD/codecs wired. |
-| `updateSignalInfos`, `getSignalInfoMap`, `deleteSignalInfoMap` | Partial keyed contract; no SQL CRUD/codecs wired. |
-| `updateSignalsRequested`, `getSignalsRequested`, `deleteSignalsRequestedSet` | Missing. |
-| `updateBufferedEvents`, `getBufferedEvents`, `deleteBufferedEvents` | Missing. |
+| `updateActivityInfos` | `SqlWorkflowStore::{maps,get}` / `workflow_state_map_statement`; standalone backend helpers in `history_state_maps_sql.rs`; keyed Go sqlblobs retained |
+| `getActivityInfoMap` | `SqlWorkflowStore::{maps,get}` / `workflow_state_map_statement`; standalone backend helpers in `history_state_maps_sql.rs`; keyed Go sqlblobs retained |
+| `deleteActivityInfoMap` | `SqlWorkflowStore::{maps,get}` / `workflow_state_map_statement`; standalone backend helpers in `history_state_maps_sql.rs`; keyed Go sqlblobs retained |
+| `updateTimerInfos` | `SqlWorkflowStore::{maps,get}` / `workflow_state_map_statement`; standalone backend helpers in `history_state_maps_sql.rs`; keyed Go sqlblobs retained |
+| `getTimerInfoMap` | `SqlWorkflowStore::{maps,get}` / `workflow_state_map_statement`; standalone backend helpers in `history_state_maps_sql.rs`; keyed Go sqlblobs retained |
+| `deleteTimerInfoMap` | `SqlWorkflowStore::{maps,get}` / `workflow_state_map_statement`; standalone backend helpers in `history_state_maps_sql.rs`; keyed Go sqlblobs retained |
+| `updateChildExecutionInfos` | `SqlWorkflowStore::{maps,get}` / `workflow_state_map_statement`; standalone backend helpers in `history_state_maps_sql.rs`; keyed Go sqlblobs retained |
+| `getChildExecutionInfoMap` | `SqlWorkflowStore::{maps,get}` / `workflow_state_map_statement`; standalone backend helpers in `history_state_maps_sql.rs`; keyed Go sqlblobs retained |
+| `deleteChildExecutionInfoMap` | `SqlWorkflowStore::{maps,get}` / `workflow_state_map_statement`; standalone backend helpers in `history_state_maps_sql.rs`; keyed Go sqlblobs retained |
+| `updateRequestCancelInfos` | `SqlWorkflowStore::{maps,get}` / `workflow_state_map_statement`; standalone backend helpers in `history_state_maps_sql.rs`; keyed Go sqlblobs retained |
+| `getRequestCancelInfoMap` | `SqlWorkflowStore::{maps,get}` / `workflow_state_map_statement`; standalone backend helpers in `history_state_maps_sql.rs`; keyed Go sqlblobs retained |
+| `deleteRequestCancelInfoMap` | `SqlWorkflowStore::{maps,get}` / `workflow_state_map_statement`; standalone backend helpers in `history_state_maps_sql.rs`; keyed Go sqlblobs retained |
+| `updateSignalInfos` | `SqlWorkflowStore::{maps,get}` / `workflow_state_map_statement`; standalone backend helpers in `history_state_maps_sql.rs`; keyed Go sqlblobs retained |
+| `getSignalInfoMap` | `SqlWorkflowStore::{maps,get}` / `workflow_state_map_statement`; standalone backend helpers in `history_state_maps_sql.rs`; keyed Go sqlblobs retained |
+| `deleteSignalInfoMap` | `SqlWorkflowStore::{maps,get}` / `workflow_state_map_statement`; standalone backend helpers in `history_state_maps_sql.rs`; keyed Go sqlblobs retained |
+
+### `workflow_state_non_maps.go`
+
+| Go function | Rust implementation |
+|---|---|
+| `updateSignalsRequested` | `SqlWorkflowStore::{signals,get}`, standalone helpers in `history_state_non_maps_sql.rs` |
+| `getSignalsRequested` | `SqlWorkflowStore::{signals,get}`, standalone helpers in `history_state_non_maps_sql.rs` |
+| `deleteSignalsRequestedSet` | `SqlWorkflowStore::{signals,get}`, standalone helpers in `history_state_non_maps_sql.rs` |
+| `updateBufferedEvents` | `SqlWorkflowStore::{apply_mutation_tx,apply_snapshot_tx,get}`, standalone helpers in `history_state_non_maps_sql.rs` |
+| `getBufferedEvents` | `SqlWorkflowStore::{apply_mutation_tx,apply_snapshot_tx,get}`, standalone helpers in `history_state_non_maps_sql.rs` |
+| `deleteBufferedEvents` | `SqlWorkflowStore::{apply_mutation_tx,apply_snapshot_tx,get}`, standalone helpers in `history_state_non_maps_sql.rs` |
 
 ### `sql_history_store.go`
 
-| Go function(s) | Rust mapping/status |
+| Go function | Rust implementation |
 |---|---|
-| `AppendHistoryNodes` | Partial: SQL statements and tree metadata codec; no transactional backend operation or duplicate-error conversion. |
-| `ReadHistoryBranch` | Partial: page token and ordered row validation helper; no SQL backend operation. |
-| `ForkHistoryBranch` | Partial: fork ancestor helper and insert query; no backend operation/tree write. |
-| `DeleteHistoryBranch` | Partial: shared-reference and bottom-up deletion range helpers plus batch SQL statements; no backend operation. |
-| `GetHistoryTree` | Partial: query and branch-result contract/codec; no backend operation. |
-| `GetAllHistoryTreeBranches` and Go gob token encode/decode | Missing. |
-
-## Next work
-
-1. Implement all workflow-state map and non-map SQL CRUD for both backends, preserving transaction semantics and serializer payloads.
-2. Implement mutation/reset/conflict-resolution transaction paths, then task tables/DLQ and History-v2 backend methods; implement Go gob page-token compatibility.
-3. Implement and wire every `GoExecutionStore` and `GoHistoryV2Store` method.
-4. Dispatch one final `rust-ci.yml` run on the final pushed head, fix failures using CI logs, and update this file with the successful run URL, exact head SHA and conclusion.
-5. Only after the SQL store parity is complete, add/reuse the requested mixed Go/Rust database and SDK compatibility validation evidence.
+| `NewHistoryV2Persistence` | `SqlHistoryV2Store::new` |
+| `AppendHistoryNodes` | `SqlHistoryV2Store::append_history_nodes` (`GoHistoryV2Store` implementation) |
+| `ReadHistoryBranch` | `SqlHistoryV2Store::read_history_branch` (`GoHistoryV2Store` implementation) |
+| `ForkHistoryBranch` | `SqlHistoryV2Store::fork_history_branch` (`GoHistoryV2Store` implementation) |
+| `DeleteHistoryBranch` | `SqlHistoryV2Store::delete_history_branch` (`GoHistoryV2Store` implementation) |
+| `GetAllHistoryTreeBranches` | `SqlHistoryV2Store::get_all_history_tree_branches` (`GoHistoryV2Store` implementation) |
+| `GetHistoryTree` | `SqlHistoryV2Store::get_history_tree` (`GoHistoryV2Store` implementation) |

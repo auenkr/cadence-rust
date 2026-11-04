@@ -51,8 +51,8 @@ impl Dialect {
             (Self::Postgres, Statement::DeleteRequestCancelInfoMaps) => "DELETE FROM request_cancel_info_maps WHERE shard_id=$1 AND domain_id=$2 AND workflow_id=$3 AND run_id=$4",
             (Self::MySql, Statement::DeleteSignalInfoMaps) => "DELETE FROM signal_info_maps WHERE shard_id=? AND domain_id=? AND workflow_id=? AND run_id=?",
             (Self::Postgres, Statement::DeleteSignalInfoMaps) => "DELETE FROM signal_info_maps WHERE shard_id=$1 AND domain_id=$2 AND workflow_id=$3 AND run_id=$4",
-            (Self::MySql, Statement::DeleteSignalsRequested) => "DELETE FROM signals_requested WHERE shard_id=? AND domain_id=? AND workflow_id=? AND run_id=?",
-            (Self::Postgres, Statement::DeleteSignalsRequested) => "DELETE FROM signals_requested WHERE shard_id=$1 AND domain_id=$2 AND workflow_id=$3 AND run_id=$4",
+            (Self::MySql, Statement::DeleteSignalsRequested) => "DELETE FROM signals_requested_sets WHERE shard_id=? AND domain_id=? AND workflow_id=? AND run_id=?",
+            (Self::Postgres, Statement::DeleteSignalsRequested) => "DELETE FROM signals_requested_sets WHERE shard_id=$1 AND domain_id=$2 AND workflow_id=$3 AND run_id=$4",
             (Self::MySql, Statement::DeleteBufferedEvents) => "DELETE FROM buffered_events WHERE shard_id=? AND domain_id=? AND workflow_id=? AND run_id=?",
             (Self::Postgres, Statement::DeleteBufferedEvents) => "DELETE FROM buffered_events WHERE shard_id=$1 AND domain_id=$2 AND workflow_id=$3 AND run_id=$4",
             (Self::MySql, Statement::InsertBufferedEvent) => "INSERT INTO buffered_events(shard_id,domain_id,workflow_id,run_id,data,data_encoding) VALUES(?,?,?,?,?,?)",
@@ -199,10 +199,21 @@ pub enum Statement {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WorkflowStateMap { Activity, Timer, ChildExecution, RequestCancel, Signal }
+pub enum WorkflowStateMap {
+    Activity,
+    Timer,
+    ChildExecution,
+    RequestCancel,
+    Signal,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WorkflowMapOperation { Upsert, Select, DeleteAll, DeleteKeys }
+pub enum WorkflowMapOperation {
+    Upsert,
+    Select,
+    DeleteAll,
+    DeleteKeys,
+}
 
 /// Build one of the fixed Go `execution_maps.go` templates. `key_count` is
 /// only used to expand the variable length `IN (...)` deletion predicate; all
@@ -214,7 +225,11 @@ pub fn workflow_state_map_statement(
     key_count: usize,
 ) -> String {
     let (table, key, extra) = match map {
-        WorkflowStateMap::Activity => ("activity_info_maps", "schedule_id", vec!["last_heartbeat_details", "last_heartbeat_updated_time"]),
+        WorkflowStateMap::Activity => (
+            "activity_info_maps",
+            "schedule_id",
+            vec!["last_heartbeat_details", "last_heartbeat_updated_time"],
+        ),
         WorkflowStateMap::Timer => ("timer_info_maps", "timer_id", vec![]),
         WorkflowStateMap::ChildExecution => ("child_execution_info_maps", "initiated_id", vec![]),
         WorkflowStateMap::RequestCancel => ("request_cancel_info_maps", "initiated_id", vec![]),
@@ -226,7 +241,10 @@ pub fn workflow_state_map_statement(
     let columns = value_columns.join(",");
     let insert_columns = format!("{table_key_columns},{columns}");
     let count = insert_columns.split(',').count();
-    let markers = (1..=count).map(|n| bind_marker(dialect, n)).collect::<Vec<_>>().join(",");
+    let markers = (1..=count)
+        .map(|n| bind_marker(dialect, n))
+        .collect::<Vec<_>>()
+        .join(",");
     let base = "shard_id,domain_id,workflow_id,run_id";
     match operation {
         WorkflowMapOperation::Upsert => match dialect {
@@ -236,21 +254,38 @@ pub fn workflow_state_map_statement(
                 format!("INSERT INTO {table}({insert_columns}) VALUES({markers}) ON CONFLICT ({key_columns}) DO UPDATE SET ({columns}) = ({})", value_columns.iter().map(|column| format!("excluded.{column}")).collect::<Vec<_>>().join(","))
             }
         },
-        WorkflowMapOperation::Select => format!("SELECT {key},{columns} FROM {table} WHERE {}", where_workflow_key(dialect)),
-        WorkflowMapOperation::DeleteAll => format!("DELETE FROM {table} WHERE {}", where_workflow_key(dialect)),
+        WorkflowMapOperation::Select => format!(
+            "SELECT {key},{columns} FROM {table} WHERE {}",
+            where_workflow_key(dialect)
+        ),
+        WorkflowMapOperation::DeleteAll => {
+            format!("DELETE FROM {table} WHERE {}", where_workflow_key(dialect))
+        }
         WorkflowMapOperation::DeleteKeys => {
-            let markers = (0..key_count).map(|index| match dialect {
-                Dialect::MySql => "?".to_string(),
-                Dialect::Postgres => format!("${}", index + 5),
-            }).collect::<Vec<_>>();
-            let in_list = if markers.is_empty() { "NULL".to_string() } else { markers.join(",") };
-            format!("DELETE FROM {table} WHERE {} AND {key} IN ({in_list})", where_workflow_key(dialect))
+            let markers = (0..key_count)
+                .map(|index| match dialect {
+                    Dialect::MySql => "?".to_string(),
+                    Dialect::Postgres => format!("${}", index + 5),
+                })
+                .collect::<Vec<_>>();
+            let in_list = if markers.is_empty() {
+                "NULL".to_string()
+            } else {
+                markers.join(",")
+            };
+            format!(
+                "DELETE FROM {table} WHERE {} AND {key} IN ({in_list})",
+                where_workflow_key(dialect)
+            )
         }
     }
 }
 
 fn bind_marker(dialect: Dialect, index: usize) -> String {
-    match dialect { Dialect::MySql => "?".into(), Dialect::Postgres => format!("${index}") }
+    match dialect {
+        Dialect::MySql => "?".into(),
+        Dialect::Postgres => format!("${index}"),
+    }
 }
 
 fn where_workflow_key(dialect: Dialect) -> &'static str {
@@ -263,12 +298,21 @@ fn where_workflow_key(dialect: Dialect) -> &'static str {
 /// Go `DeleteFromSignalsRequestedSets`, with the IN-list expanded before the
 /// query reaches the SQL driver.
 pub fn delete_signal_requested_keys_statement(dialect: Dialect, key_count: usize) -> String {
-    let markers = (0..key_count).map(|index| match dialect {
-        Dialect::MySql => "?".to_string(),
-        Dialect::Postgres => format!("${}", index + 5),
-    }).collect::<Vec<_>>();
-    let keys = if markers.is_empty() { "NULL".to_string() } else { markers.join(",") };
-    format!("DELETE FROM signals_requested_sets WHERE {} AND signal_id IN ({keys})", where_workflow_key(dialect))
+    let markers = (0..key_count)
+        .map(|index| match dialect {
+            Dialect::MySql => "?".to_string(),
+            Dialect::Postgres => format!("${}", index + 5),
+        })
+        .collect::<Vec<_>>();
+    let keys = if markers.is_empty() {
+        "NULL".to_string()
+    } else {
+        markers.join(",")
+    };
+    format!(
+        "DELETE FROM signals_requested_sets WHERE {} AND signal_id IN ({keys})",
+        where_workflow_key(dialect)
+    )
 }
 
 #[cfg(test)]
@@ -277,47 +321,107 @@ mod tests {
 
     #[test]
     fn shard_update_locks_and_conditions_on_range_id() {
-        assert!(Dialect::MySql.statement(Statement::LockShard).ends_with("FOR UPDATE"));
-        assert!(Dialect::Postgres.statement(Statement::LockShard).ends_with("FOR UPDATE"));
-        assert!(Dialect::MySql.statement(Statement::UpdateShard).contains("WHERE shard_id = ?"));
-        assert!(Dialect::Postgres.statement(Statement::UpdateShard).contains("WHERE shard_id = $4"));
+        assert!(Dialect::MySql
+            .statement(Statement::LockShard)
+            .ends_with("FOR UPDATE"));
+        assert!(Dialect::Postgres
+            .statement(Statement::LockShard)
+            .ends_with("FOR UPDATE"));
+        assert!(Dialect::MySql
+            .statement(Statement::UpdateShard)
+            .contains("WHERE shard_id = ?"));
+        assert!(Dialect::Postgres
+            .statement(Statement::UpdateShard)
+            .contains("WHERE shard_id = $4"));
     }
 
     #[test]
     fn mysql_and_postgres_bind_markers_match_their_drivers() {
-        assert!(Dialect::MySql.statement(Statement::GetExecution).contains("?"));
-        assert!(Dialect::Postgres.statement(Statement::GetExecution).contains("$4"));
+        assert!(Dialect::MySql
+            .statement(Statement::GetExecution)
+            .contains("?"));
+        assert!(Dialect::Postgres
+            .statement(Statement::GetExecution)
+            .contains("$4"));
     }
 
     #[test]
     fn execution_mutation_and_history_v2_statements_keep_go_predicates() {
         for dialect in [Dialect::MySql, Dialect::Postgres] {
-            assert!(dialect.statement(Statement::LockExecution).ends_with("FOR UPDATE"));
-            assert!(dialect.statement(Statement::UpdateExecution).contains("WHERE"));
+            assert!(dialect
+                .statement(Statement::LockExecution)
+                .ends_with("FOR UPDATE"));
+            assert!(dialect
+                .statement(Statement::UpdateExecution)
+                .contains("WHERE"));
             let read = dialect.statement(Statement::ReadHistoryNodes);
-            assert!(read.contains("node_id") && read.contains("txn_id") && read.contains("ORDER BY") && read.contains("LIMIT"));
-            assert!(dialect.statement(Statement::DeleteHistoryNodes).contains("node_id"));
-            assert!(dialect.statement(Statement::GetHistoryTree).contains("tree_id"));
-            assert!(dialect.statement(Statement::GetAllHistoryTreeBranches).contains("ORDER BY shard_id,tree_id,branch_id"));
+            assert!(
+                read.contains("node_id")
+                    && read.contains("txn_id")
+                    && read.contains("ORDER BY")
+                    && read.contains("LIMIT")
+            );
+            assert!(dialect
+                .statement(Statement::DeleteHistoryNodes)
+                .contains("node_id"));
+            assert!(dialect
+                .statement(Statement::GetHistoryTree)
+                .contains("tree_id"));
+            assert!(dialect
+                .statement(Statement::GetAllHistoryTreeBranches)
+                .contains("ORDER BY shard_id,tree_id,branch_id"));
         }
-        assert!(Dialect::MySql.statement(Statement::RangeDeleteHistoryNodes).contains("ORDER BY shard_id,tree_id,branch_id,node_id,txn_id LIMIT ?"));
-        assert!(Dialect::Postgres.statement(Statement::RangeDeleteHistoryNodes).contains("(node_id,txn_id) IN (SELECT"));
+        assert!(Dialect::MySql
+            .statement(Statement::RangeDeleteHistoryNodes)
+            .contains("ORDER BY shard_id,tree_id,branch_id,node_id,txn_id LIMIT ?"));
+        assert!(Dialect::Postgres
+            .statement(Statement::RangeDeleteHistoryNodes)
+            .contains("(node_id,txn_id) IN (SELECT"));
     }
 
     #[test]
     fn workflow_state_map_queries_keep_go_upsert_keys_and_values() {
-        let mysql = workflow_state_map_statement(Dialect::MySql, WorkflowStateMap::Activity, WorkflowMapOperation::Upsert, 0);
+        let mysql = workflow_state_map_statement(
+            Dialect::MySql,
+            WorkflowStateMap::Activity,
+            WorkflowMapOperation::Upsert,
+            0,
+        );
         assert!(mysql.starts_with("REPLACE INTO activity_info_maps"));
-        assert!(mysql.contains("schedule_id,data,data_encoding,last_heartbeat_details,last_heartbeat_updated_time"));
-        let postgres = workflow_state_map_statement(Dialect::Postgres, WorkflowStateMap::Timer, WorkflowMapOperation::Upsert, 0);
-        assert!(postgres.contains("ON CONFLICT (shard_id,domain_id,workflow_id,run_id,timer_id) DO UPDATE"));
-        let delete = workflow_state_map_statement(Dialect::Postgres, WorkflowStateMap::Signal, WorkflowMapOperation::DeleteKeys, 2);
+        assert!(mysql.contains(
+            "schedule_id,data,data_encoding,last_heartbeat_details,last_heartbeat_updated_time"
+        ));
+        let postgres = workflow_state_map_statement(
+            Dialect::Postgres,
+            WorkflowStateMap::Timer,
+            WorkflowMapOperation::Upsert,
+            0,
+        );
+        assert!(postgres
+            .contains("ON CONFLICT (shard_id,domain_id,workflow_id,run_id,timer_id) DO UPDATE"));
+        let delete = workflow_state_map_statement(
+            Dialect::Postgres,
+            WorkflowStateMap::Signal,
+            WorkflowMapOperation::DeleteKeys,
+            2,
+        );
         assert!(delete.ends_with("initiated_id IN ($5,$6)"));
-        assert!(Dialect::MySql.statement(Statement::InsertSignalRequested).starts_with("INSERT IGNORE"));
-        assert!(Dialect::Postgres.statement(Statement::InsertSignalRequested).contains("DO NOTHING"));
-        assert!(delete_signal_requested_keys_statement(Dialect::Postgres, 1).ends_with("signal_id IN ($5)"));
-        assert!(Dialect::MySql.statement(Statement::BatchDeleteTimerTasks).contains("ORDER BY visibility_timestamp,task_id LIMIT ?"));
-        assert!(Dialect::Postgres.statement(Statement::BatchDeleteCrossClusterTasks).contains("IN (SELECT task_id FROM cross_cluster_tasks"));
-        assert!(Dialect::Postgres.statement(Statement::RangeDeleteReplicationTasks).ends_with("task_id <= $2"));
+        assert!(Dialect::MySql
+            .statement(Statement::InsertSignalRequested)
+            .starts_with("INSERT IGNORE"));
+        assert!(Dialect::Postgres
+            .statement(Statement::InsertSignalRequested)
+            .contains("DO NOTHING"));
+        assert!(delete_signal_requested_keys_statement(Dialect::Postgres, 1)
+            .ends_with("signal_id IN ($5)"));
+        assert!(Dialect::MySql
+            .statement(Statement::BatchDeleteTimerTasks)
+            .contains("ORDER BY visibility_timestamp,task_id LIMIT ?"));
+        assert!(Dialect::Postgres
+            .statement(Statement::BatchDeleteCrossClusterTasks)
+            .contains("IN (SELECT task_id FROM cross_cluster_tasks"));
+        assert!(Dialect::Postgres
+            .statement(Statement::RangeDeleteReplicationTasks)
+            .ends_with("task_id <= $2"));
     }
 }
