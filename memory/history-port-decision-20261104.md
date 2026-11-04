@@ -167,3 +167,10 @@ Branch: `history-port-decision` (`/mnt/storage/service/wt-port-decision`). Scope
 - [ ] `reapplyEvents` — Rust counterpart in `rust/crates/cadence-history/src/reset/mod.rs` (partial; behavior parity audit pending)
 - [ ] `getPaginationFn` — Rust counterpart in `rust/crates/cadence-history/src/reset/mod.rs` (partial; behavior parity audit pending)
 - [ ] `closePendingDecisionTask` — Rust counterpart in `rust/crates/cadence-history/src/reset/mod.rs` (partial; behavior parity audit pending)
+
+## Current implementation and validation status
+
+- Source inventory: 11 requested Go files, 5,202 source lines, excluding tests and mocks.
+- Rust modules exist for all five packages and provide query state management, event blob/cache/notifier primitives, workflow cache/rate limit primitives, decision attribute/timeout helpers and dispatch interfaces, and a reset orchestration/backend seam.
+- The checklist entries remain unchecked because substantial behavior is still delegated to backend traits or lacks a full translation. Specifically, decision RPC/decision side effects, several validator cases (search attributes, semaphore, child/cross-domain setup), reset replay/reapply/persistence internals, and metrics/logging parity still require implementation. This branch is not a completion/parity claim.
+- No Cargo command was run locally. A package CI run was dispatched at `https://github.com/auenkr/cadence-rust/actions/runs/41878622967` for head `04f6c010ad1ec6a60634a595a0d0599fb3f3e773`; it remained queued at the last check. This run predates subsequent unpushed changes and cannot establish validation of the final head.
