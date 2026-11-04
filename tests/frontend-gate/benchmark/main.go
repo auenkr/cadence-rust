@@ -39,18 +39,26 @@ func main() {
 	bytes := flag.Int("payload-bytes", 1024, "activity input/output bytes")
 	output := flag.String("output", "benchmark.json", "JSON result path")
 	flag.Parse()
-	if *n < 1 || *warmup < 0 || *concurrency < 1 || *bytes < 0 || *label == "" { panic("invalid benchmark parameters") }
+	if *n < 1 || *warmup < 0 || *concurrency < 1 || *bytes < 0 || *label == "" {
+		panic("invalid benchmark parameters")
+	}
 	tr, err := tchannel.NewTransport(tchannel.ServiceName("cadence-benchmark"))
-	if err != nil { panic(err) }
+	if err != nil {
+		panic(err)
+	}
 	d := yarpc.NewDispatcher(yarpc.Config{Name: "cadence-benchmark", Outbounds: yarpc.Outbounds{"cadence-frontend": {Unary: tr.NewSingleOutbound(*peer)}}})
-	if err = d.Start(); err != nil { panic(err) }
+	if err = d.Start(); err != nil {
+		panic(err)
+	}
 	defer d.Stop()
 	rpc := workflowserviceclient.New(d.ClientConfig("cadence-frontend"))
 	tl := "benchmark-" + uuid.NewString()
 	w := worker.New(rpc, *domain, tl, worker.Options{DisableStickyExecution: true})
 	w.RegisterWorkflow(flow)
 	w.RegisterActivity(echo)
-	if err = w.Start(); err != nil { panic(err) }
+	if err = w.Start(); err != nil {
+		panic(err)
+	}
 	defer w.Stop()
 	c := client.NewClient(rpc, *domain, nil)
 	payload := strings.Repeat("x", *bytes)
@@ -68,34 +76,56 @@ func main() {
 				for range jobs {
 					begin := time.Now()
 					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-					r, e := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: uuid.NewString(), TaskList: tl, ExecutionStartToCloseTimeout: time.Minute, DecisionTaskStartToCloseTimeout: 10*time.Second}, flow, payload)
+					r, e := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: uuid.NewString(), TaskList: tl, ExecutionStartToCloseTimeout: time.Minute, DecisionTaskStartToCloseTimeout: 10 * time.Second}, flow, payload)
 					var value string
-					if e == nil { e = r.Get(ctx, &value) }
-					if e == nil && value != payload { e = fmt.Errorf("activity output differs from input") }
+					if e == nil {
+						e = r.Get(ctx, &value)
+					}
+					if e == nil && value != payload {
+						e = fmt.Errorf("activity output differs from input")
+					}
 					cancel()
 					mu.Lock()
-					if e != nil { failures = append(failures, e.Error()) } else { latencies = append(latencies, time.Since(begin).Seconds()*1000) }
+					if e != nil {
+						failures = append(failures, e.Error())
+					} else {
+						latencies = append(latencies, time.Since(begin).Seconds()*1000)
+					}
 					mu.Unlock()
 				}
 			}()
 		}
-		for i := 0; i < count; i++ { jobs <- i }
+		for i := 0; i < count; i++ {
+			jobs <- i
+		}
 		close(jobs)
 		wg.Wait()
 		return latencies, failures, time.Since(start).Seconds()
 	}
 	_, warmupErrors, _ := run(*warmup)
-	if len(warmupErrors) != 0 { panic(fmt.Sprintf("warmup failed: %s", warmupErrors[0])) }
+	if len(warmupErrors) != 0 {
+		panic(fmt.Sprintf("warmup failed: %s", warmupErrors[0]))
+	}
 	latencies, failures, seconds := run(*n)
 	sort.Float64s(latencies)
 	percentile := func(p float64) interface{} {
-		if len(latencies) == 0 { return nil }
+		if len(latencies) == 0 {
+			return nil
+		}
 		return latencies[int(float64(len(latencies)-1)*p)]
 	}
-	result := map[string]interface{}{"label": *label, "endpoint": *peer, "requests": *n, "warmup": *warmup, "concurrency": *concurrency, "payload_bytes": *bytes, "successful": len(latencies), "failed": len(failures), "elapsed_seconds": seconds, "successful_workflows_per_second": float64(len(latencies))/seconds, "latency_ms": map[string]interface{}{"p50": percentile(.50), "p95": percentile(.95), "p99": percentile(.99)}, "errors": failures, "successful_latency_samples_ms": latencies, "transport": "tchannel", "sticky_execution": false}
+	result := map[string]interface{}{"label": *label, "endpoint": *peer, "requests": *n, "warmup": *warmup, "concurrency": *concurrency, "payload_bytes": *bytes, "successful": len(latencies), "failed": len(failures), "elapsed_seconds": seconds, "successful_workflows_per_second": float64(len(latencies)) / seconds, "latency_ms": map[string]interface{}{"p50": percentile(.50), "p95": percentile(.95), "p99": percentile(.99)}, "errors": failures, "successful_latency_samples_ms": latencies, "transport": "tchannel", "sticky_execution": false}
 	f, err := os.Create(*output)
-	if err != nil { panic(err) }
-	if err = json.NewEncoder(f).Encode(result); err != nil { panic(err) }
-	if err = f.Close(); err != nil { panic(err) }
-	if len(failures) != 0 { os.Exit(1) }
+	if err != nil {
+		panic(err)
+	}
+	if err = json.NewEncoder(f).Encode(result); err != nil {
+		panic(err)
+	}
+	if err = f.Close(); err != nil {
+		panic(err)
+	}
+	if len(failures) != 0 {
+		os.Exit(1)
+	}
 }

@@ -1,49 +1,47 @@
 # Frontend + Matching comparison
 
-Compare only these deployments:
+Compare only the following deployments:
 
 | Arm | Frontend | Matching | History / system Worker | Persistence |
 | --- | --- | --- | --- | --- |
-| go | Go | Go | Go | identical engine/config/schema |
-| rust | Rust | Rust | Go | identical engine/config/schema |
+| Go | Go | Go | Go | MySQL 8.0 |
+| Rust | Rust | Rust | Go | MySQL 8.0 |
 
-The `tests/frontend-gate/benchmark` executable uses the existing Go SDK over
-TChannel. Each workflow executes one echo activity and verifies its output.
-This exercises Frontend requests and Matching decision/activity dispatch together.
-It measures combined service performance, not isolated RPC throughput.
+`tests/frontend-gate/benchmark` uses the existing Go SDK over TChannel. It
+starts a worker, runs an echo activity, and verifies the result. This measures
+combined Frontend and Matching workflow performance, not isolated RPC
+throughput.
 
-Build using the `Frontend Matching benchmark driver` Actions workflow, never
-locally. Download its driver artifact. Register a `benchmark` domain in each
-deployment using the existing CLI. With only one deployment active at a time:
+## Reproduce with GitHub Actions
 
-```sh
-./cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go \
-  -requests 1000 -warmup 100 -concurrency 16 -payload-bytes 1024 -output go-1.json
-./cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust \
-  -requests 1000 -warmup 100 -concurrency 16 -payload-bytes 1024 -output rust-1.json
-```
+Run **Frontend + Matching paired benchmark** with `workflow_dispatch` on
+`benchmark-frontend-matching`. The bounded defaults are 5 repetitions, 100
+measured workflows and 10 warmups per arm and concurrency, 1 KiB payloads, and
+concurrency levels 1, 16, and 64. The run builds the Go server image, builds
+the Rust image with Cargo's release profile, and builds one Go SDK driver used
+for both arms. It requires no local Cargo or Go build.
 
-Switch deployments between commands; do not point both at the same service.
-Use fresh equivalent databases per arm, identical History binaries, service counts,
-CPU/memory limits, transport, persistence settings and SDK driver binary. Use a
-release Rust binary, not the debug binary from acceptance gates. Record source
-commits, binary SHA256s, full configs, host specifications and command/exit/logs.
-Prove no Go Frontend/Matching runs in the Rust arm. Correctness gate success is a
-prerequisite for interpreting performance; failures must not become speedup claims.
+Each repetition alternates which arm runs first. Each arm gets a new MySQL
+container and schema; the complete compose project is removed before the next
+arm starts. History and system Worker remain Go in both arms. The Rust arm
+asserts that both Frontend and Matching use `cadence-rust:ci`. Services share
+the same compose configuration, runner, persistence engine, and transport.
 
-Run at least five repetitions, alternate Go/Rust order, then repeat concurrency
-1, 16, 64. Report each run and median throughput and p50/p95/p99 successful
-workflow completion latency. JSON preserves successful samples and all errors;
-any measured failure exits nonzero. Warmup errors abort measurement. This is a
-closed-loop workload, so latency excludes client queue time and cannot describe
-open-loop overload. SDK retries are included in end-to-end latency.
+Download the `frontend-matching-paired-benchmark` artifact. It contains each
+driver JSON result, the full resolved compose config for each arm, image IDs,
+Go and Rust server binary SHA256s, source tree IDs, runner details, workload
+parameters, service logs, command/exit records, and per-service resource
+samples. A nonzero workflow result or any workload error invalidates that
+comparison; do not report a speedup from a failed run. The workflow run URL,
+head SHA, and conclusion should be recorded with any published result.
 
-CPU-heavy cluster comparisons run on standard public-repository Actions runners.
-Capture per-service CPU seconds and RSS alongside each measured interval before
-claiming resource improvements. The driver does not yet collect those metrics or
-provision either cluster. Do not compare results from dissimilar hosted runners
-as if they were controlled measurements. Long low-CPU soaks of prebuilt binaries
-run locally in tmux `cadence-rust`, through `work-safe`, nice/ionice and resource
-guards specified by AGENTS.md.
-
-No benchmark measurements have been recorded yet.
+The workload is closed-loop: each client slot starts another workflow after
+the prior one finishes. Latency excludes client queue time and cannot describe
+open-loop overload. SDK retries are included. Per-service CPU seconds in the
+resource artifact are an estimate integrated from sampled Docker CPU
+percentages; RSS is the maximum sampled working set. These samples are useful
+for diagnosis, but they are not precise enough for strong resource improvement
+claims. Do not compare results from different runner classes as controlled
+measurements. This workflow is an initial reproducible comparison harness,
+not evidence that either implementation is faster; no measurements are
+recorded until a successful run completes.
