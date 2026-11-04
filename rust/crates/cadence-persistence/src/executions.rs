@@ -371,6 +371,7 @@ impl ExecutionRecord {
                         .unwrap_or(0),
                     schedule_id: p.scheduled_event_id,
                     last_failure_reason: p.last_failure_reason.clone(),
+                    ..Default::default()
                 })
                 .collect(),
             pending_children,
@@ -3055,6 +3056,7 @@ impl InMemoryExecutionStore {
             query: head_query,
             query_id: head_query_id,
             queries,
+            ..Default::default()
         })
     }
 
@@ -5327,6 +5329,7 @@ impl InMemoryExecutionStore {
                 workflow_type: Some(record.workflow_type.clone()),
                 workflow_domain: workflow_domain.clone(),
                 header: pending.header,
+                ..Default::default()
             });
         }
     }
@@ -6093,6 +6096,7 @@ impl InMemoryExecutionStore {
             delay_start_seconds: req.delay_start_seconds,
             jitter_start_seconds: req.jitter_start_seconds,
             first_run_at_timestamp: req.first_run_at_timestamp,
+            ..Default::default()
         };
         let resp = self.start_locked(&mut inner, &start_req)?;
         {

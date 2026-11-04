@@ -276,6 +276,8 @@ struct DecisionTask {
     scheduled_timestamp: Option<i64>,
     started_timestamp: Option<i64>,
     queries: Option<HashMap<String, tk::WorkflowQuery>>,
+    total_history_bytes: i64,
+    auto_config_hint: Option<ty::AutoConfigHint>,
 }
 
 fn thrift_err(what: &str, e: impl std::fmt::Display) -> CadenceError {
@@ -313,6 +315,8 @@ impl DecisionTask {
             scheduled_timestamp: s.opt_i64(130).map_err(e)?.map(|n| n / 1_000_000),
             started_timestamp: s.opt_i64(140).map_err(e)?.map(|n| n / 1_000_000),
             queries: s.opt_map_str(150).map_err(e)?,
+            total_history_bytes: s.opt_i64(160).map_err(e)?.unwrap_or(0),
+            auto_config_hint: s.opt_struct(170).map_err(e)?,
         }))
     }
 
@@ -341,6 +345,8 @@ impl DecisionTask {
             scheduled_timestamp: s.opt_i64(120).map_err(e)?.map(|n| n / 1_000_000),
             started_timestamp: s.opt_i64(130).map_err(e)?.map(|n| n / 1_000_000),
             queries: s.opt_map_str(140).map_err(e)?,
+            total_history_bytes: s.opt_i64(150).map_err(e)?.unwrap_or(0),
+            auto_config_hint: None,
         })
     }
 }
@@ -412,7 +418,7 @@ impl ProductionBackend {
         domain_id: &str,
         task: DecisionTask,
     ) -> Result<tk::PollForDecisionTaskResponse, CadenceError> {
-        let _ = domain_id;
+        let page_size = self.history_page_size(domain_id);
         let (history, continuation) = if task.sticky && task.query.is_some() {
             // Sticky query: the worker only needs the current state.
             (st::History { events: vec![] }, Vec::new())
@@ -428,7 +434,7 @@ impl ProductionBackend {
                     &task.execution,
                     first_event_id,
                     task.next_event_id,
-                    HISTORY_MAX_PAGE_SIZE,
+                    page_size,
                     Vec::new(),
                     task.transient.as_ref(),
                     &task.branch_token,
@@ -469,7 +475,30 @@ impl ProductionBackend {
             query: task.query,
             query_id: None,
             queries: task.queries,
+            total_history_bytes: task.total_history_bytes,
+            auto_config_hint: task.auto_config_hint,
         })
+    }
+
+    /// Go `int32(wh.config.HistoryMaxPageSize(domainName))`; falls back to the
+    /// 1000 default when no dynamic policy or domain name is available.
+    fn history_page_size(&self, domain_id: &str) -> i32 {
+        let size = self
+            .history_page_size
+            .as_ref()
+            .zip(
+                self.domains
+                    .as_ref()
+                    .and_then(|d| d.domain_name(domain_id).ok().flatten()),
+            )
+            .map_or(HISTORY_MAX_PAGE_SIZE, |(p, name)| {
+                p.maximum_page_size(&name)
+            });
+        if size <= 0 {
+            HISTORY_MAX_PAGE_SIZE
+        } else {
+            size
+        }
     }
 
     fn poll_envelope(
@@ -514,7 +543,14 @@ impl ProductionBackend {
         );
         let Some(task) = DecisionTask::from_matching(&reply)? else {
             eprintln!("PD-TRACE no task");
-            return Ok(serde_json::json!({}));
+            // Go returns the AutoConfigHint even for an empty poll.
+            let hint = reply
+                .opt_struct::<ty::AutoConfigHint>(170)
+                .map_err(|e| thrift_err("Matching PollForDecisionTask response", e))?;
+            return Ok(match hint {
+                Some(h) => serde_json::json!({ "autoConfigHint": to_json(&h)? }),
+                None => serde_json::json!({}),
+            });
         };
         eprintln!(
             "PD-TRACE task wf={:?} next_event_id={} started={}",

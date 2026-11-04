@@ -347,6 +347,14 @@ pub struct PollForDecisionTaskResponse {
     pub query_id: Option<String>,
     #[serde(rename = "queries", default, skip_serializing_if = "Option::is_none")]
     pub queries: Option<std::collections::HashMap<String, WorkflowQuery>>,
+    #[serde(rename = "totalHistoryBytes", default)]
+    pub total_history_bytes: i64,
+    #[serde(
+        rename = "autoConfigHint",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub auto_config_hint: Option<AutoConfigHint>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -549,6 +557,12 @@ pub struct PollForActivityTaskResponse {
     pub workflow_domain: String,
     #[serde(rename = "header", default, skip_serializing_if = "Option::is_none")]
     pub header: Option<Header>,
+    #[serde(
+        rename = "autoConfigHint",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub auto_config_hint: Option<AutoConfigHint>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -2098,6 +2112,44 @@ pub struct PendingActivityInfo {
         skip_serializing_if = "Option::is_none"
     )]
     pub last_failure_reason: Option<String>,
+    #[serde(
+        rename = "lastHeartbeatTimestamp",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub last_heartbeat_timestamp: Option<i64>,
+    #[serde(
+        rename = "expirationTimestamp",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub expiration_timestamp: Option<i64>,
+    #[serde(
+        rename = "lastFailureDetails",
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "crate::b64::serialize_bytes",
+        deserialize_with = "crate::b64::deserialize_bytes"
+    )]
+    pub last_failure_details: Vec<u8>,
+    #[serde(
+        rename = "lastFailureOptions",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub last_failure_options: Option<FailureOptions>,
+    #[serde(
+        rename = "lastWorkerIdentity",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub last_worker_identity: String,
+    #[serde(
+        rename = "startedWorkerIdentity",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub started_worker_identity: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

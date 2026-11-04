@@ -1250,6 +1250,7 @@ impl p::workflow_api_server::WorkflowApi for Frontend {
             signal_name: inner_proto.signal_name,
             signal_input: cv::data(inner_proto.signal_input),
             control: inner_proto.control,
+            active_cluster_selection_policy: start.active_cluster_selection_policy,
         };
         let executions = self.domain(&input.domain)?;
         cadence_api::validation::validate_signal_with_start_request(
@@ -1295,6 +1296,7 @@ impl p::workflow_api_server::WorkflowApi for Frontend {
             signal_name: r.signal_name,
             signal_input: cv::data(r.signal_input),
             control: r.control,
+            active_cluster_selection_policy: start.active_cluster_selection_policy,
         };
         if self
             .state

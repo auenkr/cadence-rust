@@ -49,6 +49,8 @@ pub struct ProductionBackend {
         Option<std::sync::Arc<dyn cadence_persistence::visibility_reader::VisibilityStore>>,
     pub(crate) es: Option<crate::workflow_visibility::EsBinding>,
     header_rules: std::sync::Arc<Vec<cadence_service_core::header_forwarding::HeaderRule>>,
+    pub(crate) history_page_size:
+        Option<std::sync::Arc<dyn crate::handler_workflow::HistoryPageSizePolicy>>,
 }
 
 impl std::fmt::Debug for ProductionBackend {
@@ -209,6 +211,7 @@ impl ProductionBackend {
             membership: Default::default(),
             num_history_shards: 4,
             history_access: None,
+            history_page_size: None,
             visibility: None,
             es: None,
             domains: None,
@@ -229,6 +232,15 @@ impl ProductionBackend {
         &self,
     ) -> std::sync::Arc<Vec<cadence_service_core::header_forwarding::HeaderRule>> {
         self.header_rules.clone()
+    }
+
+    /// Go `config.HistoryMaxPageSize(domainName)` for decision-poll history.
+    pub fn with_history_page_size_policy(
+        mut self,
+        policy: std::sync::Arc<dyn crate::handler_workflow::HistoryPageSizePolicy>,
+    ) -> Self {
+        self.history_page_size = Some(policy);
+        self
     }
 
     pub fn with_history_access(mut self, access: crate::workflow_matching::HistoryAccess) -> Self {
@@ -1044,6 +1056,9 @@ pub fn build_workflow_api(
     let mut backend = ProductionBackend::new(history, matching)
         .with_header_rules(header_rules)
         .with_domains(lookup.clone())
+        .with_history_page_size_policy(std::sync::Arc::new(DynamicHistoryPageSize(
+            ctx.state.admin.dynamic_config.clone(),
+        )))
         .with_history_routing(
             ctx.state.admin.membership.clone(),
             ctx.state.num_history_shards,

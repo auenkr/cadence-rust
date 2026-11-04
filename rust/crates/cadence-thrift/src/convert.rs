@@ -2220,6 +2220,7 @@ impl FromThrift for StartWorkflowExecutionRequest {
             delay_start_seconds: s.opt_i32(160)?,
             jitter_start_seconds: s.opt_i32(170)?,
             first_run_at_timestamp: s.opt_i64(180)?,
+            active_cluster_selection_policy: s.opt_struct(200)?,
         })
     }
 }
@@ -2246,6 +2247,7 @@ impl ToThrift for StartWorkflowExecutionRequest {
         f.oi32(170, self.jitter_start_seconds);
         f.oi64(180, self.first_run_at_timestamp);
         f.oenum(190, self.cron_overlap_policy);
+        f.ostruct(200, self.active_cluster_selection_policy.as_ref());
         f.finish()
     }
 }
@@ -2314,6 +2316,9 @@ impl FromThrift for WorkflowExecutionInfo {
             cron_schedule: s.opt_string(180)?,
             execution_status: s.opt_enum(190)?,
             scheduled_execution_time: s.opt_i64(200)?.map(|n| n / 1_000_000),
+            parent_domain_id: s.opt_string(70)?,
+            auto_reset_points: s.opt_struct(110)?,
+            active_cluster_selection_policy: s.opt_struct(170)?,
         })
     }
 }
@@ -2330,11 +2335,13 @@ impl ToThrift for WorkflowExecutionInfo {
             f.fields.push((60, Value::I64(self.history_length)));
         }
         f.ostruct(100, self.memo.as_ref());
+        f.ostr(70, &self.parent_domain_id);
         f.ostr(71, &self.parent_domain);
         f.oi64(72, self.parent_initiated_id);
         f.ostruct(80, self.parent_execution.as_ref());
         f.oi64(90, millis_to_nanos(self.execution_time));
         f.ostruct(101, self.search_attributes.as_ref());
+        f.ostruct(110, self.auto_reset_points.as_ref());
         f.ostr(120, &self.task_list.as_ref().map(|t| t.name.clone()));
         f.ostruct(121, self.task_list.as_ref());
         f.obool(130, self.is_cron);
@@ -2342,6 +2349,7 @@ impl ToThrift for WorkflowExecutionInfo {
         f.omap_str_str(150, &self.partition_config);
         f.oenum(160, self.cron_overlap_policy);
         f.ostr(180, &self.cron_schedule);
+        f.ostruct(170, self.active_cluster_selection_policy.as_ref());
         f.oenum(190, self.execution_status);
         f.oi64(200, millis_to_nanos(self.scheduled_execution_time));
         f.finish()
@@ -2517,6 +2525,7 @@ impl FromThrift for SignalWithStartWorkflowExecutionRequest {
             jitter_start_seconds: s.opt_i32(190)?,
             first_run_at_timestamp: s.opt_i64(200)?,
             cron_overlap_policy: s.opt_enum(210)?,
+            active_cluster_selection_policy: s.opt_struct(220)?,
         })
     }
 }
@@ -2546,6 +2555,7 @@ impl ToThrift for SignalWithStartWorkflowExecutionRequest {
         f.oi32(190, self.jitter_start_seconds);
         f.oi64(200, self.first_run_at_timestamp);
         f.oenum(210, self.cron_overlap_policy);
+        f.ostruct(220, self.active_cluster_selection_policy.as_ref());
         f.finish()
     }
 }
@@ -3021,6 +3031,83 @@ impl ToThrift for ClusterAttribute {
         let mut f = Fields::new();
         f.sstr(1, &self.scope);
         f.sstr(2, &self.name);
+        f.finish()
+    }
+}
+
+impl FromThrift for ActiveClusterSelectionPolicy {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            cluster_attribute: s.opt_struct(1)?,
+        })
+    }
+}
+
+impl ToThrift for ActiveClusterSelectionPolicy {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostruct(1, self.cluster_attribute.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for AutoConfigHint {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            enable_auto_config: s.opt_bool(10)?.unwrap_or(false),
+            poller_wait_time_in_ms: s.opt_i64(20)?.unwrap_or(0),
+        })
+    }
+}
+
+impl ToThrift for AutoConfigHint {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.fields.push((10, Value::Bool(self.enable_auto_config)));
+        f.fields.push((20, Value::I64(self.poller_wait_time_in_ms)));
+        f.finish()
+    }
+}
+
+impl FromThrift for ResetPointInfo {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            binary_checksum: s.req_string(10, "")?,
+            run_id: s.req_string(20, "")?,
+            first_decision_completed_id: s.opt_i64(30)?.unwrap_or(0),
+            created_time_nano: s.opt_i64(40)?,
+            expiring_time_nano: s.opt_i64(50)?,
+            resettable: s.opt_bool(60)?.unwrap_or(false),
+        })
+    }
+}
+
+impl ToThrift for ResetPointInfo {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.binary_checksum);
+        f.sstr(20, &self.run_id);
+        f.fields
+            .push((30, Value::I64(self.first_decision_completed_id)));
+        f.oi64(40, self.created_time_nano);
+        f.oi64(50, self.expiring_time_nano);
+        f.fields.push((60, Value::Bool(self.resettable)));
+        f.finish()
+    }
+}
+
+impl FromThrift for ResetPoints {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            points: s.opt_list::<ResetPointInfo>(10)?.unwrap_or_default(),
+        })
+    }
+}
+
+impl ToThrift for ResetPoints {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.olist(10, &self.points);
         f.finish()
     }
 }
@@ -3906,9 +3993,15 @@ impl FromThrift for PendingActivityInfo {
             attempt: s.opt_i32(70)?.unwrap_or(0),
             maximum_attempts: s.opt_i32(80)?.unwrap_or(0),
             scheduled_timestamp: s.opt_i64(90)?,
-            last_started_timestamp: None,
+            last_heartbeat_timestamp: s.opt_i64(50)?,
+            last_started_timestamp: s.opt_i64(60)?,
+            expiration_timestamp: s.opt_i64(100)?,
             schedule_id: s.opt_i64(150)?.unwrap_or(0),
             last_failure_reason: s.opt_string(110)?,
+            last_worker_identity: s.req_string(120, "")?,
+            last_failure_details: s.bytes_or_empty(130)?,
+            last_failure_options: s.opt_struct(135)?,
+            started_worker_identity: s.req_string(140, "")?,
         })
     }
 }
@@ -3924,8 +4017,15 @@ impl ToThrift for PendingActivityInfo {
             f.fields.push((70, Value::I32(self.attempt)));
         }
         f.oi32(80, Some(self.maximum_attempts).filter(|v| *v != 0));
+        f.oi64(50, self.last_heartbeat_timestamp);
+        f.oi64(60, self.last_started_timestamp);
         f.oi64(90, self.scheduled_timestamp);
+        f.oi64(100, self.expiration_timestamp);
         f.ostr(110, &self.last_failure_reason);
+        f.sstr(120, &self.last_worker_identity);
+        f.sbytes(130, &self.last_failure_details);
+        f.ostruct(135, self.last_failure_options.as_ref());
+        f.sstr(140, &self.started_worker_identity);
         if self.schedule_id != 0 {
             f.fields.push((150, Value::I64(self.schedule_id)));
         }
@@ -4257,6 +4357,8 @@ impl FromThrift for PollForDecisionTaskResponse {
             query: s.opt_struct(80)?,
             query_id: None,
             queries: s.opt_map_str(120)?,
+            total_history_bytes: s.opt_i64(140)?.unwrap_or(0),
+            auto_config_hint: s.opt_struct(150)?,
         })
     }
 }
@@ -4264,6 +4366,8 @@ impl FromThrift for PollForDecisionTaskResponse {
 impl ToThrift for PollForDecisionTaskResponse {
     fn to_thrift(&self) -> Struct {
         let mut f = Fields::new();
+        f.fields.push((140, Value::I64(self.total_history_bytes)));
+        f.ostruct(150, self.auto_config_hint.as_ref());
         f.sbytes(10, &self.task_token);
         f.ostruct(20, self.workflow_execution.as_ref());
         f.ostruct(30, self.workflow_type.as_ref());
@@ -4438,6 +4542,7 @@ impl FromThrift for PollForActivityTaskResponse {
             workflow_type: s.opt_struct(150)?,
             workflow_domain: s.req_string(160, "")?,
             header: s.opt_struct(170)?,
+            auto_config_hint: s.opt_struct(180)?,
         })
     }
 }
@@ -4466,6 +4571,7 @@ impl ToThrift for PollForActivityTaskResponse {
         f.ostruct(150, self.workflow_type.as_ref());
         f.sstr(160, &self.workflow_domain);
         f.ostruct(170, self.header.as_ref());
+        f.ostruct(180, self.auto_config_hint.as_ref());
         f.finish()
     }
 }
@@ -6604,6 +6710,67 @@ mod tests {
         let out = T::from_thrift(&back).unwrap();
         assert_eq!(&out, v);
         out
+    }
+
+    #[test]
+    fn frontend_conversion_fields_round_trip() {
+        let hint = AutoConfigHint {
+            enable_auto_config: true,
+            poller_wait_time_in_ms: 9,
+        };
+        let decision = PollForDecisionTaskResponse {
+            scheduled_timestamp: Some(1_700_000_000_123),
+            total_history_bytes: 321,
+            auto_config_hint: Some(hint.clone()),
+            ..Default::default()
+        };
+        assert_eq!(round_trip(&decision), decision);
+        let activity = PollForActivityTaskResponse {
+            auto_config_hint: Some(hint),
+            ..Default::default()
+        };
+        assert_eq!(round_trip(&activity), activity);
+        let pending = PendingActivityInfo {
+            last_heartbeat_timestamp: Some(1),
+            last_started_timestamp: Some(2),
+            expiration_timestamp: Some(3),
+            last_worker_identity: "last".into(),
+            started_worker_identity: "started".into(),
+            last_failure_details: vec![1, 2],
+            last_failure_options: Some(FailureOptions {
+                failure_category: None,
+                next_retry_interval_seconds: Some(5),
+            }),
+            ..Default::default()
+        };
+        assert_eq!(round_trip(&pending), pending);
+        let policy = ActiveClusterSelectionPolicy {
+            cluster_attribute: Some(ClusterAttribute {
+                scope: "s".into(),
+                name: "n".into(),
+            }),
+        };
+        let start = StartWorkflowExecutionRequest {
+            active_cluster_selection_policy: Some(policy.clone()),
+            ..Default::default()
+        };
+        assert_eq!(round_trip(&start), start);
+        let info = WorkflowExecutionInfo {
+            parent_domain_id: Some("pd".into()),
+            auto_reset_points: Some(ResetPoints {
+                points: vec![ResetPointInfo {
+                    binary_checksum: "c".into(),
+                    run_id: "r".into(),
+                    first_decision_completed_id: 4,
+                    created_time_nano: Some(5),
+                    expiring_time_nano: None,
+                    resettable: true,
+                }],
+            }),
+            active_cluster_selection_policy: Some(policy),
+            ..Default::default()
+        };
+        assert_eq!(round_trip(&info), info);
     }
 
     #[test]

@@ -47,7 +47,7 @@ pub fn start_request_out(v: t::StartWorkflowExecutionRequest) -> p::StartWorkflo
         jitter_start: secs(v.jitter_start_seconds),
         first_run_at: v.first_run_at_timestamp.map(ns),
         cron_overlap_policy: v.cron_overlap_policy.map_or(0, |x| x as i32 + 1),
-        active_cluster_selection_policy: None,
+        active_cluster_selection_policy: v.active_cluster_selection_policy.map(selection_policy_out),
     }
 }
 
@@ -123,7 +123,7 @@ pub fn signal_with_start_request_out(
             jitter_start: secs(v.jitter_start_seconds),
             first_run_at: v.first_run_at_timestamp.map(ns),
             cron_overlap_policy: v.cron_overlap_policy.map_or(0, |x| x as i32 + 1),
-            active_cluster_selection_policy: None,
+            active_cluster_selection_policy: v.active_cluster_selection_policy.map(selection_policy_out),
         }),
         signal_name: v.signal_name,
         signal_input: payload(v.signal_input),
@@ -385,7 +385,10 @@ pub fn info_in(v: p::WorkflowExecutionInfo) -> Result<st::WorkflowExecutionInfo,
         close_status: enum_in(v.close_status, e::WorkflowExecutionCloseStatus::from_i32)?,
         history_length: v.history_length,
         memo: v.memo.map(memo_in),
+        parent_domain_id: parent.as_ref().map(|x| x.domain_id.clone()),
         parent_domain: parent.as_ref().map(|x| x.domain_name.clone()),
+        auto_reset_points: v.auto_reset_points.map(reset_points_in),
+        active_cluster_selection_policy: v.active_cluster_selection_policy.map(selection_policy_in),
         parent_execution: parent
             .as_ref()
             .and_then(|x| x.workflow_execution.clone())
@@ -482,6 +485,7 @@ pub fn describe_response_in(
             .pending_activities
             .into_iter()
             .map(|a| {
+                let last_failure = failure_in(a.last_failure)?;
                 Ok::<_, Status>(tk::PendingActivityInfo {
                     activity_id: a.activity_id,
                     activity_type: a.activity_type.map(|t| t::ActivityType { name: t.name }),
@@ -492,7 +496,13 @@ pub fn describe_response_in(
                     heartbeat_details: data(a.heartbeat_details),
                     maximum_attempts: a.maximum_attempts,
                     schedule_id: a.schedule_id,
-                    last_failure_reason: a.last_failure.map(|f| f.reason),
+                    last_heartbeat_timestamp: nanos(a.last_heartbeat_time),
+                    expiration_timestamp: nanos(a.expiration_time),
+                    last_worker_identity: a.last_worker_identity,
+                    started_worker_identity: a.started_worker_identity,
+                    last_failure_reason: last_failure.0,
+                    last_failure_details: last_failure.1,
+                    last_failure_options: last_failure.2,
                 })
             })
             .collect::<Result<_, _>>()?,
@@ -588,6 +598,8 @@ pub fn poll_decision_response_in(
         query: v.query.map(query_in),
         query_id: None,
         queries: if queries.is_empty() { None } else { Some(queries) },
+        total_history_bytes: v.total_history_bytes,
+        auto_config_hint: v.auto_config_hint.map(auto_config_hint_in),
     })
 }
 
@@ -615,7 +627,8 @@ pub fn poll_decision_response_out(
             .into_iter()
             .map(|(k, q)| (k, query_out(q)))
             .collect(),
-        ..Default::default()
+        total_history_bytes: v.total_history_bytes,
+        auto_config_hint: v.auto_config_hint.map(auto_config_hint_out),
     })
 }
 
@@ -698,6 +711,7 @@ pub fn poll_activity_response_in(
         workflow_type: v.workflow_type.map(|x| t::WorkflowType { name: x.name }),
         workflow_domain: v.workflow_domain,
         header: v.header.map(header_in),
+        auto_config_hint: v.auto_config_hint.map(auto_config_hint_in),
     })
 }
 

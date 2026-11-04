@@ -486,6 +486,24 @@ pub struct WorkflowExecutionInfo {
         skip_serializing_if = "Option::is_none"
     )]
     pub scheduled_execution_time: Option<i64>,
+    #[serde(
+        rename = "parentDomainId",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub parent_domain_id: Option<String>,
+    #[serde(
+        rename = "autoResetPoints",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub auto_reset_points: Option<ResetPoints>,
+    #[serde(
+        rename = "activeClusterSelectionPolicy",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub active_cluster_selection_policy: Option<ActiveClusterSelectionPolicy>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -837,6 +855,12 @@ pub struct SignalWithStartWorkflowExecutionRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub cron_overlap_policy: Option<CronOverlapPolicy>,
+    #[serde(
+        rename = "activeClusterSelectionPolicy",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub active_cluster_selection_policy: Option<ActiveClusterSelectionPolicy>,
 }
 
 // ---------------------------------------------------------------------------
