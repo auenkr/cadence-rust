@@ -535,6 +535,17 @@ impl<M: WireMapper> GrpcHandler<M> {
             .map(|response| self.mapper.encode_count_dlq_messages_response(response))
             .map_err(|error| self.mapper.error(error))
     }
+    pub async fn count_dlq_messages_with_partial(
+        &self,
+        request: M::CountDlqMessagesRequest,
+    ) -> (Option<M::CountDlqMessagesResponse>, Option<M::Error>) {
+        let request = self.mapper.to_count_dlq_messages_request(request);
+        let (response, error) = self.handler.count_dlq_messages_with_partial(request.as_ref()).await;
+        (
+            response.map(|response| self.mapper.encode_count_dlq_messages_response(response)),
+            error.map(|error| self.mapper.error(error)),
+        )
+    }
     pub async fn get_dlq_replication_messages(
         &self,
         request: M::GetDlqReplicationMessagesRequest,

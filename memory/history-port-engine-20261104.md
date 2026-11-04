@@ -284,6 +284,12 @@ preserve this status rather than flattening it into Other.
 
 Remaining integration work: concrete execution/persistence/queue/shard adapters,
 wire type conversions and live server dispatcher registration. This source-port
-inventory does not certify service or SDK parity. Go's partial response alongside
-CountDLQMessages errors is still represented by the Rust Result convention; the
-wire adapter must account for that when concrete upstream transport adapters land.
+inventory does not certify service or SDK parity. CountDLQMessages now retains the Go shard/source-cluster map and exposes
+`count_dlq_messages_with_partial` through Handler, rate limiting and both wire
+wrappers to preserve a response alongside an error. Existing Result methods remain
+available; concrete wire dispatchers must select the outcome method when needed.
+
+CountDLQ follow-up: corrected entries to HashMap<HistoryDLQCountKey, i64>
+(shard ID + source cluster); shard adapters return cluster counts directly.
+Collect futures in completion order to retain errgroup first-failure behavior.
+Outcome methods preserve partial successful counts alongside the mapped error.

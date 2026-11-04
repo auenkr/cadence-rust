@@ -35,6 +35,15 @@ pub trait Handler: Send + Sync {
         &self,
         request: Option<&cadence_api::admin::CountDLQMessagesRequest>,
     ) -> HResult<crate::engine::types::HistoryCountDLQMessagesResponse>;
+    async fn count_dlq_messages_with_partial(
+        &self,
+        request: Option<&cadence_api::admin::CountDLQMessagesRequest>,
+    ) -> crate::engine::types::CountDLQMessagesOutcome {
+        match self.count_dlq_messages(request).await {
+            Ok(response) => (Some(response), None),
+            Err(error) => (None, Some(error)),
+        }
+    }
     async fn get_dlq_replication_messages(
         &self,
         request: Option<&cadence_api::admin::GetDLQReplicationMessagesRequest>,

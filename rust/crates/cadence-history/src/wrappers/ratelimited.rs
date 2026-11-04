@@ -100,6 +100,12 @@ impl Handler for HistoryHandler {
     ) -> HResult<crate::engine::types::HistoryCountDLQMessagesResponse> {
         self.wrapped.count_dlq_messages(request).await
     }
+    async fn count_dlq_messages_with_partial(
+        &self,
+        request: Option<&cadence_api::admin::CountDLQMessagesRequest>,
+    ) -> crate::engine::types::CountDLQMessagesOutcome {
+        self.wrapped.count_dlq_messages_with_partial(request).await
+    }
     async fn get_dlq_replication_messages(
         &self,
         request: Option<&cadence_api::admin::GetDLQReplicationMessagesRequest>,

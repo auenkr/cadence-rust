@@ -10,6 +10,7 @@ use crate::engine::{
 use async_trait::async_trait;
 use cadence_api::admin::*;
 use std::sync::Arc;
+use futures_util::StreamExt;
 
 /// TODO(link): host resources, failover coordinator and rate-limit RPC mapper.
 #[async_trait]
@@ -136,28 +137,39 @@ impl HistoryHandler {
         &self,
         request: Option<&CountDLQMessagesRequest>,
     ) -> HResult<HistoryCountDLQMessagesResponse> {
+        let (response, error) = self.count_dlq_messages_with_partial(request).await;
+        match error {
+            Some(error) => Err(error),
+            None => Ok(response.unwrap_or_default()),
+        }
+    }
+    /// Preserve Go's non-nil response on shard errors for in-process and wire adapters.
+    pub async fn count_dlq_messages_with_partial(
+        &self,
+        request: Option<&CountDLQMessagesRequest>,
+    ) -> CountDLQMessagesOutcome {
         self.wait_started().await;
         let _profile = self.metrics.start_request_profile("CountDLQMessages");
-        self.check_shutdown()?;
-        let request = request.cloned().unwrap_or_default();
-        let results =
-            futures_util::future::join_all(self.admin.shard_ids().into_iter().map(|shard| {
-                let request = &request;
-                async move {
-                    let engine = self.resources.engine_for_shard(shard).map_err(|e| {
-                        HistoryError::Other(format!("dlq count for shard {shard}: {e}"))
-                    })?;
-                    engine.count_dlq_messages(Some(request)).await.map_err(|e| {
-                        HistoryError::Other(format!("dlq count for shard {shard}: {e}"))
-                    })
-                }
-            }))
-            .await;
-        let mut entries = Vec::new();
+        if let Err(error) = self.check_shutdown() {
+            return (None, Some(error));
+        }
+        let force_fetch = request.is_some_and(|request| request.force_fetch);
+        let results = futures_util::stream::FuturesUnordered::from_iter(self.admin.shard_ids().into_iter().map(|shard| async move {
+            let result = async {
+                let engine = self.resources.engine_for_shard(shard)?;
+                engine.count_replication_dlq_messages(force_fetch).await
+            }.await.map_err(|error| HistoryError::Other(format!("dlq count for shard {shard}: {error}")));
+            (shard, result)
+        })).collect::<Vec<_>>().await;
+        let mut entries = std::collections::HashMap::new();
         let mut failure = None;
-        for result in results {
+        for (shard_id, result) in results {
             match result {
-                Ok(response) => entries.extend(response.entries),
+                Ok(counts) => {
+                    for (source_cluster, count) in counts {
+                        entries.insert(HistoryDLQCountKey { shard_id, source_cluster }, count);
+                    }
+                }
                 Err(error) => {
                     if failure.is_none() {
                         failure = Some(error);
@@ -165,10 +177,8 @@ impl HistoryHandler {
                 }
             }
         }
-        if let Some(error) = failure {
-            return Err(self.error("CountDLQMessages", "", "", "", error));
-        }
-        Ok(HistoryCountDLQMessagesResponse { entries })
+        let error = failure.map(|error| self.error("CountDLQMessages", "", "", "", error));
+        (Some(HistoryCountDLQMessagesResponse { entries }), error)
     }
     pub async fn notify_failover_markers(
         &self,

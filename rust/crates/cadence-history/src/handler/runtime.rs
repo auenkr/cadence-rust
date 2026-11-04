@@ -9,6 +9,7 @@ use std::sync::{
 };
 #[async_trait]
 pub trait RoutedEngine: Handler {
+    async fn count_replication_dlq_messages(&self, force_fetch: bool) -> HResult<std::collections::HashMap<String, i64>>;
     async fn reapply_history_events(
         &self,
         domain: &str,

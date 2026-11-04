@@ -320,9 +320,19 @@ wire! { pub struct RatelimitUpdateRequest {
 wire! { pub struct RatelimitUpdateResponse {
     #[serde(rename = "any")] pub any: Option<Any>,
 } }
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct HistoryDLQCountKey {
+    pub shard_id: i32,
+    pub source_cluster: String,
+}
 wire! { pub struct HistoryCountDLQMessagesResponse {
-    #[serde(rename = "entries")] pub entries: Vec<cadence_api::admin::HistoryDLQCountEntry>,
+    #[serde(rename = "entries")] pub entries: HashMap<HistoryDLQCountKey, i64>,
 } }
+/// Go handlers may return a partial response and a non-nil error together.
+pub type CountDLQMessagesOutcome = (
+    Option<HistoryCountDLQMessagesResponse>,
+    Option<super::deps::HistoryError>,
+);
 wire! { pub struct HealthStatus {
     #[serde(rename = "ok")] pub ok: bool,
     #[serde(rename = "msg")] pub msg: String,
