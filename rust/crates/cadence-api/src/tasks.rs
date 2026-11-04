@@ -1101,6 +1101,14 @@ pub struct DecisionTaskFailedEventAttributes {
         skip_serializing_if = "String::is_empty"
     )]
     pub binary_checksum: String,
+    #[serde(rename = "baseRunId", default, skip_serializing_if = "String::is_empty")]
+    pub base_run_id: String,
+    #[serde(rename = "newRunId", default, skip_serializing_if = "String::is_empty")]
+    pub new_run_id: String,
+    #[serde(rename = "forkEventVersion", default)]
+    pub fork_event_version: i64,
+    #[serde(rename = "requestId", default, skip_serializing_if = "String::is_empty")]
+    pub request_id: String,
 }
 
 #[cfg(test)]

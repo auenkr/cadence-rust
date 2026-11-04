@@ -5270,7 +5270,11 @@ impl FromThrift for DecisionTaskFailedEventAttributes {
             details: s.bytes_or_empty(35)?,
             identity: s.req_string(40, "")?,
             reason: s.opt_string(50)?,
+            base_run_id: s.opt_string(60)?.unwrap_or_default(),
+            new_run_id: s.opt_string(70)?.unwrap_or_default(),
+            fork_event_version: s.opt_i64(80)?.unwrap_or(0),
             binary_checksum: s.req_string(90, "")?,
+            request_id: s.opt_string(100)?.unwrap_or_default(),
         })
     }
 }
@@ -5288,7 +5292,13 @@ impl ToThrift for DecisionTaskFailedEventAttributes {
         f.sbytes(35, &self.details);
         f.sstr(40, &self.identity);
         f.ostr(50, &self.reason);
+        f.sstr(60, &self.base_run_id);
+        f.sstr(70, &self.new_run_id);
+        if self.fork_event_version != 0 {
+            f.fields.push((80, Value::I64(self.fork_event_version)));
+        }
         f.sstr(90, &self.binary_checksum);
+        f.sstr(100, &self.request_id);
         f.finish()
     }
 }

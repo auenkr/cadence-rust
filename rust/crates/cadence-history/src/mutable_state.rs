@@ -7,7 +7,17 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use cadence_api::{service_types::HistoryEvent, types::VersionHistories};
+use cadence_api::{
+    enums::{DecisionTaskFailedCause, DecisionTaskTimedOutCause, EventType, TimeoutType},
+    service_types::HistoryEvent,
+    tasks::{
+        DecisionTaskCompletedEventAttributes, DecisionTaskFailedEventAttributes,
+        DecisionTaskScheduledEventAttributes, DecisionTaskStartedEventAttributes,
+        DecisionTaskTimedOutEventAttributes, PollForDecisionTaskRequest,
+        RespondDecisionTaskCompletedRequest,
+    },
+    types::{TaskList, VersionHistories},
+};
 use serde::{Deserialize, Serialize};
 
 pub type Record = serde_json::Value;
@@ -36,6 +46,8 @@ pub enum MutableStateError {
     SnapshotWithBufferedEvents,
     #[error("cannot create a snapshot with transient event batches")]
     SnapshotWithTransientEvents,
+    #[error("invalid decision task state for {action}: scheduled={schedule_id}, started={started_id}")]
+    InvalidDecisionState { action: &'static str, schedule_id: i64, started_id: i64 },
 }
 
 /// A close-transaction persistence delta. The buckets mirror Go's
@@ -186,6 +198,7 @@ impl MutableStateBuilder {
     pub fn update_decision(&mut self, info: DecisionInfo) { self.decision_info = Some(info); }
     pub fn delete_decision(&mut self) { self.delete_decision_preserving_heartbeat(); }
     pub fn fail_decision(&mut self, increment_attempt: bool) {
+        self.execution_info["sticky_task_list"] = String::new().into();
         let attempt = self.execution_info.get("decision_attempt").and_then(serde_json::Value::as_i64).unwrap_or_default()
             + i64::from(increment_attempt);
         let reset = DecisionInfo { attempt, ..Default::default() };
@@ -249,6 +262,292 @@ impl MutableStateBuilder {
         event.decision_task_started_event_attributes = Some(DecisionTaskStartedEventAttributes { scheduled_event_id: schedule_id, request_id: request_id.clone(), ..Default::default() });
         info.started_id = event.event_id; info.request_id = request_id; info.version = version;
         self.persist_decision(info.clone()); Some((event, info))
+    }
+
+    fn decision_event(&mut self, event_type: EventType, timestamp: i64) -> HistoryEvent {
+        let version = self.current_version();
+        self.add_event(HistoryEvent { event_type: Some(event_type), timestamp: Some(timestamp), version, ..Default::default() })
+    }
+
+    fn current_version(&self) -> i64 {
+        self.execution_info.get("current_version").and_then(Record::as_i64).unwrap_or_default()
+    }
+
+    fn sticky_task_list(&self) -> String {
+        self.execution_info.get("sticky_task_list").and_then(Record::as_str).unwrap_or_default().to_owned()
+    }
+
+    /// Flush buffered events before scheduling a decision, as Go does so a
+    /// transient decision cannot retain IDs that buffered events later occupy.
+    pub fn flush_buffered_events(&mut self) {
+        let mut pending = std::mem::take(&mut self.buffered_events);
+        pending.append(&mut self.update_buffered_events);
+        for mut event in pending {
+            event.event_id = self.next_event_id;
+            self.next_event_id += 1;
+            self.history.push(event);
+        }
+        self.clear_buffered_events = true;
+    }
+
+    pub fn add_decision_task_scheduled_event(
+        &mut self,
+        bypass_task_generation: bool,
+        now_timestamp: i64,
+        original_scheduled_timestamp: i64,
+    ) -> Result<DecisionInfo, MutableStateError> {
+        let task_list = self.execution_info.get("task_list").and_then(Record::as_str).unwrap_or_default().to_owned();
+        self.add_decision_task_scheduled_event_as_heartbeat(
+            bypass_task_generation, now_timestamp, original_scheduled_timestamp, task_list,
+        )
+    }
+
+    /// Heartbeat scheduling preserves Go's transient retry behavior. Task
+    /// generation is an external concern in this state-only builder; the flag
+    /// is retained so callers can make the same choice as the Go API.
+    pub fn add_decision_task_scheduled_event_as_heartbeat(
+        &mut self,
+        _bypass_task_generation: bool,
+        now_timestamp: i64,
+        original_scheduled_timestamp: i64,
+        normal_task_list: String,
+    ) -> Result<DecisionInfo, MutableStateError> {
+        if self.decision_info.as_ref().is_some_and(|d| d.schedule_id != 0) {
+            let d = self.decision_snapshot();
+            return Err(MutableStateError::InvalidDecisionState { action: "schedule", schedule_id: d.schedule_id, started_id: d.started_id });
+        }
+        let sticky = self.sticky_task_list();
+        let task_list = if sticky.is_empty() { normal_task_list } else { sticky };
+        let timeout = self.execution_info.get("decision_timeout").and_then(Record::as_i64).unwrap_or_default() as i32;
+        let mut attempt = self.execution_info.get("decision_attempt").and_then(Record::as_i64).unwrap_or_default();
+        if !self.buffered_events.is_empty() || !self.update_buffered_events.is_empty() || self.execution_info.get("has_buffered_events_in_db").and_then(Record::as_bool).unwrap_or(false) {
+            attempt = 0;
+            self.execution_info["decision_attempt"] = 0.into();
+            self.flush_buffered_events();
+        }
+        let current_version = self.current_version();
+        let last_write_version = self.execution_info.get("last_write_version").and_then(Record::as_i64);
+        let non_transient = last_write_version.is_some_and(|v| v != current_version);
+        let (schedule_id, schedule_timestamp) = if attempt == 0 || non_transient {
+            let mut event = self.decision_event(EventType::DecisionTaskScheduled, now_timestamp);
+            event.decision_task_scheduled_event_attributes = Some(DecisionTaskScheduledEventAttributes {
+                task_list: Some(TaskList { name: task_list.clone(), ..Default::default() }),
+                start_to_close_timeout_seconds: Some(timeout), attempt: attempt.max(0),
+            });
+            if let Some(stored) = self.history.last_mut() { *stored = event.clone(); }
+            attempt = 0;
+            (event.event_id, now_timestamp)
+        } else {
+            (self.next_event_id, now_timestamp)
+        };
+        let info = DecisionInfo {
+            version: current_version, schedule_id, task_list,
+            start_to_close_timeout_seconds: timeout, attempt,
+            schedule_timestamp, original_schedule_timestamp: original_scheduled_timestamp, ..Default::default()
+        };
+        self.persist_decision(info.clone());
+        Ok(info)
+    }
+
+    pub fn add_decision_task_started_event(
+        &mut self,
+        schedule_event_id: i64,
+        request_id: String,
+        request: &PollForDecisionTaskRequest,
+        now_timestamp: i64,
+    ) -> Result<(Option<HistoryEvent>, DecisionInfo), MutableStateError> {
+        let Some(mut decision) = self.get_decision_info(schedule_event_id).cloned() else {
+            return Err(MutableStateError::InvalidDecisionState { action: "start", schedule_id: schedule_event_id, started_id: 0 });
+        };
+        if decision.started_id != 0 {
+            return Err(MutableStateError::InvalidDecisionState { action: "start", schedule_id: schedule_event_id, started_id: decision.started_id });
+        }
+        let mut schedule_id = decision.schedule_id;
+        let mut started_id = schedule_id + 1;
+        let timestamp = now_timestamp;
+        let mut event = None;
+        let non_transient = self.execution_info.get("last_write_version").and_then(Record::as_i64).is_some_and(|v| v != self.current_version());
+        if decision.attempt > 0 && (decision.schedule_id != self.next_event_id || non_transient) {
+            let task_list = request.task_list.as_ref().map(|v| v.name.clone()).unwrap_or_default();
+            let scheduled = self.decision_event(EventType::DecisionTaskScheduled, now_timestamp);
+            schedule_id = scheduled.event_id;
+            decision.attempt = 0;
+            let mut scheduled = scheduled;
+            scheduled.decision_task_scheduled_event_attributes = Some(DecisionTaskScheduledEventAttributes {
+                task_list: Some(TaskList { name: task_list, ..Default::default() }),
+                start_to_close_timeout_seconds: Some(decision.start_to_close_timeout_seconds), attempt: 0,
+            });
+            if let Some(stored) = self.history.last_mut() { *stored = scheduled.clone(); }
+        }
+        if decision.attempt == 0 {
+            let mut started = self.decision_event(EventType::DecisionTaskStarted, now_timestamp);
+            started_id = started.event_id;
+            started.decision_task_started_event_attributes = Some(DecisionTaskStartedEventAttributes {
+                scheduled_event_id: schedule_id, request_id: request_id.clone(), identity: request.identity.clone(),
+            });
+            if let Some(stored) = self.history.last_mut() { *stored = started.clone(); }
+            event = Some(started);
+        }
+        decision.version = self.current_version();
+        decision.schedule_id = schedule_id;
+        decision.started_id = started_id;
+        decision.request_id = request_id;
+        decision.started_timestamp = timestamp;
+        self.persist_decision(decision.clone());
+        Ok((event, decision))
+    }
+
+    pub fn add_decision_task_completed_event(
+        &mut self,
+        schedule_event_id: i64,
+        started_event_id: i64,
+        request: &RespondDecisionTaskCompletedRequest,
+        now_timestamp: i64,
+        max_reset_points: usize,
+    ) -> Result<HistoryEvent, MutableStateError> {
+        let Some(decision) = self.get_decision_info(schedule_event_id).cloned() else {
+            return Err(MutableStateError::InvalidDecisionState { action: "complete", schedule_id: schedule_event_id, started_id: started_event_id });
+        };
+        if decision.started_id != started_event_id {
+            return Err(MutableStateError::InvalidDecisionState { action: "complete", schedule_id: schedule_event_id, started_id: decision.started_id });
+        }
+        self.before_add_decision_task_completed_event();
+        let completed_started_id = if decision.attempt > 0 {
+            let mut scheduled = self.decision_event(EventType::DecisionTaskScheduled, decision.schedule_timestamp);
+            scheduled.decision_task_scheduled_event_attributes = Some(DecisionTaskScheduledEventAttributes {
+                task_list: Some(TaskList { name: self.execution_info.get("task_list").and_then(Record::as_str).unwrap_or_default().to_owned(), ..Default::default() }),
+                start_to_close_timeout_seconds: Some(decision.start_to_close_timeout_seconds), attempt: decision.attempt,
+            });
+            if let Some(stored) = self.history.last_mut() { *stored = scheduled.clone(); }
+            let mut started = self.decision_event(EventType::DecisionTaskStarted, decision.started_timestamp);
+            started.decision_task_started_event_attributes = Some(DecisionTaskStartedEventAttributes {
+                scheduled_event_id: scheduled.event_id, request_id: decision.request_id.clone(), identity: request.identity.clone(),
+            });
+            if let Some(stored) = self.history.last_mut() { *stored = started.clone(); }
+            started.event_id
+        } else { started_event_id };
+        let mut event = self.decision_event(EventType::DecisionTaskCompleted, now_timestamp);
+        event.decision_task_completed_event_attributes = Some(DecisionTaskCompletedEventAttributes {
+            execution_context: request.execution_context.clone(), scheduled_event_id: schedule_event_id,
+            started_event_id: completed_started_id, identity: request.identity.clone(), binary_checksum: request.binary_checksum.clone(),
+        });
+        if let Some(stored) = self.history.last_mut() { *stored = event.clone(); }
+        self.execution_info["last_processed_event"] = completed_started_id.into();
+        self.after_add_decision_task_completed_event(&event, max_reset_points, now_timestamp);
+        Ok(event)
+    }
+
+    pub fn before_add_decision_task_completed_event(&mut self) { self.delete_decision_preserving_heartbeat(); }
+
+    /// Port of Go's afterAddDecisionTaskCompletedEvent and
+    /// addBinaryCheckSumIfNotExists. Persistence/search task generation is
+    /// outside this state container, but the reset points and checksum list
+    /// are retained in the execution record for its mutation.
+    fn after_add_decision_task_completed_event(
+        &mut self,
+        event: &HistoryEvent,
+        max_reset_points: usize,
+        now_timestamp: i64,
+    ) {
+        let Some(attrs) = event.decision_task_completed_event_attributes.as_ref() else { return };
+        if attrs.binary_checksum.is_empty() { return; }
+        let mut points = self.execution_info.get("auto_reset_points")
+            .and_then(|value| value.get("points"))
+            .and_then(Record::as_array).cloned().unwrap_or_default();
+        let mut checksums: Vec<String> = points.iter()
+            .filter_map(|point| point.get("binaryChecksum").and_then(Record::as_str).map(str::to_owned))
+            .collect();
+        if checksums.iter().any(|checksum| checksum == &attrs.binary_checksum) { return; }
+        let capacity = max_reset_points.max(1);
+        if points.len() >= capacity {
+            let remove = points.len() - capacity + 1;
+            points.drain(..remove);
+            checksums.drain(..remove);
+        }
+        checksums.push(attrs.binary_checksum.clone());
+        let run_id = self.execution_info.get("run_id").and_then(Record::as_str).unwrap_or_default();
+        points.push(serde_json::json!({
+            "binaryChecksum": attrs.binary_checksum,
+            "runId": run_id,
+            "firstDecisionCompletedId": event.event_id,
+            "createdTimeNano": now_timestamp,
+            "resettable": true,
+        }));
+        self.execution_info["auto_reset_points"] = serde_json::json!({ "points": points });
+        self.execution_info["binary_checksums"] = serde_json::Value::Array(checksums.into_iter().map(Into::into).collect());
+    }
+
+    pub fn add_decision_task_timed_out_event(
+        &mut self,
+        schedule_event_id: i64,
+        started_event_id: i64,
+        now_timestamp: i64,
+    ) -> Result<HistoryEvent, MutableStateError> {
+        let Some(decision) = self.get_decision_info(schedule_event_id).cloned() else {
+            return Err(MutableStateError::InvalidDecisionState { action: "timeout", schedule_id: schedule_event_id, started_id: started_event_id });
+        };
+        if decision.started_id != started_event_id {
+            return Err(MutableStateError::InvalidDecisionState { action: "timeout", schedule_id: schedule_event_id, started_id: decision.started_id });
+        }
+        let mut event = if decision.attempt == 0 { self.decision_event(EventType::DecisionTaskTimedOut, now_timestamp) } else {
+            HistoryEvent { event_type: Some(EventType::DecisionTaskTimedOut), ..Default::default() }
+        };
+        event.decision_task_timed_out_event_attributes = Some(DecisionTaskTimedOutEventAttributes {
+            scheduled_event_id: schedule_event_id, started_event_id,
+            timeout_type: Some(TimeoutType::StartToClose), cause: Some(DecisionTaskTimedOutCause::Timeout), ..Default::default()
+        });
+        if decision.attempt == 0 { if let Some(stored) = self.history.last_mut() { *stored = event.clone(); } }
+        self.fail_decision_at(true, now_timestamp);
+        Ok(event)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_decision_task_failed_event(
+        &mut self, schedule_event_id: i64, started_event_id: i64,
+        cause: DecisionTaskFailedCause, details: Vec<u8>, identity: String,
+        reason: String, binary_checksum: String, base_run_id: String,
+        new_run_id: String, fork_event_version: i64, reset_request_id: String,
+        now_timestamp: i64,
+    ) -> Result<Option<HistoryEvent>, MutableStateError> {
+        let Some(decision) = self.get_decision_info(schedule_event_id).cloned() else {
+            return Err(MutableStateError::InvalidDecisionState { action: "fail", schedule_id: schedule_event_id, started_id: started_event_id });
+        };
+        if decision.started_id != started_event_id {
+            return Err(MutableStateError::InvalidDecisionState { action: "fail", schedule_id: schedule_event_id, started_id: decision.started_id });
+        }
+        let event = if decision.attempt == 0 {
+            let mut event = self.decision_event(EventType::DecisionTaskFailed, now_timestamp);
+            event.decision_task_failed_event_attributes = Some(DecisionTaskFailedEventAttributes {
+                scheduled_event_id: schedule_event_id, started_event_id,
+                cause: Some(cause), details, identity, reason: Some(reason), binary_checksum,
+                base_run_id, new_run_id, fork_event_version, request_id: reset_request_id,
+            });
+            if cause == DecisionTaskFailedCause::ResetWorkflow {
+                let requests = self.execution_info.get("workflow_requests").and_then(Record::as_array).cloned().unwrap_or_default();
+                let mut requests = requests;
+                requests.push(serde_json::json!({
+                    "request_id": event.decision_task_failed_event_attributes.as_ref().map(|a| a.request_id.as_str()).unwrap_or_default(),
+                    "version": event.version,
+                    "request_type": "reset",
+                }));
+                self.execution_info["workflow_requests"] = serde_json::Value::Array(requests);
+            }
+            if let Some(stored) = self.history.last_mut() { *stored = event.clone(); }
+            Some(event)
+        } else { None };
+        self.fail_decision_at(true, now_timestamp);
+        if matches!(cause, DecisionTaskFailedCause::ResetWorkflow | DecisionTaskFailedCause::FailoverCloseDecision) {
+            self.execution_info["decision_attempt"] = 0.into();
+            if let Some(info) = &mut self.decision_info { info.attempt = 0; }
+        }
+        Ok(event)
+    }
+
+    fn fail_decision_at(&mut self, increment_attempt: bool, now_timestamp: i64) {
+        self.execution_info["sticky_task_list"] = String::new().into();
+        let attempt = if increment_attempt { self.execution_info.get("decision_attempt").and_then(Record::as_i64).unwrap_or_default() + 1 } else { 0 };
+        let info = DecisionInfo { attempt, schedule_timestamp: if increment_attempt { now_timestamp } else { 0 }, ..Default::default() };
+        self.persist_decision(info);
     }
 
     /// Apply a replicated scheduled event. Schedule IDs are supplied by the
@@ -449,6 +748,128 @@ mod tests {
         s.replicate_decision_timed_out(&timeout);
         assert_eq!(s.decision_snapshot().attempt, 0);
         assert_eq!(s.decision_snapshot().schedule_id, 0);
+    }
+
+    #[test]
+    fn add_decision_task_scheduled_emits_event_and_info_from_execution_defaults() {
+        let mut s = MutableStateBuilder::default();
+        s.execution_info["task_list"] = "normal".into();
+        s.execution_info["decision_timeout"] = 30.into();
+        s.execution_info["current_version"] = 7.into();
+        let info = s.add_decision_task_scheduled_event(false, 100, 80).unwrap();
+        let event = &s.history[0];
+        assert_eq!(event.event_id, 1);
+        assert_eq!(event.event_type, Some(EventType::DecisionTaskScheduled));
+        assert_eq!(event.timestamp, Some(100));
+        let attrs = event.decision_task_scheduled_event_attributes.as_ref().unwrap();
+        assert_eq!(attrs.task_list.as_ref().unwrap().name, "normal");
+        assert_eq!(attrs.start_to_close_timeout_seconds, Some(30));
+        assert_eq!(attrs.attempt, 0);
+        assert_eq!(info.schedule_id, 1);
+        assert_eq!(info.version, 7);
+        assert_eq!(info.original_schedule_timestamp, 80);
+        assert_eq!(s.decision_snapshot(), info);
+    }
+
+    #[test]
+    fn heartbeat_scheduling_keeps_failed_decisions_transient_and_flushes_buffers_first() {
+        let mut s = MutableStateBuilder::default();
+        s.execution_info["task_list"] = "normal".into();
+        s.execution_info["decision_timeout"] = 9.into();
+        s.execution_info["decision_attempt"] = 2.into();
+        s.buffered_events.push(HistoryEvent { event_type: Some(EventType::WorkflowExecutionSignaled), ..Default::default() });
+        let info = s.add_decision_task_scheduled_event_as_heartbeat(false, 50, 25, "normal".into()).unwrap();
+        assert_eq!(s.history[0].event_id, 1);
+        assert_eq!(s.history[0].event_type, Some(EventType::WorkflowExecutionSignaled));
+        assert_eq!(info.schedule_id, 2);
+        assert_eq!(info.attempt, 0);
+        assert_eq!(info.original_schedule_timestamp, 25);
+        assert_eq!(s.history[1].event_type, Some(EventType::DecisionTaskScheduled));
+    }
+
+    #[test]
+    fn add_decision_task_started_emits_event_and_updates_decision_info() {
+        let mut s = MutableStateBuilder::default();
+        s.execution_info["task_list"] = "normal".into();
+        let (_, d) = s.add_decision_scheduled(3, "normal".into(), 20, 0, 10, 10);
+        let (event, info) = s.add_decision_task_started_event(
+            d.schedule_id, "request".into(),
+            &PollForDecisionTaskRequest { identity: "worker".into(), ..Default::default() }, 15,
+        ).unwrap();
+        let event = event.unwrap();
+        assert_eq!(event.event_id, 2);
+        assert_eq!(event.event_type, Some(EventType::DecisionTaskStarted));
+        assert_eq!(event.timestamp, Some(15));
+        let attrs = event.decision_task_started_event_attributes.as_ref().unwrap();
+        assert_eq!(attrs.scheduled_event_id, 1);
+        assert_eq!(attrs.request_id, "request");
+        assert_eq!(attrs.identity, "worker");
+        assert_eq!(info.started_id, 2);
+        assert_eq!(info.started_timestamp, 15);
+        assert_eq!(s.decision_snapshot(), info);
+    }
+
+    #[test]
+    fn add_decision_task_completed_flushes_decision_and_sets_last_processed_event() {
+        let mut s = MutableStateBuilder::default();
+        let (_, d) = s.add_decision_scheduled(3, "normal".into(), 20, 0, 10, 10);
+        let (_, d) = s.start_decision(d.schedule_id, "request".into(), 3).unwrap();
+        let event = s.add_decision_task_completed_event(
+            d.schedule_id, d.started_id,
+            &RespondDecisionTaskCompletedRequest { execution_context: b"ctx".to_vec(), identity: "worker".into(), binary_checksum: "sum".into(), ..Default::default() }, 20,
+            10,
+        ).unwrap();
+        assert_eq!(event.event_id, 3);
+        assert_eq!(event.event_type, Some(EventType::DecisionTaskCompleted));
+        let attrs = event.decision_task_completed_event_attributes.as_ref().unwrap();
+        assert_eq!(attrs.scheduled_event_id, 1);
+        assert_eq!(attrs.started_event_id, 2);
+        assert_eq!(attrs.execution_context, b"ctx");
+        assert_eq!(s.execution_info["last_processed_event"], 2);
+        assert_eq!(s.execution_info["auto_reset_points"]["points"][0]["binaryChecksum"], "sum");
+        assert_eq!(s.execution_info["auto_reset_points"]["points"][0]["firstDecisionCompletedId"], 3);
+        assert_eq!(s.execution_info["binary_checksums"][0], "sum");
+        assert_eq!(s.decision_snapshot().schedule_id, 0);
+    }
+
+    #[test]
+    fn add_decision_task_timed_out_emits_start_to_close_event_and_increments_attempt() {
+        let mut s = MutableStateBuilder::default();
+        let (_, d) = s.add_decision_scheduled(3, "normal".into(), 20, 0, 10, 10);
+        let (_, d) = s.start_decision(d.schedule_id, "request".into(), 3).unwrap();
+        let event = s.add_decision_task_timed_out_event(d.schedule_id, d.started_id, 30).unwrap();
+        assert_eq!(event.event_id, 3);
+        let attrs = event.decision_task_timed_out_event_attributes.as_ref().unwrap();
+        assert_eq!(attrs.scheduled_event_id, 1);
+        assert_eq!(attrs.started_event_id, 2);
+        assert_eq!(attrs.timeout_type, Some(TimeoutType::StartToClose));
+        assert_eq!(attrs.cause, Some(DecisionTaskTimedOutCause::Timeout));
+        assert_eq!(s.decision_snapshot().attempt, 1);
+        assert_eq!(s.decision_snapshot().schedule_timestamp, 30);
+    }
+
+    #[test]
+    fn add_decision_task_failed_emits_attributes_and_reset_clears_attempt() {
+        let mut s = MutableStateBuilder::default();
+        let (_, d) = s.add_decision_scheduled(3, "normal".into(), 20, 0, 10, 10);
+        let (_, d) = s.start_decision(d.schedule_id, "request".into(), 3).unwrap();
+        let event = s.add_decision_task_failed_event(
+            d.schedule_id, d.started_id, DecisionTaskFailedCause::ResetWorkflow,
+            b"details".to_vec(), "worker".into(), "reset".into(), "sum".into(),
+            "base".into(), "new".into(), 8, "reset-request".into(), 40,
+        ).unwrap().unwrap();
+        assert_eq!(event.event_id, 3);
+        let attrs = event.decision_task_failed_event_attributes.as_ref().unwrap();
+        assert_eq!(attrs.scheduled_event_id, 1);
+        assert_eq!(attrs.started_event_id, 2);
+        assert_eq!(attrs.cause, Some(DecisionTaskFailedCause::ResetWorkflow));
+        assert_eq!(attrs.details, b"details");
+        assert_eq!(attrs.reason.as_deref(), Some("reset"));
+        assert_eq!(attrs.base_run_id, "base");
+        assert_eq!(attrs.new_run_id, "new");
+        assert_eq!(attrs.fork_event_version, 8);
+        assert_eq!(attrs.request_id, "reset-request");
+        assert_eq!(s.decision_snapshot().attempt, 0);
     }
 
     #[test]

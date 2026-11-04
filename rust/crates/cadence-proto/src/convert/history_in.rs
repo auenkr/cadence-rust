@@ -114,8 +114,11 @@ fn decision_task_failed_event_attributes(v: p::DecisionTaskFailedEventAttributes
         reason: r_failure,
         details: d_failure,
         identity: v.identity,
+        base_run_id: v.base_run_id,
+        new_run_id: v.new_run_id,
+        fork_event_version: v.fork_event_version,
         binary_checksum: v.binary_checksum,
-        ..Default::default()
+        request_id: v.request_id,
     })
 }
 fn activity_task_scheduled_event_attributes(v: p::ActivityTaskScheduledEventAttributes) -> Result<tasks::ActivityTaskScheduledEventAttributes, Status> {
