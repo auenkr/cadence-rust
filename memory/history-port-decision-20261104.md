@@ -228,3 +228,9 @@ Rust: `rust/crates/cadence-history/src/reset/mod.rs + reset/history.rs`.
 - Metrics, configuration, domain cache, token serialization and mutable-state/store calls remain explicit dependency traits with TODO(link). These need concrete adapters when assembling the independently ported packages.
 
 Final acceptance still requires green CI on the final source head and importing runner formatting; no service-completion or SDK compatibility claim is made here.
+
+## Last green CI
+
+- Run: https://github.com/auenkr/cadence-rust/actions/runs/41895734486 (rust-ci, package=cadence-history, clippy + tests green)
+- Head SHA: 9ab1ef6187171c18af7c3dfce79c26c1f64b1715
+- Note: the 6 Go files in decision/ (3 non-test) map to Rust per tables above; remaining `TODO(link)` seams await execution/persistence/config ports.
