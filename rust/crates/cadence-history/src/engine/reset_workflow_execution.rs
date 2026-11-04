@@ -77,7 +77,7 @@ pub fn check_reset_event_type(events: &[HistoryEvent], reset_id: i64) -> HResult
         if event.event_id == reset_id {
             return match event.event_type {
                 Some(EventType::DecisionTaskStarted | EventType::DecisionTaskTimedOut | EventType::DecisionTaskFailed | EventType::DecisionTaskCompleted) => Ok(()),
-                _ => Err(HistoryError::bad_request(format!("reset event must be of type DecisionTaskStarted, DecisionTaskTimedOut, DecisionTaskFailed, or DecisionTaskCompleted. Attempting to reset on event type: {}", event.event_type.map(|t| t.to_string()).unwrap_or_default()))),
+                _ => Err(HistoryError::bad_request(format!("reset event must be of type DecisionTaskStarted, DecisionTaskTimedOut, DecisionTaskFailed, or DecisionTaskCompleted. Attempting to reset on event type: {}", event.event_type.map(|t| format!("{t:?}")).unwrap_or_default()))),
             };
         }
     }

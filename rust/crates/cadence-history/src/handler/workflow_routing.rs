@@ -110,12 +110,12 @@ impl HistoryHandler {
         let _profile = self.metrics.start_request_profile("RecordActivityTaskStarted");
         let request = request.cloned().unwrap_or_default();
         let domain = &request.domain_uuid;
-        let fail = |error| self.error("RecordActivityTaskStarted", domain, "", "", error);
-        if domain.is_empty() { return Err(fail(HistoryError::bad_request("Domain not set on request."))); }
-        self.check_rate().map_err(&fail)?;
         let execution = request.workflow_execution.clone().unwrap_or_default();
         let workflow = execution.workflow_id; let run = execution.run_id;
-        let fail = |error| self.error("RecordActivityTaskStarted", domain, &workflow, &run, error);
+        self.emit_info_or_debug_log(domain, "RecordActivityTaskStarted", &workflow, &run, request.schedule_id);
+        let fail = |error| self.error("RecordActivityTaskStarted", domain, &workflow, "", error);
+        if domain.is_empty() { return Err(fail(HistoryError::bad_request("Domain not set on request."))); }
+        self.check_rate().map_err(&fail)?;
         let engine = self.resources.engine_for_workflow(&workflow).map_err(&fail)?;
         let result = engine.record_activity_task_started(Some(&request)).await;
         result.map_err(fail)
@@ -142,14 +142,18 @@ impl HistoryHandler {
         let _profile = self.metrics.start_request_profile("RecordDecisionTaskStarted");
         let request = request.cloned().unwrap_or_default();
         let domain = &request.domain_uuid;
-        let fail = |error| self.error("RecordDecisionTaskStarted", domain, "", "", error);
+        let execution = request.workflow_execution.clone().unwrap_or_default();
+        let workflow = execution.workflow_id; let run = execution.run_id;
+        self.emit_info_or_debug_log(domain, "RecordDecisionTaskStarted", &workflow, &run, request.schedule_id);
+        let fail = |error| self.error("RecordDecisionTaskStarted", domain, &workflow, &run, error);
         if domain.is_empty() { return Err(fail(HistoryError::bad_request("Domain not set on request."))); }
         self.check_rate().map_err(&fail)?;
         if request.poll_request.as_ref().and_then(|r| r.task_list.as_ref()).is_none_or(|t| t.name.is_empty()) { return Err(fail(HistoryError::bad_request("Tasklist not set."))); }
-        let execution = request.workflow_execution.clone().unwrap_or_default();
-        let workflow = execution.workflow_id; let run = execution.run_id;
-        let fail = |error| self.error("RecordDecisionTaskStarted", domain, &workflow, &run, error);
-        let engine = self.resources.engine_for_workflow(&workflow).map_err(&fail)?;
+        let engine = self.resources.engine_for_workflow(&workflow).map_err(|error| {
+            tracing::error!(error = %error, workflow_id = workflow, run_id = run, domain_name = domain,
+                schedule_id = request.schedule_id, "RecordDecisionTaskStarted failed.");
+            fail(error)
+        })?;
         let result = engine.record_decision_task_started(Some(&request)).await;
         result.map_err(fail)
     }

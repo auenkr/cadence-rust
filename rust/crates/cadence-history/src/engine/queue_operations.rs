@@ -22,8 +22,8 @@ impl HistoryEngine {
     }
     async fn describe_queue(&self, category: HistoryTaskCategory, cluster: &str) -> HResult<DescribeQueueResponse> {
         let processor = self.queue_processors.get(&category).ok_or_else(|| {
-            // Go HistoryTaskCategory.String uses these category names.
-            let name = match category { HistoryTaskCategory::Transfer => "transfer", HistoryTaskCategory::Timer => "timer", HistoryTaskCategory::Replication => "replication", HistoryTaskCategory::CrossCluster => "cross-cluster" };
+            // Go formats the category struct as {categoryType categoryID categoryName}.
+            let name = match category { HistoryTaskCategory::Transfer => "{1 1 transfer}", HistoryTaskCategory::Timer => "{2 2 timer}", HistoryTaskCategory::Replication => "{1 3 replication}", HistoryTaskCategory::CrossCluster => "{0 0 cross-cluster}" };
             HistoryError::Other(format!("queue processor not found for category {name}"))
         })?;
         // TODO(link): QueueProcessor adapter serializes each ProcessingQueueState using Go's String representation.
