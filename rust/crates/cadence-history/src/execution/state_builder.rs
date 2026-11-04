@@ -1,6 +1,6 @@
 //! Event replay into mutable state, corresponding to Go's `state_builder.go`.
 
-use cadence_api::{service_types::HistoryEvent, types::EventType};
+use cadence_api::{enums::EventType, service_types::HistoryEvent};
 use crate::mutable_state::{MutableStateBuilder, MutableStateError};
 use super::{child_workflow::ChildWorkflowError, timer::TimerError};
 

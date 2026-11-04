@@ -1,7 +1,7 @@
 //! Child workflow initiation and start transitions from
 //! `mutable_state_builder_methods_child_workflow.go`.
 
-use cadence_api::{service_types::HistoryEvent, tasks::{ChildWorkflowExecutionStartedEventAttributes, StartChildWorkflowExecutionInitiatedEventAttributes}, types::{EventType, ParentClosePolicy, WorkflowExecution, WorkflowType}};
+use cadence_api::{enums::{EventType, ParentClosePolicy}, service_types::HistoryEvent, tasks::{ChildWorkflowExecutionStartedEventAttributes, StartChildWorkflowExecutionInitiatedEventAttributes}, types::{WorkflowExecution, WorkflowType}};
 use serde::{Deserialize, Serialize};
 
 use crate::mutable_state::{MutableStateBuilder, MutableStateError};
@@ -118,7 +118,7 @@ impl MutableStateBuilder {
     /// common persistence action; local event construction remains owned by
     /// the matching history handler.
     pub fn replicate_child_workflow_terminal_event(&mut self, event: &HistoryEvent) -> Result<(), ChildWorkflowError> {
-        use cadence_api::types::EventType;
+        use cadence_api::enums::EventType;
         let valid = matches!(event.event_type.as_ref(), Some(EventType::StartChildWorkflowExecutionFailed | EventType::ChildWorkflowExecutionCompleted | EventType::ChildWorkflowExecutionFailed | EventType::ChildWorkflowExecutionCanceled | EventType::ChildWorkflowExecutionTimedOut | EventType::ChildWorkflowExecutionTerminated));
         if !valid { return Err(ChildWorkflowError::InvalidEvent("event is not a terminal child transition")); }
         let value = serde_json::to_value(event).map_err(|_| ChildWorkflowError::InvalidEvent("event is not serializable"))?;

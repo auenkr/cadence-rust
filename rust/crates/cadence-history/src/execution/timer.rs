@@ -1,6 +1,6 @@
 //! User timer transitions from `mutable_state_builder_methods_timer.go`.
 
-use cadence_api::{service_types::HistoryEvent, tasks::{CancelTimerFailedEventAttributes, TimerCanceledEventAttributes, TimerFiredEventAttributes, TimerStartedEventAttributes}, types::EventType};
+use cadence_api::{enums::EventType, service_types::HistoryEvent, tasks::{CancelTimerFailedEventAttributes, TimerCanceledEventAttributes, TimerFiredEventAttributes, TimerStartedEventAttributes}};
 use serde::{Deserialize, Serialize};
 
 use crate::mutable_state::{MutableStateBuilder, MutableStateError, Record};
@@ -113,7 +113,7 @@ impl MutableStateBuilder {
             version,
             timer_canceled_event_attributes: Some(TimerCanceledEventAttributes {
                 timer_id: timer_id.to_owned(), started_event_id: info.started_id,
-                decision_task_completed_event_id, identity: identity.to_owned(),
+                decision_task_completed_event_id: decision_completed_event_id, identity: identity.to_owned(),
             }),
             ..Default::default()
         });

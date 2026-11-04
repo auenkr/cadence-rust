@@ -43,6 +43,9 @@ workflow repairer, mocks excluded) were not ported in this progress slice.
 - `f60ad5459` workflow start and child terminal transitions
 - `8d5c1725f` execution event replay state builder
 - `f266fc031` history builder and execution utility primitives
+- `57b1f19c9` expanded transitions and terminal child handlers
+- `6329b2407` preserved headers and cancellation identity
+- `94deff872` carried external cancellation request identifiers
 
 ## CI evidence
 
@@ -50,6 +53,11 @@ workflow repairer, mocks excluded) were not ported in this progress slice.
   https://github.com/auenkr/cadence-rust/actions/runs/41878835114
 - At the time of this note, the run was queued. Final green CI on the final
   branch head has not yet been recorded.
+- CI against `94deff87212a4d6f596aefc4289c4a5dc351788a` failed to compile:
+  https://github.com/auenkr/cadence-rust/actions/runs/41880868975
+  The failure was private enum imports (`EventType`, `ParentClosePolicy`) and
+  one wrong timer attribute field shorthand. These are corrected in the next
+  commit; rerun the requested-crate workflow against that head.
 
 This note must be updated with the final head SHA, run URL/conclusion, and a
 complete parity checklist before the work is considered done.

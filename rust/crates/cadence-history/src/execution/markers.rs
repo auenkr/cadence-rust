@@ -1,7 +1,7 @@
 //! Marker and search-attribute event application.
 
 use cadence_api::{service_types::HistoryEvent, tasks::{MarkerRecordedEventAttributes, UpsertWorkflowSearchAttributesEventAttributes}};
-use cadence_api::types::EventType;
+use cadence_api::enums::EventType;
 use crate::mutable_state::MutableStateBuilder;
 
 impl MutableStateBuilder {

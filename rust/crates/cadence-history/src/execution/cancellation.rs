@@ -1,6 +1,6 @@
 //! Workflow and external workflow cancellation transitions.
 
-use cadence_api::{service_types::HistoryEvent, tasks::RequestCancelExternalWorkflowExecutionInitiatedEventAttributes, types::EventType};
+use cadence_api::{enums::EventType, service_types::HistoryEvent, tasks::RequestCancelExternalWorkflowExecutionInitiatedEventAttributes};
 use serde::{Deserialize, Serialize};
 use crate::mutable_state::MutableStateBuilder;
 

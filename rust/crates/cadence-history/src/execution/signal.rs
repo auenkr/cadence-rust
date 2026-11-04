@@ -1,6 +1,6 @@
 //! Signal transitions from `mutable_state_builder_methods_signal.go`.
 
-use cadence_api::{service_types::HistoryEvent, tasks::SignalExternalWorkflowExecutionInitiatedEventAttributes, types::EventType};
+use cadence_api::{enums::EventType, service_types::HistoryEvent, tasks::SignalExternalWorkflowExecutionInitiatedEventAttributes};
 use serde::{Deserialize, Serialize};
 use crate::mutable_state::MutableStateBuilder;
 

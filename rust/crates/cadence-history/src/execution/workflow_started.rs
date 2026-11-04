@@ -1,7 +1,7 @@
 //! Workflow start event application from `mutable_state_builder_methods_started.go`.
 
 use cadence_api::service_types::{HistoryEvent, WorkflowExecutionStartedEventAttributes};
-use cadence_api::types::EventType;
+use cadence_api::enums::EventType;
 use crate::mutable_state::MutableStateBuilder;
 
 impl MutableStateBuilder {

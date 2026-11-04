@@ -1,7 +1,7 @@
 //! Workflow completion, failure, cancellation, timeout, termination, and
 //! continue-as-new state updates from `mutable_state_builder_methods_*`.
 
-use cadence_api::{service_types::HistoryEvent, types::EventType};
+use cadence_api::{enums::EventType, service_types::HistoryEvent};
 use crate::mutable_state::MutableStateBuilder;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
