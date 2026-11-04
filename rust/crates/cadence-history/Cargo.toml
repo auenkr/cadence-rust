@@ -31,7 +31,6 @@ futures-util = "0.3"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 cadence-proto = { path = "../cadence-proto" }
-cadence-thrift = { path = "../cadence-thrift" }
 tonic = "0.12"
 prost = "0.13"
 bytes = "1"
