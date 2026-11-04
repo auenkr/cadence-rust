@@ -12,4 +12,7 @@ pub mod cancellation;
 pub mod markers;
 pub mod workflow_started;
 pub mod state_builder;
+pub mod mutable_state_util;
+pub mod history_builder;
+pub mod context;
 

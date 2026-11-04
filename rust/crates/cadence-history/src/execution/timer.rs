@@ -99,10 +99,7 @@ impl MutableStateBuilder {
 
     pub fn replicate_timer_fired_event(&mut self, event: &HistoryEvent) -> Result<(), TimerError> {
         let attrs = event.timer_fired_event_attributes.as_ref().ok_or(TimerError::InvalidEvent("missing TimerFired attributes"))?;
-        if !self.pending_timer_infos.contains_key(&attrs.timer_id) {
-            return Err(TimerError::NotFound(attrs.timer_id.clone()));
-        }
-        self.delete_timer(attrs.timer_id.clone());
+        self.delete_user_timer(&attrs.timer_id);
         Ok(())
     }
 
@@ -137,31 +134,37 @@ impl MutableStateBuilder {
 
     pub fn replicate_timer_canceled_event(&mut self, event: &HistoryEvent) -> Result<(), TimerError> {
         let attrs = event.timer_canceled_event_attributes.as_ref().ok_or(TimerError::InvalidEvent("missing TimerCanceled attributes"))?;
-        if !self.pending_timer_infos.contains_key(&attrs.timer_id) {
-            return Err(TimerError::NotFound(attrs.timer_id.clone()));
-        }
-        self.delete_timer(attrs.timer_id.clone());
+        self.delete_user_timer(&attrs.timer_id);
         Ok(())
     }
 
     /// Refresh the user timer's start time after a reset/replay operation.
-    pub fn update_user_timer(&mut self, timer_id: &str, started_id: i64, expiry_time_unix_nanos: i64) -> bool {
-        let Some(mut info) = self.get_user_timer_info(timer_id) else { return false; };
-        info.started_id = started_id;
-        info.expiry_time_unix_nanos = expiry_time_unix_nanos;
-        self.upsert_timer(timer_id.to_owned(), serde_json::to_value(info).expect("TimerInfo is serializable"));
-        true
+    pub fn update_user_timer(&mut self, info: TimerInfo) -> Result<(), TimerError> {
+        let Some(existing_id) = self.pending_timer_infos.iter().find_map(|(id, value)| {
+            serde_json::from_value::<TimerInfo>(value.clone()).ok().filter(|old| old.started_id == info.started_id).map(|_| id.clone())
+        }) else { return Err(TimerError::NotFound(info.timer_id)); };
+        self.pending_timer_infos.remove(&existing_id);
+        self.update_timer_infos.remove(&existing_id);
+        let id = info.timer_id.clone();
+        self.upsert_timer(id, serde_json::to_value(info).expect("TimerInfo is serializable"));
+        Ok(())
     }
 
-    pub fn delete_user_timer(&mut self, timer_id: &str) -> bool {
-        if self.pending_timer_infos.remove(timer_id).is_none() { return false; }
+    pub fn delete_user_timer(&mut self, timer_id: &str) {
+        self.pending_timer_infos.remove(timer_id);
         self.update_timer_infos.remove(timer_id);
         self.delete_timer_infos.insert(timer_id.to_owned());
-        true
     }
 }
 
 /// Convert a timer state to the generic persistence record shape used by the
 /// mutable-state delta contract.
 pub fn timer_record(info: TimerInfo) -> Record { serde_json::to_value(info).expect("TimerInfo is serializable") }
+
+/// Remove and return the first matching TimerFired event, as Go's buffered
+/// history scan does while reconciling an unknown timer cancellation.
+pub fn check_and_clear_timer_fired_event(events: &mut Vec<HistoryEvent>, timer_id: &str) -> Option<HistoryEvent> {
+    let index = events.iter().position(|event| event.timer_fired_event_attributes.as_ref().is_some_and(|attrs| attrs.timer_id == timer_id))?;
+    Some(events.remove(index))
+}
 
