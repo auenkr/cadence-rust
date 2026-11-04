@@ -79,6 +79,7 @@ pub trait EngineMetrics: Send + Sync {
 }
 /// Components are supplied by the shard factory. TODO(link): factory wiring in history_engine.go.
 pub struct HistoryEngine {
+    pub start_backend: Arc<dyn super::start_dependencies::StartBackend>,
     pub current_cluster_name: String,
     pub domain_cache: Arc<dyn DomainCache>,
     pub cluster_metadata: Arc<dyn ClusterMetadata>,

@@ -74,6 +74,8 @@ pub enum HistoryError {
     PersistenceTimeout(String),
     #[error("{message}")]
     CurrentBranchChanged { message: String, current_branch_token: Vec<u8> },
+    #[error("cluster attribute not found")]
+    ClusterAttributeNotFound,
     #[error("sticky worker unavailable")]
     StickyWorkerUnavailable,
     #[error("version histories do not exist")]

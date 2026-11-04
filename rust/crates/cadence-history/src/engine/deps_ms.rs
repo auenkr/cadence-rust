@@ -6,6 +6,10 @@ use super::{deps::{ActivityInfo, DomainCacheEntry, HResult, WorkflowExecutionInf
 
 #[async_trait]
 pub trait MutableState: Send + Sync {
+    fn set_history_tree(&self, run_id: &str) -> HResult<()>;
+    fn add_workflow_execution_started_event(&self, execution: &WorkflowExecution, request: &HistoryStartWorkflowExecutionRequest) -> HResult<cadence_api::service_types::HistoryEvent>;
+    fn add_first_decision_task_scheduled(&self, event: &cadence_api::service_types::HistoryEvent) -> HResult<()>;
+    fn add_decision_task_scheduled_event(&self, bypass_task_generation: bool) -> HResult<()>;
     fn is_workflow_execution_running(&self) -> bool;
     fn get_next_event_id(&self) -> i64;
     fn get_execution_info(&self) -> WorkflowExecutionInfo;
@@ -60,6 +64,9 @@ pub trait MutableState: Send + Sync {
 #[async_trait]
 pub trait ExecutionContext: Send + Sync {
     fn get_execution(&self) -> WorkflowExecution;
+    fn clear(&self);
+    async fn update_workflow_execution_as_active(&self, now: i64) -> HResult<()>;
+    async fn update_workflow_execution_with_new_as_active(&self, now: i64, domain: &str, execution: &WorkflowExecution, state: super::deps::MutableStateRef) -> HResult<()>;
     fn get_workflow_execution(&self) -> Option<super::deps::MutableStateRef>;
     async fn load_workflow_execution(&self) -> HResult<super::deps::MutableStateRef>;
     async fn update_workflow_execution_tasks(&self, now: i64) -> HResult<()>;

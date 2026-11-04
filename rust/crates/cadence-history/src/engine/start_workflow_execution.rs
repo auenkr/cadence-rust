@@ -95,3 +95,284 @@ pub fn should_terminate_and_start(policy: i32, state: i32) -> bool {
 pub fn get_terminate_if_running_details(new_run_id: &str) -> Vec<u8> {
     format!("New runID: {new_run_id}").into_bytes()
 }
+
+use std::time::Instant;
+use cadence_api::{types::{StartWorkflowExecutionResponse, WorkflowExecution}, errors::ServiceBusyError, CadenceError};
+use super::{deps::*, runtime::HistoryEngine, start_dependencies::*, types::*};
+
+#[derive(Default)]
+pub struct StartArtifacts {
+    pub execution: Option<WorkflowExecution>,
+    pub blob: Option<PersistedStartBlob>,
+}
+impl HistoryEngine {
+    pub async fn start_workflow_execution(&self, request: &mut HistoryStartWorkflowExecutionRequest, deadline: Option<Instant>) -> HResult<StartWorkflowExecutionResponse> {
+        let domain = self.domain_cache.get_domain_by_id(&request.domain_uuid)?;
+        let mut artifacts = StartArtifacts::default();
+        let result = self.start_workflow_helper(request, &domain, None, None, deadline, &mut artifacts).await;
+        if let Err(error) = &result { self.cleanup_start_failure(&domain, &artifacts, error).await; }
+        result
+    }
+
+    pub async fn start_workflow_helper(&self, request: &mut HistoryStartWorkflowExecutionRequest,
+        domain: &DomainCacheEntry, previous: Option<MutableStateRef>, signal: Option<&HistorySignalWithStartWorkflowExecutionRequest>,
+        deadline: Option<Instant>, artifacts: &mut StartArtifacts) -> HResult<StartWorkflowExecutionResponse> {
+        if domain.info.status != DOMAIN_STATUS_REGISTERED { return Err(HistoryError::bad_request("Domain is deprecated.")); }
+        let start = request.start_request.get_or_insert_default();
+        validate_start_workflow_execution_request(start, &*self.start_backend)?;
+        override_task_start_to_close_timeout_seconds(&domain.info.name, start,
+            self.start_backend.maximum_decision_timeout(&domain.info.name), &*self.start_backend);
+        let workflow_id = start.workflow_id.clone();
+        let lock = tokio::time::timeout(child_lock_timeout(deadline),
+            self.execution_cache.get_or_create_current_workflow_execution(&domain.info.id, &workflow_id)).await;
+        let release = match lock {
+            Ok(Ok(release)) => release,
+            Err(_) | Ok(Err(HistoryError::DeadlineExceeded)) => return Err(ServiceBusyError {
+                message: "an outstanding start workflow request is in-progress. Failed to acquire the resource.".into(),
+                ..Default::default()
+            }.into()),
+            Ok(Err(error)) => return Err(error),
+        };
+        let result = self.start_workflow_locked(request, domain, previous, signal, artifacts).await;
+        release(result.as_ref().err());
+        result
+    }
+
+    async fn start_workflow_locked(&self, request: &HistoryStartWorkflowExecutionRequest, domain: &DomainCacheEntry,
+        previous: Option<MutableStateRef>, signal: Option<&HistorySignalWithStartWorkflowExecutionRequest>, artifacts: &mut StartArtifacts) -> HResult<StartWorkflowExecutionResponse> {
+        let start = request.start_request.as_ref().expect("validated start request");
+        let execution = WorkflowExecution { workflow_id: start.workflow_id.clone(), run_id: uuid::Uuid::new_v4().to_string() };
+        let state = self.create_start_mutable_state(domain, &execution.run_id, request).await?;
+        let reuse = start.workflow_id_reuse_policy.map(|p| p as i32).unwrap_or_default();
+        if let Some(previous) = &previous {
+            let version = previous.get_last_write_version()?;
+            let info = previous.get_execution_info();
+            if version > state.get_current_version() {
+                let policy = self.start_backend.workflow_selection_policy(&domain.info.id, &execution.workflow_id, &info.run_id).await?;
+                if policy == start.active_cluster_selection_policy { return Err(self.new_domain_not_active_error(domain, version)); }
+            }
+            apply_workflow_id_reuse_policy(&info.create_request_id, &info.run_id, info.state, info.close_status, &execution.workflow_id, reuse)?;
+        } else if self.start_backend.record_uninitialized_enabled(&domain.info.name) {
+            if let Err(error) = self.start_backend.record_uninitialized(domain, &execution,
+                &start.workflow_type.as_ref().expect("validated type").name, self.time_source.now()).await {
+                tracing::error!(error = %error, "Failed to record uninitialized workflow execution");
+            }
+        }
+        if let Err(error) = self.add_start_events_and_tasks(&*state, &execution, request, signal) {
+            if self.start_backend.record_uninitialized_enabled(&domain.info.name) {
+                if let Err(error) = self.start_backend.delete_visibility(domain, &execution).await {
+                    tracing::error!(error = %error, "Failed to delete uninitialized workflow execution record");
+                }
+            }
+            return Err(error);
+        }
+        let snapshot = self.start_backend.close_snapshot(state.clone(), self.time_source.now()).await?;
+        artifacts.execution = Some(execution.clone());
+        let blob = self.start_backend.persist_start_batch(&domain.info.id, &execution, &snapshot.event_batches[0]).await?;
+        artifacts.blob = Some(blob.clone());
+        let (mode, previous_run, previous_version) = if let Some(previous) = &previous {
+            let info = previous.get_execution_info();
+            (if info.state == WORKFLOW_STATE_CORRUPTED { CreateWorkflowMode::ContinueAsNew } else { CreateWorkflowMode::WorkflowIdReuse }, info.run_id, previous.get_last_write_version()?)
+        } else { (CreateWorkflowMode::BrandNew, String::new(), 0) };
+        let result = self.start_backend.create_workflow(&domain.info.id, &execution, &snapshot, &blob, mode, &previous_run, previous_version).await;
+        let already = match result {
+            Ok(()) => return Ok(StartWorkflowExecutionResponse { run_id: execution.run_id }),
+            Err(HistoryError::DuplicateRequest { request_type, run_id }) => {
+                if request_type == WorkflowRequestType::Start || (signal.is_some() && request_type == WorkflowRequestType::Signal) {
+                    return Ok(StartWorkflowExecutionResponse { run_id });
+                }
+                tracing::error!(?request_type, "A bug is detected for idempotency improvement");
+                return Err(HistoryError::DuplicateRequest { request_type, run_id });
+            }
+            Err(HistoryError::PersistenceAlreadyStarted(already)) => already,
+            Err(error) => return Err(error),
+        };
+        if already.start_request_id == start.request_id { return Ok(StartWorkflowExecutionResponse { run_id: already.run_id }); }
+        if signal.is_some() {
+            tracing::warn!(workflow_domain_id = domain.info.id, workflow_id = execution.workflow_id, workflow_run_id = execution.run_id,
+                "signal-with-start might have left an orphaned history branch");
+            return Err(HistoryError::PersistenceAlreadyStarted(already));
+        }
+        if state.get_current_version() < already.last_write_version {
+            let policy = self.start_backend.workflow_selection_policy(&domain.info.id, &execution.workflow_id, &already.run_id).await?;
+            if policy == start.active_cluster_selection_policy { return Err(self.new_domain_not_active_error(domain, already.last_write_version)); }
+        }
+        if should_terminate_and_start(reuse, already.state) {
+            let old_execution = WorkflowExecution { workflow_id: execution.workflow_id.clone(), run_id: already.run_id.clone() };
+            let (context, release) = self.execution_cache.get_or_create_workflow_execution(&domain.info.id, &old_execution).await?;
+            let result = async {
+                let state = context.load_workflow_execution().await?;
+                self.terminate_and_start_workflow(context, state, &execution, domain, request, None).await
+            }.await;
+            release(result.as_ref().err());
+            match result { Err(error) if error.is_workflow_already_completed() => {
+                tracing::warn!(error = %error, "Workflow completed while trying to terminate, will continue starting workflow");
+            }, other => return other }
+        }
+        apply_workflow_id_reuse_policy(&already.start_request_id, &already.run_id, already.state, already.close_status, &execution.workflow_id, reuse)?;
+        match self.start_backend.create_workflow(&domain.info.id, &execution, &snapshot, &blob,
+            CreateWorkflowMode::WorkflowIdReuse, &already.run_id, already.last_write_version).await {
+            Ok(()) => Ok(StartWorkflowExecutionResponse { run_id: execution.run_id }),
+            Err(HistoryError::DuplicateRequest { request_type, run_id }) if request_type == WorkflowRequestType::Start
+                || (signal.is_some() && request_type == WorkflowRequestType::Signal) => Ok(StartWorkflowExecutionResponse { run_id }),
+            Err(error) => Err(error),
+        }
+    }
+
+    pub async fn cleanup_start_failure(&self, domain: &DomainCacheEntry, artifacts: &StartArtifacts, error: &HistoryError) {
+        let (Some(execution), Some(blob)) = (&artifacts.execution, &artifacts.blob) else { return; };
+        if matches!(error, HistoryError::PersistenceTimeout(_)) {
+            tracing::warn!(error = %error, "timeout error detected when creating execution. If the excution was not created successfully this has probably left some orphaned history branch that needs cleaning up");
+            self.start_backend.cleanup_metric("halted-timeout"); return;
+        }
+        let known = match error {
+            HistoryError::CurrentWorkflowConditionFailed(_) | HistoryError::ConditionFailed(_) | HistoryError::ShardAlreadyExist(_)
+                | HistoryError::PersistenceAlreadyStarted(_) | HistoryError::PersistenceShardOwnershipLost(_)
+                | HistoryError::DuplicateRequest { .. } => true,
+            HistoryError::Cadence(error) => matches!(&**error, CadenceError::WorkflowAlreadyStarted(_)
+                | CadenceError::ShardOwnershipLost(_) | CadenceError::WorkflowAlreadyCompleted(_)),
+            _ => false,
+        };
+        if !known {
+            tracing::warn!(error = %error, "unknown failure detected when creating execution. If the excution was not created successfully this has probably left some orphaned history branch that needs cleaning up");
+            self.start_backend.cleanup_metric("unknown"); return;
+        }
+        if !self.start_backend.cleanup_enabled(&domain.info.name) {
+            tracing::warn!(error = %error, "cleanup of orphaned history branch is disabled, but possible orphaned history branch was detected"); return;
+        }
+        if execution.workflow_id.is_empty() || execution.run_id.is_empty() {
+            tracing::error!("some parameters are missing in handleCreateWorkflowExecutionFailureCleanup. This is a bug"); return;
+        }
+        tracing::debug!("Deleting orphaned history branch during cleanup after identified failure during creation");
+        if let Err(error) = self.start_backend.delete_history_branch(&domain.info.name, &blob.branch_token).await {
+            tracing::warn!(error = %error, "Failed to cleanup orphaned history branch");
+            self.start_backend.cleanup_metric("failure"); return;
+        }
+        self.start_backend.cleanup_metric("success");
+        if self.start_backend.record_uninitialized_enabled(&domain.info.name) {
+            if let Err(error) = self.start_backend.delete_visibility(domain, execution).await {
+                tracing::warn!(error = %error, "Failed to delete uninitialized workflow execution record after failed CreateWorkflowExecution");
+            }
+        }
+    }
+
+    pub async fn terminate_and_start_workflow(&self, context: ExecutionContextRef, mut state: MutableStateRef,
+        execution: &WorkflowExecution, domain: &DomainCacheEntry, request: &HistoryStartWorkflowExecutionRequest,
+        signal: Option<&HistorySignalWithStartWorkflowExecutionRequest>) -> HResult<StartWorkflowExecutionResponse> {
+        let version = state.get_current_version();
+        if self.cluster_metadata.cluster_name_for_failover_version(version)? != self.current_cluster_name {
+            let policy = request.start_request.as_ref().and_then(|s| s.active_cluster_selection_policy.clone());
+            if state.get_execution_info().active_cluster_selection_policy == policy { return Err(self.new_domain_not_active_error(domain, version)); }
+            return Err(HistoryError::bad_request("Cannot terminate the existing workflow and start a new workflow because it is active in a different cluster with a different active cluster selection policy."));
+        }
+        for attempt in 0..5 {
+            if !state.is_workflow_execution_running() { return Err(super::workflow_mutations::already_completed()); }
+            if let Err(error) = state.terminate_workflow(state.get_next_event_id(), "TerminateIfRunning Policy", &get_terminate_if_running_details(&execution.run_id), "history-service") {
+                if matches!(error, HistoryError::StaleState) {
+                    context.clear();
+                    if attempt != 4 { state = context.load_workflow_execution().await?; }
+                    continue;
+                }
+                return Err(error);
+            }
+            let new_state = self.create_start_mutable_state(domain, &execution.run_id, request).await?;
+            self.add_start_events_and_tasks(&*new_state, execution, request, signal)?;
+            match context.update_workflow_execution_with_new_as_active(self.time_source.now(), &domain.info.id, execution, new_state).await {
+                Err(error) if is_start_conflict(&error) => { self.start_backend.concurrency_update_failure(); continue; }
+                Err(error) => return Err(error), Ok(()) => break,
+            }
+        }
+        // Go returns the new run even when every conditional update conflicts.
+        Ok(StartWorkflowExecutionResponse { run_id: execution.run_id.clone() })
+    }
+}
+fn is_start_conflict(error: &HistoryError) -> bool {
+    matches!(error, HistoryError::ConditionFailed(_) | HistoryError::CurrentWorkflowConditionFailed(_))
+}
+
+impl HistoryEngine {
+    pub async fn signal_with_start_workflow_execution(&self, request: &HistorySignalWithStartWorkflowExecutionRequest,
+        deadline: Option<Instant>) -> HResult<StartWorkflowExecutionResponse> {
+        let domain = self.domain_cache.get_domain_by_id(&request.domain_uuid)?;
+        if domain.info.status != DOMAIN_STATUS_REGISTERED { return Err(HistoryError::bad_request("Domain is deprecated.")); }
+        let signal = request.signal_with_start_request.clone().unwrap_or_default();
+        let execution = WorkflowExecution { workflow_id: signal.workflow_id.clone(), run_id: String::new() };
+        let mut previous = None;
+        let mut deferred_release = None;
+        let result = async {
+            match self.execution_cache.get_or_create_workflow_execution(&domain.info.id, &execution).await {
+                Ok((context, release)) => {
+                    deferred_release = Some(release);
+                    let mut exhausted = true;
+                    for _ in 0..5 {
+                        let state = match context.load_workflow_execution().await {
+                            Ok(state) => state,
+                            Err(error) if error.is_entity_not_exists() => { exhausted = false; break; }
+                            Err(error) => return Err(error),
+                        };
+                        if state.is_signal_requested(&signal.request_id) {
+                            return Ok(StartWorkflowExecutionResponse { run_id: context.get_execution().run_id });
+                        }
+                        if !state.is_workflow_execution_running() || self.check_for_history_corruptions(&*state).await? {
+                            previous = Some(state); exhausted = false; break;
+                        }
+                        if signal.workflow_id_reuse_policy.is_some_and(|p| p as i32 == 3) {
+                            let new_execution = WorkflowExecution { workflow_id: execution.workflow_id.clone(), run_id: uuid::Uuid::new_v4().to_string() };
+                            let start = self.get_start_request(&domain.info.id, &signal, request.partition_config.clone())?;
+                            match self.terminate_and_start_workflow(context.clone(), state.clone(), &new_execution, &domain, &start, Some(request)).await {
+                                Err(error) if error.is_workflow_already_completed() => {},
+                                other => return other,
+                            }
+                        }
+                        let info = state.get_execution_info();
+                        let max = self.config.maximum_signals_per_execution(&domain.info.name);
+                        if max > 0 && info.signal_count >= max {
+                            tracing::info!(signal_count = info.signal_count, workflow_id = execution.workflow_id,
+                                run_id = execution.run_id, domain_id = domain.info.id, "Execution limit reached for maximum signals");
+                            return Err(cadence_api::errors::LimitExceededError { message: "exceeded workflow execution limit for signal events".into() }.into());
+                        }
+                        if !signal.request_id.is_empty() { state.add_signal_requested(&signal.request_id); }
+                        state.add_workflow_execution_signaled(&signal.signal_name, &signal.signal_input, &signal.identity, &signal.request_id)
+                            .map_err(|_| HistoryError::internal("Unable to signal workflow execution."))?;
+                        if !state.has_pending_decision() && state.has_processed_or_pending_decision() {
+                            state.add_decision_task_scheduled_event(false)
+                                .map_err(|_| HistoryError::internal("Failed to add decision scheduled event."))?;
+                        }
+                        tracing::debug!("SignalWithStartWorkflowExecution calling UpdateWorkflowExecutionAsActive for wfID {}", execution.workflow_id);
+                        match context.update_workflow_execution_as_active(self.time_source.now()).await {
+                            Ok(()) => return Ok(StartWorkflowExecutionResponse { run_id: context.get_execution().run_id }),
+                            Err(HistoryError::DuplicateRequest { request_type: WorkflowRequestType::Signal, run_id }) => return Ok(StartWorkflowExecutionResponse { run_id }),
+                            Err(error) if is_start_conflict(&error) => continue,
+                            Err(error) => return Err(error),
+                        }
+                    }
+                    if exhausted { return Err(HistoryError::MaxAttemptsExceeded); }
+                }
+                Err(error) if error.is_entity_not_exists() => {},
+                Err(error) => return Err(error),
+            }
+            let mut start = self.get_start_request(&domain.info.id, &signal, request.partition_config.clone())?;
+            let mut artifacts = StartArtifacts::default();
+            let result = self.start_workflow_helper(&mut start, &domain, previous, Some(request), deadline, &mut artifacts).await;
+            if let Err(error) = &result { self.cleanup_start_failure(&domain, &artifacts, error).await; }
+            result
+        }.await;
+        if let Some(release) = deferred_release { release(result.as_ref().err()); }
+        result
+    }
+
+    pub fn get_start_request(&self, domain: &str, signal: &cadence_api::service_types::SignalWithStartWorkflowExecutionRequest,
+        partition: std::collections::HashMap<String, String>) -> HResult<HistoryStartWorkflowExecutionRequest> {
+        self.start_backend.history_start_request(domain, StartWorkflowExecutionRequest {
+            domain: signal.domain.clone(), workflow_id: signal.workflow_id.clone(), workflow_type: signal.workflow_type.clone(),
+            task_list: signal.task_list.clone(), input: signal.input.clone(),
+            execution_start_to_close_timeout_seconds: signal.execution_start_to_close_timeout_seconds,
+            task_start_to_close_timeout_seconds: signal.task_start_to_close_timeout_seconds,
+            identity: signal.identity.clone(), request_id: signal.request_id.clone(), workflow_id_reuse_policy: signal.workflow_id_reuse_policy,
+            retry_policy: signal.retry_policy.clone(), cron_schedule: signal.cron_schedule.clone(), cron_overlap_policy: signal.cron_overlap_policy,
+            memo: signal.memo.clone(), search_attributes: signal.search_attributes.clone(), header: signal.header.clone(),
+            delay_start_seconds: signal.delay_start_seconds, jitter_start_seconds: signal.jitter_start_seconds,
+            first_run_at_timestamp: signal.first_run_at_timestamp, active_cluster_selection_policy: signal.active_cluster_selection_policy.clone(),
+        }, partition)
+    }
+}

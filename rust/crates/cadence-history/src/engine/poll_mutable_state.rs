@@ -103,7 +103,6 @@ impl HistoryEngine {
         self.history_event_notifier.unwatch_history_event(domain_id, execution, &subscriber);
         result
     }
-    pub fn notify_new_history_event(&self, event: HistoryNotification) { self.history_event_notifier.notify_new_history_event(event); }
 }
 fn branch_changed(state: &GetMutableStateResponse, polling: bool) -> HistoryError {
     HistoryError::CurrentBranchChanged {
