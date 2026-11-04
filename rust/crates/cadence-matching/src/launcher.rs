@@ -1741,6 +1741,39 @@ async fn run_with_lifecycle(
                         state.domain_manager.clone(),
                         state.cluster_metadata.clone(),
                         matching_metric_sink.clone(),
+                        state.history_admin_channel.clone().map(|channel| {
+                            let handle = tokio::runtime::Handle::current();
+                            std::sync::Arc::new(move |domain_id: &str| {
+                                let mut client =
+                                    cadence_proto::history::history_api_client::HistoryApiClient::new(
+                                        channel.clone(),
+                                    );
+                                let mut request = cadence_service_core::admin::history_admin_request(
+                                    cadence_proto::history::GetFailoverInfoRequest {
+                                        domain_id: domain_id.to_owned(),
+                                    },
+                                );
+                                request.set_timeout(std::time::Duration::from_secs(1));
+                                handle
+                                    .block_on(async move {
+                                        tokio::time::timeout(
+                                            std::time::Duration::from_secs(1),
+                                            client.get_failover_info(request),
+                                        )
+                                        .await
+                                    })
+                                    .map_err(|_| "context deadline exceeded".to_owned())?
+                                    .map(|response| {
+                                        let response = response.into_inner();
+                                        cadence_service_core::domain_failover_watcher::FailoverInfo {
+                                            pending_shards: response.pending_shards,
+                                            completed_shard_count: response.completed_shard_count,
+                                        }
+                                    })
+                                    .map_err(|status| status.message().to_owned())
+                            })
+                                as cadence_service_core::domain_failover_watcher::FailoverInfoFn
+                        }),
                         std::sync::Arc::new(move || {
                             let o = interval_overlay.lock().expect("admin lock");
                             let interval = cadence_persistence::dynamic_config::duration(
