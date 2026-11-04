@@ -50,7 +50,7 @@ on:
         type: boolean
         default: false
   push:
-    branches: ["master", "matching-*"]
+    branches: ["master", "matching-*", "history-*"]
     paths: ["rust/**", ".github/workflows/rust-ci.yml", "go/idls"]
 
 concurrency:
@@ -164,6 +164,28 @@ jobs:
           name: matching-raw-string-oracle
           retention-days: 3
           path: ${{ runner.temp }}/matching-raw-string-oracle
+      - name: Generate Go sqlblobs ThriftRW golden fixtures
+        working-directory: go
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/sqlblobs-golden"
+          mkdir -p "$evidence"
+          git rev-parse HEAD > "$evidence/source-sha.txt"
+          go version > "$evidence/go-version.txt"
+          printf '%s\n' 'go test ./common/persistence/serialization -run ^TestPrintSQLBlobsGoldenHex$ -count=1 -v' > "$evidence/command.txt"
+          set +e
+          go test ./common/persistence/serialization -run '^TestPrintSQLBlobsGoldenHex$' -count=1 -v > "$evidence/go-golden.log" 2>&1
+          result=$?
+          echo "$result" > "$evidence/go-golden.exit"
+          cat "$evidence/go-golden.log"
+          exit "$result"
+      - name: Upload Go sqlblobs golden fixtures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sqlblobs-go-golden-fixtures
+          retention-days: 3
+          path: ${{ runner.temp }}/sqlblobs-golden
       - name: Run original Go malformed DescribeTaskList oracle
         working-directory: go
         run: |
