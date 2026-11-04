@@ -25,13 +25,14 @@ pub trait HandlerResources: Send + Sync {
 }
 pub struct HistoryHandler {
     pub resources: Arc<dyn HandlerResources>,
+    pub admin: super::admin::AdminResourcesRef,
     pub metrics: Arc<dyn HandlerMetrics>,
     pub shutting_down: AtomicBool,
     pub started: tokio::sync::Semaphore,
 }
 impl HistoryHandler {
-    pub fn new(resources: Arc<dyn HandlerResources>, metrics: Arc<dyn HandlerMetrics>) -> Self {
-        Self { resources, metrics, shutting_down: AtomicBool::new(false), started: tokio::sync::Semaphore::new(0) }
+    pub fn new(resources: Arc<dyn HandlerResources>, metrics: Arc<dyn HandlerMetrics>, admin: super::admin::AdminResourcesRef) -> Self {
+        Self { resources, metrics, admin, shutting_down: AtomicBool::new(false), started: tokio::sync::Semaphore::new(0) }
     }
     pub fn start(&self) { self.resources.start(); self.started.add_permits(1); }
     pub fn stop(&self) { self.shutting_down.store(true, Ordering::SeqCst); self.resources.stop(); }
