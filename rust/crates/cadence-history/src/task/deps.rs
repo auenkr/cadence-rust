@@ -857,3 +857,72 @@ pub type StringPropertyFnWithDomainFilter = Arc<dyn Fn(&str) -> String + Send + 
 /// Go `constants.HistoryTaskDLQMode*` (service/history/constants).
 pub const HISTORY_TASK_DLQ_MODE_ENABLED: &str = "enabled";
 pub const HISTORY_TASK_DLQ_MODE_SHADOW: &str = "shadow";
+
+/// TODO(link): replace by common::metrics typed identifiers.
+pub mod metrics {
+ pub const DATA_INCONSISTENT_COUNTER: &str = "DATA_INCONSISTENT_COUNTER";
+ pub const HISTORY_TASK_DLQ_PAGE_SIZE_BYTES: &str = "HISTORY_TASK_DLQ_PAGE_SIZE_BYTES";
+ pub const HISTORY_TASK_DLQ_PROCESSOR_SCOPE: &str = "HISTORY_TASK_DLQ_PROCESSOR_SCOPE";
+ pub const HISTORY_TASK_DLQ_REINJECT_FAILURES_COUNTER: &str = "HISTORY_TASK_DLQ_REINJECT_FAILURES_COUNTER";
+ pub const STALE_MUTABLE_STATE_COUNTER: &str = "STALE_MUTABLE_STATE_COUNTER";
+ pub const TASK_ATTEMPT_PER_DOMAIN_COUNTS_HISTOGRAM: &str = "TASK_ATTEMPT_PER_DOMAIN_COUNTS_HISTOGRAM";
+ pub const TASK_ATTEMPT_TIMER_PER_DOMAIN: &str = "TASK_ATTEMPT_TIMER_PER_DOMAIN";
+ pub const TASK_DISCARDED_PER_DOMAIN: &str = "TASK_DISCARDED_PER_DOMAIN";
+ pub const TASK_FAILURES_PER_DOMAIN: &str = "TASK_FAILURES_PER_DOMAIN";
+ pub const TASK_LATENCY_PER_DOMAIN: &str = "TASK_LATENCY_PER_DOMAIN";
+ pub const TASK_LATENCY_PER_DOMAIN_HISTOGRAM: &str = "TASK_LATENCY_PER_DOMAIN_HISTOGRAM";
+ pub const TASK_LATENCY_PER_TASK_LIST_HISTOGRAM: &str = "TASK_LATENCY_PER_TASK_LIST_HISTOGRAM";
+ pub const TASK_LIST_NOT_OWNED_BY_HOST_COUNTER_PER_DOMAIN: &str = "TASK_LIST_NOT_OWNED_BY_HOST_COUNTER_PER_DOMAIN";
+ pub const TASK_NOT_ACTIVE_COUNTER_PER_DOMAIN: &str = "TASK_NOT_ACTIVE_COUNTER_PER_DOMAIN";
+ pub const TASK_PENDING_ACTIVE_COUNTER_PER_DOMAIN: &str = "TASK_PENDING_ACTIVE_COUNTER_PER_DOMAIN";
+ pub const TASK_PRIORITY_ASSIGNER_SCOPE: &str = "TASK_PRIORITY_ASSIGNER_SCOPE";
+ pub const TASK_PROCESSING_LATENCY_PER_DOMAIN: &str = "TASK_PROCESSING_LATENCY_PER_DOMAIN";
+ pub const TASK_PROCESSING_LATENCY_PER_DOMAIN_HISTOGRAM: &str = "TASK_PROCESSING_LATENCY_PER_DOMAIN_HISTOGRAM";
+ pub const TASK_PROCESSING_LATENCY_PER_TASK_LIST_HISTOGRAM: &str = "TASK_PROCESSING_LATENCY_PER_TASK_LIST_HISTOGRAM";
+ pub const TASK_QUEUE_LATENCY_PER_DOMAIN: &str = "TASK_QUEUE_LATENCY_PER_DOMAIN";
+ pub const TASK_QUEUE_LATENCY_PER_DOMAIN_HISTOGRAM: &str = "TASK_QUEUE_LATENCY_PER_DOMAIN_HISTOGRAM";
+ pub const TASK_QUEUE_LATENCY_PER_TASK_LIST_HISTOGRAM: &str = "TASK_QUEUE_LATENCY_PER_TASK_LIST_HISTOGRAM";
+ pub const TASK_REDISPATCH_QUEUE_PENDING_TASKS_HISTOGRAM: &str = "TASK_REDISPATCH_QUEUE_PENDING_TASKS_HISTOGRAM";
+ pub const TASK_REDISPATCH_QUEUE_PENDING_TASKS_TIMER: &str = "TASK_REDISPATCH_QUEUE_PENDING_TASKS_TIMER";
+ pub const TASK_REQUESTS_PER_DOMAIN: &str = "TASK_REQUESTS_PER_DOMAIN";
+ pub const TASK_REQUESTS_PER_TASK_LIST: &str = "TASK_REQUESTS_PER_TASK_LIST";
+ pub const TASK_SCHEDULER_ALLOWED_COUNTER_PER_DOMAIN: &str = "TASK_SCHEDULER_ALLOWED_COUNTER_PER_DOMAIN";
+ pub const TASK_SCHEDULER_RATE_LIMITER_SCOPE: &str = "TASK_SCHEDULER_RATE_LIMITER_SCOPE";
+ pub const TASK_SCHEDULER_THROTTLED_COUNTER_PER_DOMAIN: &str = "TASK_SCHEDULER_THROTTLED_COUNTER_PER_DOMAIN";
+ pub const TASK_SCHEDULE_LATENCY_PER_DOMAIN: &str = "TASK_SCHEDULE_LATENCY_PER_DOMAIN";
+ pub const TASK_SCHEDULE_LATENCY_PER_TASK_LIST_HISTOGRAM: &str = "TASK_SCHEDULE_LATENCY_PER_TASK_LIST_HISTOGRAM";
+ pub const TASK_STANDBY_RETRY_COUNTER_PER_DOMAIN: &str = "TASK_STANDBY_RETRY_COUNTER_PER_DOMAIN";
+ pub const TASK_UNSUPPORTED_PER_DOMAIN: &str = "TASK_UNSUPPORTED_PER_DOMAIN";
+ pub const TASK_WORKFLOW_BUSY_PER_DOMAIN: &str = "TASK_WORKFLOW_BUSY_PER_DOMAIN";
+ pub const TIMER_TASK_THROTTLED_COUNTER: &str = "TIMER_TASK_THROTTLED_COUNTER";
+ pub const TRANSFER_TASK_MISSING_EVENT_COUNTER_PER_DOMAIN: &str = "TRANSFER_TASK_MISSING_EVENT_COUNTER_PER_DOMAIN";
+ pub const TRANSFER_TASK_THROTTLED_COUNTER: &str = "TRANSFER_TASK_THROTTLED_COUNTER";
+}
+
+// TODO(link): replace by config::Config.
+pub trait HistoryConfig: Send + Sync {
+ fn enable_debug_mode(&self)->bool;
+ fn enable_task_info_log_by_domain_id(&self,domain:&str)->bool;
+ fn enable_drop_stuck_task_by_domain_id(&self,domain:&str)->bool;
+ fn task_process_rps(&self)->i64;
+ fn task_critical_retry_count(&self)->i32;
+ fn number_of_shards(&self)->i32;
+ fn task_scheduler_global_domain_rps(&self,domain:&str)->i32;
+ fn task_scheduler_enable_rate_limiter(&self)->BoolPropertyFn;
+ fn task_scheduler_enable_rate_limiter_shadow_mode(&self)->BoolPropertyFnWithDomainFilter;
+}
+// TODO(link): replace by shard::Controller.
+pub trait ShardController: Send + Sync {fn num_shards(&self)->usize;}
+// TODO(link): replace by resource::Resource.
+pub trait Service: Send + Sync {fn get_domain_metrics_scope_cache(&self)->Arc<dyn DomainMetricsScopeCache>;}
+// TODO(link): replace by shard::Context.
+pub trait ShardContext: Send + Sync {
+ fn get_shard_id(&self)->i32;
+ fn get_time_source(&self)->Arc<dyn TimeSource>;
+ fn get_config(&self)->Arc<dyn HistoryConfig>;
+ fn get_domain_cache(&self)->Arc<dyn DomainCache>;
+ fn get_cluster_metadata(&self)->Arc<dyn ClusterMetadata>;
+ fn get_active_cluster_manager(&self)->Arc<dyn ActiveClusterManager>;
+ fn get_metrics_client(&self)->Arc<dyn MetricsClient>;
+ fn get_service(&self)->Arc<dyn Service>;
+}

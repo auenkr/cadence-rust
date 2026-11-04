@@ -13,7 +13,6 @@ use tokio_util::sync::CancellationToken;
 use super::host_limiter::HostLimiter;
 use super::interface::TaskReinjector;
 use crate::task::deps::*;
-use crate::task::deps_exec::*;
 
 const SWEEP_INTERVAL_JITTER_COEFFICIENT: f64 = 0.15;
 

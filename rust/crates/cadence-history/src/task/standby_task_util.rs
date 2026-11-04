@@ -232,7 +232,7 @@ pub fn new_push_decision_to_matching_info(
 }
 
 /// `getHistoryResendInfo`
-pub fn get_history_resend_info(ms: &(dyn MutableStateVersionHistories)) -> Result<HistoryResendInfo> {
+pub fn get_history_resend_info(ms: &dyn MutableStateVersionHistories) -> Result<HistoryResendInfo> {
     let version_histories = ms.get_version_histories().ok_or(TaskError::MissingVersionHistories)?;
     let current_branch = version_histories.get_current_version_history()?;
     let last_item = current_branch.get_last_item()?;
