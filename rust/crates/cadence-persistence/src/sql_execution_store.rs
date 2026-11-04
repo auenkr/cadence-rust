@@ -1,11 +1,7 @@
 //! History SQL execution row statements and create-mode transition checks.
-//!
-//! SQL transactions must lock and compare the shard row before invoking these
-//! statements. The workflow info payload itself is deliberately left at the
-//! `DataBlob` boundary until its Go `WorkflowExecutionInfo` codec is available.
 
 use crate::history_contract::{
-    CurrentExecution, CreateWorkflowMode, PersistenceError, WorkflowExecutionInfo,
+    CurrentExecution, CreateWorkflowMode, DataBlob, PersistenceError, SqlWorkflowExecutionInfo, WorkflowExecutionInfo,
 };
 use crate::history_sql_queries::{Dialect, Statement};
 use crate::history_sql::{ExecutionRow, WorkflowKey};
@@ -13,6 +9,131 @@ use crate::matching_mysql::{MySqlTaskStore, SyncConnectionPool};
 use crate::matching_postgres::{PostgresConnectionPool, PostgresTaskStore};
 use mysql::prelude::Queryable;
 use std::sync::Arc;
+
+const NANOS_PER_SECOND: i64 = 1_000_000_000;
+
+/// Convert the persistence contract to the exact sqlblobs struct used by Go.
+/// UUID fields are stored as their 16 byte SQL representation; variable
+/// payloads keep their original bytes and encoding labels.
+pub fn execution_info_to_sql(info: &WorkflowExecutionInfo, start_version: i64) -> Result<SqlWorkflowExecutionInfo, PersistenceError> {
+    let uuid_bytes = |value: &str, name: &str| -> Result<Vec<u8>, PersistenceError> {
+        if value.is_empty() { return Ok(Vec::new()); }
+        uuid::Uuid::parse_str(value).map(|v| v.as_bytes().to_vec()).map_err(|e| PersistenceError::InvalidArgument(format!("{name}: {e}")))
+    };
+    let seconds = |nanos: i64| i32::try_from(nanos / NANOS_PER_SECOND).map_err(|_| PersistenceError::InvalidArgument("workflow timeout seconds out of range".into()));
+    Ok(SqlWorkflowExecutionInfo {
+        parent_domain_id: uuid_bytes(&info.parent_domain_id, "parent_domain_id")?, parent_workflow_id: info.parent_workflow_id.clone(),
+        parent_run_id: uuid_bytes(&info.parent_run_id, "parent_run_id")?, initiated_id: info.initiated_id, completion_event_batch_id: info.completion_event_batch_id,
+        completion_event: info.completion_event.as_ref().map_or_else(Vec::new, |v| v.data.clone()), completion_event_encoding: info.completion_event.as_ref().map_or_else(String::new, |v| v.encoding.clone()),
+        task_list: info.task_list.clone(), task_list_kind: info.task_list_kind, workflow_type_name: info.workflow_type_name.clone(),
+        workflow_timeout_seconds: seconds(info.workflow_timeout_nanos)?, decision_task_timeout_seconds: seconds(info.decision_start_to_close_timeout_nanos)?, execution_context: info.execution_context.clone(),
+        state: info.state, close_status: info.close_status, start_version, last_write_event_id: info.next_event_id.saturating_sub(1),
+        last_event_task_id: info.last_event_task_id, last_first_event_id: info.last_first_event_id, last_processed_event: info.last_processed_event,
+        start_time_unix_nanos: info.start_time_unix_nanos, last_updated_time_unix_nanos: info.last_updated_time_unix_nanos,
+        decision_version: info.decision_version, decision_schedule_id: info.decision_schedule_id, decision_started_id: info.decision_started_id,
+        decision_timeout_seconds: seconds(info.decision_timeout_nanos)?, decision_attempt: info.decision_attempt,
+        decision_started_timestamp_unix_nanos: info.decision_started_time_unix_nanos, decision_scheduled_timestamp_unix_nanos: info.decision_scheduled_time_unix_nanos,
+        cancel_requested: info.cancel_requested, decision_original_scheduled_timestamp_unix_nanos: info.decision_original_scheduled_time_unix_nanos,
+        create_request_id: info.create_request_id.clone(), decision_request_id: info.decision_request_id.clone(), cancel_request_id: info.cancel_request_id.clone(),
+        sticky_task_list: info.sticky_task_list.clone(), sticky_schedule_to_start_timeout_seconds: info.sticky_schedule_to_start_timeout_nanos / NANOS_PER_SECOND,
+        retry_attempt: i64::from(info.attempt), retry_initial_interval_seconds: seconds(info.initial_interval_nanos)?, retry_maximum_interval_seconds: seconds(info.maximum_interval_nanos)?,
+        retry_maximum_attempts: info.maximum_attempts, retry_expiration_seconds: seconds(info.expiration_interval_nanos)?, retry_backoff_coefficient: info.backoff_coefficient,
+        retry_jitter_coefficient: info.jitter_coefficient, retry_expiration_time_unix_nanos: info.expiration_time_unix_nanos,
+        retry_non_retryable_errors: info.non_retriable_errors.clone(), has_retry_policy: info.has_retry_policy, cron_schedule: info.cron_schedule.clone(),
+        event_store_version: 0, event_branch_token: info.branch_token.clone(), signal_count: i64::from(info.signal_count), history_size: info.history_size,
+        client_library_version: info.client_library_version.clone(), client_feature_version: info.client_feature_version.clone(), client_impl: info.client_impl.clone(),
+        auto_reset_points: info.auto_reset_points.as_ref().map_or_else(Vec::new, |v| v.data.clone()), auto_reset_points_encoding: info.auto_reset_points.as_ref().map_or_else(String::new, |v| v.encoding.clone()),
+        search_attributes: info.search_attributes.clone(), memo: info.memo.clone(), version_histories: Vec::new(), version_histories_encoding: String::new(),
+        first_execution_run_id: uuid_bytes(&info.first_execution_run_id, "first_execution_run_id")?, partition_config: info.partition_config.clone(), checksum: Vec::new(), checksum_encoding: String::new(),
+        cron_overlap_policy: info.cron_overlap_policy, active_cluster_selection_policy: info.active_cluster_selection_policy.as_ref().map_or_else(Vec::new, |v| v.data.clone()),
+        active_cluster_selection_policy_encoding: info.active_cluster_selection_policy.as_ref().map_or_else(String::new, |v| v.encoding.clone()),
+    })
+}
+
+/// Decode Go's SQL struct into the public execution info contract. Metadata
+/// held in SQL columns (workflow/run/domain IDs, next event and last write
+/// version) is supplied separately by the caller.
+pub fn execution_info_from_sql(sql: SqlWorkflowExecutionInfo, key: &WorkflowKey, next_event_id: i64, last_write_version: i64) -> Result<(WorkflowExecutionInfo, i64, Option<DataBlob>, Option<DataBlob>), PersistenceError> {
+    let uuid_string = |value: Vec<u8>, name: &str| -> Result<String, PersistenceError> {
+        if value.is_empty() { return Ok(String::new()); }
+        uuid::Uuid::from_slice(&value).map(|v| v.to_string()).map_err(|e| PersistenceError::InternalDataInconsistency(format!("{name}: {e}")))
+    };
+    let blob = |data: Vec<u8>, encoding: String| (!data.is_empty() || !encoding.is_empty()).then_some(DataBlob { data, encoding });
+    let start_version = sql.start_version;
+    let version_histories = blob(sql.version_histories, sql.version_histories_encoding);
+    let checksum = blob(sql.checksum, sql.checksum_encoding);
+    let is_cron = !sql.cron_schedule.is_empty();
+    Ok((WorkflowExecutionInfo {
+        domain_id: uuid::Uuid::from_bytes(key.domain_id).to_string(), workflow_id: key.workflow_id.clone(), run_id: uuid::Uuid::from_bytes(key.run_id).to_string(),
+        first_execution_run_id: uuid_string(sql.first_execution_run_id, "first_execution_run_id")?, parent_domain_id: uuid_string(sql.parent_domain_id, "parent_domain_id")?,
+        parent_workflow_id: sql.parent_workflow_id, parent_run_id: uuid_string(sql.parent_run_id, "parent_run_id")?, initiated_id: sql.initiated_id,
+        completion_event_batch_id: sql.completion_event_batch_id, create_request_id: sql.create_request_id, state: sql.state, close_status: sql.close_status,
+        next_event_id, last_first_event_id: sql.last_first_event_id, last_event_task_id: sql.last_event_task_id, last_processed_event: sql.last_processed_event,
+        last_write_version, start_time_unix_nanos: sql.start_time_unix_nanos, last_updated_time_unix_nanos: sql.last_updated_time_unix_nanos,
+        workflow_timeout_nanos: i64::from(sql.workflow_timeout_seconds) * NANOS_PER_SECOND,
+        decision_start_to_close_timeout_nanos: i64::from(sql.decision_task_timeout_seconds) * NANOS_PER_SECOND, execution_context: sql.execution_context,
+        signal_count: sql.signal_count as i32, decision_version: sql.decision_version, decision_schedule_id: sql.decision_schedule_id, decision_started_id: sql.decision_started_id,
+        decision_request_id: sql.decision_request_id, decision_timeout_nanos: i64::from(sql.decision_timeout_seconds) * NANOS_PER_SECOND,
+        decision_attempt: sql.decision_attempt, decision_started_time_unix_nanos: sql.decision_started_timestamp_unix_nanos,
+        decision_scheduled_time_unix_nanos: sql.decision_scheduled_timestamp_unix_nanos, decision_original_scheduled_time_unix_nanos: sql.decision_original_scheduled_timestamp_unix_nanos,
+        cancel_requested: sql.cancel_requested, cancel_request_id: sql.cancel_request_id, task_list: sql.task_list, task_list_kind: sql.task_list_kind,
+        workflow_type_name: sql.workflow_type_name, sticky_task_list: sql.sticky_task_list,
+        sticky_schedule_to_start_timeout_nanos: sql.sticky_schedule_to_start_timeout_seconds * NANOS_PER_SECOND,
+        client_library_version: sql.client_library_version, client_feature_version: sql.client_feature_version, client_impl: sql.client_impl,
+        cron_schedule: sql.cron_schedule, cron_overlap_policy: sql.cron_overlap_policy, expiration_interval_nanos: i64::from(sql.retry_expiration_seconds) * NANOS_PER_SECOND,
+        completion_event: blob(sql.completion_event, sql.completion_event_encoding), auto_reset_points: blob(sql.auto_reset_points, sql.auto_reset_points_encoding),
+        branch_token: sql.event_branch_token, attempt: sql.retry_attempt as i32, has_retry_policy: sql.has_retry_policy,
+        initial_interval_nanos: i64::from(sql.retry_initial_interval_seconds) * NANOS_PER_SECOND, backoff_coefficient: sql.retry_backoff_coefficient,
+        jitter_coefficient: sql.retry_jitter_coefficient, maximum_interval_nanos: i64::from(sql.retry_maximum_interval_seconds) * NANOS_PER_SECOND,
+        expiration_time_unix_nanos: sql.retry_expiration_time_unix_nanos, maximum_attempts: sql.retry_maximum_attempts,
+        non_retriable_errors: sql.retry_non_retryable_errors, memo: sql.memo, search_attributes: sql.search_attributes,
+        partition_config: sql.partition_config, active_cluster_selection_policy: blob(sql.active_cluster_selection_policy, sql.active_cluster_selection_policy_encoding),
+        history_size: sql.history_size, is_cron,
+    }, start_version, version_histories, checksum))
+}
+
+/// Build the execution SQL row payload using the caller's configured Go
+/// serialization encoding. No default encoding is selected here.
+pub fn encode_execution_info(info: &WorkflowExecutionInfo, start_version: i64, encoding: crate::sqlblobs::Encoding) -> Result<DataBlob, PersistenceError> {
+    let sql = execution_info_to_sql(info, start_version)?;
+    let data = encoding.encode(&crate::sqlblobs::sql_workflow_execution_info_to_struct(&sql))
+        .map_err(|e| PersistenceError::InvalidArgument(e.to_string()))?;
+    Ok(DataBlob { data, encoding: encoding.as_str().into() })
+}
+
+/// Convert a persistence snapshot into the Go-compatible execution row.
+/// `Encoding` is explicit because Go selects it from serializer configuration.
+pub fn snapshot_to_execution_row(snapshot: &crate::history_contract::WorkflowSnapshot, shard_id: i32, encoding: crate::sqlblobs::Encoding) -> Result<ExecutionRow, PersistenceError> {
+    let domain_id = uuid::Uuid::parse_str(&snapshot.execution_info.domain_id)
+        .map_err(|e| PersistenceError::InvalidArgument(format!("domain_id: {e}")))?;
+    let run_id = uuid::Uuid::parse_str(&snapshot.execution_info.run_id)
+        .map_err(|e| PersistenceError::InvalidArgument(format!("run_id: {e}")))?;
+    let mut sql = execution_info_to_sql(&snapshot.execution_info, snapshot.start_version)?;
+    if let Some(blob) = &snapshot.version_histories {
+        sql.version_histories.clone_from(&blob.data);
+        sql.version_histories_encoding.clone_from(&blob.encoding);
+    }
+    if let Some(blob) = &snapshot.checksum {
+        sql.checksum.clone_from(&blob.data);
+        sql.checksum_encoding.clone_from(&blob.encoding);
+    }
+    let data = encoding.encode(&crate::sqlblobs::sql_workflow_execution_info_to_struct(&sql))
+        .map_err(|e| PersistenceError::InvalidArgument(e.to_string()))?;
+    Ok(ExecutionRow {
+        key: WorkflowKey { shard_id, domain_id: *domain_id.as_bytes(), workflow_id: snapshot.execution_info.workflow_id.clone(), run_id: *run_id.as_bytes() },
+        next_event_id: snapshot.execution_info.next_event_id,
+        last_write_version: snapshot.last_write_version,
+        data,
+        data_encoding: encoding.as_str().into(),
+    })
+}
+
+pub fn decode_execution_info(row: &ExecutionRow) -> Result<(WorkflowExecutionInfo, i64, Option<DataBlob>, Option<DataBlob>), PersistenceError> {
+    let encoding = crate::sqlblobs::Encoding::parse(&row.data_encoding).map_err(|e| PersistenceError::InternalDataInconsistency(e.to_string()))?;
+    let value = encoding.decode(&row.data).map_err(|e| PersistenceError::InternalDataInconsistency(e.to_string()))?;
+    let sql = crate::sqlblobs::sql_workflow_execution_info_from_struct(&value).map_err(|e| PersistenceError::InternalDataInconsistency(e.to_string()))?;
+    execution_info_from_sql(sql, &row.key, row.next_event_id, row.last_write_version)
+}
 
 type ExecutionDbRow = (i32, Vec<u8>, String, Vec<u8>, i64, i64, Vec<u8>, String);
 type CurrentExecutionDbRow = (Vec<u8>, String, i32, i32, i64, i64);
@@ -252,9 +373,38 @@ pub fn validate_create_transition(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::history_contract::WorkflowSnapshot;
 
     fn info(run_id: &str) -> WorkflowExecutionInfo {
         WorkflowExecutionInfo { workflow_id: "wf".into(), run_id: run_id.into(), ..Default::default() }
+    }
+
+    #[test]
+    fn snapshot_execution_row_round_trips_go_sqlblobs_payload() {
+        let mut execution_info = info("00000000-0000-0000-0000-000000000002");
+        execution_info.domain_id = "00000000-0000-0000-0000-000000000001".into();
+        execution_info.next_event_id = 42;
+        execution_info.workflow_timeout_nanos = NANOS_PER_SECOND * 17;
+        execution_info.create_request_id = "request".into();
+        let snapshot = WorkflowSnapshot {
+            execution_info,
+            start_version: 7,
+            last_write_version: 9,
+            version_histories: Some(DataBlob { encoding: "thriftrw".into(), data: vec![1, 2] }),
+            checksum: Some(DataBlob { encoding: "thriftrw".into(), data: vec![3, 4] }),
+            ..Default::default()
+        };
+        let row = snapshot_to_execution_row(&snapshot, 5, crate::sqlblobs::Encoding::ThriftRW).unwrap();
+        let (decoded, start_version, histories, checksum) = decode_execution_info(&row).unwrap();
+        assert_eq!(decoded.workflow_id, snapshot.execution_info.workflow_id);
+        assert_eq!(decoded.run_id, snapshot.execution_info.run_id);
+        assert_eq!(decoded.domain_id, snapshot.execution_info.domain_id);
+        assert_eq!(decoded.next_event_id, 42);
+        assert_eq!(decoded.workflow_timeout_nanos, NANOS_PER_SECOND * 17);
+        assert_eq!(decoded.create_request_id, "request");
+        assert_eq!(start_version, 7);
+        assert_eq!(histories, snapshot.version_histories);
+        assert_eq!(checksum, snapshot.checksum);
     }
     fn current() -> CurrentExecution {
         CurrentExecution { run_id: "old".into(), create_request_id: "request".into(), state: 2, close_status: 1, start_version: 4, last_write_version: 7 }
