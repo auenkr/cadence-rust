@@ -44,6 +44,22 @@ pub struct WorkflowExecutionInfo {
     pub active_cluster_selection_policy:Option<DataBlob>,
     pub history_size: i64, pub is_cron: bool,
 }
+
+/// Typed mutable-state activity row decoded from a SQL sqlblobs value.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ActivityInfo {
+    pub version:i64, pub scheduled_event_batch_id:i64, pub scheduled_event:Vec<u8>, pub scheduled_event_encoding:String,
+    pub scheduled_time_unix_nanos:i64, pub started_id:i64, pub started_event:Vec<u8>, pub started_event_encoding:String,
+    pub started_time_unix_nanos:i64, pub activity_id:String, pub request_id:String,
+    pub schedule_to_start_timeout_seconds:i32, pub schedule_to_close_timeout_seconds:i32,
+    pub start_to_close_timeout_seconds:i32, pub heartbeat_timeout_seconds:i32,
+    pub cancel_requested:bool, pub cancel_request_id:i64, pub timer_task_status:i32, pub attempt:i32,
+    pub task_list:String, pub task_list_kind:i32, pub started_identity:String, pub has_retry_policy:bool,
+    pub retry_initial_interval_seconds:i32, pub retry_maximum_interval_seconds:i32, pub retry_maximum_attempts:i32,
+    pub retry_expiration_time_unix_nanos:i64, pub retry_backoff_coefficient:f64, pub retry_jitter_coefficient:f64,
+    pub retry_non_retriable_errors:Vec<String>, pub retry_last_failure_reason:String, pub retry_last_worker_identity:String,
+    pub retry_last_failure_details:Vec<u8>,
+}
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct WorkflowSnapshot {
     pub execution_info: WorkflowExecutionInfo, pub version_histories: Option<DataBlob>,

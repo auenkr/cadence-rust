@@ -7,7 +7,7 @@
 //! contract boundary, while this module owns the byte-compatible wire layer.
 
 use cadence_thrift::{value::{read_struct, write_value, Struct}, Error, Reader, Result, TType, Writer};
-use crate::history_contract::{HistoryBranchRange, HistoryTreeInfo, ReplicationTask, TimerTask, TransferTask};
+use crate::history_contract::{ActivityInfo, HistoryBranchRange, HistoryTreeInfo, ReplicationTask, TimerTask, TransferTask};
 use cadence_thrift::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -120,6 +120,40 @@ fn uuid_from_bytes(value: &[u8], field: &str) -> Result<String> {
 fn string_field(value: &str) -> Value { Value::Bytes(value.as_bytes().to_vec()) }
 
 fn i64_field(value: i64) -> Value { Value::I64(value) }
+
+/// Map SQL ActivityInfo's seconds and unix-nanos fields to its typed contract.
+pub fn activity_info_to_struct(info: &ActivityInfo) -> Struct {
+    use Value::*;
+    let bytes = |v: &str| Bytes(v.as_bytes().to_vec());
+    let blob = |v: &[u8]| Bytes(v.to_vec());
+    cadence_thrift::Struct { fields: vec![
+        (10, I64(info.version)), (12, I64(info.scheduled_event_batch_id)), (14, blob(&info.scheduled_event)),
+        (16, bytes(&info.scheduled_event_encoding)), (18, I64(info.scheduled_time_unix_nanos)), (20, I64(info.started_id)),
+        (22, blob(&info.started_event)), (24, bytes(&info.started_event_encoding)), (26, I64(info.started_time_unix_nanos)),
+        (28, bytes(&info.activity_id)), (30, bytes(&info.request_id)), (32, I32(info.schedule_to_start_timeout_seconds)),
+        (34, I32(info.schedule_to_close_timeout_seconds)), (36, I32(info.start_to_close_timeout_seconds)),
+        (38, I32(info.heartbeat_timeout_seconds)), (40, Bool(info.cancel_requested)), (42, I64(info.cancel_request_id)),
+        (44, I32(info.timer_task_status)), (46, I32(info.attempt)), (48, bytes(&info.task_list)), (49, I32(info.task_list_kind)),
+        (50, bytes(&info.started_identity)), (52, Bool(info.has_retry_policy)), (54, I32(info.retry_initial_interval_seconds)),
+        (56, I32(info.retry_maximum_interval_seconds)), (58, I32(info.retry_maximum_attempts)),
+        (60, I64(info.retry_expiration_time_unix_nanos)), (62, F64(info.retry_backoff_coefficient)),
+        (64, List(info.retry_non_retriable_errors.iter().map(|s| bytes(s)).collect())),
+        (66, bytes(&info.retry_last_failure_reason)), (68, bytes(&info.retry_last_worker_identity)),
+        (70, blob(&info.retry_last_failure_details)), (74, F64(info.retry_jitter_coefficient)),
+    ] }
+}
+
+pub fn activity_info_from_struct(value: &Struct) -> Result<ActivityInfo> {
+    use Value::*;
+    let i64v = |id| match value.get(id) { Some(I64(v)) => Ok(*v), Some(I32(v)) => Ok(i64::from(*v)), None => Ok(0), Some(v) => Err(Error::Invalid(format!("field {id}: expected integer, got {v:?}"))) };
+    let i32v = |id| i64v(id).and_then(|v| i32::try_from(v).map_err(|_| Error::Invalid(format!("field {id}: integer out of range"))));
+    let boolv = |id| match value.get(id) { Some(Bool(v)) => Ok(*v), None => Ok(false), Some(v) => Err(Error::Invalid(format!("field {id}: expected bool, got {v:?}"))) };
+    let strv = |id| match value.get(id) { Some(Bytes(v)) => String::from_utf8(v.clone()).map_err(Error::from), None => Ok(String::new()), Some(v) => Err(Error::Invalid(format!("field {id}: expected string, got {v:?}"))) };
+    let blob = |id| match value.get(id) { Some(Bytes(v)) => Ok(v.clone()), None => Ok(Vec::new()), Some(v) => Err(Error::Invalid(format!("field {id}: expected binary, got {v:?}"))) };
+    let f64v = |id| match value.get(id) { Some(F64(v)) => Ok(*v), None => Ok(0.0), Some(v) => Err(Error::Invalid(format!("field {id}: expected double, got {v:?}"))) };
+    let retry_non_retriable_errors = match value.get(64) { Some(List(xs)) => xs.iter().map(|x| match x { Bytes(b) => String::from_utf8(b.clone()).map_err(Error::from), v => Err(Error::Invalid(format!("retryNonRetryableErrors: {v:?}"))) }).collect::<Result<Vec<_>>>()?, None => Vec::new(), Some(v) => return Err(Error::Invalid(format!("retryNonRetryableErrors: {v:?}"))) };
+    Ok(ActivityInfo { version:i64v(10)?, scheduled_event_batch_id:i64v(12)?, scheduled_event:blob(14)?, scheduled_event_encoding:strv(16)?, scheduled_time_unix_nanos:i64v(18)?, started_id:i64v(20)?, started_event:blob(22)?, started_event_encoding:strv(24)?, started_time_unix_nanos:i64v(26)?, activity_id:strv(28)?, request_id:strv(30)?, schedule_to_start_timeout_seconds:i32v(32)?, schedule_to_close_timeout_seconds:i32v(34)?, start_to_close_timeout_seconds:i32v(36)?, heartbeat_timeout_seconds:i32v(38)?, cancel_requested:boolv(40)?, cancel_request_id:i64v(42)?, timer_task_status:i32v(44)?, attempt:i32v(46)?, task_list:strv(48)?, task_list_kind:i32v(49)?, started_identity:strv(50)?, has_retry_policy:boolv(52)?, retry_initial_interval_seconds:i32v(54)?, retry_maximum_interval_seconds:i32v(56)?, retry_maximum_attempts:i32v(58)?, retry_expiration_time_unix_nanos:i64v(60)?, retry_backoff_coefficient:f64v(62)?, retry_non_retriable_errors, retry_last_failure_reason:strv(66)?, retry_last_worker_identity:strv(68)?, retry_last_failure_details:blob(70)?, retry_jitter_coefficient:f64v(74)? })
+}
 
 /// Convert the History task contract to Go `sqlblobs.TransferTaskInfo`.
 pub fn transfer_task_to_struct(task: &TransferTask) -> Result<Struct> {
@@ -372,6 +406,14 @@ mod tests {
         assert_eq!(Encoding::parse("thriftrw").unwrap().as_str(), "thriftrw");
         assert_eq!(Encoding::parse("thriftrw_snappy").unwrap().as_str(), "thriftrw_snappy");
         assert!(Encoding::parse("json").is_err());
+    }
+
+    #[test]
+    fn activity_info_contract_round_trips_seconds_and_unix_nanos() {
+        let activity = ActivityInfo { version: 7, scheduled_time_unix_nanos: 1_700_000_000_123_456_789,
+            schedule_to_close_timeout_seconds: 3600, activity_id: "act".into(),
+            retry_non_retriable_errors: vec!["Fatal".into()], ..Default::default() };
+        assert_eq!(activity_info_from_struct(&activity_info_to_struct(&activity)).unwrap(), activity);
     }
 
     #[test]
