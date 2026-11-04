@@ -18,8 +18,7 @@ impl SqlHistoryTasks {
         for task in tasks {
             let mut params = vec![Value::I32(shard_id)];
             if category.category_type == 2 {
-                let value = crate::sqlblobs::Encoding::parse(&task.data.encoding).and_then(|e| e.decode(&task.data.data)).and_then(|v| crate::sqlblobs::timer_task_from_struct(&v)).map_err(internal)?;
-                params.push(timestamp(value.visibility_timestamp_unix_nanos)?);
+                params.push(timestamp(task.visibility_timestamp_unix_nanos)?);
             }
             params.extend([Value::I64(task.task_id), Value::Bytes(task.data.data.clone()), Value::Text(task.data.encoding.clone())]);
             let count = tx.execute(dialect.statement(statement), &params)?;
@@ -50,7 +49,7 @@ impl SqlHistoryTasks {
                 if dialect == Dialect::MySql { params.push(min); }
                 params.extend([timestamp(request.max_timestamp_unix_nanos)?, Value::I32(request.page_size.wrapping_add(1))]);
                 let rows = self.backend.transaction(|tx| tx.query(dialect.statement(Statement::SelectTimerTasks), &params, &[Column::Timestamp,Column::I64,Column::Bytes,Column::Text]))?;
-                let mut tasks = rows.iter().map(|row| self.task(&request.category, row[1].integer()?, row[2].bytes()?, row[3].text()?)).collect::<Result<Vec<_>,_>>()?;
+                let mut tasks = rows.iter().map(|row| self.task(&request.category, row[1].integer()?, row[2].bytes()?, row[3].text()?).and_then(|mut task|{task.visibility_timestamp_unix_nanos=row[0].nanos()?;Ok(task)})).collect::<Result<Vec<_>,_>>()?;
                 let next_page_token = if tasks.len() > request.page_size.max(0) as usize {
                     let row = &rows[request.page_size as usize];
                     let next = TimerCursor { task_id: row[1].integer()?, timestamp: match &row[0] { Value::Timestamp(v) => v.and_utc(), _ => unreachable!() } };
@@ -64,7 +63,7 @@ impl SqlHistoryTasks {
     fn task(&self, category: &HistoryTaskCategory, task_id:i64, data:Vec<u8>, encoding:String) -> Result<Task,PersistenceError> {
         let value = crate::sqlblobs::Encoding::parse(&encoding).and_then(|e| e.decode(&data)).map_err(internal)?;
         let task_type = match category.category_id { 1 => crate::sqlblobs::transfer_task_from_struct(&value).map_err(internal)?.task_type, 2 => crate::sqlblobs::timer_task_from_struct(&value).map_err(internal)?.task_type, 3 => crate::sqlblobs::replication_task_from_struct(&value).map_err(internal)?.task_type, _ => return Err(internal("unsupported task category")) };
-        Ok(Task { task_type, task_id, data:DataBlob { data,encoding } })
+        Ok(Task { visibility_timestamp_unix_nanos:0, task_type, task_id, data:DataBlob { data,encoding } })
     }
     pub fn complete(&self, shard_id:i32, category:&HistoryTaskCategory, task_id:i64, visibility_timestamp:i64) -> Result<(),PersistenceError> {
         let statement = match (category.category_type, category.category_id) { (1,1) => Statement::DeleteTransferTask, (1,3) => Statement::DeleteReplicationTask, (2,2) => Statement::DeleteTimerTask, _ => return Err(PersistenceError::InvalidArgument("Unknown task category".into())) };
