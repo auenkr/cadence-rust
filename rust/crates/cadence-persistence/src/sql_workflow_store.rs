@@ -3,12 +3,13 @@
 use crate::{history_contract::*, history_sql_backend::{SqlBackend,SqlTx,Value,Column,uuid,uuid_string,internal,timestamp}, history_sql_queries::{Statement,workflow_state_map_statement,WorkflowStateMap,WorkflowMapOperation}, history_task_sql::SqlHistoryTasks, sql_execution_store::{snapshot_to_execution_row,decode_execution_info,validate_create_transition}};
 
 #[derive(Clone)]
-pub struct SqlWorkflowStore { pub backend:SqlBackend, pub encoding:crate::sqlblobs::Encoding, pub shard_id:i32, pub target_cluster:String }
+pub struct SqlWorkflowStore { pub backend:SqlBackend, pub encoding:crate::sqlblobs::Encoding, pub shard_id:i32, pub range_id:i64, pub target_cluster:String }
 fn key(shard:i32,info:&WorkflowExecutionInfo)->Result<Vec<Value>,PersistenceError>{Ok(vec![Value::I32(shard),uuid(&info.domain_id)?,Value::Text(info.workflow_id.clone()),uuid(&info.run_id)?])}
 impl SqlWorkflowStore {
     pub fn lock_shard(&self,tx:&mut dyn SqlTx,shard:i32,range:i64)->Result<(),PersistenceError>{
-        let rows=tx.query(self.backend.dialect().statement(Statement::LockShard),&[Value::I32(shard)],&[Column::I64])?;
-        let found=rows.first().ok_or_else(||PersistenceError::EntityNotExists(format!("shard {shard} not found")))?[0].integer()?;
+        let sql=match self.backend.dialect(){crate::history_sql_queries::Dialect::MySql=>"SELECT range_id FROM shards WHERE shard_id=? LOCK IN SHARE MODE",crate::history_sql_queries::Dialect::Postgres=>"SELECT range_id FROM shards WHERE shard_id=$1 FOR SHARE"};
+        let rows=tx.query(sql,&[Value::I32(shard)],&[Column::I64])?;
+        let found=rows.first().ok_or_else(||internal(format!("Failed to lock shard with ID {shard} that does not exist.")))?[0].integer()?;
         if found!=range{return Err(PersistenceError::ShardOwnershipLost{shard_id:shard,expected_range_id:range,actual_range_id:found});} Ok(())
     }
     fn current_tx(&self,tx:&mut dyn SqlTx,k:&[Value],lock:bool)->Result<Option<CurrentExecution>,PersistenceError>{
@@ -89,32 +90,42 @@ impl SqlWorkflowStore {
         validate_conflict(request)?;let reset=&request.reset_workflow_snapshot;
         self.backend.transaction(|tx|{self.lock_shard(tx,request.shard_id,request.range_id)?;
             match request.mode{ConflictResolveWorkflowMode::BypassCurrent=>self.assert_current(tx,request.shard_id,&reset.execution_info,&reset.execution_info.run_id,true)?,ConflictResolveWorkflowMode::UpdateCurrent=>{let previous=request.current_workflow_mutation.as_ref().map_or(&reset.execution_info.run_id,|m|&m.execution_info.run_id);self.assert_current(tx,request.shard_id,&reset.execution_info,previous,false)?;let target=request.new_workflow_snapshot.as_ref().unwrap_or(reset);self.current_write(tx,request.shard_id,&target.execution_info,target.start_version,target.last_write_version,false)?;}}
-            self.apply_snapshot_tx(tx,request.shard_id,reset,true)?;if let Some(current)=&request.current_workflow_mutation{self.apply_mutation_tx(tx,request.shard_id,current)?;}if let Some(new)=&request.new_workflow_snapshot{self.apply_snapshot_tx(tx,request.shard_id,new,false)?;}Ok(())})
+            self.apply_snapshot_tx(tx,request.shard_id,reset,true)?;if let Some(current)=&request.current_workflow_mutation{self.apply_mutation_tx(tx,request.shard_id,current)?;}
+ if let Some(new)=&request.new_workflow_snapshot{self.apply_snapshot_tx(tx,request.shard_id,new,false)?;}Ok(())})
     }
     pub fn create(&self,request:&CreateWorkflowExecutionRequest)->Result<CurrentExecution,PersistenceError>{
         let snapshot=&request.new_workflow_snapshot;let info=&snapshot.execution_info;check_state(info.state)?;
         let invalid=match request.mode{CreateWorkflowMode::Zombie=>matches!(info.state,0..=2),_=>matches!(info.state,2|3)};
         if invalid{return Err(internal(format!("Invalid workflow create mode {}, state: {}",request.mode as i32,info.state)));}
-        self.backend.transaction(|tx|{self.lock_shard(tx,request.shard_id,request.range_id)?;let current=self.current_tx(tx,&key(request.shard_id,info)?,true)?;
-            if validate_create_transition(request.mode,info,&request.previous_run_id,request.previous_last_write_version,current.as_ref())?{self.current_write(tx,request.shard_id,info,snapshot.start_version,snapshot.last_write_version,current.is_none())?;}
+        self.backend.transaction(|tx|{self.lock_shard(tx,request.shard_id,request.range_id)?;let k=key(request.shard_id,info)?;
+            let rows=tx.query(&self.query("SELECT ce.shard_id,ce.domain_id,ce.workflow_id,ce.run_id,ce.create_request_id,ce.state,ce.close_status,ce.start_version,e.last_write_version FROM current_executions ce INNER JOIN executions e ON e.shard_id=ce.shard_id AND e.domain_id=ce.domain_id AND e.workflow_id=ce.workflow_id AND e.run_id=ce.run_id WHERE ce.shard_id=? AND ce.domain_id=? AND ce.workflow_id=? FOR UPDATE"),&k[..3],&[Column::I32,Column::Bytes,Column::Text,Column::Bytes,Column::Text,Column::I32,Column::I32,Column::I64,Column::I64])?;
+            let current=rows.first().map(|r|Ok::<_,PersistenceError>(CurrentExecution{run_id:uuid_string(&r[3])?,create_request_id:r[4].text()?,state:r[5].integer()? as i32,close_status:r[6].integer()? as i32,start_version:r[7].integer()?,last_write_version:r[8].integer()?})).transpose()?;
+            if current.is_some(){validate_create_transition(request.mode,info,&request.previous_run_id,request.previous_last_write_version,current.as_ref())?;}
+            if request.mode!=CreateWorkflowMode::Zombie{self.current_write(tx,request.shard_id,info,snapshot.start_version,snapshot.last_write_version,request.mode==CreateWorkflowMode::BrandNew)?;}
             self.apply_snapshot_tx(tx,request.shard_id,snapshot,false)?;Ok(CurrentExecution{run_id:info.run_id.clone(),create_request_id:info.create_request_id.clone(),state:info.state,close_status:info.close_status,start_version:snapshot.start_version,last_write_version:snapshot.last_write_version})})
     }
     pub fn query(&self,sql:&str)->String{if self.backend.dialect()==crate::history_sql_queries::Dialect::MySql{return sql.into();}let mut n=0;sql.chars().map(|c|if c=='?'{n+=1;format!("${n}")}else{c.to_string()}).collect()}
     pub fn get_current(&self,shard:i32,domain:&str,workflow:&str)->Result<CurrentExecution,PersistenceError>{let k=vec![Value::I32(shard),uuid(domain)?,Value::Text(workflow.into())];self.backend.transaction(|tx|self.current_tx(tx,&k,false))?.ok_or_else(||PersistenceError::EntityNotExists("current execution not found".into()))}
     pub fn get(&self,shard:i32,domain:&str,workflow:&str,run:&str)->Result<WorkflowSnapshot,PersistenceError>{
         let k=key(shard,&WorkflowExecutionInfo{domain_id:domain.into(),workflow_id:workflow.into(),run_id:run.into(),..Default::default()})?;
-        self.backend.transaction(|tx|{let rows=tx.query(self.backend.dialect().statement(Statement::GetExecution),&k,&[Column::I32,Column::Bytes,Column::Text,Column::Bytes,Column::I64,Column::I64,Column::Bytes,Column::Text])?;let row=rows.first().ok_or_else(||PersistenceError::EntityNotExists("workflow execution not found".into()))?;
-            let key=crate::history_sql::WorkflowKey{shard_id:shard,domain_id:uuid::Uuid::parse_str(domain).map_err(internal)?.into_bytes(),workflow_id:workflow.into(),run_id:uuid::Uuid::parse_str(run).map_err(internal)?.into_bytes()};
-            let (execution_info,start_version,version_histories,checksum)=decode_execution_info(&crate::history_sql::ExecutionRow{key,next_event_id:row[4].integer()?,last_write_version:row[5].integer()?,data:row[6].bytes()?,data_encoding:row[7].text()?})?;
-            let mut snapshot=WorkflowSnapshot{execution_info,start_version,last_write_version:row[5].integer()?,version_histories,checksum,..Default::default()};
-            for map in [WorkflowStateMap::Activity,WorkflowStateMap::Timer,WorkflowStateMap::ChildExecution,WorkflowStateMap::RequestCancel,WorkflowStateMap::Signal]{
-                let mut columns=vec![if map==WorkflowStateMap::Timer{Column::Text}else{Column::I64},Column::Bytes,Column::Text];if map==WorkflowStateMap::Activity{columns.extend([Column::Bytes,Column::Timestamp]);}
-                let rows=tx.query(&workflow_state_map_statement(self.backend.dialect(),map,WorkflowMapOperation::Select,0),&k,&columns)?;
-                for row in rows{let value=DataBlob{data:row[1].bytes()?,encoding:row[2].text()?};if map==WorkflowStateMap::Timer{snapshot.timer_infos.push(KeyedBlob{key:row[0].text()?,value});}else{let entry=KeyedBlob{key:row[0].integer()?,value};match map{WorkflowStateMap::Activity=>{snapshot.activity_heartbeats.insert(entry.key,ActivityHeartbeat{details:row[3].bytes()?,updated_time_unix_nanos:row[4].nanos()?});snapshot.activity_infos.push(entry)},WorkflowStateMap::ChildExecution=>snapshot.child_execution_infos.push(entry),WorkflowStateMap::RequestCancel=>snapshot.request_cancel_infos.push(entry),WorkflowStateMap::Signal=>snapshot.signal_infos.push(entry),_=>unreachable!()}}}
-            }
-            let events=tx.query(self.backend.dialect().statement(Statement::SelectBufferedEvents),&k,&[Column::Bytes,Column::Text])?;snapshot.buffered_events=events.iter().map(|r|Ok(DataBlob{data:r[0].bytes()?,encoding:r[1].text()?})).collect::<Result<_,PersistenceError>>()?;
-            let signals=tx.query(self.backend.dialect().statement(Statement::SelectSignalRequested),&k,&[Column::Text])?;snapshot.signal_requested_ids=signals.iter().map(|r|r[0].text()).collect::<Result<_,_>>()?;Ok(snapshot)})
+        let mut snapshot=WorkflowSnapshot::default();
+        // Go reads maps first and the execution/checksum row last.
+        for map in [WorkflowStateMap::Activity,WorkflowStateMap::Timer,WorkflowStateMap::ChildExecution,WorkflowStateMap::RequestCancel,WorkflowStateMap::Signal]{
+            let mut columns=vec![if map==WorkflowStateMap::Timer{Column::Text}else{Column::I64},Column::Bytes,Column::Text];if map==WorkflowStateMap::Activity{columns.extend([Column::Bytes,Column::Timestamp]);}
+            let rows=self.backend.transaction(|tx|tx.query(&workflow_state_map_statement(self.backend.dialect(),map,WorkflowMapOperation::Select,0),&k,&columns))?;
+            for row in rows{let value=DataBlob{data:row[1].bytes()?,encoding:row[2].text()?};if map==WorkflowStateMap::Timer{snapshot.timer_infos.push(KeyedBlob{key:row[0].text()?,value});}else{let entry=KeyedBlob{key:row[0].integer()?,value};match map{WorkflowStateMap::Activity=>{snapshot.activity_heartbeats.insert(entry.key,ActivityHeartbeat{details:row[3].bytes()?,updated_time_unix_nanos:row[4].nanos()?});snapshot.activity_infos.push(entry)},WorkflowStateMap::ChildExecution=>snapshot.child_execution_infos.push(entry),WorkflowStateMap::RequestCancel=>snapshot.request_cancel_infos.push(entry),WorkflowStateMap::Signal=>snapshot.signal_infos.push(entry),_=>unreachable!()}}}
+        }
+        let events=self.backend.transaction(|tx|tx.query(self.backend.dialect().statement(Statement::SelectBufferedEvents),&k,&[Column::Bytes,Column::Text]))?;
+        snapshot.buffered_events=events.iter().map(|r|Ok(DataBlob{data:r[0].bytes()?,encoding:r[1].text()?})).collect::<Result<_,PersistenceError>>()?;
+        let signals=self.backend.transaction(|tx|tx.query(self.backend.dialect().statement(Statement::SelectSignalRequested),&k,&[Column::Text]))?;
+        snapshot.signal_requested_ids=signals.iter().map(|r|r[0].text()).collect::<Result<_,_>>()?;
+        let rows=self.backend.transaction(|tx|tx.query(self.backend.dialect().statement(Statement::GetExecution),&k,&[Column::I32,Column::Bytes,Column::Text,Column::Bytes,Column::I64,Column::I64,Column::Bytes,Column::Text]))?;
+        let row=rows.first().ok_or_else(||PersistenceError::EntityNotExists(format!("Workflow execution not found.  WorkflowId: {workflow}, RunId: {run}")))?;
+        let key=crate::history_sql::WorkflowKey{shard_id:shard,domain_id:uuid::Uuid::parse_str(domain).map_err(internal)?.into_bytes(),workflow_id:workflow.into(),run_id:uuid::Uuid::parse_str(run).map_err(internal)?.into_bytes()};
+        let (execution_info,start_version,version_histories,checksum)=decode_execution_info(&crate::history_sql::ExecutionRow{key,next_event_id:row[4].integer()?,last_write_version:row[5].integer()?,data:row[6].bytes()?,data_encoding:row[7].text()?})?;
+        snapshot.execution_info=execution_info;snapshot.start_version=start_version;snapshot.last_write_version=row[5].integer()?;snapshot.version_histories=version_histories;snapshot.checksum=checksum;Ok(snapshot)
     }
+
 }
 fn ints(values:&[KeyedBlob<i64>])->Vec<(Value,DataBlob)>{values.iter().map(|v|(Value::I64(v.key),v.value.clone())).collect()}
 fn strings(values:&[KeyedBlob<String>])->Vec<(Value,DataBlob)>{values.iter().map(|v|(Value::Text(v.key.clone()),v.value.clone())).collect()}
@@ -146,7 +157,7 @@ impl GoExecutionStore for SqlWorkflowStore {
   let (shard,workflow)=if filter.next_page_token.is_empty(){(filter.shard_id,String::new())}else{crate::history_tree_token::decode_execution(&filter.next_page_token)?};
   let rows=self.backend.transaction(|tx|tx.query(&self.query("SELECT shard_id,domain_id,workflow_id,run_id,next_event_id,last_write_version,data,data_encoding FROM executions WHERE shard_id=? AND workflow_id>? ORDER BY workflow_id LIMIT ?"),&[Value::I32(shard),Value::Text(workflow),Value::I32(filter.page_size)],&[Column::I32,Column::Bytes,Column::Text,Column::Bytes,Column::I64,Column::I64,Column::Bytes,Column::Text]))?;
   let mut executions=Vec::new();for row in &rows{let key=crate::history_sql::WorkflowKey{shard_id:row[0].integer()? as i32,domain_id:uuid::Uuid::parse_str(&uuid_string(&row[1])?).map_err(internal)?.into_bytes(),workflow_id:row[2].text()?,run_id:uuid::Uuid::parse_str(&uuid_string(&row[3])?).map_err(internal)?.into_bytes()};let (execution_info,start_version,version_histories,checksum)=decode_execution_info(&crate::history_sql::ExecutionRow{key,next_event_id:row[4].integer()?,last_write_version:row[5].integer()?,data:row[6].bytes()?,data_encoding:row[7].text()?})?;executions.push(WorkflowSnapshot{execution_info,start_version,last_write_version:row[5].integer()?,version_histories,checksum,..Default::default()});}
-  let next_page_token=rows.last().map(|r|Ok(crate::history_tree_token::encode_execution(filter.shard_id,&r[2].text()?))).transpose()?.unwrap_or_default();Ok(ExecutionPage{executions,next_page_token})
+  let next_page_token=rows.last().map(|r|Ok::<_,PersistenceError>(crate::history_tree_token::encode_execution(filter.shard_id,&r[2].text()?))).transpose()?.unwrap_or_default();Ok(ExecutionPage{executions,next_page_token})
  }
  async fn create_transfer_tasks(&self,shard_id:i32,tasks:Vec<TransferTask>)->Result<(),PersistenceError>{let tasks=tasks.iter().map(|task|Ok(Task{visibility_timestamp_unix_nanos:0,task_type:task.task_type,task_id:task.task_id,data:DataBlob{data:self.encoding.encode(&crate::sqlblobs::transfer_task_to_struct(task).map_err(internal)?).map_err(internal)?,encoding:self.encoding.as_str().into()}})).collect::<Result<Vec<_>,PersistenceError>>()?;self.task_store().create(shard_id,HistoryTaskCategory{category_type:1,category_id:1},&tasks)}
  async fn get_transfer_tasks(&self,shard_id:i32,min_id:i64,max_id:i64,batch_size:i32)->Result<Vec<TransferTask>,PersistenceError>{let page=self.task_store().get_page(&crate::history_task_sql::HistoryTaskQuery{shard_id,category:HistoryTaskCategory{category_type:1,category_id:1},min_task_id:min_id,max_task_id:max_id,page_size:batch_size,..Default::default()})?;page.tasks.into_iter().map(|task|{let mut value=crate::sqlblobs::Encoding::parse(&task.data.encoding).and_then(|e|e.decode(&task.data.data)).and_then(|v|crate::sqlblobs::transfer_task_from_struct(&v)).map_err(internal)?;value.task_id=task.task_id;Ok(value)}).collect()}
@@ -159,7 +170,7 @@ impl GoExecutionStore for SqlWorkflowStore {
  async fn complete_timer_task(&self,shard_id:i32,visibility_timestamp:i64,task_id:i64)->Result<(),PersistenceError>{self.task_store().complete(shard_id,&HistoryTaskCategory{category_type:2,category_id:2},task_id,visibility_timestamp)}
  async fn select_workflow_timer_tasks(&self,_range:TimerTaskRange)->Result<Vec<HistoryTaskKey>,PersistenceError>{Ok(Vec::new())}
  async fn create_history_tasks(&self,_shard_id:i32,_tasks:Vec<Task>)->Result<(),PersistenceError>{self.task_store().create_history_tasks()}
- async fn create_failover_marker_tasks(&self,shard_id:i32,tasks:Vec<Task>)->Result<(),PersistenceError>{self.task_store().create(shard_id,HistoryTaskCategory{category_type:1,category_id:3},&tasks)}
+ async fn create_failover_marker_tasks(&self,shard_id:i32,tasks:Vec<Task>)->Result<(),PersistenceError>{self.create_failover_markers(shard_id,self.range_id,&tasks)}
  async fn get_history_tasks(&self,range:TaskRange,category:HistoryTaskCategory)->Result<Vec<Task>,PersistenceError>{Ok(self.task_store().get_page(&crate::history_task_sql::HistoryTaskQuery{shard_id:range.shard_id,category,min_task_id:range.min_task_id,max_task_id:range.max_task_id,page_size:range.batch_size,..Default::default()})?.tasks)}
  async fn complete_history_task(&self,shard_id:i32,category:HistoryTaskCategory,task_id:i64)->Result<(),PersistenceError>{self.task_store().complete(shard_id,&category,task_id,0)}
  async fn range_complete_history_tasks(&self,range:TaskRange,category:HistoryTaskCategory)->Result<u64,PersistenceError>{self.task_store().range_complete(&crate::history_task_sql::HistoryTaskQuery{shard_id:range.shard_id,category,min_task_id:range.min_task_id,max_task_id:range.max_task_id,page_size:range.batch_size,..Default::default()})}
@@ -176,3 +187,18 @@ impl GoExecutionStore for SqlWorkflowStore {
  async fn delete_active_cluster_selection_policy(&self,shard_id:i32,domain_id:String,workflow_id:String,run_id:String)->Result<(),PersistenceError>{let k=key(shard_id,&WorkflowExecutionInfo{domain_id,workflow_id,run_id,..Default::default()})?;self.backend.transaction(|tx|tx.execute(&self.query("DELETE FROM active_cluster_selection_policy WHERE shard_id=? AND domain_id=? AND workflow_id=? AND run_id=?"),&k))?;Ok(())}
 }
 impl SqlWorkflowStore {pub fn task_store(&self)->SqlHistoryTasks{SqlHistoryTasks{backend:self.backend.clone(),encoding:self.encoding,shard_id:self.shard_id,target_cluster:self.target_cluster.clone()}}}
+
+impl SqlWorkflowStore {
+ pub fn new(backend:SqlBackend,encoding:crate::sqlblobs::Encoding,shard_id:i32,range_id:i64)->Self{Self{backend,encoding,shard_id,range_id,target_cluster:String::new()}}
+ pub fn create_failover_markers(&self,shard_id:i32,range_id:i64,markers:&[Task])->Result<(),PersistenceError>{
+  let tasks=markers.iter().map(|marker|{let mut task=crate::sqlblobs::Encoding::parse(&marker.data.encoding).and_then(|e|e.decode(&marker.data.data)).and_then(|v|crate::sqlblobs::replication_task_from_struct(&v)).map_err(internal)?;
+   task.workflow_id=String::new();task.run_id="30000000-5000-f000-f000-000000000000".into();task.task_type=marker.task_type;task.first_event_id=-23;task.next_event_id=-23;task.scheduled_id=-23;task.event_store_version=2;task.new_run_event_store_version=2;task.branch_token.clear();task.new_run_branch_token.clear();task.creation_time_unix_nanos=marker.visibility_timestamp_unix_nanos;
+   Ok(Task{visibility_timestamp_unix_nanos:marker.visibility_timestamp_unix_nanos,task_id:marker.task_id,task_type:marker.task_type,data:DataBlob{data:self.encoding.encode(&crate::sqlblobs::replication_task_to_struct(&task).map_err(internal)?).map_err(internal)?,encoding:self.encoding.as_str().into()}})
+  }).collect::<Result<Vec<_>,PersistenceError>>()?;
+  self.backend.transaction(|tx|{self.lock_shard(tx,shard_id,range_id)?;SqlHistoryTasks::insert_tx(tx,self.backend.dialect(),shard_id,&HistoryTaskCategory{category_type:1,category_id:3},&tasks)})
+ }
+ pub fn complete_history_task_keys(&self,shard:i32,category:&HistoryTaskCategory,keys:&[(i64,i64)])->Result<(),PersistenceError>{
+  let statement=match(category.category_type,category.category_id){(1,1)=>Statement::DeleteTransferTask,(1,3)=>Statement::DeleteReplicationTask,(2,2)=>Statement::DeleteTimerTask,_=>return Err(PersistenceError::InvalidArgument("Unknown task category".into()))};
+  self.backend.transaction(|tx|{for (task_id,time)in keys{let mut params=vec![Value::I32(shard)];if category.category_type==2{params.push(timestamp(*time)?);}params.push(Value::I64(*task_id));tx.execute(self.backend.dialect().statement(statement),&params)?;}Ok(())})
+ }
+}

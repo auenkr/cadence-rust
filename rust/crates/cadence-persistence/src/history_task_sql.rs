@@ -78,7 +78,8 @@ impl SqlHistoryTasks {
             (2,2) => { params.extend([timestamp(request.min_timestamp_unix_nanos)?,timestamp(request.max_timestamp_unix_nanos)?]); Statement::BatchDeleteTimerTasks }
             _ => return Err(PersistenceError::InvalidArgument("Unknown task category".into())),
         };
-        params.push(Value::I32(request.page_size)); self.backend.transaction(|tx| tx.execute(self.backend.dialect().statement(statement), &params))
+        let statement=if request.page_size>0{params.push(Value::I32(request.page_size));statement}else{match statement{Statement::BatchDeleteTransferTasks=>Statement::RangeDeleteTransferTasks,Statement::BatchDeleteReplicationTasks=>Statement::RangeDeleteReplicationTasks,Statement::BatchDeleteTimerTasks=>Statement::RangeDeleteTimerTasks,_=>unreachable!()}};
+        self.backend.transaction(|tx| tx.execute(self.backend.dialect().statement(statement), &params))
     }
     pub fn put_dlq(&self, source_cluster:&str, task:&ReplicationTask) -> Result<(),PersistenceError> {
         let mut task = task.clone(); task.event_store_version = 2; task.new_run_event_store_version = 2;
@@ -88,7 +89,7 @@ impl SqlHistoryTasks {
     }
     pub fn get_dlq(&self, source_cluster:&str, min:i64, max:i64, page_size:i32) -> Result<Vec<ReplicationTask>,PersistenceError> {
         let rows = self.backend.transaction(|tx| tx.query(self.backend.dialect().statement(Statement::SelectReplicationTasksDLQ), &[Value::Text(source_cluster.into()),Value::I32(self.shard_id),Value::I64(min),Value::I64(max),Value::I32(page_size)], &[Column::I64,Column::Bytes,Column::Text]))?;
-        rows.into_iter().map(|row| { let mut task = crate::sqlblobs::Encoding::parse(&row[2].text()?).and_then(|e| e.decode(&row[1].bytes().map_err(|e| crate::sqlblobs::Error::Invalid(e.to_string()))?)).and_then(|v| crate::sqlblobs::replication_task_from_struct(&v)).map_err(internal)?; task.task_id = row[0].integer()?; Ok(task) }).collect()
+        rows.into_iter().map(|row| { let mut task = crate::sqlblobs::Encoding::parse(&row[2].text()?).and_then(|e| e.decode(&row[1].bytes().map_err(|e| cadence_thrift::Error::Invalid(e.to_string()))?)).and_then(|v| crate::sqlblobs::replication_task_from_struct(&v)).map_err(internal)?; task.task_id = row[0].integer()?; Ok(task) }).collect()
     }
     pub fn dlq_size(&self, source_cluster:&str) -> Result<i64,PersistenceError> {
         let rows = self.backend.transaction(|tx| tx.query(self.backend.dialect().statement(Statement::CountReplicationTasksDLQ), &[Value::Text(source_cluster.into()),Value::I32(self.shard_id)], &[Column::I64]))?;
@@ -98,6 +99,9 @@ impl SqlHistoryTasks {
         self.backend.transaction(|tx| tx.execute(self.backend.dialect().statement(Statement::DeleteReplicationTaskDLQ), &[Value::Text(source_cluster.into()),Value::I32(self.shard_id),Value::I64(task_id)]))?; Ok(())
     }
     pub fn range_delete_dlq(&self, source_cluster:&str, min:i64, max:i64, page_size:i32) -> Result<u64,PersistenceError> {
-        self.backend.transaction(|tx| tx.execute(self.backend.dialect().statement(Statement::RangeDeleteReplicationTasksDLQ), &[Value::Text(source_cluster.into()),Value::I32(self.shard_id),Value::I64(min),Value::I64(max),Value::I32(page_size)]))
+        let mut params=vec![Value::Text(source_cluster.into()),Value::I32(self.shard_id),Value::I64(min),Value::I64(max)];
+        if page_size>0{params.push(Value::I32(page_size));return self.backend.transaction(|tx|tx.execute(self.backend.dialect().statement(Statement::RangeDeleteReplicationTasksDLQ),&params));}
+        let query=match self.backend.dialect(){Dialect::MySql=>"DELETE FROM replication_tasks_dlq WHERE source_cluster_name=? AND shard_id=? AND task_id>=? AND task_id<?",Dialect::Postgres=>"DELETE FROM replication_tasks_dlq WHERE source_cluster_name=$1 AND shard_id=$2 AND task_id >= $3 AND task_id < $4"};
+        self.backend.transaction(|tx|tx.execute(query,&params))
     }
 }
