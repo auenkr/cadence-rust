@@ -29,4 +29,4 @@ executors/queue v1 via `QueueFactoryDeps`.
 
 Notes: mocks/tests (`*_mock.go`, `*_test.go`) not ported. Mitigator picks domains by max-count scan instead of a heap.
 
-Last green CI run: none yet (not compiled).
+Last green CI run: https://github.com/auenkr/cadence-rust/actions/runs/41900722340 (rust-ci, package=cadence-history, clippy -D warnings + tests, conclusion success), head SHA 640e61700fd63f766f35c7a5b6d5d697d62b4e11.
