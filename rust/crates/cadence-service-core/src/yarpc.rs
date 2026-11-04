@@ -860,7 +860,7 @@ async fn handle_get_cross_cluster_tasks(state: &AppState, body: &Struct) -> Hand
         decode_args(body).map_err(AppError::bad_request)?;
     if req.target_cluster.is_empty() {
         return Err(AppError::bad_request(
-            "Target cluster is not set on request.".to_string(),
+            "Cluster name is not set.".to_string(),
         ));
     }
     if state.history_admin_channel.is_none() {
@@ -882,7 +882,7 @@ async fn handle_respond_cross_cluster_tasks_completed(
         decode_args(body).map_err(AppError::bad_request)?;
     if req.target_cluster.is_empty() {
         return Err(AppError::bad_request(
-            "Target cluster is not set on request.".to_string(),
+            "Cluster name is not set.".to_string(),
         ));
     }
     if state.history_admin_channel.is_none() {
