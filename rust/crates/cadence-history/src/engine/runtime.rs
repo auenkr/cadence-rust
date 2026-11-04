@@ -56,7 +56,15 @@ pub trait Replicator: Send + Sync {
 }
 #[async_trait]
 pub trait DecisionHandler: Send + Sync {
+    async fn handle_decision_task_started(&self, request: &RecordDecisionTaskStartedRequest) -> HResult<RecordDecisionTaskStartedResponse>;
+    async fn handle_decision_task_completed(&self, request: &HistoryRespondDecisionTaskCompletedRequest) -> HResult<HistoryRespondDecisionTaskCompletedResponse>;
+    async fn handle_decision_task_failed(&self, request: &HistoryRespondDecisionTaskFailedRequest) -> HResult<()>;
     async fn handle_decision_task_scheduled(&self, request: &ScheduleDecisionTaskRequest) -> HResult<()>;
+}
+pub trait EngineConfig: Send + Sync {
+    fn long_poll_expiration_interval(&self, domain: &str) -> std::time::Duration;
+    fn maximum_signals_per_execution(&self, domain: &str) -> i32;
+    fn enable_history_corruption_check(&self, domain: &str) -> bool;
 }
 pub trait ShardClock: Send + Sync { fn set_current_time(&self, cluster: &str, timestamp: i64); }
 pub trait EngineMetrics: Send + Sync {
@@ -80,4 +88,28 @@ pub struct HistoryEngine {
     pub decision_handler: Arc<dyn DecisionHandler>,
     pub shard_clock: Arc<dyn ShardClock>,
     pub metrics: Arc<dyn EngineMetrics>,
+    pub config: Arc<dyn EngineConfig>,
+    pub execution_cache: Arc<dyn ExecutionCache>,
+    pub history_event_notifier: Arc<dyn HistoryEventNotifier>,
+    pub task_refresher: Arc<dyn MutableStateTaskRefresher>,
+}
+
+#[async_trait]
+pub trait MutableStateTaskRefresher: Send + Sync {
+    async fn refresh_tasks(&self, start_timestamp: i64, state: MutableStateRef) -> HResult<()>;
+}
+
+#[derive(Clone)]
+pub struct HistoryNotification {
+    pub last_first_event_id: i64,
+    pub next_event_id: i64,
+    pub previous_started_event_id: i64,
+    pub workflow_state: i32,
+    pub workflow_close_state: i32,
+    pub version_histories: VersionHistories,
+}
+pub trait HistoryEventNotifier: Send + Sync {
+    fn watch_history_event(&self, domain_id: &str, execution: &WorkflowExecution) -> HResult<(String, tokio::sync::mpsc::UnboundedReceiver<HistoryNotification>)>;
+    fn unwatch_history_event(&self, domain_id: &str, execution: &WorkflowExecution, subscriber: &str);
+    fn notify_new_history_event(&self, event: HistoryNotification);
 }

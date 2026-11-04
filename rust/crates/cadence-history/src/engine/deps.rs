@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use cadence_api::errors::{
     AccessDeniedError, BadRequestError, CancellationAlreadyRequestedError,
     ClientVersionNotSupportedError, DomainNotActiveError, EntityNotExistsError,
-    InternalServiceError, LimitExceededError, QueryFailedError, ServiceBusyError,
+    InternalServiceError, LimitExceededError, QueryFailedError, ServiceBusyError, EventAlreadyStartedError,
     ShardOwnershipLostError, WorkflowExecutionAlreadyCompletedError,
     WorkflowExecutionAlreadyStartedError,
 };
@@ -33,7 +33,7 @@ use futures_util::future::BoxFuture;
 #[derive(Debug, thiserror::Error)]
 pub enum HistoryError {
     #[error(transparent)]
-    Cadence(#[from] CadenceError),
+    Cadence(Box<CadenceError>),
     /// `workflow.ErrStaleState`
     #[error("cache mutable state could potentially be stale")]
     StaleState,
@@ -70,6 +70,10 @@ pub enum HistoryError {
     /// `persistence.TimeoutError`
     #[error("{0}")]
     PersistenceTimeout(String),
+    #[error("{message}")]
+    CurrentBranchChanged { message: String, current_branch_token: Vec<u8> },
+    #[error("version histories do not exist")]
+    MissingVersionHistories,
     /// Anything else (Go `errors.New` / `fmt.Errorf`).
     #[error("{0}")]
     Other(String),
@@ -79,11 +83,12 @@ pub type HResult<T> = Result<T, HistoryError>;
 
 macro_rules! history_error_from {
     ($($t:ty),* $(,)?) => { $(impl From<$t> for HistoryError {
-        fn from(e: $t) -> Self { HistoryError::Cadence(CadenceError::from(e)) }
+        fn from(e: $t) -> Self { HistoryError::Cadence(Box::new(CadenceError::from(e))) }
     })* };
 }
 history_error_from!(
     AccessDeniedError,
+    EventAlreadyStartedError,
     BadRequestError,
     CancellationAlreadyRequestedError,
     ClientVersionNotSupportedError,
@@ -109,13 +114,13 @@ impl HistoryError {
         EntityNotExistsError { message: msg.into(), ..Default::default() }.into()
     }
     pub fn is_entity_not_exists(&self) -> bool {
-        matches!(self, HistoryError::Cadence(CadenceError::EntityNotExists(_)))
+        matches!(self, HistoryError::Cadence(e) if matches!(&**e, CadenceError::EntityNotExists(_)))
     }
     pub fn is_workflow_already_completed(&self) -> bool {
-        matches!(self, HistoryError::Cadence(CadenceError::WorkflowAlreadyCompleted(_)))
+        matches!(self, HistoryError::Cadence(e) if matches!(&**e, CadenceError::WorkflowAlreadyCompleted(_)))
     }
     pub fn is_service_busy(&self) -> bool {
-        matches!(self, HistoryError::Cadence(CadenceError::ServiceBusy(_)))
+        matches!(self, HistoryError::Cadence(e) if matches!(&**e, CadenceError::ServiceBusy(_)))
     }
     /// `persistence.IsTimeoutError`
     pub fn is_timeout(&self) -> bool {
@@ -224,6 +229,10 @@ pub struct WorkflowExecutionInfo {
     pub cron_schedule: String,
     pub has_retry_policy: bool,
     pub attempt: i32,
+    pub client_library_version: String,
+    pub client_feature_version: String,
+    pub client_impl: String,
+    pub sticky_schedule_to_start_timeout: i32,
     pub auto_reset_points: Option<cadence_api::types::ResetPoints>,
 }
 impl WorkflowExecutionInfo {
@@ -244,6 +253,7 @@ pub struct ActivityInfo {
     pub attempt: i32,
     pub started_time: i64,
     pub scheduled_time: i64,
+    pub schedule_to_close_timeout: i32,
     pub cancel_requested: bool,
     pub cancel_request_id: i64,
     pub has_retry_policy: bool,
@@ -341,3 +351,5 @@ pub trait ExecutionCache: Send + Sync {
 pub type Fut<'a, T> = BoxFuture<'a, HResult<T>>;
 
 pub type Map<K, V> = HashMap<K, V>;
+
+impl From<CadenceError> for HistoryError { fn from(error: CadenceError) -> Self { Self::Cadence(Box::new(error)) } }

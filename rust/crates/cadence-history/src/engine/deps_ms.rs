@@ -12,6 +12,23 @@ pub trait MutableState: Send + Sync {
     fn get_domain_entry(&self) -> DomainCacheEntry;
     fn get_activity_info(&self, schedule_id: i64) -> Option<ActivityInfo>;
     fn get_activity_by_activity_id(&self, activity_id: &str) -> Option<ActivityInfo>;
+    fn get_last_first_event_id(&self) -> i64;
+    fn get_previous_started_event_id(&self) -> i64;
+    fn get_current_branch_token(&self) -> HResult<Vec<u8>>;
+    fn get_version_histories(&self) -> Option<VersionHistories>;
+    fn is_sticky_task_list_enabled(&self) -> bool;
+    fn get_history_size(&self) -> i64;
+    fn get_workflow_type(&self) -> Option<WorkflowType>;
+    async fn get_resurrected_activities(&self) -> HResult<std::collections::HashSet<i64>>;
+    fn delete_activity(&self, schedule_id: i64) -> HResult<()>;
+    async fn get_activity_scheduled_event(&self, schedule_id: i64) -> HResult<cadence_api::service_types::HistoryEvent>;
+    fn add_activity_task_started_event(&self, info: &ActivityInfo, schedule_id: i64, request_id: &str, identity: &str) -> HResult<ActivityInfo>;
+    fn is_signal_requested(&self, request_id: &str) -> bool;
+    fn add_signal_requested(&self, request_id: &str);
+    fn has_processed_or_pending_decision(&self) -> bool;
+    fn set_workflow_state(&self, state: i32);
+    fn copy_to_persistence(&self) -> HResult<serde_json::Value>;
+    fn add_workflow_execution_signaled(&self, name: &str, input: &[u8], identity: &str, request_id: &str) -> HResult<()>;
     fn delete_signal_requested(&self, request_id: &str);
     fn clear_stickyness(&self);
     fn is_cancel_requested(&self) -> (bool, String);
@@ -24,4 +41,10 @@ pub trait MutableState: Send + Sync {
     fn add_workflow_execution_cancel_requested_event(&self, cause: &str, request: &HistoryRequestCancelWorkflowExecutionRequest) -> HResult<()>;
     fn terminate_workflow(&self, first_event_id: i64, reason: &str, details: &[u8], identity: &str) -> HResult<()>;
 }
-pub trait ExecutionContext: Send + Sync {}
+#[async_trait]
+pub trait ExecutionContext: Send + Sync {
+    fn get_execution(&self) -> WorkflowExecution;
+    fn get_workflow_execution(&self) -> Option<super::deps::MutableStateRef>;
+    async fn load_workflow_execution(&self) -> HResult<super::deps::MutableStateRef>;
+    async fn update_workflow_execution_tasks(&self, now: i64) -> HResult<()>;
+}

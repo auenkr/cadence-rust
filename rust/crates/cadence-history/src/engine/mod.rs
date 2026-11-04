@@ -8,3 +8,8 @@ pub mod queue_operations;
 pub mod dlq_operations;
 pub mod workflow_mutations;
 pub mod activity_responses;
+pub mod decision_replication;
+pub mod signal_workflow_execution;
+pub mod mutable_state_admin;
+pub mod record_activity_task_started;
+pub mod poll_mutable_state;

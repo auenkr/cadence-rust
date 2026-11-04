@@ -11,7 +11,7 @@ impl HistoryEngine {
             &request.source_cluster, request.inclusive_end_message_id.unwrap_or_default(), request.maximum_page_size, &request.next_page_token).await?;
         // Unhydrated tasks must not reach the protobuf response marshaler.
         Ok(ReadDLQMessagesResponse {
-            dlq_type: Some(request.dlq_type.unwrap_or(DLQType::Replication)),
+            dlq_type: Some(request.dlq_type.unwrap_or(DLQType::Invalid)),
             replication_tasks: tasks.into_iter().flatten().collect(), replication_tasks_info, next_page_token,
         })
     }
