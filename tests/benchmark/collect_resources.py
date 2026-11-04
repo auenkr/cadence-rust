@@ -59,7 +59,7 @@ def cpu_seconds(before_ns, after_ns):
     return (after_ns - before_ns) / 1_000_000_000
 
 
-def collect(interval, output, names, start_event=None, end_event=None, duration=None):
+def collect(interval, output, names, start_event=None, end_event=None, duration=None, ready_event=None, event_timeout=180):
     if bool(start_event) != bool(end_event):
         raise ValueError("--start-event and --end-event must be provided together")
     if not start_event and duration is None:
@@ -75,8 +75,11 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
 
     def wait_event(path):
         marker = Path(path)
+        deadline = time.monotonic() + event_timeout
         while not marker.exists():
-            time.sleep(1)
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f"timed out waiting for measurement marker: {path}")
+            time.sleep(min(interval, 0.1))
         return None
 
     if start_event:
@@ -84,12 +87,16 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
     started_at = datetime.now(timezone.utc).isoformat()
     started = time.monotonic()
     first = snapshot(selected)
+    if ready_event:
+        Path(ready_event).write_text(started_at, encoding="utf-8")
     peak = dict((name, data["memory_bytes"]) for name, data in first.items())
     samples = 1
     while True:
         if end_event and Path(end_event).exists():
             break
         elapsed = time.monotonic() - started
+        if end_event and elapsed >= event_timeout:
+            raise RuntimeError("timed out waiting for measurement end marker")
         if duration is not None and elapsed >= duration:
             break
         time.sleep(min(interval, max(0.01, duration - elapsed)) if duration is not None else interval)
@@ -128,11 +135,13 @@ def main():
     ap.add_argument("--containers", nargs="*", help="Docker container names; default is all accessible running containers")
     ap.add_argument("--start-event", help="wait for this marker file before the measured interval")
     ap.add_argument("--end-event", help="stop the measured interval when this marker file appears")
+    ap.add_argument("--ready-event", help="write after baseline capture; SDK waits for this before measured traffic")
+    ap.add_argument("--event-timeout", type=float, default=180, help="maximum seconds waiting for each marker")
     a = ap.parse_args()
-    if a.duration is not None and a.duration <= 0 or a.interval <= 0:
+    if a.duration is not None and a.duration <= 0 or a.interval <= 0 or a.event_timeout <= 0:
         ap.error("duration and interval must be positive")
     try:
-        collect(a.interval, a.output, a.containers, a.start_event, a.end_event, a.duration)
+        collect(a.interval, a.output, a.containers, a.start_event, a.end_event, a.duration, a.ready_event, a.event_timeout)
     except ValueError as error:
         ap.error(str(error))
 
