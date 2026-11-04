@@ -104,3 +104,14 @@ conflict resolution, request validation, signal reapplication routing and error
 cleanup now have Rust policy implementations. Concrete shard persistence retry,
 notification, and mutable-state adapters remain required. This is not complete
 execution parity. No local Cargo commands or integration tests run.
+
+## Green checkpoint 2026-11-05
+Fixed compile/clippy errors (cadence_api::tasks paths, imports, clippy lints in context.rs).
+CI green (clippy + test, package=cadence-history): https://github.com/auenkr/cadence-rust/actions/runs/41894690426
+Code head tested: `d3e34ed41aaac8862db21bca6fa0f367396b1e34` (this note's commit follows).
+Status per Go file: ported-as-policy-modules = cache, checksum, context, context_util, history_builder, integrity, retry, semaphore,
+state_builder, state_rebuilder, timer_sequence, workflow, workflow_repairer, workflow_execution_util, mutable_state_util, task_generator,
+task_refresher, decision_task_manager, timer/child_workflow/signal/cancellation/started/completed (rust files above).
+TODO (not full line-by-line parity; rust files are 2.6k lines vs ~14k Go): mutable_state_builder.go core (Add*/Replicate* surface, buffering,
+transaction close), activity/decision Add* (in other branches), state_builder per-event replay coverage, context.go concrete adapters.
+Not done per the task's done-condition; further porting required.
