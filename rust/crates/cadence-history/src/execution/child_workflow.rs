@@ -88,14 +88,14 @@ impl MutableStateBuilder {
 
     pub fn add_child_workflow_execution_started_event(
         &mut self, initiated_event_id: i64, domain: impl Into<String>, execution: WorkflowExecution,
-        workflow_type: Option<WorkflowType>, timestamp_unix_nanos: i64, version: i64,
+        workflow_type: Option<WorkflowType>, header: Option<cadence_api::types::Header>, timestamp_unix_nanos: i64, version: i64,
     ) -> Result<HistoryEvent, ChildWorkflowError> {
         let info = self.get_child_execution_info(initiated_event_id).ok_or(ChildWorkflowError::Missing(initiated_event_id))?;
         if info.started_id != 0 { return Err(ChildWorkflowError::AlreadyStarted(initiated_event_id)); }
         let event = self.add_event(HistoryEvent {
             event_type: Some(EventType::ChildWorkflowExecutionStarted), timestamp: Some(timestamp_unix_nanos), version,
             child_workflow_execution_started_event_attributes: Some(ChildWorkflowExecutionStartedEventAttributes {
-                domain: domain.into(), initiated_event_id, workflow_execution: Some(execution), workflow_type, header: None,
+                domain: domain.into(), initiated_event_id, workflow_execution: Some(execution), workflow_type, header,
             }), ..Default::default()
         });
         self.replicate_child_workflow_execution_started_event(&event)?;

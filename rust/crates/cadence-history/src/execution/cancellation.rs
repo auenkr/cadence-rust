@@ -11,9 +11,9 @@ impl MutableStateBuilder {
     pub fn is_cancel_requested(&self) -> (bool, String) {
         (self.execution_info.get("cancel_requested").and_then(serde_json::Value::as_bool).unwrap_or(false), self.execution_info.get("cancel_request_id").and_then(serde_json::Value::as_str).unwrap_or_default().to_owned())
     }
-    pub fn add_workflow_execution_cancel_requested_event(&mut self, cause: impl Into<String>, request_id: impl Into<String>, timestamp_unix_nanos: i64, version: i64) -> HistoryEvent {
+    pub fn add_workflow_execution_cancel_requested_event(&mut self, cause: impl Into<String>, request_id: impl Into<String>, identity: impl Into<String>, timestamp_unix_nanos: i64, version: i64) -> HistoryEvent {
         let cause = cause.into(); let request_id = request_id.into();
-        let event = self.add_event(HistoryEvent { event_type: Some(EventType::WorkflowExecutionCancelRequested), timestamp: Some(timestamp_unix_nanos), version, workflow_execution_cancel_requested_event_attributes: Some(cadence_api::service_types::WorkflowExecutionCancelRequestedEventAttributes { cause, request_id: request_id.clone(), ..Default::default() }), ..Default::default() });
+        let event = self.add_event(HistoryEvent { event_type: Some(EventType::WorkflowExecutionCancelRequested), timestamp: Some(timestamp_unix_nanos), version, workflow_execution_cancel_requested_event_attributes: Some(cadence_api::service_types::WorkflowExecutionCancelRequestedEventAttributes { cause, request_id: request_id.clone(), identity: identity.into(), ..Default::default() }), ..Default::default() });
         self.execution_info["cancel_requested"] = true.into();
         self.execution_info["cancel_request_id"] = request_id.into();
         event
