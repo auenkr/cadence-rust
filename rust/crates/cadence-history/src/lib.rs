@@ -3,6 +3,7 @@
 pub mod config;
 pub mod config_collection;
 pub mod constants;
+pub mod shard_context;
 pub mod engine;
 pub mod execution;
 pub mod mutable_state;
