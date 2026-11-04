@@ -24,5 +24,6 @@ Rust: `rust/crates/cadence-history/src/{replication,failover}/`. Collaborators o
 - `triggerDataInconsistencyScan` is unused in Go too; kept `#[allow(dead_code)]`.
 
 ## CI
-Last green run: none yet (not compiled; first CI run pending).
-Head SHA: pending.
+Last green run: https://github.com/auenkr/cadence-rust/actions/runs/41900413463 (rust-ci.yml, package=cadence-history, clippy + tests, success)
+Green head SHA: 95d3f56154dc0a371eec8953ce5363b43c316409
+Notes: added `#![allow(clippy::result_large_err)]` in replication/mod.rs (ReplicationError::RetryTaskV2 is ~160 bytes); added `last_worker_identity` to `ActivityInfo` (needed by sync-activity hydration, Go has it).
