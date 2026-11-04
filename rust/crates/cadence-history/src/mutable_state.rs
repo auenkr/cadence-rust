@@ -360,6 +360,7 @@ mod tests {
             started_timestamp: 120, attempt: 2, schedule_timestamp: 100,
             original_schedule_timestamp: 40,
         };
+        s.execution_info["sticky_task_list"] = "sticky".into();
         s.persist_decision(info.clone());
         assert_eq!(s.decision_snapshot(), info);
         s.delete_decision_preserving_heartbeat();
