@@ -1,0 +1,415 @@
+{
+  "interpretation": "descriptive medians; no speedup claim implied",
+  "runs": [
+    {
+      "file": "out/paired-benchmark/result-00-go-c1.json",
+      "rep": 0,
+      "arm": "go",
+      "concurrency": 1,
+      "throughput": 22.72097467448342,
+      "latency_ms": {
+        "p50": 38.835215,
+        "p95": 78.137169,
+        "p99": 109.25180900000001
+      }
+    },
+    {
+      "file": "out/paired-benchmark/result-01-go-c1.json",
+      "rep": 1,
+      "arm": "go",
+      "concurrency": 1,
+      "throughput": 25.190878008635863,
+      "latency_ms": {
+        "p50": 38.810038999999996,
+        "p95": 43.603697,
+        "p99": 69.611704
+      }
+    },
+    {
+      "file": "out/paired-benchmark/result-02-go-c1.json",
+      "rep": 2,
+      "arm": "go",
+      "concurrency": 1,
+      "throughput": 24.810377676239646,
+      "latency_ms": {
+        "p50": 37.247929,
+        "p95": 65.18463100000001,
+        "p99": 100.018278
+      }
+    },
+    {
+      "file": "out/paired-benchmark/result-03-go-c1.json",
+      "rep": 3,
+      "arm": "go",
+      "concurrency": 1,
+      "throughput": 25.615737902794486,
+      "latency_ms": {
+        "p50": 37.61976,
+        "p95": 44.751684,
+        "p99": 77.699416
+      }
+    },
+    {
+      "file": "out/paired-benchmark/result-04-go-c1.json",
+      "rep": 4,
+      "arm": "go",
+      "concurrency": 1,
+      "throughput": 25.42617846855722,
+      "latency_ms": {
+        "p50": 38.675936,
+        "p95": 44.521077,
+        "p99": 57.540109
+      }
+    },
+    {
+      "file": "out/paired-benchmark/result-00-go-c16.json",
+      "rep": 0,
+      "arm": "go",
+      "concurrency": 16,
+      "throughput": 69.34324568217639,
+      "latency_ms": {
+        "p50": 223.829936,
+        "p95": 308.380125,
+        "p99": 331.5534
+      }
+    },
+    {
+      "file": "out/paired-benchmark/result-01-go-c16.json",
+      "rep": 1,
+      "arm": "go",
+      "concurrency": 16,
+      "throughput": 68.61004825017423,
+      "latency_ms": {
+        "p50": 215.158978,
+        "p95": 334.6831,
+        "p99": 370.62660200000005
+      }
+    },
+    {
+      "file": "out/paired-benchmark/result-02-go-c16.json",
+      "rep": 2,
+      "arm": "go",
+      "concurrency": 16,
+      "throughput": 66.92506348908053,
+      "latency_ms": {
+        "p50": 229.890444,
+        "p95": 334.76399699999996,
+        "p99": 377.622101
+      }
+    },
+    {
+      "file": "out/paired-benchmark/result-03-go-c16.json",
+      "rep": 3,
+      "arm": "go",
+      "concurrency": 16,
+      "throughput": 67.98674582073406,
+      "latency_ms": {
+        "p50": 220.324601,
+        "p95": 335.73071999999996,
+        "p99": 360.23436
+      }
+    },
+    {
+      "file": "out/paired-benchmark/result-04-go-c16.json",
+      "rep": 4,
+      "arm": "go",
+      "concurrency": 16,
+      "throughput": 65.83144590847465,
+      "latency_ms": {
+        "p50": 221.268327,
+        "p95": 352.680933,
+        "p99": 432.147584
+      }
+    },
+    {
+      "file": "out/paired-benchmark/result-00-go-c64.json",
+      "rep": 0,
+      "arm": "go",
+      "concurrency": 64,
+      "throughput": 63.4703364473867,
+      "latency_ms": {
+        "p50": 855.598143,
+        "p95": 1311.470715,
+        "p99": 1354.777432
+      }
+    },
+    {
+      "file": "out/paired-benchmark/result-01-go-c64.json",
+      "rep": 1,
+      "arm": "go",
+      "concurrency": 64,
+      "throughput": 63.284479510321106,
+      "latency_ms": {
+        "p50": 837.306145,
+        "p95": 1329.977257,
+        "p99": 1378.749859
+      }
+    },
+    {
+      "file": "out/paired-benchmark/result-02-go-c64.json",
+      "rep": 2,
+      "arm": "go",
+      "concurrency": 64,
+      "throughput": 61.57446084806349,
+      "latency_ms": {
+        "p50": 845.382111,
+        "p95": 1348.803652,
+        "p99": 1392.374953
+      }
+    },
+    {
+      "file": "out/paired-benchmark/result-03-go-c64.json",
+      "rep": 3,
+      "arm": "go",
+      "concurrency": 64,
+      "throughput": 58.595603955753596,
+      "latency_ms": {
+        "p50": 961.40774,
+        "p95": 1436.387002,
+        "p99": 1477.146276
+      }
+    },
+    {
+      "file": "out/paired-benchmark/result-04-go-c64.json",
+      "rep": 4,
+      "arm": "go",
+      "concurrency": 64,
+      "throughput": 62.67714869523811,
+      "latency_ms": {
+        "p50": 924.326518,
+        "p95": 1306.4269630000001,
+        "p99": 1367.4913490000001
+      }
+    },
+    {
+      "file": "out/paired-benchmark/result-00-rust-c1.json",
+      "rep": 0,
+      "arm": "rust",
+      "concurrency": 1,
+      "throughput": 17.72238275429249,
+      "latency_ms": {
+        "p50": 47.472085,
+        "p95": 149.54483199999999,
+        "p99": 154.844554
+      }
+    },
+    {
+      "file": "out/paired-benchmark/result-01-rust-c1.json",
+      "rep": 1,
+      "arm": "rust",
+      "concurrency": 1,
+      "throughput": 20.21625933028508,
+      "latency_ms": {
+        "p50": 47.578773,
+        "p95": 55.301939000000004,
+        "p99": 106.026254
+      }
+    },
+    {
+      "file": "out/paired-benchmark/result-02-rust-c1.json",
+      "rep": 2,
+      "arm": "rust",
+      "concurrency": 1,
+      "throughput": 16.917325885429637,
+      "latency_ms": {
+        "p50": 47.740325,
+        "p95": 149.71632300000002,
+        "p99": 151.277941
+      }
+    },
+    {
+      "file": "out/paired-benchmark/result-03-rust-c1.json",
+      "rep": 3,
+      "arm": "rust",
+      "concurrency": 1,
+      "throughput": 18.167437465922543,
+      "latency_ms": {
+        "p50": 47.316528,
+        "p95": 129.22571599999998,
+        "p99": 151.355238
+      }
+    },
+    {
+      "file": "out/paired-benchmark/result-04-rust-c1.json",
+      "rep": 4,
+      "arm": "rust",
+      "concurrency": 1,
+      "throughput": 16.804716643678304,
+      "latency_ms": {
+        "p50": 48.911589,
+        "p95": 149.47276200000002,
+        "p99": 153.732027
+      }
+    },
+    {
+      "file": "out/paired-benchmark/result-00-rust-c16.json",
+      "rep": 0,
+      "arm": "rust",
+      "concurrency": 16,
+      "throughput": 50.71925657385421,
+      "latency_ms": {
+        "p50": 290.774042,
+        "p95": 429.337647,
+        "p99": 456.895916
+      }
+    },
+    {
+      "file": "out/paired-benchmark/result-01-rust-c16.json",
+      "rep": 1,
+      "arm": "rust",
+      "concurrency": 16,
+      "throughput": 55.661008862041925,
+      "latency_ms": {
+        "p50": 271.31446900000003,
+        "p95": 371.082878,
+        "p99": 409.571872
+      }
+    },
+    {
+      "file": "out/paired-benchmark/result-02-rust-c16.json",
+      "rep": 2,
+      "arm": "rust",
+      "concurrency": 16,
+      "throughput": 49.827940608210035,
+      "latency_ms": {
+        "p50": 309.61175000000003,
+        "p95": 422.754704,
+        "p99": 473.171868
+      }
+    },
+    {
+      "file": "out/paired-benchmark/result-03-rust-c16.json",
+      "rep": 3,
+      "arm": "rust",
+      "concurrency": 16,
+      "throughput": 54.124846427513866,
+      "latency_ms": {
+        "p50": 283.28233400000005,
+        "p95": 417.57448200000005,
+        "p99": 497.107136
+      }
+    },
+    {
+      "file": "out/paired-benchmark/result-04-rust-c16.json",
+      "rep": 4,
+      "arm": "rust",
+      "concurrency": 16,
+      "throughput": 50.50013120565339,
+      "latency_ms": {
+        "p50": 305.41523,
+        "p95": 420.480711,
+        "p99": 460.638566
+      }
+    },
+    {
+      "file": "out/paired-benchmark/result-00-rust-c64.json",
+      "rep": 0,
+      "arm": "rust",
+      "concurrency": 64,
+      "throughput": 51.96337212684688,
+      "latency_ms": {
+        "p50": 1050.1420320000002,
+        "p95": 1495.5155790000001,
+        "p99": 1581.435068
+      }
+    },
+    {
+      "file": "out/paired-benchmark/result-01-rust-c64.json",
+      "rep": 1,
+      "arm": "rust",
+      "concurrency": 64,
+      "throughput": 49.385487123938006,
+      "latency_ms": {
+        "p50": 1125.112828,
+        "p95": 1642.118982,
+        "p99": 1681.2866920000001
+      }
+    },
+    {
+      "file": "out/paired-benchmark/result-02-rust-c64.json",
+      "rep": 2,
+      "arm": "rust",
+      "concurrency": 64,
+      "throughput": 53.293723022400975,
+      "latency_ms": {
+        "p50": 1076.0605839999998,
+        "p95": 1521.0495050000002,
+        "p99": 1581.561217
+      }
+    },
+    {
+      "file": "out/paired-benchmark/result-03-rust-c64.json",
+      "rep": 3,
+      "arm": "rust",
+      "concurrency": 64,
+      "throughput": 51.7130484600981,
+      "latency_ms": {
+        "p50": 1165.260642,
+        "p95": 1684.591467,
+        "p99": 1737.390456
+      }
+    },
+    {
+      "file": "out/paired-benchmark/result-04-rust-c64.json",
+      "rep": 4,
+      "arm": "rust",
+      "concurrency": 64,
+      "throughput": 48.96127605086777,
+      "latency_ms": {
+        "p50": 1135.060993,
+        "p95": 1594.717657,
+        "p99": 1662.933501
+      }
+    }
+  ],
+  "medians": {
+    "go-c1": {
+      "successful_workflows_per_second": 25.190878008635863,
+      "latency_ms": {
+        "p50": 38.675936,
+        "p95": 44.751684,
+        "p99": 77.699416
+      }
+    },
+    "go-c16": {
+      "successful_workflows_per_second": 67.98674582073406,
+      "latency_ms": {
+        "p50": 221.268327,
+        "p95": 334.76399699999996,
+        "p99": 370.62660200000005
+      }
+    },
+    "go-c64": {
+      "successful_workflows_per_second": 62.67714869523811,
+      "latency_ms": {
+        "p50": 855.598143,
+        "p95": 1329.977257,
+        "p99": 1378.749859
+      }
+    },
+    "rust-c1": {
+      "successful_workflows_per_second": 17.72238275429249,
+      "latency_ms": {
+        "p50": 47.578773,
+        "p95": 149.47276200000002,
+        "p99": 151.355238
+      }
+    },
+    "rust-c16": {
+      "successful_workflows_per_second": 50.71925657385421,
+      "latency_ms": {
+        "p50": 290.774042,
+        "p95": 420.480711,
+        "p99": 460.638566
+      }
+    },
+    "rust-c64": {
+      "successful_workflows_per_second": 51.7130484600981,
+      "latency_ms": {
+        "p50": 1125.112828,
+        "p95": 1594.717657,
+        "p99": 1662.933501
+      }
+    }
+  }
+}

@@ -1,0 +1,48 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Cadence Frontend + Matching benchmark</title><style>
+*{box-sizing:border-box}body{margin:0;background:#f4f7fb;color:#182334;font:16px/1.5 system-ui,sans-serif}main{max-width:1100px;margin:32px auto;padding:0 20px}header,.panel{background:white;border:1px solid #dce4ee;border-radius:12px;padding:22px;margin-bottom:18px}h1{margin:0 0 8px}h2{margin-top:0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:16px}.chart{background:#fff;border:1px solid #dce4ee;border-radius:12px;padding:16px;overflow:hidden}.chart h3{margin:0}svg{width:100%;height:auto}svg text{font:12px system-ui,sans-serif;fill:#46576b}svg .value{font-weight:700;fill:#182334}svg .axis{font-size:10px}table{width:100%;border-collapse:collapse}td,th{padding:9px;border-bottom:1px solid #e5ebf2;text-align:right}td:first-child,th:first-child{text-align:left}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f4f7fb;padding:12px;border-radius:8px}.muted{color:#52647a}</style></head><body><main><header><h1>Frontend + Matching benchmark</h1><p>combined Frontend+Matching end-to-end SDK workflow; same Go History/system Worker and persistence required</p><p class="muted">Workload: 1000 measured workflows/run; 100 warmup; concurrency 16; payload 1024 bytes; transport tchannel; 5 paired runs.</p></header><div class="grid"><section class="chart"><h3>Median throughput</h3><svg viewBox="0 0 720 220" role="img" aria-label="Median throughput"><line x1="58" y1="180" x2="704" y2="180" stroke="#9aa7b7"/><text x="8" y="36" class="axis">workflows/s</text><rect x="122.6" y="47.8" width="193.8" height="132.2" rx="4" fill="#3284d6"/><text class="value" x="219.5" y="41.8" text-anchor="middle">33.57</text><text x="219.5" y="208" text-anchor="middle">Go</text><rect x="445.6" y="62.6" width="193.8" height="117.4" rx="4" fill="#3284d6"/><text class="value" x="542.5" y="56.6" text-anchor="middle">29.82</text><text x="542.5" y="208" text-anchor="middle">Rust</text></svg></section><section class="chart"><h3>Median latency p50</h3><svg viewBox="0 0 720 220" role="img" aria-label="Median latency p50"><line x1="58" y1="180" x2="704" y2="180" stroke="#9aa7b7"/><text x="8" y="36" class="axis">ms</text><rect x="122.6" y="61.8" width="193.8" height="118.2" rx="4" fill="#805ad5"/><text class="value" x="219.5" y="55.8" text-anchor="middle">484.45</text><text x="219.5" y="208" text-anchor="middle">Go</text><rect x="445.6" y="47.8" width="193.8" height="132.2" rx="4" fill="#805ad5"/><text class="value" x="542.5" y="41.8" text-anchor="middle">541.93</text><text x="542.5" y="208" text-anchor="middle">Rust</text></svg></section><section class="chart"><h3>Median latency p95</h3><svg viewBox="0 0 720 220" role="img" aria-label="Median latency p95"><line x1="58" y1="180" x2="704" y2="180" stroke="#9aa7b7"/><text x="8" y="36" class="axis">ms</text><rect x="122.6" y="64.6" width="193.8" height="115.4" rx="4" fill="#805ad5"/><text class="value" x="219.5" y="58.6" text-anchor="middle">618.96</text><text x="219.5" y="208" text-anchor="middle">Go</text><rect x="445.6" y="47.8" width="193.8" height="132.2" rx="4" fill="#805ad5"/><text class="value" x="542.5" y="41.8" text-anchor="middle">709.16</text><text x="542.5" y="208" text-anchor="middle">Rust</text></svg></section><section class="chart"><h3>Median latency p99</h3><svg viewBox="0 0 720 220" role="img" aria-label="Median latency p99"><line x1="58" y1="180" x2="704" y2="180" stroke="#9aa7b7"/><text x="8" y="36" class="axis">ms</text><rect x="122.6" y="64.6" width="193.8" height="115.4" rx="4" fill="#805ad5"/><text class="value" x="219.5" y="58.6" text-anchor="middle">671.86</text><text x="219.5" y="208" text-anchor="middle">Go</text><rect x="445.6" y="47.8" width="193.8" height="132.2" rx="4" fill="#805ad5"/><text class="value" x="542.5" y="41.8" text-anchor="middle">769.26</text><text x="542.5" y="208" text-anchor="middle">Rust</text></svg></section></div><section class="panel"><h2>Paired run throughput</h2><table><thead><tr><th>Pair</th><th>Go workflows/s</th><th>Rust workflows/s</th><th>Rust − Go</th></tr></thead><tbody><tr><td>1</td><td>32.840</td><td>28.867</td><td>-3.974</td></tr><tr><td>2</td><td>33.375</td><td>29.767</td><td>-3.609</td></tr><tr><td>3</td><td>33.575</td><td>30.076</td><td>-3.499</td></tr><tr><td>4</td><td>33.739</td><td>29.821</td><td>-3.919</td></tr><tr><td>5</td><td>33.961</td><td>30.680</td><td>-3.282</td></tr></tbody></table><p>Closed-loop end-to-end SDK measurements include retries and exclude client queue time. The scope uses the existing Go History and the shared system Worker/persistence described above.</p></section><section class="panel"><h2>Median resources per run</h2><p>Peak cgroup memory includes charged cache; it is not RSS.</p><table><thead><tr><th>Container</th><th>Go CPU (s)</th><th>Rust CPU (s)</th><th>Go peak cgroup memory (MiB)</th><th>Rust peak cgroup memory (MiB)</th></tr></thead><tbody><tr><td>cadence-fm-benchmark-frontend-1</td><td>4.069</td><td>5.008</td><td>39.25</td><td>29.27</td></tr><tr><td>cadence-fm-benchmark-history-1</td><td>11.591</td><td>13.944</td><td>98.18</td><td>96.51</td></tr><tr><td>cadence-fm-benchmark-matching-1</td><td>2.687</td><td>5.045</td><td>35.66</td><td>26.80</td></tr><tr><td>cadence-fm-benchmark-worker-1</td><td>0.086</td><td>0.138</td><td>30.19</td><td>30.14</td></tr></tbody></table></section><section class="panel"><section><h3>Go deployment metadata</h3><pre>{
+  &quot;host&quot;: {
+    &quot;concurrency&quot;: [
+      1,
+      16,
+      64
+    ],
+    &quot;cpu_memory_limits&quot;: &quot;Each service: 1 CPU/1400 MiB, DB: 1.5 CPU/1800 MiB; see resolved compose configs&quot;,
+    &quot;database&quot;: &quot;mysql:8.0&quot;,
+    &quot;frontend_matching_rust_image&quot;: &quot;cadence-rust:ci&quot;,
+    &quot;github_runner&quot;: &quot;ubuntu26&quot;,
+    &quot;history&quot;: &quot;Go image&quot;,
+    &quot;order&quot;: &quot;alternates by repetition; each arm gets a new database&quot;,
+    &quot;payload_bytes&quot;: 1024,
+    &quot;repetitions&quot;: 5,
+    &quot;requests&quot;: 1000,
+    &quot;runner_arch&quot;: &quot;X64&quot;,
+    &quot;runner_os&quot;: &quot;Linux&quot;,
+    &quot;system_worker&quot;: &quot;Go image&quot;,
+    &quot;transport&quot;: &quot;TChannel&quot;,
+    &quot;warmup&quot;: 100
+  },
+  &quot;sources&quot;: &quot;head=316c28e4a2638e55cd52603a307fb6d7ffd09bd7\ngo_tree=36b5af995abeea69cdca171d449c93c835c84871\nrust_tree=33b78ae30a6cdabbae4e3992032658a9f5761608\ndriver_tree=8f4e8b4793354973a51941b68a790125970cb111\ngo_image=sha256:1024a5209dc1f6d564a83748883a559df46f3cf609274d0c85f0574945b5cf46\nrust_image=sha256:c60b41a9cf83a27531a3d221b25a8e07c3bbb289914b5cd88a9f92fd176a0879\n&quot;
+}</pre></section></section><section class="panel"><section><h3>Rust deployment metadata</h3><pre>{
+  &quot;host&quot;: {
+    &quot;concurrency&quot;: [
+      1,
+      16,
+      64
+    ],
+    &quot;cpu_memory_limits&quot;: &quot;Each service: 1 CPU/1400 MiB, DB: 1.5 CPU/1800 MiB; see resolved compose configs&quot;,
+    &quot;database&quot;: &quot;mysql:8.0&quot;,
+    &quot;frontend_matching_rust_image&quot;: &quot;cadence-rust:ci&quot;,
+    &quot;github_runner&quot;: &quot;ubuntu26&quot;,
+    &quot;history&quot;: &quot;Go image&quot;,
+    &quot;order&quot;: &quot;alternates by repetition; each arm gets a new database&quot;,
+    &quot;payload_bytes&quot;: 1024,
+    &quot;repetitions&quot;: 5,
+    &quot;requests&quot;: 1000,
+    &quot;runner_arch&quot;: &quot;X64&quot;,
+    &quot;runner_os&quot;: &quot;Linux&quot;,
+    &quot;system_worker&quot;: &quot;Go image&quot;,
+    &quot;transport&quot;: &quot;TChannel&quot;,
+    &quot;warmup&quot;: 100
+  },
+  &quot;sources&quot;: &quot;head=316c28e4a2638e55cd52603a307fb6d7ffd09bd7\ngo_tree=36b5af995abeea69cdca171d449c93c835c84871\nrust_tree=33b78ae30a6cdabbae4e3992032658a9f5761608\ndriver_tree=8f4e8b4793354973a51941b68a790125970cb111\ngo_image=sha256:1024a5209dc1f6d564a83748883a559df46f3cf609274d0c85f0574945b5cf46\nrust_image=sha256:c60b41a9cf83a27531a3d221b25a8e07c3bbb289914b5cd88a9f92fd176a0879\n&quot;
+}</pre></section></section><p class="muted">Values are read from the comparison JSON; no measurements are inferred or generated by this report.</p></main></body></html>

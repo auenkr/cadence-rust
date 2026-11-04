@@ -1,0 +1,270 @@
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 4.93kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/golang:1.25.14-alpine3.23
+#2 ...
+
+#3 [auth] library/golang:pull token for registry-1.docker.io
+#3 DONE 0.0s
+
+#4 [auth] library/alpine:pull token for registry-1.docker.io
+#4 DONE 0.0s
+
+#5 [internal] load metadata for docker.io/library/alpine:3.24
+#5 ...
+
+#2 [internal] load metadata for docker.io/library/golang:1.25.14-alpine3.23
+#2 DONE 0.9s
+
+#5 [internal] load metadata for docker.io/library/alpine:3.24
+#5 DONE 0.9s
+
+#6 [internal] load .dockerignore
+#6 transferring context: 154B done
+#6 DONE 0.0s
+
+#7 [dockerize 1/3] FROM docker.io/library/alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+#7 resolve docker.io/library/alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a 0.0s done
+#7 ...
+
+#8 [builder  1/13] FROM docker.io/library/golang:1.25.14-alpine3.23@sha256:27b3069b25647beacd3745b0b2c83e2f9b8d3935455a32cd4531236ee1c960e0
+#8 resolve docker.io/library/golang:1.25.14-alpine3.23@sha256:27b3069b25647beacd3745b0b2c83e2f9b8d3935455a32cd4531236ee1c960e0 0.0s done
+#8 DONE 0.2s
+
+#7 [dockerize 1/3] FROM docker.io/library/alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+#7 sha256:7b229517ed222597277036d94892173207d01a731ab3a88eeb1de2e963a2c788 3.85MB / 3.85MB 0.1s done
+#7 extracting sha256:7b229517ed222597277036d94892173207d01a731ab3a88eeb1de2e963a2c788
+#7 extracting sha256:7b229517ed222597277036d94892173207d01a731ab3a88eeb1de2e963a2c788 0.2s done
+#7 DONE 0.4s
+
+#8 [builder  1/13] FROM docker.io/library/golang:1.25.14-alpine3.23@sha256:27b3069b25647beacd3745b0b2c83e2f9b8d3935455a32cd4531236ee1c960e0
+#8 sha256:4d7f9c98f0d77b87be67f15ae33a498bb1fe4506436b93af59a885d159771f0f 126B / 126B 0.1s done
+#8 sha256:2129e38f8eb91140cd022167d69ad764919cb78de3d2c70efd48c5e6b1b48f98 0B / 60.29MB 0.2s
+#8 sha256:fa7c99a68b8360a8f995a0c563ef3ec8739e6adaa573ee4852f6534b682ff74e 245.06kB / 245.06kB 0.2s done
+#8 sha256:e6f31ffc071e5560b82a8685fba8214954e5721e3e49269d00958316edbe89fe 3.84MB / 3.84MB 0.2s done
+#8 sha256:2129e38f8eb91140cd022167d69ad764919cb78de3d2c70efd48c5e6b1b48f98 51.38MB / 60.29MB 0.5s
+#8 extracting sha256:e6f31ffc071e5560b82a8685fba8214954e5721e3e49269d00958316edbe89fe
+#8 sha256:2129e38f8eb91140cd022167d69ad764919cb78de3d2c70efd48c5e6b1b48f98 60.29MB / 60.29MB 0.6s done
+#8 extracting sha256:e6f31ffc071e5560b82a8685fba8214954e5721e3e49269d00958316edbe89fe 0.2s done
+#8 extracting sha256:fa7c99a68b8360a8f995a0c563ef3ec8739e6adaa573ee4852f6534b682ff74e
+#8 extracting sha256:fa7c99a68b8360a8f995a0c563ef3ec8739e6adaa573ee4852f6534b682ff74e 0.1s done
+#8 extracting sha256:2129e38f8eb91140cd022167d69ad764919cb78de3d2c70efd48c5e6b1b48f98
+#8 ...
+
+#9 [internal] load build context
+#9 transferring context: 69.73MB 0.8s done
+#9 DONE 0.9s
+
+#10 [alpine 2/3] RUN apk add --update --no-cache ca-certificates tzdata bash curl
+#10 0.688 ( 1/15) Installing ncurses-terminfo-base (6.6_p20260516-r0)
+#10 0.699 ( 2/15) Installing libncursesw (6.6_p20260516-r0)
+#10 0.716 ( 3/15) Installing readline (8.3.3-r1)
+#10 0.729 ( 4/15) Installing bash (5.3.9-r1)
+#10 0.754   Executing bash-5.3.9-r1.post-install
+#10 0.756 ( 5/15) Installing ca-certificates (20261020-r0)
+#10 0.772 ( 6/15) Installing brotli-libs (1.2.1-r0)
+#10 0.791 ( 7/15) Installing c-ares (1.34.9-r0)
+#10 0.802 ( 8/15) Installing libunistring (1.4.2-r0)
+#10 0.829 ( 9/15) Installing libidn2 (2.3.8-r0)
+#10 0.840 (10/15) Installing nghttp2-libs (1.70.0-r0)
+#10 0.850 (11/15) Installing libpsl (0.21.5-r3)
+#10 0.858 (12/15) Installing zstd-libs (1.5.7-r2)
+#10 0.878 (13/15) Installing libcurl (8.23.0-r0)
+#10 0.894 (14/15) Installing curl (8.23.0-r0)
+#10 0.906 (15/15) Installing tzdata (2026e-r0)
+#10 0.975 Executing busybox-1.37.0-r31.trigger
+#10 0.978 Executing ca-certificates-20261020-r0.trigger
+#10 0.998 OK: 15.7 MiB in 31 packages
+#10 ...
+
+#8 [builder  1/13] FROM docker.io/library/golang:1.25.14-alpine3.23@sha256:27b3069b25647beacd3745b0b2c83e2f9b8d3935455a32cd4531236ee1c960e0
+#8 extracting sha256:2129e38f8eb91140cd022167d69ad764919cb78de3d2c70efd48c5e6b1b48f98 1.6s done
+#8 DONE 2.4s
+
+#8 [builder  1/13] FROM docker.io/library/golang:1.25.14-alpine3.23@sha256:27b3069b25647beacd3745b0b2c83e2f9b8d3935455a32cd4531236ee1c960e0
+#8 extracting sha256:4d7f9c98f0d77b87be67f15ae33a498bb1fe4506436b93af59a885d159771f0f 0.1s done
+#8 extracting sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1 0.1s done
+#8 DONE 2.5s
+
+#11 [dockerize 2/3] RUN apk add --no-cache openssl
+#11 0.641 (1/1) Installing openssl (3.5.9-r0)
+#11 0.659 Executing busybox-1.37.0-r31.trigger
+#11 0.664 OK: 9009 KiB in 17 packages
+#11 ...
+
+#12 [builder  2/13] RUN apk add --no-cache ca-certificates make git curl mercurial unzip bash
+#12 0.427 ( 1/34) Installing ncurses-terminfo-base (6.5_p20251123-r0)
+#12 0.436 ( 2/34) Installing libncursesw (6.5_p20251123-r0)
+#12 0.446 ( 3/34) Installing readline (8.3.1-r0)
+#12 0.459 ( 4/34) Installing bash (5.3.3-r1)
+#12 0.474   Executing bash-5.3.3-r1.post-install
+#12 0.476 ( 5/34) Installing brotli-libs (1.2.1-r0)
+#12 0.489 ( 6/34) Installing c-ares (1.34.9-r0)
+#12 0.499 ( 7/34) Installing libunistring (1.4.1-r0)
+#12 0.514 ( 8/34) Installing libidn2 (2.3.8-r0)
+#12 0.523 ( 9/34) Installing nghttp2-libs (1.69.0-r0)
+#12 0.532 (10/34) Installing libpsl (0.21.5-r3)
+#12 0.540 (11/34) Installing zstd-libs (1.5.7-r2)
+#12 0.552 (12/34) Installing libcurl (8.23.0-r0)
+#12 0.564 (13/34) Installing curl (8.23.0-r0)
+#12 0.574 (14/34) Installing libexpat (2.10.0-r0)
+#12 0.583 (15/34) Installing pcre2 (10.49-r0)
+#12 0.595 (16/34) Installing git (2.52.0-r0)
+#12 0.647 (17/34) Installing git-init-template (2.52.0-r0)
+#12 0.658 (18/34) Installing make (4.4.1-r3)
+#12 0.667 (19/34) Installing libbz2 (1.0.8-r6)
+#12 0.676 (20/34) Installing libffi (3.5.2-r0)
+#12 0.683 (21/34) Installing gdbm (1.26-r0)
+#12 0.692 (22/34) Installing xz-libs (5.8.4-r0)
+#12 0.701 (23/34) Installing libgcc (15.2.0-r2)
+#12 0.711 (24/34) Installing libstdc++ (15.2.0-r2)
+#12 0.732 (25/34) Installing mpdecimal (4.0.1-r0)
+#12 0.741 (26/34) Installing libpanelw (6.5_p20251123-r0)
+#12 0.749 (27/34) Installing sqlite-libs (3.53.4-r0)
+#12 0.766 (28/34) Installing python3 (3.12.16-r0)
+#12 0.882 (29/34) Installing python3-pycache-pyc0 (3.12.16-r0)
+#12 0.983 (30/34) Installing pyc (3.12.16-r0)
+#12 0.994 (31/34) Installing mercurial-pyc (7.1.2-r0)
+#12 1.475 (32/34) Installing python3-pyc (3.12.16-r0)
+#12 1.475 (33/34) Installing mercurial (7.1.2-r0)
+#12 1.579 (34/34) Installing unzip (6.0-r16)
+#12 1.591 Executing busybox-1.37.0-r30.trigger
+#12 1.595 OK: 84.6 MiB in 51 packages
+#12 ...
+
+#10 [alpine 2/3] RUN apk add --update --no-cache ca-certificates tzdata bash curl
+#10 DONE 5.9s
+
+#12 [builder  2/13] RUN apk add --no-cache ca-certificates make git curl mercurial unzip bash
+#12 DONE 3.8s
+
+#11 [dockerize 2/3] RUN apk add --no-cache openssl
+#11 DONE 5.9s
+
+#13 [builder  3/13] WORKDIR /cadence
+#13 DONE 0.1s
+
+#14 [dockerize 3/3] RUN wget https://github.com/jwilder/dockerize/releases/download/v0.9.3/dockerize-linux-amd64-v0.9.3.tar.gz     && tar -C /usr/local/bin -xzvf dockerize-linux-amd64-v0.9.3.tar.gz     && rm dockerize-linux-amd64-v0.9.3.tar.gz     && echo "**** fix for host id mapping error ****"     && chown root:root /usr/local/bin/dockerize
+#14 ...
+
+#15 [builder  4/13] COPY go.* ./
+#15 DONE 0.1s
+
+#16 [alpine 3/3] RUN [ -e /etc/nsswitch.conf ] && grep '^hosts: files dns' /etc/nsswitch.conf
+#16 0.185 hosts: files dns
+#16 DONE 0.2s
+
+#14 [dockerize 3/3] RUN wget https://github.com/jwilder/dockerize/releases/download/v0.9.3/dockerize-linux-amd64-v0.9.3.tar.gz     && tar -C /usr/local/bin -xzvf dockerize-linux-amd64-v0.9.3.tar.gz     && rm dockerize-linux-amd64-v0.9.3.tar.gz     && echo "**** fix for host id mapping error ****"     && chown root:root /usr/local/bin/dockerize
+#14 0.197 Connecting to github.com (140.82.116.4:443)
+#14 ...
+
+#17 [builder  5/13] COPY cmd/server/go.* ./cmd/server/
+#17 DONE 0.1s
+
+#18 [builder  6/13] COPY common/archiver/gcloud/go.* ./common/archiver/gcloud/
+#18 DONE 0.0s
+
+#19 [builder  7/13] COPY common/dynamicconfig/openfeatureprovider/unleash/go.* ./common/dynamicconfig/openfeatureprovider/unleash/
+#19 DONE 0.0s
+
+#20 [alpine-nonroot 1/1] RUN addgroup -g 1000 cadence &&     adduser -u 1000 -G cadence -s /bin/sh -D cadence
+#20 DONE 0.2s
+
+#21 [builder  8/13] COPY common/persistence/sql/sqlplugin/cloudsql-mysql/go.* ./common/persistence/sql/sqlplugin/cloudsql-mysql/
+#21 DONE 0.0s
+
+#14 [dockerize 3/3] RUN wget https://github.com/jwilder/dockerize/releases/download/v0.9.3/dockerize-linux-amd64-v0.9.3.tar.gz     && tar -C /usr/local/bin -xzvf dockerize-linux-amd64-v0.9.3.tar.gz     && rm dockerize-linux-amd64-v0.9.3.tar.gz     && echo "**** fix for host id mapping error ****"     && chown root:root /usr/local/bin/dockerize
+#14 0.409 Connecting to release-assets.githubusercontent.com (185.199.110.133:443)
+#14 0.448 saving to 'dockerize-linux-amd64-v0.9.3.tar.gz'
+#14 ...
+
+#22 [cadence-server  1/14] RUN mkdir -p /etc/cadence
+#22 DONE 0.2s
+
+#14 [dockerize 3/3] RUN wget https://github.com/jwilder/dockerize/releases/download/v0.9.3/dockerize-linux-amd64-v0.9.3.tar.gz     && tar -C /usr/local/bin -xzvf dockerize-linux-amd64-v0.9.3.tar.gz     && rm dockerize-linux-amd64-v0.9.3.tar.gz     && echo "**** fix for host id mapping error ****"     && chown root:root /usr/local/bin/dockerize
+#14 0.497 dockerize-linux-amd6 100% |********************************| 6827k  0:00:00 ETA
+#14 0.497 'dockerize-linux-amd64-v0.9.3.tar.gz' saved
+#14 0.499 dockerize
+#14 0.607 **** fix for host id mapping error ****
+#14 DONE 0.6s
+
+#23 [cadence-server  2/14] COPY --from=dockerize --chown=cadence:cadence /usr/local/bin/dockerize /usr/local/bin
+#23 DONE 0.1s
+
+#24 [builder  9/13] RUN go mod download
+#24 DONE 19.0s
+
+#25 [builder 10/13] COPY . .
+#25 DONE 0.9s
+
+#26 [builder 11/13] RUN rm -fr .bin .build idls
+#26 DONE 0.2s
+
+#27 [builder 12/13] RUN make .just-build
+#27 0.133 Makefile:46: warning: your Go toolchain is explicitly set to GOTOOLCHAIN=local, ignoring go.work version go1.25.14...
+#27 0.154 find: idls: No such file or directory
+#27 0.189 touch .build/just-build
+#27 DONE 0.2s
+
+#28 [builder 13/13] RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 make cadence-cassandra-tool cadence-sql-tool cadence cadence-server cadence-bench cadence-canary
+#28 0.125 Makefile:46: warning: your Go toolchain is explicitly set to GOTOOLCHAIN=local, ignoring go.work version go1.25.14...
+#28 0.146 find: idls: No such file or directory
+#28 0.178 Makefile:494: !!!!! lint and codegen disabled, validations skipped !!!!!
+#28 0.180 compiling cadence-cassandra-tool with OS: linux, ARCH: amd64
+#28 41.95 compiling cadence-sql-tool with OS: linux, ARCH: amd64
+#28 46.55 compiling cadence with OS: linux, ARCH: amd64
+#28 57.35 compiling cadence-server with OS: linux, ARCH: amd64
+#28 82.17 compiling cadence-bench with OS: linux, ARCH: amd64
+#28 83.46 compiling cadence-canary with OS: linux, ARCH: amd64
+#28 DONE 87.3s
+
+#29 [cadence-server  3/14] COPY --from=builder --chown=cadence:cadence /cadence/cadence-cassandra-tool /usr/local/bin
+#29 DONE 0.1s
+
+#30 [cadence-server  4/14] COPY --from=builder --chown=cadence:cadence /cadence/cadence-sql-tool /usr/local/bin
+#30 DONE 0.2s
+
+#31 [cadence-server  5/14] COPY --from=builder --chown=cadence:cadence /cadence/cadence /usr/local/bin
+#31 DONE 0.4s
+
+#32 [cadence-server  6/14] COPY --from=builder --chown=cadence:cadence /cadence/cadence-server /usr/local/bin
+#32 DONE 0.6s
+
+#33 [cadence-server  7/14] COPY --from=builder --chown=cadence:cadence /cadence/schema /etc/cadence/schema
+#33 DONE 0.1s
+
+#34 [cadence-server  8/14] COPY --chown=cadence:cadence docker/entrypoint.sh /docker-entrypoint.sh
+#34 DONE 0.1s
+
+#35 [cadence-server  9/14] COPY --chown=cadence:cadence docker/start-cadence.sh /start-cadence.sh
+#35 DONE 0.1s
+
+#36 [cadence-server 10/14] COPY --chown=cadence:cadence config/dynamicconfig /etc/cadence/dynamicconfig
+#36 DONE 0.0s
+
+#37 [cadence-server 11/14] COPY --chown=cadence:cadence config/credentials /etc/cadence/credentials
+#37 DONE 0.0s
+
+#38 [cadence-server 12/14] COPY --chown=cadence:cadence docker/config_template.yaml /etc/cadence/config_template.yaml
+#38 DONE 0.0s
+
+#39 [cadence-server 13/14] RUN mkdir -p /etc/cadence/config &&     chown cadence:cadence /etc/cadence/config &&     chmod 0700 /docker-entrypoint.sh /start-cadence.sh
+#39 DONE 0.1s
+
+#40 [cadence-server 14/14] WORKDIR /etc/cadence
+#40 DONE 0.0s
+
+#41 exporting to image
+#41 exporting layers
+#41 exporting layers 4.6s done
+#41 exporting manifest sha256:bccab4eb8c4a74d1050ef5bf3e2d322c695d1ff78cdf41000afe5da43e03a0ab 0.0s done
+#41 exporting config sha256:03bb71ead8861defbe94919ed5871427432b8118e4820f9c1a3a0fd66304789d 0.0s done
+#41 exporting attestation manifest sha256:0bb304758953453fdae0c6dadb29702c5fc4c1ba80e9e26d8fe794b6f2e91747 0.0s done
+#41 exporting manifest list sha256:1024a5209dc1f6d564a83748883a559df46f3cf609274d0c85f0574945b5cf46 0.0s done
+#41 naming to docker.io/library/cadence-go:ci done
+#41 unpacking to docker.io/library/cadence-go:ci
+#41 unpacking to docker.io/library/cadence-go:ci 1.4s done
+#41 DONE 6.1s

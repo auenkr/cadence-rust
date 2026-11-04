@@ -1,0 +1,2 @@
+PID                 COMMAND             COMMAND
+70314               cadence-server      cadence-server --root /etc/cadence --env docker --config config start --services=history

@@ -1,0 +1,1 @@
+Linux ip-10-0-130-226 7.0.0-1016-aws #17-Ubuntu SMP PREEMPT Mon Oct 19 17:36:33 UTC 2026 x86_64 GNU/Linux

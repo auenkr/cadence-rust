@@ -1,0 +1,21 @@
+services:
+  frontend:
+    mem_limit: 1400m
+    memswap_limit: 1400m
+    cpus: 1.0
+    pids_limit: 2048
+  matching:
+    mem_limit: 1400m
+    memswap_limit: 1400m
+    cpus: 1.0
+    pids_limit: 2048
+  history:
+    mem_limit: 1400m
+    memswap_limit: 1400m
+    cpus: 1.0
+    pids_limit: 2048
+  worker:
+    mem_limit: 1400m
+    memswap_limit: 1400m
+    cpus: 1.0
+    pids_limit: 2048

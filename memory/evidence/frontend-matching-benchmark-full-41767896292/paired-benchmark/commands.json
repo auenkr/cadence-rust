@@ -1,0 +1,1218 @@
+[
+  {
+    "name": "down-00-go",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-00-go.log",
+    "started_unix": 1793764270.2470047,
+    "elapsed_seconds": 0.700918436050415
+  },
+  {
+    "name": "up-00-go",
+    "command": "docker compose -p cadence-fm-benchmark up -d",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/up-00-go.log",
+    "started_unix": 1793764270.994804,
+    "elapsed_seconds": 29.686134576797485
+  },
+  {
+    "name": "process-00-go-frontend",
+    "command": "docker top 9c0b078bada4ccce97b87ae30abd6441ecb93018179839d508def0473f370403 -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-00-go-frontend.log",
+    "started_unix": 1793764301.7997813,
+    "elapsed_seconds": 0.01754474639892578
+  },
+  {
+    "name": "process-00-go-matching",
+    "command": "docker top afa1608a26df3cda8b77cc882315c8b59fedd2c4861dc0b019a1a5b86d71d251 -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-00-go-matching.log",
+    "started_unix": 1793764301.882401,
+    "elapsed_seconds": 0.01584172248840332
+  },
+  {
+    "name": "process-00-go-history",
+    "command": "docker top 8437c77775ad6e5d5cf5596beb89150daf054e298a259c39f79a599138ee3898 -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-00-go-history.log",
+    "started_unix": 1793764301.969068,
+    "elapsed_seconds": 0.015140056610107422
+  },
+  {
+    "name": "process-00-go-worker",
+    "command": "docker top e7d889b58b14ca8b9d1843b26bce502e0fa960d0374831ce0bb974343e83a653 -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-00-go-worker.log",
+    "started_unix": 1793764302.0500712,
+    "elapsed_seconds": 0.016224384307861328
+  },
+  {
+    "name": "domain-00-go-0",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-cli --address 127.0.0.1:7833 --transport grpc --domain benchmark domain register --rd 1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/domain-00-go-0.log",
+    "started_unix": 1793764302.115085,
+    "elapsed_seconds": 0.06399226188659668
+  },
+  {
+    "name": "run-00-go-c1",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 1000 -warmup 100 -concurrency 1 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-go-c1.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-go-c1.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-go-c1.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-00-go-c1.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-00-go-c1.log",
+    "started_unix": 1793764302.1797936,
+    "elapsed_seconds": 90.44743156433105
+  },
+  {
+    "name": "collector-00-go-c1",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-go-c1.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-go-c1.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-go-c1.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-00-go-c1.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-00-go-c1.log",
+    "started_unix": 1793764302.179369,
+    "elapsed_seconds": 90.47951912879944
+  },
+  {
+    "name": "run-00-go-c16",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 1000 -warmup 100 -concurrency 16 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-go-c16.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-go-c16.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-go-c16.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-00-go-c16.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-00-go-c16.log",
+    "started_unix": 1793764392.6595857,
+    "elapsed_seconds": 33.685126066207886
+  },
+  {
+    "name": "collector-00-go-c16",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-go-c16.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-go-c16.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-go-c16.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-00-go-c16.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-00-go-c16.log",
+    "started_unix": 1793764392.6591494,
+    "elapsed_seconds": 33.71735215187073
+  },
+  {
+    "name": "run-00-go-c64",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 1000 -warmup 100 -concurrency 64 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-go-c64.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-go-c64.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-go-c64.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-00-go-c64.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-00-go-c64.log",
+    "started_unix": 1793764426.3772674,
+    "elapsed_seconds": 36.46434497833252
+  },
+  {
+    "name": "collector-00-go-c64",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-go-c64.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-go-c64.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-go-c64.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-00-go-c64.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-00-go-c64.log",
+    "started_unix": 1793764426.3767965,
+    "elapsed_seconds": 36.46505618095398
+  },
+  {
+    "name": "services-00-go",
+    "command": "docker compose -p cadence-fm-benchmark logs --no-color",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/services-00-go.log",
+    "started_unix": 1793764462.8428214,
+    "elapsed_seconds": 0.058451175689697266
+  },
+  {
+    "name": "down-after-00-go",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-after-00-go.log",
+    "started_unix": 1793764462.901483,
+    "elapsed_seconds": 13.015837907791138
+  },
+  {
+    "name": "down-00-rust",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-00-rust.log",
+    "started_unix": 1793764475.917558,
+    "elapsed_seconds": 0.03155970573425293
+  },
+  {
+    "name": "up-00-rust",
+    "command": "docker compose -p cadence-fm-benchmark up -d",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/up-00-rust.log",
+    "started_unix": 1793764475.9945707,
+    "elapsed_seconds": 16.70498776435852
+  },
+  {
+    "name": "process-00-rust-frontend",
+    "command": "docker top f030dfeab9081ce6b21558ca6cae0b1ffefa63e701f07db71190a4bf3d98ba90 -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-00-rust-frontend.log",
+    "started_unix": 1793764492.856276,
+    "elapsed_seconds": 0.016626834869384766
+  },
+  {
+    "name": "process-00-rust-matching",
+    "command": "docker top 90b10cb8672233bcb7dac0ec130a497cfcf84f61b2447f4d24e839e63eed0855 -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-00-rust-matching.log",
+    "started_unix": 1793764492.9453855,
+    "elapsed_seconds": 0.016308307647705078
+  },
+  {
+    "name": "process-00-rust-history",
+    "command": "docker top 522b8b2532c50a0c97242c8470b1be6beeafd35394e35ca71ca6c77697a72567 -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-00-rust-history.log",
+    "started_unix": 1793764493.028093,
+    "elapsed_seconds": 0.01579117774963379
+  },
+  {
+    "name": "process-00-rust-worker",
+    "command": "docker top 79b2c90493b421e6384065154c05d44400808597f7a8f5ceacd99a89b9eca7b9 -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-00-rust-worker.log",
+    "started_unix": 1793764493.1090815,
+    "elapsed_seconds": 0.016460180282592773
+  },
+  {
+    "name": "domain-00-rust-0",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-cli --address 127.0.0.1:7833 --transport grpc --domain benchmark domain register --rd 1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/domain-00-rust-0.log",
+    "started_unix": 1793764493.177511,
+    "elapsed_seconds": 0.06387972831726074
+  },
+  {
+    "name": "run-00-rust-c1",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 1000 -warmup 100 -concurrency 1 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-rust-c1.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-rust-c1.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-rust-c1.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-00-rust-c1.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-00-rust-c1.log",
+    "started_unix": 1793764493.242091,
+    "elapsed_seconds": 105.56417751312256
+  },
+  {
+    "name": "collector-00-rust-c1",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-rust-c1.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-rust-c1.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-rust-c1.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-00-rust-c1.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-00-rust-c1.log",
+    "started_unix": 1793764493.2417145,
+    "elapsed_seconds": 105.59626269340515
+  },
+  {
+    "name": "run-00-rust-c16",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 1000 -warmup 100 -concurrency 16 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-rust-c16.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-rust-c16.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-rust-c16.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-00-rust-c16.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-00-rust-c16.log",
+    "started_unix": 1793764598.8387575,
+    "elapsed_seconds": 38.450464963912964
+  },
+  {
+    "name": "collector-00-rust-c16",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-rust-c16.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-rust-c16.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-rust-c16.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-00-rust-c16.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-00-rust-c16.log",
+    "started_unix": 1793764598.8382666,
+    "elapsed_seconds": 38.4826934337616
+  },
+  {
+    "name": "run-00-rust-c64",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 1000 -warmup 100 -concurrency 64 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-rust-c64.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-rust-c64.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-rust-c64.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-00-rust-c64.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-00-rust-c64.log",
+    "started_unix": 1793764637.3216789,
+    "elapsed_seconds": 42.133005142211914
+  },
+  {
+    "name": "collector-00-rust-c64",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-rust-c64.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-rust-c64.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-00-rust-c64.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-00-rust-c64.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-00-rust-c64.log",
+    "started_unix": 1793764637.32128,
+    "elapsed_seconds": 42.13683271408081
+  },
+  {
+    "name": "services-00-rust",
+    "command": "docker compose -p cadence-fm-benchmark logs --no-color",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/services-00-rust.log",
+    "started_unix": 1793764679.4582481,
+    "elapsed_seconds": 0.5238609313964844
+  },
+  {
+    "name": "down-after-00-rust",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-after-00-rust.log",
+    "started_unix": 1793764679.9824295,
+    "elapsed_seconds": 7.812230110168457
+  },
+  {
+    "name": "down-01-rust",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-01-rust.log",
+    "started_unix": 1793764687.794946,
+    "elapsed_seconds": 0.030000686645507812
+  },
+  {
+    "name": "up-01-rust",
+    "command": "docker compose -p cadence-fm-benchmark up -d",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/up-01-rust.log",
+    "started_unix": 1793764687.8687468,
+    "elapsed_seconds": 21.7126727104187
+  },
+  {
+    "name": "process-01-rust-frontend",
+    "command": "docker top 0baf4d2ff8f6e72bd8ea332b5736f23b37ffb3c1555e1291e830094feb3502d4 -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-01-rust-frontend.log",
+    "started_unix": 1793764709.7259817,
+    "elapsed_seconds": 0.015776634216308594
+  },
+  {
+    "name": "process-01-rust-matching",
+    "command": "docker top 089aad4344e3328693bd521077f4570e67a4747bfd7de803422fa25c5c3ea69b -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-01-rust-matching.log",
+    "started_unix": 1793764709.8123865,
+    "elapsed_seconds": 0.01506185531616211
+  },
+  {
+    "name": "process-01-rust-history",
+    "command": "docker top 1811ef452b3930d83c9d9099203d19406f1ef516ea7d9f8f8b41be747d2ccb9e -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-01-rust-history.log",
+    "started_unix": 1793764709.89072,
+    "elapsed_seconds": 0.014812469482421875
+  },
+  {
+    "name": "process-01-rust-worker",
+    "command": "docker top 4ddf31ccca015916274cfe19a5d626a4b3a880db48daa9b1899c77284fb78f41 -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-01-rust-worker.log",
+    "started_unix": 1793764709.9668524,
+    "elapsed_seconds": 0.015227794647216797
+  },
+  {
+    "name": "domain-01-rust-0",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-cli --address 127.0.0.1:7833 --transport grpc --domain benchmark domain register --rd 1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/domain-01-rust-0.log",
+    "started_unix": 1793764710.0288117,
+    "elapsed_seconds": 0.0639035701751709
+  },
+  {
+    "name": "run-01-rust-c1",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 1000 -warmup 100 -concurrency 1 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-rust-c1.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-rust-c1.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-rust-c1.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-01-rust-c1.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-01-rust-c1.log",
+    "started_unix": 1793764710.0935078,
+    "elapsed_seconds": 103.529531955719
+  },
+  {
+    "name": "collector-01-rust-c1",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-rust-c1.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-rust-c1.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-rust-c1.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-01-rust-c1.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-01-rust-c1.log",
+    "started_unix": 1793764710.093093,
+    "elapsed_seconds": 103.5455710887909
+  },
+  {
+    "name": "run-01-rust-c16",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 1000 -warmup 100 -concurrency 16 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-rust-c16.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-rust-c16.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-rust-c16.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-01-rust-c16.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-01-rust-c16.log",
+    "started_unix": 1793764813.6394145,
+    "elapsed_seconds": 37.13279843330383
+  },
+  {
+    "name": "collector-01-rust-c16",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-rust-c16.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-rust-c16.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-rust-c16.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-01-rust-c16.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-01-rust-c16.log",
+    "started_unix": 1793764813.6389863,
+    "elapsed_seconds": 37.136794090270996
+  },
+  {
+    "name": "run-01-rust-c64",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 1000 -warmup 100 -concurrency 64 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-rust-c64.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-rust-c64.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-rust-c64.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-01-rust-c64.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-01-rust-c64.log",
+    "started_unix": 1793764850.7771833,
+    "elapsed_seconds": 40.06853747367859
+  },
+  {
+    "name": "collector-01-rust-c64",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-rust-c64.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-rust-c64.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-rust-c64.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-01-rust-c64.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-01-rust-c64.log",
+    "started_unix": 1793764850.7768033,
+    "elapsed_seconds": 40.06924080848694
+  },
+  {
+    "name": "services-01-rust",
+    "command": "docker compose -p cadence-fm-benchmark logs --no-color",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/services-01-rust.log",
+    "started_unix": 1793764890.8472106,
+    "elapsed_seconds": 0.5491228103637695
+  },
+  {
+    "name": "down-after-01-rust",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-after-01-rust.log",
+    "started_unix": 1793764891.3966503,
+    "elapsed_seconds": 9.065213441848755
+  },
+  {
+    "name": "down-01-go",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-01-go.log",
+    "started_unix": 1793764900.462157,
+    "elapsed_seconds": 0.030026912689208984
+  },
+  {
+    "name": "up-01-go",
+    "command": "docker compose -p cadence-fm-benchmark up -d",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/up-01-go.log",
+    "started_unix": 1793764900.5369303,
+    "elapsed_seconds": 16.697564601898193
+  },
+  {
+    "name": "process-01-go-frontend",
+    "command": "docker top 42be2a99454e61c69e20033ccce57658897661d1fcc92e39e090b4d752a5207e -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-01-go-frontend.log",
+    "started_unix": 1793764917.3891451,
+    "elapsed_seconds": 0.015667438507080078
+  },
+  {
+    "name": "process-01-go-matching",
+    "command": "docker top c924a3542d3eaf2795ce42372b27eed7d50bd35b8d48c97d0277e60f26877fa1 -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-01-go-matching.log",
+    "started_unix": 1793764917.4743044,
+    "elapsed_seconds": 0.015555143356323242
+  },
+  {
+    "name": "process-01-go-history",
+    "command": "docker top cc9311e0bb97aa1e372878c82492a055504419208f4a4b96ed818934bc049d93 -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-01-go-history.log",
+    "started_unix": 1793764917.5786233,
+    "elapsed_seconds": 0.021728992462158203
+  },
+  {
+    "name": "process-01-go-worker",
+    "command": "docker top 614a419c074907711896ef15d97a9299e700176af287afeaa6ed8f948503731a -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-01-go-worker.log",
+    "started_unix": 1793764917.6727817,
+    "elapsed_seconds": 0.014456748962402344
+  },
+  {
+    "name": "domain-01-go-0",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-cli --address 127.0.0.1:7833 --transport grpc --domain benchmark domain register --rd 1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/domain-01-go-0.log",
+    "started_unix": 1793764917.7334497,
+    "elapsed_seconds": 0.06389594078063965
+  },
+  {
+    "name": "run-01-go-c1",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 1000 -warmup 100 -concurrency 1 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-go-c1.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-go-c1.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-go-c1.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-01-go-c1.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-01-go-c1.log",
+    "started_unix": 1793764917.798138,
+    "elapsed_seconds": 90.1647117137909
+  },
+  {
+    "name": "collector-01-go-c1",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-go-c1.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-go-c1.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-go-c1.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-01-go-c1.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-01-go-c1.log",
+    "started_unix": 1793764917.7977648,
+    "elapsed_seconds": 90.16542339324951
+  },
+  {
+    "name": "run-01-go-c16",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 1000 -warmup 100 -concurrency 16 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-go-c16.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-go-c16.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-go-c16.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-01-go-c16.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-01-go-c16.log",
+    "started_unix": 1793765007.9647884,
+    "elapsed_seconds": 33.12577939033508
+  },
+  {
+    "name": "collector-01-go-c16",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-go-c16.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-go-c16.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-go-c16.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-01-go-c16.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-01-go-c16.log",
+    "started_unix": 1793765007.964408,
+    "elapsed_seconds": 33.15798997879028
+  },
+  {
+    "name": "run-01-go-c64",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 1000 -warmup 100 -concurrency 64 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-go-c64.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-go-c64.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-go-c64.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-01-go-c64.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-01-go-c64.log",
+    "started_unix": 1793765041.1232383,
+    "elapsed_seconds": 35.554383754730225
+  },
+  {
+    "name": "collector-01-go-c64",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-go-c64.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-go-c64.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-01-go-c64.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-01-go-c64.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-01-go-c64.log",
+    "started_unix": 1793765041.1227636,
+    "elapsed_seconds": 35.618711709976196
+  },
+  {
+    "name": "services-01-go",
+    "command": "docker compose -p cadence-fm-benchmark logs --no-color",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/services-01-go.log",
+    "started_unix": 1793765076.7417555,
+    "elapsed_seconds": 0.0513911247253418
+  },
+  {
+    "name": "down-after-01-go",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-after-01-go.log",
+    "started_unix": 1793765076.7934368,
+    "elapsed_seconds": 13.558220386505127
+  },
+  {
+    "name": "down-02-go",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-02-go.log",
+    "started_unix": 1793765090.3520286,
+    "elapsed_seconds": 0.030464649200439453
+  },
+  {
+    "name": "up-02-go",
+    "command": "docker compose -p cadence-fm-benchmark up -d",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/up-02-go.log",
+    "started_unix": 1793765090.425218,
+    "elapsed_seconds": 21.65684413909912
+  },
+  {
+    "name": "process-02-go-frontend",
+    "command": "docker top 70b1520d375f2605d7fb286653d1c5bf09dda0bf91fa1fd6eb498426bb27ccbc -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-02-go-frontend.log",
+    "started_unix": 1793765112.2511253,
+    "elapsed_seconds": 0.016376256942749023
+  },
+  {
+    "name": "process-02-go-matching",
+    "command": "docker top db212588317f28df4acad2cb43e29d7590165659e021d5e9072fcaa4eab4e3ea -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-02-go-matching.log",
+    "started_unix": 1793765112.3397982,
+    "elapsed_seconds": 0.017054319381713867
+  },
+  {
+    "name": "process-02-go-history",
+    "command": "docker top 147b60f7a154e3023f75a9310bbc5553be02dbccc31d44a83134314d5b301597 -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-02-go-history.log",
+    "started_unix": 1793765112.4332166,
+    "elapsed_seconds": 0.015340328216552734
+  },
+  {
+    "name": "process-02-go-worker",
+    "command": "docker top a95f44c5645424f291874187e42923531ec88c474cfdda84206adf1e0779a597 -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-02-go-worker.log",
+    "started_unix": 1793765112.511754,
+    "elapsed_seconds": 0.014330387115478516
+  },
+  {
+    "name": "domain-02-go-0",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-cli --address 127.0.0.1:7833 --transport grpc --domain benchmark domain register --rd 1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/domain-02-go-0.log",
+    "started_unix": 1793765112.5696037,
+    "elapsed_seconds": 0.0317535400390625
+  },
+  {
+    "name": "run-02-go-c1",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 1000 -warmup 100 -concurrency 1 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-go-c1.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-go-c1.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-go-c1.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-02-go-c1.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-02-go-c1.log",
+    "started_unix": 1793765112.6019967,
+    "elapsed_seconds": 87.35387015342712
+  },
+  {
+    "name": "collector-02-go-c1",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-go-c1.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-go-c1.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-go-c1.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-02-go-c1.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-02-go-c1.log",
+    "started_unix": 1793765112.6017566,
+    "elapsed_seconds": 87.35451102256775
+  },
+  {
+    "name": "run-02-go-c16",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 1000 -warmup 100 -concurrency 16 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-go-c16.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-go-c16.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-go-c16.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-02-go-c16.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-02-go-c16.log",
+    "started_unix": 1793765199.9579384,
+    "elapsed_seconds": 33.019235610961914
+  },
+  {
+    "name": "collector-02-go-c16",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-go-c16.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-go-c16.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-go-c16.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-02-go-c16.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-02-go-c16.log",
+    "started_unix": 1793765199.9575622,
+    "elapsed_seconds": 33.02001190185547
+  },
+  {
+    "name": "run-02-go-c64",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 1000 -warmup 100 -concurrency 64 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-go-c64.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-go-c64.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-go-c64.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-02-go-c64.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-02-go-c64.log",
+    "started_unix": 1793765232.979344,
+    "elapsed_seconds": 35.49305868148804
+  },
+  {
+    "name": "collector-02-go-c64",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-go-c64.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-go-c64.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-go-c64.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-02-go-c64.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-02-go-c64.log",
+    "started_unix": 1793765232.9789171,
+    "elapsed_seconds": 35.5573844909668
+  },
+  {
+    "name": "services-02-go",
+    "command": "docker compose -p cadence-fm-benchmark logs --no-color",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/services-02-go.log",
+    "started_unix": 1793765268.5366066,
+    "elapsed_seconds": 0.0571742057800293
+  },
+  {
+    "name": "down-after-02-go",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-after-02-go.log",
+    "started_unix": 1793765268.5940874,
+    "elapsed_seconds": 13.647167205810547
+  },
+  {
+    "name": "down-02-rust",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-02-rust.log",
+    "started_unix": 1793765282.2416158,
+    "elapsed_seconds": 0.029201507568359375
+  },
+  {
+    "name": "up-02-rust",
+    "command": "docker compose -p cadence-fm-benchmark up -d",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/up-02-rust.log",
+    "started_unix": 1793765282.31371,
+    "elapsed_seconds": 16.696611166000366
+  },
+  {
+    "name": "process-02-rust-frontend",
+    "command": "docker top 1d0fcae238ab00dc5fbcb68de77d44b3c48add280f693cb0b69446866a157602 -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-02-rust-frontend.log",
+    "started_unix": 1793765299.174833,
+    "elapsed_seconds": 0.018781185150146484
+  },
+  {
+    "name": "process-02-rust-matching",
+    "command": "docker top 50d976ff06220b8dd2b8e646701d25e371c6debe03c66b108d88fbac88e24bf2 -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-02-rust-matching.log",
+    "started_unix": 1793765299.2748778,
+    "elapsed_seconds": 0.018941640853881836
+  },
+  {
+    "name": "process-02-rust-history",
+    "command": "docker top 64ad6ea4ee46b149727e2dcb2a0cddc1bf0e5357c8e95c31ba7b14088038a213 -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-02-rust-history.log",
+    "started_unix": 1793765299.365811,
+    "elapsed_seconds": 0.018291950225830078
+  },
+  {
+    "name": "process-02-rust-worker",
+    "command": "docker top c5a250b6360a3d9d66f6d97b0d892c5a496cc9bd97ed67a544674db9a6821391 -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-02-rust-worker.log",
+    "started_unix": 1793765299.4613059,
+    "elapsed_seconds": 0.01890850067138672
+  },
+  {
+    "name": "domain-02-rust-0",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-cli --address 127.0.0.1:7833 --transport grpc --domain benchmark domain register --rd 1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/domain-02-rust-0.log",
+    "started_unix": 1793765299.536637,
+    "elapsed_seconds": 0.06460809707641602
+  },
+  {
+    "name": "run-02-rust-c1",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 1000 -warmup 100 -concurrency 1 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-rust-c1.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-rust-c1.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-rust-c1.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-02-rust-c1.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-02-rust-c1.log",
+    "started_unix": 1793765299.60224,
+    "elapsed_seconds": 103.58493518829346
+  },
+  {
+    "name": "collector-02-rust-c1",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-rust-c1.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-rust-c1.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-rust-c1.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-02-rust-c1.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-02-rust-c1.log",
+    "started_unix": 1793765299.6017747,
+    "elapsed_seconds": 103.59310913085938
+  },
+  {
+    "name": "run-02-rust-c16",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 1000 -warmup 100 -concurrency 16 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-rust-c16.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-rust-c16.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-rust-c16.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-02-rust-c16.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-02-rust-c16.log",
+    "started_unix": 1793765403.195693,
+    "elapsed_seconds": 36.73092293739319
+  },
+  {
+    "name": "collector-02-rust-c16",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-rust-c16.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-rust-c16.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-rust-c16.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-02-rust-c16.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-02-rust-c16.log",
+    "started_unix": 1793765403.195279,
+    "elapsed_seconds": 36.73182511329651
+  },
+  {
+    "name": "run-02-rust-c64",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 1000 -warmup 100 -concurrency 64 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-rust-c64.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-rust-c64.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-rust-c64.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-02-rust-c64.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-02-rust-c64.log",
+    "started_unix": 1793765439.9288378,
+    "elapsed_seconds": 39.701104402542114
+  },
+  {
+    "name": "collector-02-rust-c64",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-rust-c64.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-rust-c64.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-02-rust-c64.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-02-rust-c64.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-02-rust-c64.log",
+    "started_unix": 1793765439.9284613,
+    "elapsed_seconds": 39.765377044677734
+  },
+  {
+    "name": "services-02-rust",
+    "command": "docker compose -p cadence-fm-benchmark logs --no-color",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/services-02-rust.log",
+    "started_unix": 1793765479.6941593,
+    "elapsed_seconds": 0.5511267185211182
+  },
+  {
+    "name": "down-after-02-rust",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-after-02-rust.log",
+    "started_unix": 1793765480.2470798,
+    "elapsed_seconds": 8.677060604095459
+  },
+  {
+    "name": "down-03-rust",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-03-rust.log",
+    "started_unix": 1793765488.9245129,
+    "elapsed_seconds": 0.028941869735717773
+  },
+  {
+    "name": "up-03-rust",
+    "command": "docker compose -p cadence-fm-benchmark up -d",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/up-03-rust.log",
+    "started_unix": 1793765488.9958172,
+    "elapsed_seconds": 16.693092346191406
+  },
+  {
+    "name": "process-03-rust-frontend",
+    "command": "docker top 9ed0c4778637dbbaf6a30c8ed954b4b5a576720bd3a151cac8b1616437982adc -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-03-rust-frontend.log",
+    "started_unix": 1793765505.8421986,
+    "elapsed_seconds": 0.015056133270263672
+  },
+  {
+    "name": "process-03-rust-matching",
+    "command": "docker top e18a211f946bd125f31b9cc9e4c27cb1582d49a35b2f37891de0bb4a7acd879b -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-03-rust-matching.log",
+    "started_unix": 1793765505.919958,
+    "elapsed_seconds": 0.013694524765014648
+  },
+  {
+    "name": "process-03-rust-history",
+    "command": "docker top 22bfb5610b0e992cc27ace97c0268ace8bc8887e1bc18aa0330be79be1864f1e -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-03-rust-history.log",
+    "started_unix": 1793765505.992258,
+    "elapsed_seconds": 0.01311635971069336
+  },
+  {
+    "name": "process-03-rust-worker",
+    "command": "docker top 3c6f1eef625184f6f04f03b33e5e0a5e9ea6630062f6554f6fbd5c368fa8ffe1 -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-03-rust-worker.log",
+    "started_unix": 1793765506.064498,
+    "elapsed_seconds": 0.013411760330200195
+  },
+  {
+    "name": "domain-03-rust-0",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-cli --address 127.0.0.1:7833 --transport grpc --domain benchmark domain register --rd 1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/domain-03-rust-0.log",
+    "started_unix": 1793765506.1181319,
+    "elapsed_seconds": 0.06378602981567383
+  },
+  {
+    "name": "run-03-rust-c1",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 1000 -warmup 100 -concurrency 1 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-rust-c1.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-rust-c1.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-rust-c1.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-03-rust-c1.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-03-rust-c1.log",
+    "started_unix": 1793765506.1825528,
+    "elapsed_seconds": 107.88052344322205
+  },
+  {
+    "name": "collector-03-rust-c1",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-rust-c1.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-rust-c1.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-rust-c1.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-03-rust-c1.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-03-rust-c1.log",
+    "started_unix": 1793765506.182319,
+    "elapsed_seconds": 107.88120532035828
+  },
+  {
+    "name": "run-03-rust-c16",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 1000 -warmup 100 -concurrency 16 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-rust-c16.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-rust-c16.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-rust-c16.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-03-rust-c16.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-03-rust-c16.log",
+    "started_unix": 1793765614.0653596,
+    "elapsed_seconds": 37.02580666542053
+  },
+  {
+    "name": "collector-03-rust-c16",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-rust-c16.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-rust-c16.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-rust-c16.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-03-rust-c16.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-03-rust-c16.log",
+    "started_unix": 1793765614.0649416,
+    "elapsed_seconds": 37.04208207130432
+  },
+  {
+    "name": "run-03-rust-c64",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 1000 -warmup 100 -concurrency 64 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-rust-c64.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-rust-c64.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-rust-c64.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-03-rust-c64.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-03-rust-c64.log",
+    "started_unix": 1793765651.107903,
+    "elapsed_seconds": 39.9041953086853
+  },
+  {
+    "name": "collector-03-rust-c64",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-rust-c64.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-rust-c64.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-rust-c64.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-03-rust-c64.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-03-rust-c64.log",
+    "started_unix": 1793765651.1074576,
+    "elapsed_seconds": 39.912609577178955
+  },
+  {
+    "name": "services-03-rust",
+    "command": "docker compose -p cadence-fm-benchmark logs --no-color",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/services-03-rust.log",
+    "started_unix": 1793765691.020448,
+    "elapsed_seconds": 0.5055601596832275
+  },
+  {
+    "name": "down-after-03-rust",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-after-03-rust.log",
+    "started_unix": 1793765691.5264258,
+    "elapsed_seconds": 7.375746250152588
+  },
+  {
+    "name": "down-03-go",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-03-go.log",
+    "started_unix": 1793765698.9025772,
+    "elapsed_seconds": 0.028950214385986328
+  },
+  {
+    "name": "up-03-go",
+    "command": "docker compose -p cadence-fm-benchmark up -d",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/up-03-go.log",
+    "started_unix": 1793765698.9749584,
+    "elapsed_seconds": 16.69705605506897
+  },
+  {
+    "name": "process-03-go-frontend",
+    "command": "docker top 551266e87b89a0ec4e6866ebc56c8d36624af3849cf2bae9382795242b44a961 -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-03-go-frontend.log",
+    "started_unix": 1793765715.8234262,
+    "elapsed_seconds": 0.015940427780151367
+  },
+  {
+    "name": "process-03-go-matching",
+    "command": "docker top 79b1f369cef2211c9c3d44c1efde6d73f12c3f2a7176e862c016ec90fb3236eb -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-03-go-matching.log",
+    "started_unix": 1793765715.9051926,
+    "elapsed_seconds": 0.01539301872253418
+  },
+  {
+    "name": "process-03-go-history",
+    "command": "docker top 171f1e073e754dcc80d16cc358eb2e5900cb9e37410750445fb8406cb3948e23 -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-03-go-history.log",
+    "started_unix": 1793765715.999555,
+    "elapsed_seconds": 0.018149137496948242
+  },
+  {
+    "name": "process-03-go-worker",
+    "command": "docker top 2ca92caae520b415a5db89657e9daa4e431e64c6c7574ba6440d5e0a7c0bba82 -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-03-go-worker.log",
+    "started_unix": 1793765716.085323,
+    "elapsed_seconds": 0.01468968391418457
+  },
+  {
+    "name": "domain-03-go-0",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-cli --address 127.0.0.1:7833 --transport grpc --domain benchmark domain register --rd 1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/domain-03-go-0.log",
+    "started_unix": 1793765716.1455572,
+    "elapsed_seconds": 0.06382322311401367
+  },
+  {
+    "name": "run-03-go-c1",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 1000 -warmup 100 -concurrency 1 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-go-c1.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-go-c1.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-go-c1.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-03-go-c1.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-03-go-c1.log",
+    "started_unix": 1793765716.2101064,
+    "elapsed_seconds": 87.097660779953
+  },
+  {
+    "name": "collector-03-go-c1",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-go-c1.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-go-c1.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-go-c1.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-03-go-c1.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-03-go-c1.log",
+    "started_unix": 1793765716.2098455,
+    "elapsed_seconds": 87.12995910644531
+  },
+  {
+    "name": "run-03-go-c16",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 1000 -warmup 100 -concurrency 16 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-go-c16.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-go-c16.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-go-c16.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-03-go-c16.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-03-go-c16.log",
+    "started_unix": 1793765803.3407762,
+    "elapsed_seconds": 32.869662284851074
+  },
+  {
+    "name": "collector-03-go-c16",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-go-c16.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-go-c16.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-go-c16.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-03-go-c16.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-03-go-c16.log",
+    "started_unix": 1793765803.3402534,
+    "elapsed_seconds": 32.87075209617615
+  },
+  {
+    "name": "run-03-go-c64",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 1000 -warmup 100 -concurrency 64 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-go-c64.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-go-c64.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-go-c64.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-03-go-c64.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-03-go-c64.log",
+    "started_unix": 1793765836.212892,
+    "elapsed_seconds": 35.140679359436035
+  },
+  {
+    "name": "collector-03-go-c64",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-go-c64.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-go-c64.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-03-go-c64.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-03-go-c64.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-03-go-c64.log",
+    "started_unix": 1793765836.2124903,
+    "elapsed_seconds": 35.15699481964111
+  },
+  {
+    "name": "services-03-go",
+    "command": "docker compose -p cadence-fm-benchmark logs --no-color",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/services-03-go.log",
+    "started_unix": 1793765871.369935,
+    "elapsed_seconds": 0.056423187255859375
+  },
+  {
+    "name": "down-after-03-go",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-after-03-go.log",
+    "started_unix": 1793765871.4268048,
+    "elapsed_seconds": 13.324989795684814
+  },
+  {
+    "name": "down-04-go",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-04-go.log",
+    "started_unix": 1793765884.7522302,
+    "elapsed_seconds": 0.029581308364868164
+  },
+  {
+    "name": "up-04-go",
+    "command": "docker compose -p cadence-fm-benchmark up -d",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/up-04-go.log",
+    "started_unix": 1793765884.8232486,
+    "elapsed_seconds": 16.691925048828125
+  },
+  {
+    "name": "process-04-go-frontend",
+    "command": "docker top cf55d3b52fa916166365ebf102a77fc4682fdfd5475f567fe5ccd2c53cbceebe -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-04-go-frontend.log",
+    "started_unix": 1793765901.6702178,
+    "elapsed_seconds": 0.016554832458496094
+  },
+  {
+    "name": "process-04-go-matching",
+    "command": "docker top f8dbc01e8f08588c53edddb7c9cbde0ee05aa24ed9204d54bc475f7660a5dc4f -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-04-go-matching.log",
+    "started_unix": 1793765901.7525632,
+    "elapsed_seconds": 0.016439437866210938
+  },
+  {
+    "name": "process-04-go-history",
+    "command": "docker top f02bb9998d58614f4b68c57071ce6733fdc4101a8a2889e04d446a8019b96bca -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-04-go-history.log",
+    "started_unix": 1793765901.8432546,
+    "elapsed_seconds": 0.020914316177368164
+  },
+  {
+    "name": "process-04-go-worker",
+    "command": "docker top 43a2d069d17a1fe9ff6112488f14d9b6f04e0ffeebe5e02ab4614e0b81f7e699 -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-04-go-worker.log",
+    "started_unix": 1793765901.931106,
+    "elapsed_seconds": 0.014175176620483398
+  },
+  {
+    "name": "domain-04-go-0",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-cli --address 127.0.0.1:7833 --transport grpc --domain benchmark domain register --rd 1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/domain-04-go-0.log",
+    "started_unix": 1793765901.9874501,
+    "elapsed_seconds": 0.031693458557128906
+  },
+  {
+    "name": "run-04-go-c1",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 1000 -warmup 100 -concurrency 1 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-go-c1.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-go-c1.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-go-c1.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-04-go-c1.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-04-go-c1.log",
+    "started_unix": 1793765902.0198636,
+    "elapsed_seconds": 86.49636912345886
+  },
+  {
+    "name": "collector-04-go-c1",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-go-c1.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-go-c1.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-go-c1.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-04-go-c1.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-04-go-c1.log",
+    "started_unix": 1793765902.0196223,
+    "elapsed_seconds": 86.49723935127258
+  },
+  {
+    "name": "run-04-go-c16",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 1000 -warmup 100 -concurrency 16 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-go-c16.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-go-c16.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-go-c16.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-04-go-c16.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-04-go-c16.log",
+    "started_unix": 1793765988.5193079,
+    "elapsed_seconds": 32.715797424316406
+  },
+  {
+    "name": "collector-04-go-c16",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-go-c16.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-go-c16.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-go-c16.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-04-go-c16.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-04-go-c16.log",
+    "started_unix": 1793765988.5188794,
+    "elapsed_seconds": 32.71697211265564
+  },
+  {
+    "name": "run-04-go-c64",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label go -requests 1000 -warmup 100 -concurrency 64 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-go-c64.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-go-c64.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-go-c64.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-04-go-c64.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-04-go-c64.log",
+    "started_unix": 1793766021.2377622,
+    "elapsed_seconds": 35.89335250854492
+  },
+  {
+    "name": "collector-04-go-c64",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-go-c64.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-go-c64.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-go-c64.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-04-go-c64.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-04-go-c64.log",
+    "started_unix": 1793766021.237364,
+    "elapsed_seconds": 35.8943088054657
+  },
+  {
+    "name": "services-04-go",
+    "command": "docker compose -p cadence-fm-benchmark logs --no-color",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/services-04-go.log",
+    "started_unix": 1793766057.1332982,
+    "elapsed_seconds": 0.05517387390136719
+  },
+  {
+    "name": "down-after-04-go",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-after-04-go.log",
+    "started_unix": 1793766057.1889193,
+    "elapsed_seconds": 13.460408926010132
+  },
+  {
+    "name": "down-04-rust",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-04-rust.log",
+    "started_unix": 1793766070.649787,
+    "elapsed_seconds": 0.028130054473876953
+  },
+  {
+    "name": "up-04-rust",
+    "command": "docker compose -p cadence-fm-benchmark up -d",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/up-04-rust.log",
+    "started_unix": 1793766070.719803,
+    "elapsed_seconds": 16.693861961364746
+  },
+  {
+    "name": "process-04-rust-frontend",
+    "command": "docker top 7a540679b2b1d7f7f60d8912016a14b77a4e77c7f970aa81dde5027c6e134f2a -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-04-rust-frontend.log",
+    "started_unix": 1793766087.5695395,
+    "elapsed_seconds": 0.014747381210327148
+  },
+  {
+    "name": "process-04-rust-matching",
+    "command": "docker top 971f9cc9e8f537a57a573ed295e58df192882e33d85f01297fbd97bb6a6ed72f -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-04-rust-matching.log",
+    "started_unix": 1793766087.6476674,
+    "elapsed_seconds": 0.01627945899963379
+  },
+  {
+    "name": "process-04-rust-history",
+    "command": "docker top c5a6103b3f06905e6400d15a53cefa7e10cf1c92f4fb1a9bf491469e1f9c243b -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-04-rust-history.log",
+    "started_unix": 1793766087.728354,
+    "elapsed_seconds": 0.01368260383605957
+  },
+  {
+    "name": "process-04-rust-worker",
+    "command": "docker top d8b783b6b569150d80272906542cb3d2589cc57a3cdc290b5ad7d6763a48172f -eo pid,comm,args",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/process-04-rust-worker.log",
+    "started_unix": 1793766087.7998114,
+    "elapsed_seconds": 0.013551473617553711
+  },
+  {
+    "name": "domain-04-rust-0",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-cli --address 127.0.0.1:7833 --transport grpc --domain benchmark domain register --rd 1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/domain-04-rust-0.log",
+    "started_unix": 1793766087.8532858,
+    "elapsed_seconds": 0.06382131576538086
+  },
+  {
+    "name": "run-04-rust-c1",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 1000 -warmup 100 -concurrency 1 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-rust-c1.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-rust-c1.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-rust-c1.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-04-rust-c1.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-04-rust-c1.log",
+    "started_unix": 1793766087.9180043,
+    "elapsed_seconds": 103.22580623626709
+  },
+  {
+    "name": "collector-04-rust-c1",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-rust-c1.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-rust-c1.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-rust-c1.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-04-rust-c1.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-04-rust-c1.log",
+    "started_unix": 1793766087.9176574,
+    "elapsed_seconds": 103.24205183982849
+  },
+  {
+    "name": "run-04-rust-c16",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 1000 -warmup 100 -concurrency 16 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-rust-c16.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-rust-c16.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-rust-c16.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-04-rust-c16.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-04-rust-c16.log",
+    "started_unix": 1793766191.160595,
+    "elapsed_seconds": 36.12112498283386
+  },
+  {
+    "name": "collector-04-rust-c16",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-rust-c16.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-rust-c16.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-rust-c16.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-04-rust-c16.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-04-rust-c16.log",
+    "started_unix": 1793766191.1602447,
+    "elapsed_seconds": 36.18550658226013
+  },
+  {
+    "name": "run-04-rust-c64",
+    "command": "/home/runner/work/cadence-rust/cadence-rust/out/cadence-benchmark -endpoint 127.0.0.1:7933 -domain benchmark -label rust -requests 1000 -warmup 100 -concurrency 64 -payload-bytes 1024 -measurement-start-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-rust-c64.start -measurement-end-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-rust-c64.end -collector-ready-file /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-rust-c64.ready -output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/result-04-rust-c64.json",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/run-04-rust-c64.log",
+    "started_unix": 1793766227.3466678,
+    "elapsed_seconds": 39.351577043533325
+  },
+  {
+    "name": "collector-04-rust-c64",
+    "command": "/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/benchmark/collect_resources.py --start-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-rust-c64.start --end-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-rust-c64.end --ready-event /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/measurement-04-rust-c64.ready --event-timeout 1800 --interval 0.05 --output /home/runner/work/cadence-rust/cadence-rust/out/paired-benchmark/resources-04-rust-c64.json --containers cadence-fm-benchmark-frontend-1 cadence-fm-benchmark-matching-1 cadence-fm-benchmark-history-1 cadence-fm-benchmark-worker-1",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/collector-04-rust-c64.log",
+    "started_unix": 1793766227.3463178,
+    "elapsed_seconds": 39.384010553359985
+  },
+  {
+    "name": "services-04-rust",
+    "command": "docker compose -p cadence-fm-benchmark logs --no-color",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/services-04-rust.log",
+    "started_unix": 1793766266.7307994,
+    "elapsed_seconds": 0.5054349899291992
+  },
+  {
+    "name": "down-after-04-rust",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/down-after-04-rust.log",
+    "started_unix": 1793766267.236709,
+    "elapsed_seconds": 8.925248146057129
+  },
+  {
+    "name": "final-compose-logs",
+    "command": "docker compose -p cadence-fm-benchmark logs --no-color",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/final-compose-logs.log",
+    "started_unix": 1793766276.1889691,
+    "elapsed_seconds": 0.02795267105102539
+  },
+  {
+    "name": "cleanup",
+    "command": "docker compose -p cadence-fm-benchmark down -v --remove-orphans",
+    "exit_code": 0,
+    "log": "out/paired-benchmark/cleanup.log",
+    "started_unix": 1793766276.2173343,
+    "elapsed_seconds": 0.026888370513916016
+  }
+]
