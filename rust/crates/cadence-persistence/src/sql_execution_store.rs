@@ -255,10 +255,12 @@ pub fn encode_execution_info(
     encoding: crate::sqlblobs::Encoding,
 ) -> Result<DataBlob, PersistenceError> {
     let sql = execution_info_to_sql(info, start_version)?;
+    // Go leaves the deprecated LastWriteEventID pointer nil for NDC writes.
+    // Emitting even zero would make Go reconstruct a legacy ReplicationState.
+    let mut value = crate::sqlblobs::sql_workflow_execution_info_to_struct(&sql);
+    value.fields.retain(|(id, _)| *id != 44);
     let data = encoding
-        .encode(&crate::sqlblobs::sql_workflow_execution_info_to_struct(
-            &sql,
-        ))
+        .encode(&value)
         .map_err(|e| PersistenceError::InvalidArgument(e.to_string()))?;
     Ok(DataBlob {
         data,
@@ -286,10 +288,12 @@ pub fn snapshot_to_execution_row(
         sql.checksum.clone_from(&blob.data);
         sql.checksum_encoding.clone_from(&blob.encoding);
     }
+    // Go leaves the deprecated LastWriteEventID pointer nil for NDC writes.
+    // Emitting even zero would make Go reconstruct a legacy ReplicationState.
+    let mut value = crate::sqlblobs::sql_workflow_execution_info_to_struct(&sql);
+    value.fields.retain(|(id, _)| *id != 44);
     let data = encoding
-        .encode(&crate::sqlblobs::sql_workflow_execution_info_to_struct(
-            &sql,
-        ))
+        .encode(&value)
         .map_err(|e| PersistenceError::InvalidArgument(e.to_string()))?;
     Ok(ExecutionRow {
         key: WorkflowKey {
