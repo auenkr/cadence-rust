@@ -1,6 +1,6 @@
 //! Domain-aware validation from checker.go, with configuration/cache dependency seams.
 use super::*;
-use super::task_handler::PortDecision;
+use cadence_api::tasks::Decision;
 use cadence_api::enums::DecisionType;
 /// TODO(link): implement using history Config and DomainCache. Each callback is one dependency operation.
 pub trait ValidationContext: DomainReplicationLookup {
@@ -18,7 +18,7 @@ fn length(context: &impl ValidationContext, field: &str, domain: &str, value: &s
     context.id_length_observation(field, domain, value);
     if value.len() > context.max_length(field, domain) { Err(DecisionError::new(message)) } else { Ok(()) }
 }
-pub fn validate(context: &impl ValidationContext, decision: &mut PortDecision, domain_name: &str) -> Result<(), DecisionError> {
+pub fn validate(context: &impl ValidationContext, decision: &mut Decision, domain_name: &str) -> Result<(), DecisionError> {
     use DecisionType as D;
     let defaults = context.defaults();
     match decision.decision_type.unwrap_or(D::ScheduleActivityTask) {
@@ -90,7 +90,7 @@ pub fn validate(context: &impl ValidationContext, decision: &mut PortDecision, d
 pub struct AttrValidator<C: ValidationContext> { pub context: C }
 pub fn new_attr_validator<C: ValidationContext>(context: C) -> AttrValidator<C> { AttrValidator { context } }
 impl<C: ValidationContext> AttrValidator<C> {
-    pub fn validate(&self, decision: &mut PortDecision, domain: &str) -> Result<(), DecisionError> { validate(&self.context, decision, domain) }
+    pub fn validate(&self, decision: &mut Decision, domain: &str) -> Result<(), DecisionError> { validate(&self.context, decision, domain) }
 }
 pub struct WorkflowSizeChecker<'a, S, O> {
     pub mutable_state: &'a mut S, pub observer: &'a O, pub limits: WorkflowSizeLimits, pub completed_id: i64,
