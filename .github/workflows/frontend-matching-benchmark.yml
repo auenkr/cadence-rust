@@ -1,0 +1,32 @@
+name: Frontend Matching benchmark driver
+on:
+  workflow_dispatch:
+concurrency:
+  group: frontend-matching-benchmark-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  driver:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tests/frontend-gate/go.mod
+          cache-dependency-path: tests/frontend-gate/go.sum
+      - name: Format, vet and build shared SDK workload
+        working-directory: tests/frontend-gate
+        run: |
+          mkdir -p ../../out
+          gofmt -w benchmark/main.go
+          git diff --exit-code -- benchmark/main.go > ../../out/format.diff
+          go vet ./benchmark
+          go build -trimpath -o ../../out/cadence-benchmark ./benchmark
+          sha256sum ../../out/cadence-benchmark > ../../out/driver.sha256
+          git rev-parse HEAD > ../../out/head.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cadence-benchmark-driver
+          path: out/
+          retention-days: 3
