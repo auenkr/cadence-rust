@@ -30,3 +30,15 @@ All Cargo on CI (`gh workflow run rust-ci.yml --ref <branch> -f package=cadence-
 
 ## Status
 - [ ] H1  - [ ] H2  - [ ] H3  - [ ] H4  - [ ] H5  - [ ] H6  - [ ] H7
+
+## Go package sizes (non-test lines) for task breakdown
+execution 14167, task 8318, queuev2 5752, queue 5731, engine 5558, ndc 3952,
+replication 3196, shard 3157, decision 3147, reset 732, events 631,
+failover 575, query 372, workflowcache 320.
+
+## Next slices (simple-worker sized, dispatch after H1/H2 merge)
+- H3a execution/mutable_state_builder* (state maps, add*/replicate* events)
+- H3b execution/history_builder + state_builder + events cache + workflowcache
+- H4a decision/ (checker, task handler, attr validator)
+- H4b engine/engineimpl start/signal/terminate/describe/query/reset
+- H5a queue/ transfer+timer active executors; H5b standby + queuev2
