@@ -48,7 +48,16 @@ pub fn cmp_replication_shard_messages(a: &ReplicationShardMessages, b: &Replicat
     }
 }
 pub fn sort_replication_shard_messages(messages: &mut [ReplicationShardMessages]) {
-    messages.sort_by(cmp_replication_shard_messages);
+    // Go's stable sorter uses only cmp(a, b) < 0. Its nil/nil result of
+    // +1 therefore leaves those elements in input order. Rust requires a total
+    // comparator; normalize that pair while preserving the same less relation.
+    messages.sort_by(|a, b| {
+        if a.earliest_creation_time.is_none() && b.earliest_creation_time.is_none() {
+            Ordering::Equal
+        } else {
+            cmp_replication_shard_messages(a, b)
+        }
+    });
 }
 
 pub fn build_get_replication_messages_response(controller: &dyn ReplicationController,

@@ -95,8 +95,11 @@ impl HistoryHandler {
         self.metrics.error_counter(operation, counter);
         error
     }
+    pub fn deserialize_token(&self, data: &[u8]) -> HResult<TaskToken> {
+        self.resources.deserialize_token(data).map_err(|error| HistoryError::bad_request(format!("Error deserializing task token. Error: {error}")))
+    }
     pub fn token(&self, data: &[u8]) -> HResult<TaskToken> {
-        let token = self.resources.deserialize_token(data).map_err(|error| HistoryError::bad_request(format!("Error deserializing task token. Error: {error}")))?;
+        let token = self.deserialize_token(data)?;
         validate_task_token(&token)?; Ok(token)
     }
 }
