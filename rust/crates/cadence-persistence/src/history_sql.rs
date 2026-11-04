@@ -74,30 +74,13 @@ pub struct ExecutionRow {
     pub data_encoding: String,
 }
 
-/// SQL transaction boundary for History execution and task persistence.
-/// Implementations must preserve Go create modes and condition/error classes.
-#[async_trait]
-pub trait ExecutionStore: Send + Sync {
-    async fn create_workflow_execution(&self, row: ExecutionRow, mode: i32) -> Result<(), HistoryPersistenceError>;
-    async fn get_workflow_execution(&self, key: &WorkflowKey) -> Result<ExecutionRow, HistoryPersistenceError>;
-    async fn update_workflow_execution(&self, row: ExecutionRow, condition: i64) -> Result<(), HistoryPersistenceError>;
-    async fn conflict_resolve_workflow_execution(&self, row: ExecutionRow, condition: i64) -> Result<(), HistoryPersistenceError>;
-    async fn delete_workflow_execution(&self, key: &WorkflowKey) -> Result<(), HistoryPersistenceError>;
-    async fn delete_current_workflow_execution(&self, key: &WorkflowKey, condition: i64) -> Result<(), HistoryPersistenceError>;
-    async fn get_current_execution(&self, shard_id: i32, domain_id: [u8; 16], workflow_id: &str) -> Result<ExecutionRow, HistoryPersistenceError>;
-    async fn is_workflow_execution_exists(&self, key: &WorkflowKey) -> Result<bool, HistoryPersistenceError>;
-}
+/// ExecutionStore is the complete typed Go-compatible contract. `ExecutionRow`
+/// remains available for the current row adapters while they are brought up to
+/// this interface.
+pub use crate::history_contract::GoExecutionStore as ExecutionStore;
 
-/// History-v2 `history_node` branch persistence contract.
-#[async_trait]
-pub trait HistoryStore: Send + Sync {
-    async fn append_history_nodes(&self, shard_id: i32, tree_id: [u8; 16], branch_id: [u8; 16], nodes: Vec<HistoryNode>) -> Result<(), HistoryPersistenceError>;
-    async fn read_history_branch(&self, request: crate::history_reader::ReadHistoryBranchRequest) -> Result<crate::history_reader::ReadHistoryBranchResponse, HistoryPersistenceError>;
-    async fn fork_history_branch(&self, shard_id: i32, tree_id: [u8; 16], source_branch_id: [u8; 16], branch_id: [u8; 16], fork_node_id: i64) -> Result<(), HistoryPersistenceError>;
-    async fn delete_history_branch(&self, shard_id: i32, tree_id: [u8; 16], branch_id: [u8; 16]) -> Result<(), HistoryPersistenceError>;
-    async fn get_history_tree(&self, shard_id: i32, tree_id: [u8; 16]) -> Result<Vec<u8>, HistoryPersistenceError>;
-    async fn get_all_history_tree_branches(&self, shard_id: i32, tree_id: [u8; 16]) -> Result<Vec<Vec<u8>>, HistoryPersistenceError>;
-}
+/// HistoryStore is the typed Go-compatible History-v2 interface.
+pub use crate::history_contract::GoHistoryV2Store as HistoryStore;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HistoryNode {
