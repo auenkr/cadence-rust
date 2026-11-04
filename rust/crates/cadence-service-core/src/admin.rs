@@ -2519,9 +2519,15 @@ mod tests {
         assert!(decode_reapply_events(&bad).is_err());
         let thrift = cadence_thrift::history_blob::encode(Vec::new());
         assert!(decode_reapply_events(&thrift).unwrap().is_empty());
-        let none = DataBlob { encoding_type: None, data: thrift.data.clone() };
+        let none = DataBlob {
+            encoding_type: None,
+            data: thrift.data.clone(),
+        };
         assert!(decode_reapply_events(&none).unwrap().is_empty());
-        let garbage = DataBlob { encoding_type: None, data: b"xx".to_vec() };
+        let garbage = DataBlob {
+            encoding_type: None,
+            data: b"xx".to_vec(),
+        };
         assert!(decode_reapply_events(&garbage).is_err());
     }
 
