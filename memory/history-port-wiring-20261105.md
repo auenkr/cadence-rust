@@ -27,3 +27,8 @@ Per-module local trait universes (engine/deps.rs, task/deps.rs, queue/deps.rs, q
 
 ## CI runs
 (none yet)
+
+## Unit C (server, branch history-wiring-server) 2026-11-05
+Server in wiring/server/: tchannel.rs (TChannel v2 + thrift dispatch), grpc.rs (tonic HistoryApi, all 44 RPCs), errors.rs, limiter.rs, mod.rs (`HistoryServer::start(cfg, handler) -> RunningServer`, `shutdown()`).
+RPC groups: thrift_g1/grpc_g1 (workflow lifecycle), g2 (task responses/mutable state), g3 (replication/DLQ/failover/cross-cluster); `thrift_types_g*` hold converters.
+Gaps: ResetWorkflowExecution (engine type has `failed_request` instead of Go `resetRequest`; both transports unimplemented); gRPC GetReplicationMessages/GetDLQReplicationMessages/Read/Purge/MergeDLQ unimplemented (no ReplicationTask proto converters); ShardOwnershipLost owner field not carried; gRPC errors lack detail fields; CountDLQ shard_id=0; no interop test with Go client yet.
