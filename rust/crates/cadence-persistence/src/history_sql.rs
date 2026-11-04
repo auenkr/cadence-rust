@@ -90,3 +90,21 @@ pub struct HistoryNode {
     pub data_encoding: String,
 }
 
+/// Encode/decode `history_tree.data` with the existing Go sqlblobs schema.
+/// The selected SQL encoding is explicit, matching the Go parser configured
+/// for the History persistence store.
+pub fn encode_history_tree_info(info: &crate::history_contract::HistoryTreeInfo, encoding: crate::sqlblobs::Encoding) -> Result<(Vec<u8>, String), HistoryPersistenceError> {
+    encoding.encode(&crate::sqlblobs::history_tree_to_struct(info))
+        .map(|data| (data, encoding.as_str().to_owned()))
+        .map_err(|error| HistoryPersistenceError::Internal(error.to_string()))
+}
+
+pub fn decode_history_tree_info(data: &[u8], data_encoding: &str) -> Result<crate::history_contract::HistoryTreeInfo, HistoryPersistenceError> {
+    let encoding = crate::sqlblobs::Encoding::parse(data_encoding)
+        .map_err(|error| HistoryPersistenceError::Internal(error.to_string()))?;
+    let value = encoding.decode(data)
+        .map_err(|error| HistoryPersistenceError::Internal(error.to_string()))?;
+    crate::sqlblobs::history_tree_from_struct(&value)
+        .map_err(|error| HistoryPersistenceError::Internal(error.to_string()))
+}
+

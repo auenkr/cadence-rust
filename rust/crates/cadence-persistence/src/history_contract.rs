@@ -75,23 +75,27 @@ pub struct SqlWorkflowExecutionInfo { pub parent_domain_id:Vec<u8>, pub parent_w
 pub struct WorkflowSnapshot {
     pub execution_info: WorkflowExecutionInfo, pub version_histories: Option<DataBlob>,
     pub start_version: i64, pub last_write_version: i64,
-    pub activity_infos: Vec<DataBlob>, pub timer_infos: Vec<DataBlob>,
-    pub workflow_timer_tasks: Vec<HistoryTaskKey>, pub child_execution_infos: Vec<DataBlob>,
-    pub request_cancel_infos: Vec<DataBlob>, pub signal_infos: Vec<DataBlob>,
+    pub activity_infos: Vec<KeyedBlob<i64>>, pub timer_infos: Vec<KeyedBlob<String>>,
+    pub workflow_timer_tasks: Vec<HistoryTaskKey>, pub child_execution_infos: Vec<KeyedBlob<i64>>,
+    pub request_cancel_infos: Vec<KeyedBlob<i64>>, pub signal_infos: Vec<KeyedBlob<i64>>,
     pub semaphore_infos: Vec<DataBlob>, pub signal_requested_ids: Vec<String>,
     pub tasks_by_category: BTreeMap<HistoryTaskCategory, Vec<Task>>, pub workflow_requests: Vec<WorkflowRequest>,
     pub condition: i64, pub checksum: Option<DataBlob>,
 }
+/// A Go workflow-state map value keeps its identity in SQL key columns and
+/// serializes only the value into `data`/`data_encoding`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyedBlob<K> { pub key:K, pub value:DataBlob }
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct WorkflowMutation {
     pub execution_info: WorkflowExecutionInfo, pub version_histories: Option<DataBlob>,
     pub start_version: i64, pub last_write_version: i64,
-    pub upsert_activity_infos: Vec<DataBlob>, pub delete_activity_infos: Vec<i64>, pub rewrite_activity_infos: Vec<DataBlob>,
-    pub upsert_timer_infos: Vec<DataBlob>, pub delete_timer_infos: Vec<String>, pub rewrite_timer_infos: Vec<DataBlob>,
+    pub upsert_activity_infos: Vec<KeyedBlob<i64>>, pub delete_activity_infos: Vec<i64>, pub rewrite_activity_infos: Vec<KeyedBlob<i64>>,
+    pub upsert_timer_infos: Vec<KeyedBlob<String>>, pub delete_timer_infos: Vec<String>, pub rewrite_timer_infos: Vec<KeyedBlob<String>>,
     pub sentinel_write_enabled: bool, pub workflow_timer_tasks: Vec<HistoryTaskKey>,
-    pub upsert_child_execution_infos: Vec<DataBlob>, pub delete_child_execution_infos: Vec<i64>,
-    pub upsert_request_cancel_infos: Vec<DataBlob>, pub delete_request_cancel_infos: Vec<i64>,
-    pub upsert_signal_infos: Vec<DataBlob>, pub delete_signal_infos: Vec<i64>,
+    pub upsert_child_execution_infos: Vec<KeyedBlob<i64>>, pub delete_child_execution_infos: Vec<i64>,
+    pub upsert_request_cancel_infos: Vec<KeyedBlob<i64>>, pub delete_request_cancel_infos: Vec<i64>,
+    pub upsert_signal_infos: Vec<KeyedBlob<i64>>, pub delete_signal_infos: Vec<i64>,
     pub upsert_semaphore_infos: Vec<DataBlob>, pub delete_semaphore_infos: Vec<i64>,
     pub upsert_signal_requested_ids: Vec<String>, pub delete_signal_requested_ids: Vec<String>,
     pub new_buffered_events: Option<DataBlob>, pub clear_buffered_events: bool,
@@ -206,12 +210,16 @@ pub struct HistoryBranchRequest {
 }
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct HistoryBranchPage { pub nodes:Vec<DataBlob>, pub next_page_token:Vec<u8> }
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HistoryTreeBranch { pub shard_id:i32, pub tree_id:String, pub branch_id:String, pub fork_time_unix_nanos:i64, pub info:String, pub ancestors:Vec<HistoryBranchRange> }
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HistoryTreePage { pub branches:Vec<HistoryTreeBranch>, pub next_page_token:Vec<u8> }
 #[async_trait]
 pub trait GoHistoryV2Store: Send+Sync {
     async fn append_history_nodes(&self, request:HistoryBranchRequest)->Result<(),PersistenceError>;
     async fn read_history_branch(&self, request:HistoryBranchRequest)->Result<HistoryBranchPage,PersistenceError>;
-    async fn fork_history_branch(&self, request:HistoryBranchRequest, fork_node_id:i64, new_branch_id:String)->Result<String,PersistenceError>;
+    async fn fork_history_branch(&self, request:HistoryBranchRequest, fork_node_id:i64, new_branch_id:String)->Result<HistoryBranchRequest,PersistenceError>;
     async fn delete_history_branch(&self, request:HistoryBranchRequest)->Result<(),PersistenceError>;
-    async fn get_history_tree(&self, request:HistoryBranchRequest)->Result<DataBlob,PersistenceError>;
-    async fn get_all_history_tree_branches(&self, shard_id:i32, page_size:i32, next_page_token:Vec<u8>)->Result<HistoryBranchPage,PersistenceError>;
+    async fn get_history_tree(&self, request:HistoryBranchRequest)->Result<Vec<HistoryTreeBranch>,PersistenceError>;
+    async fn get_all_history_tree_branches(&self, shard_id:i32, page_size:i32, next_page_token:Vec<u8>)->Result<HistoryTreePage,PersistenceError>;
 }
