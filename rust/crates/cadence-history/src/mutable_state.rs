@@ -237,7 +237,7 @@ impl MutableStateBuilder {
         use cadence_api::{enums::EventType, tasks::DecisionTaskScheduledEventAttributes, types::TaskList};
         let mut event = self.add_event(HistoryEvent { event_type: Some(EventType::DecisionTaskScheduled), ..Default::default() });
         event.decision_task_scheduled_event_attributes = Some(DecisionTaskScheduledEventAttributes {
-            task_list: Some(TaskList { name: task_list.clone() }), start_to_close_timeout_seconds: Some(timeout), attempt,
+            task_list: Some(TaskList { name: task_list.clone(), ..Default::default() }), start_to_close_timeout_seconds: Some(timeout), attempt,
         });
         let info = DecisionInfo { schedule_id: event.event_id, version, task_list, start_to_close_timeout_seconds: timeout, attempt, schedule_timestamp, original_schedule_timestamp, ..Default::default() };
         self.decision_info = Some(info.clone()); (event, info)
