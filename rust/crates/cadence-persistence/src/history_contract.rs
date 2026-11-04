@@ -165,7 +165,15 @@ pub trait GoExecutionStore: Send+Sync {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct HistoryBranchRequest { pub shard_id:i32, pub tree_id:String, pub branch_id:String, pub node_id:i64, pub transaction_id:i64, pub data:DataBlob, pub page_size:i32, pub next_page_token:Vec<u8> }
+pub struct HistoryBranchRange { pub branch_id:String, pub begin_node_id:i64, pub end_node_id:i64 }
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HistoryBranchRequest {
+    pub shard_id:i32, pub tree_id:String, pub branch_id:String, pub node_id:i64, pub transaction_id:i64,
+    pub data:DataBlob, pub page_size:i32, pub next_page_token:Vec<u8>,
+    pub is_new_branch:bool, pub info:String, pub ancestors:Vec<HistoryBranchRange>,
+    pub min_node_id:i64, pub max_node_id:i64, pub last_node_id:i64, pub last_transaction_id:i64,
+    pub fork_node_id:i64, pub source_branch_id:String, pub current_timestamp_unix_nanos:i64,
+}
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct HistoryBranchPage { pub nodes:Vec<DataBlob>, pub next_page_token:Vec<u8> }
 #[async_trait]
