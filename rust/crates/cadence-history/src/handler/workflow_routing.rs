@@ -162,7 +162,7 @@ impl HistoryHandler {
         self.check_shutdown()?;
         let request = request.cloned().unwrap_or_default();
         let domain = &request.domain_uuid;
-        let execution = request.request.clone().and_then(|r| r.execution).unwrap_or_default();
+        let execution = request.request.clone().and_then(|r| r.workflow_execution).unwrap_or_default();
         let workflow = execution.workflow_id; let run = execution.run_id;
         let fail = |error| self.error("RefreshWorkflowTasks", domain, &workflow, &run, error);
         let engine = self.resources.engine_for_workflow(&workflow).map_err(&fail)?;
@@ -287,15 +287,7 @@ impl HistoryHandler {
         let fail = |error| self.error("RespondActivityTaskFailed", domain, "", "", error);
         if domain.is_empty() { return Err(fail(HistoryError::bad_request("Domain not set on request."))); }
         self.check_rate().map_err(&fail)?;
-        let failed = request.failed_request.clone().unwrap_or_default();
-        let token = self.deserialize_token(&failed.task_token).map_err(&fail)?;
-        tracing::debug!(domain_id = token.domain_id, workflow_id = token.workflow_id, run_id = token.run_id,
-            schedule_id = token.schedule_id, "RespondDecisionTaskFailed");
-        if failed.cause.unwrap_or_default() == cadence_api::enums::DecisionTaskFailedCause::UnhandledDecision {
-            tracing::info!(domain_id = token.domain_id, workflow_id = token.workflow_id, run_id = token.run_id, "Non-Deterministic Error");
-            self.metrics.non_deterministic(&token.domain_id);
-        }
-        super::runtime::validate_task_token(&token).map_err(&fail)?;
+        let token = self.token(&request.failed_request.clone().unwrap_or_default().task_token).map_err(&fail)?;
         let workflow = token.workflow_id; let run = token.run_id;
         let fail = |error| self.error("RespondActivityTaskFailed", domain, &workflow, &run, error);
         let engine = self.resources.engine_for_workflow(&workflow).map_err(&fail)?;

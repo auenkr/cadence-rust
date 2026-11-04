@@ -56,7 +56,7 @@ impl HistoryHandler {
         self.check_rate().map_err(&fail)?;
         if request.source_cluster.is_empty() { return Err(fail(HistoryError::bad_request("Source Cluster not set on request."))); }
         if request.timestamp.is_none() { return Err(fail(HistoryError::bad_request("Timestamp not set on request."))); }
-        let engine = self.resources.engine_for_shard(request.shard_id).map_err(&fail)?;
+        let engine = self.resources.engine_for_shard(request.shard_id as i32).map_err(&fail)?;
         engine.sync_shard_status(Some(&request)).await.map_err(fail)
     }
 }

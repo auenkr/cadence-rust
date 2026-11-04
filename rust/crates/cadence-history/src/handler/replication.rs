@@ -96,3 +96,19 @@ pub async fn get_dlq_replication_messages(controller: &dyn ReplicationController
     })).await;
     GetDLQReplicationMessagesResponse { replication_tasks: Some(results.into_iter().flatten().collect()) }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn budget_order_keeps_missing_timestamps_stable_after_dated_messages() {
+        let message = |shard_id, earliest_creation_time, size| ReplicationShardMessages {
+            messages: ReplicationMessages::default(), shard_id, size, earliest_creation_time,
+        };
+        let mut messages = vec![message(1, None, 1), message(2, Some(8), 4),
+            message(3, None, 2), message(4, Some(8), 2), message(5, Some(7), 9)];
+        sort_replication_shard_messages(&mut messages);
+        assert_eq!(messages.iter().map(|m| m.shard_id).collect::<Vec<_>>(), vec![5, 4, 2, 1, 3]);
+    }
+}

@@ -66,9 +66,9 @@ pub enum HistoryError {
     /// `persistence.ShardAlreadyExistError`
     #[error("{0}")]
     ShardAlreadyExist(String),
-    /// `persistence.ShardOwnershipLostError`
-    #[error("{0}")]
-    PersistenceShardOwnershipLost(String),
+    /// `persistence.ShardOwnershipLostError`; retain the shard for membership lookup.
+    #[error("{message}")]
+    PersistenceShardOwnershipLost { shard_id: i32, message: String },
     #[error("{0}")]
     TransactionSizeLimit(String),
     /// `persistence.TimeoutError`

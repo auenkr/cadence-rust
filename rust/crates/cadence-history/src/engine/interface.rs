@@ -1,5 +1,6 @@
 //! Complete engine interface ported from go/service/history/engine/interface.go.
 use async_trait::async_trait;
+use cadence_api::service_types::DescribeWorkflowExecutionResponse;
 use std::{collections::HashMap, time::Instant};
 use cadence_api::{service_types::HistoryEvent, tasks::RecordActivityTaskHeartbeatResponse};
 use cadence_api::{admin::*, types::*};

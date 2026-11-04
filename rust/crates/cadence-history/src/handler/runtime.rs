@@ -26,7 +26,7 @@ pub trait HandlerResources: super::lifecycle::HandlerComponentFactory + Send + S
     fn engine_for_shard(&self, shard_id: i32) -> HResult<Arc<dyn RoutedEngine>>;
     fn deserialize_token(&self, data: &[u8]) -> HResult<TaskToken>;
     fn deserialize_thriftrw_history(&self, data: &[u8]) -> HResult<Vec<cadence_api::service_types::HistoryEvent>>;
-    fn shard_ownership_lost(&self, persistence_message: &str) -> HistoryError;
+    fn shard_ownership_lost(&self, shard_id: i32, persistence_message: &str) -> HistoryError;
 }
 pub struct HistoryHandler {
     pub resources: Arc<dyn HandlerResources>,
@@ -75,7 +75,7 @@ impl HistoryHandler {
     }
     pub fn convert_error(&self, error: HistoryError) -> HistoryError {
         match error {
-            HistoryError::PersistenceShardOwnershipLost(message) => self.resources.shard_ownership_lost(&message),
+            HistoryError::PersistenceShardOwnershipLost { shard_id, message } => self.resources.shard_ownership_lost(shard_id, &message),
             HistoryError::PersistenceAlreadyStarted(error) => HistoryError::internal(error.msg),
             HistoryError::CurrentWorkflowConditionFailed(message) | HistoryError::PersistenceTimeout(message) => HistoryError::internal(message),
             HistoryError::TransactionSizeLimit(message) => HistoryError::bad_request(message),

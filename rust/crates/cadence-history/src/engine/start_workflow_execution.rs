@@ -227,7 +227,7 @@ impl HistoryEngine {
         }
         let known = match error {
             HistoryError::CurrentWorkflowConditionFailed(_) | HistoryError::ConditionFailed(_) | HistoryError::ShardAlreadyExist(_)
-                | HistoryError::PersistenceAlreadyStarted(_) | HistoryError::PersistenceShardOwnershipLost(_)
+                | HistoryError::PersistenceAlreadyStarted(_) | HistoryError::PersistenceShardOwnershipLost { .. }
                 | HistoryError::DuplicateRequest { .. } => true,
             HistoryError::Cadence(error) => matches!(&**error, CadenceError::WorkflowAlreadyStarted(_)
                 | CadenceError::ShardOwnershipLost(_) | CadenceError::WorkflowAlreadyCompleted(_)),
