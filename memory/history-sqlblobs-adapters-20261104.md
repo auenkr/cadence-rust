@@ -17,3 +17,10 @@
 ## Remaining work
 
 - This task is incomplete: adapters and round-trip tests remain for `ChildExecutionInfo`, `SignalInfo`, `RequestCancelInfo`, `TimerInfo`, and `WorkflowExecutionInfo`. The successful CI run validates the committed ActivityInfo change only.
+
+## Follow-up implementation and CI evidence
+
+- Added typed `ChildExecutionInfo`, `SignalInfo`, `RequestCancelInfo`, `TimerInfo`, and distinct `SqlWorkflowExecutionInfo` contracts with `*_to_struct` / `*_from_struct` adapters in `rust/crates/cadence-persistence/src/{history_contract.rs,sqlblobs.rs}`. The field IDs and wire types follow the embedded Go sqlblobs IDL; timestamps remain Unix nanoseconds and duration values remain seconds.
+- Added round-trip tests for all five records using non-default values across their fields.
+- CI run: https://github.com/auenkr/cadence-rust/actions/runs/41869012362
+- Validated head: `2b3676b0fa83e6f684c35f4e7ef32fbd53ed4fdf`; conclusion: `success` (cadence-persistence Clippy and tests).
