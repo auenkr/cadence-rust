@@ -15,4 +15,4 @@ impl WorkflowCache{pub fn new(domains:Arc<dyn DomainNames>,external_factory:Arc<
  pub fn size(&self)->usize{self.items.lock().unwrap().len()}
 }
 #[derive(Debug,Default)]pub struct WorkflowIdCountMetric{starting_second:Option<Instant>,count:i32}
-impl WorkflowIdCountMetric{pub fn reset(&mut self){self.starting_second=Some(Instant::now());self.count=0}pub fn update(&mut self,now:Instant)->i32{if self.starting_second.map_or(true,|start|now.duration_since(start)>Duration::from_secs(1)){self.starting_second=Some(now);self.count=0}self.count+=1;self.count}pub fn count(&self)->i32{self.count}}
+impl WorkflowIdCountMetric{pub fn reset(&mut self){self.starting_second=Some(Instant::now());self.count=0}pub fn update(&mut self,now:Instant)->i32{if self.starting_second.is_none_or(|start|now.duration_since(start)>Duration::from_secs(1)){self.starting_second=Some(now);self.count=0}self.count+=1;self.count}pub fn count(&self)->i32{self.count}}

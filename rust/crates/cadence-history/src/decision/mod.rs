@@ -56,3 +56,37 @@ pub trait DecisionWorkflowBackend {fn handle_decision(&mut self,decision:&Decisi
 pub struct DecisionTaskHandler<B>{pub backend:B,pub validator:AttributeValidator,pub stop_processing:bool,pub fail_decision:bool,pub has_unhandled_events_before_decisions:bool}
 impl<B:DecisionWorkflowBackend> DecisionTaskHandler<B>{pub fn new(backend:B,validator:AttributeValidator,has_unhandled_events_before_decisions:bool)->Self{Self{backend,validator,stop_processing:false,fail_decision:false,has_unhandled_events_before_decisions}}
  pub fn handle_decisions(&mut self,execution_context:&[u8],decisions:&[Decision])->Result<(),DecisionError>{for d in decisions{if self.stop_processing{break}if let Err(e)=self.validator.validate(d){self.backend.fail_decision("BAD_DECISION_ATTRIBUTES",Some(&e.message))?;self.fail_decision=true;self.stop_processing=true;break}self.backend.handle_decision(d)?;}if !self.fail_decision{self.backend.complete_decision(execution_context)?}Ok(())}}
+
+macro_rules! typed_decision_handler {
+ ($method:ident,$kind:ident) => {pub fn $method(&mut self,d:&Decision)->Result<(),DecisionError>{if d.decision_type!=Some(DecisionType::$kind){return Err(DecisionError::new(concat!(stringify!($method)," received a different decision type")))}self.validator.validate(d)?;self.backend.handle_decision(d)}};
+}
+impl<B:DecisionWorkflowBackend> DecisionTaskHandler<B>{
+ typed_decision_handler!(handle_decision_schedule_activity,ScheduleActivityTask);
+ typed_decision_handler!(handle_decision_request_cancel_activity,RequestCancelActivityTask);
+ typed_decision_handler!(handle_decision_start_timer,StartTimer);
+ typed_decision_handler!(handle_decision_complete_workflow,CompleteWorkflowExecution);
+ typed_decision_handler!(handle_decision_fail_workflow,FailWorkflowExecution);
+ typed_decision_handler!(handle_decision_cancel_timer,CancelTimer);
+ typed_decision_handler!(handle_decision_cancel_workflow,CancelWorkflowExecution);
+ typed_decision_handler!(handle_decision_request_cancel_external_workflow,RequestCancelExternalWorkflowExecution);
+ typed_decision_handler!(handle_decision_record_marker,RecordMarker);
+ typed_decision_handler!(handle_decision_continue_as_new_workflow,ContinueAsNewWorkflowExecution);
+ typed_decision_handler!(handle_decision_start_child_workflow,StartChildWorkflowExecution);
+ typed_decision_handler!(handle_decision_signal_external_workflow,SignalExternalWorkflowExecution);
+ typed_decision_handler!(handle_decision_upsert_workflow_search_attributes,UpsertWorkflowSearchAttributes);
+ pub fn handle_decision_with_result(&mut self,d:&Decision)->Result<(),DecisionError>{self.handle_decision(d)}
+ pub fn handle_decision(&mut self,d:&Decision)->Result<(),DecisionError>{self.validator.validate(d)?;self.backend.handle_decision(d)}
+ pub fn handle_fail_workflow_error(&mut self,reason:&str,details:&str)->Result<(),DecisionError>{self.backend.fail_decision(reason,Some(details))}
+ pub fn handle_workflow_failure(&mut self,reason:&str,message:Option<&str>)->Result<(),DecisionError>{self.backend.fail_decision(reason,message)}
+ pub fn fail_workflow_semaphore_not_found(&mut self,name:&str)->Result<(),DecisionError>{self.backend.fail_decision("SEMAPHORE_NOT_FOUND",Some(name))}
+ pub fn handler_fail_decision(&mut self,cause:&str,message:Option<&str>)->Result<(),DecisionError>{self.fail_decision=true;self.stop_processing=true;self.backend.fail_decision(cause,message)}
+ pub fn retry_cron_continue_as_new(&mut self,d:&Decision)->Result<(),DecisionError>{if d.decision_type!=Some(DecisionType::ContinueAsNewWorkflowExecution){return Err(DecisionError::new("decision is not ContinueAsNewWorkflowExecution"))}self.handle_decision(d)}
+}
+
+/// Inputs shared by Go Handler's schedule/start/fail/complete lifecycle methods.
+#[derive(Debug,Clone,Default)]pub struct DecisionTaskRequest{pub domain_id:String,pub workflow_id:String,pub run_id:String,pub schedule_id:i64,pub request_id:String,pub identity:String,pub execution_context:Vec<u8>,pub decisions:Vec<Decision>}
+pub trait DecisionTaskLifecycle:Send+Sync{type Started:Send;type Completed:Send;fn handle_scheduled(&self,request:&DecisionTaskRequest)->Result<(),DecisionError>;fn handle_started(&self,request:&DecisionTaskRequest)->Result<Self::Started,DecisionError>;fn handle_failed(&self,request:&DecisionTaskRequest)->Result<(),DecisionError>;fn handle_completed(&self,request:&DecisionTaskRequest)->Result<Self::Completed,DecisionError>;}
+pub struct Handler<B:DecisionTaskLifecycle>{backend:B}
+impl<B:DecisionTaskLifecycle> Handler<B>{pub fn new(backend:B)->Self{Self{backend}}pub fn handle_decision_task_scheduled(&self,r:&DecisionTaskRequest)->Result<(),DecisionError>{self.backend.handle_scheduled(r)}pub fn handle_decision_task_started(&self,r:&DecisionTaskRequest)->Result<B::Started,DecisionError>{self.backend.handle_started(r)}pub fn handle_decision_task_failed(&self,r:&DecisionTaskRequest)->Result<(),DecisionError>{self.backend.handle_failed(r)}pub fn handle_decision_task_completed(&self,r:&DecisionTaskRequest)->Result<B::Completed,DecisionError>{self.backend.handle_completed(r)}}
+pub fn get_decision_info_attempt(attempt:i64)->i64{attempt}
+pub fn get_decision_info_started_id(started_id:i64)->i64{started_id}
