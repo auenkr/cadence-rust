@@ -404,6 +404,7 @@ impl MutableStateBuilder {
         started_event_id: i64,
         request: &RespondDecisionTaskCompletedRequest,
         now_timestamp: i64,
+        max_reset_points: usize,
     ) -> Result<HistoryEvent, MutableStateError> {
         let Some(decision) = self.get_decision_info(schedule_event_id).cloned() else {
             return Err(MutableStateError::InvalidDecisionState { action: "complete", schedule_id: schedule_event_id, started_id: started_event_id });
@@ -433,13 +434,49 @@ impl MutableStateBuilder {
         });
         if let Some(stored) = self.history.last_mut() { *stored = event.clone(); }
         self.execution_info["last_processed_event"] = completed_started_id.into();
-        if !request.binary_checksum.is_empty() {
-            self.execution_info["binary_checksum"] = request.binary_checksum.clone().into();
-        }
+        self.after_add_decision_task_completed_event(&event, max_reset_points, now_timestamp);
         Ok(event)
     }
 
     pub fn before_add_decision_task_completed_event(&mut self) { self.delete_decision_preserving_heartbeat(); }
+
+    /// Port of Go's afterAddDecisionTaskCompletedEvent and
+    /// addBinaryCheckSumIfNotExists. Persistence/search task generation is
+    /// outside this state container, but the reset points and checksum list
+    /// are retained in the execution record for its mutation.
+    fn after_add_decision_task_completed_event(
+        &mut self,
+        event: &HistoryEvent,
+        max_reset_points: usize,
+        now_timestamp: i64,
+    ) {
+        let Some(attrs) = event.decision_task_completed_event_attributes.as_ref() else { return };
+        if attrs.binary_checksum.is_empty() { return; }
+        let mut points = self.execution_info.get("auto_reset_points")
+            .and_then(|value| value.get("points"))
+            .and_then(Record::as_array).cloned().unwrap_or_default();
+        let mut checksums: Vec<String> = points.iter()
+            .filter_map(|point| point.get("binaryChecksum").and_then(Record::as_str).map(str::to_owned))
+            .collect();
+        if checksums.iter().any(|checksum| checksum == &attrs.binary_checksum) { return; }
+        let capacity = max_reset_points.max(1);
+        if points.len() >= capacity {
+            let remove = points.len() - capacity + 1;
+            points.drain(..remove);
+            checksums.drain(..remove);
+        }
+        checksums.push(attrs.binary_checksum.clone());
+        let run_id = self.execution_info.get("run_id").and_then(Record::as_str).unwrap_or_default();
+        points.push(serde_json::json!({
+            "binaryChecksum": attrs.binary_checksum,
+            "runId": run_id,
+            "firstDecisionCompletedId": event.event_id,
+            "createdTimeNano": now_timestamp,
+            "resettable": true,
+        }));
+        self.execution_info["auto_reset_points"] = serde_json::json!({ "points": points });
+        self.execution_info["binary_checksums"] = serde_json::Value::Array(checksums.into_iter().map(Into::into).collect());
+    }
 
     pub fn add_decision_task_timed_out_event(
         &mut self,
@@ -485,6 +522,16 @@ impl MutableStateBuilder {
                 cause: Some(cause), details, identity, reason: Some(reason), binary_checksum,
                 base_run_id, new_run_id, fork_event_version, request_id: reset_request_id,
             });
+            if cause == DecisionTaskFailedCause::ResetWorkflow {
+                let requests = self.execution_info.get("workflow_requests").and_then(Record::as_array).cloned().unwrap_or_default();
+                let mut requests = requests;
+                requests.push(serde_json::json!({
+                    "request_id": event.decision_task_failed_event_attributes.as_ref().map(|a| a.request_id.as_str()).unwrap_or_default(),
+                    "version": event.version,
+                    "request_type": "reset",
+                }));
+                self.execution_info["workflow_requests"] = serde_json::Value::Array(requests);
+            }
             if let Some(stored) = self.history.last_mut() { *stored = event.clone(); }
             Some(event)
         } else { None };
@@ -769,6 +816,7 @@ mod tests {
         let event = s.add_decision_task_completed_event(
             d.schedule_id, d.started_id,
             &RespondDecisionTaskCompletedRequest { execution_context: b"ctx".to_vec(), identity: "worker".into(), binary_checksum: "sum".into(), ..Default::default() }, 20,
+            10,
         ).unwrap();
         assert_eq!(event.event_id, 3);
         assert_eq!(event.event_type, Some(EventType::DecisionTaskCompleted));
@@ -777,7 +825,9 @@ mod tests {
         assert_eq!(attrs.started_event_id, 2);
         assert_eq!(attrs.execution_context, b"ctx");
         assert_eq!(s.execution_info["last_processed_event"], 2);
-        assert_eq!(s.execution_info["binary_checksum"], "sum");
+        assert_eq!(s.execution_info["auto_reset_points"]["points"][0]["binaryChecksum"], "sum");
+        assert_eq!(s.execution_info["auto_reset_points"]["points"][0]["firstDecisionCompletedId"], 3);
+        assert_eq!(s.execution_info["binary_checksums"][0], "sum");
         assert_eq!(s.decision_snapshot().schedule_id, 0);
     }
 
