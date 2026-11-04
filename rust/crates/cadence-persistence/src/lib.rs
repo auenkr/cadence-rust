@@ -45,6 +45,7 @@ pub use semaphores::{
 };
 
 pub mod matching_blob;
+pub mod sqlblobs;
 pub mod matching_cassandra;
 pub mod matching_cassandra_exec;
 pub mod matching_mysql;
