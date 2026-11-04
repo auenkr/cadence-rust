@@ -76,7 +76,7 @@ jobs:
           export SOAK_RESTART_AT=$((SOAK_SECONDS / 2))
           mkdir -p res
           set +e
-          tests/gates/run-frontend-mysql-lane.sh res/lane --mode "$M" \
+          tests/gates/run-frontend-soak-lane.sh res/lane --mode "$M" \
             --rust-binary "$PWD/bin/cadence-server" --go-server "$PWD/bin/cadence-go-server" \
             --go-cli "$PWD/bin/cadence-cli" --driver "$PWD/bin/frontend-soak-driver" \
             --rust-root "$PWD" > res/gate.log 2>&1
