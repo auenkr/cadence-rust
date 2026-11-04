@@ -288,9 +288,9 @@ impl HistoryBuilder {
             continued_execution_run_id: previous_run_id.unwrap_or_default().to_string(),
             identity: request.identity.clone(), retry_policy: request.retry_policy.clone(), attempt: start_request.attempt,
             expiration_timestamp: start_request.expiration_timestamp, cron_schedule: request.cron_schedule.clone(),
-            cron_overlap_policy: request.cron_overlap_policy.clone(), last_completion_result: start_request.last_completion_result.clone(),
+            cron_overlap_policy: request.cron_overlap_policy, last_completion_result: start_request.last_completion_result.clone(),
             continued_failure_reason: start_request.continued_failure_reason.clone().unwrap_or_default(),
-            continued_failure_details: start_request.continued_failure_details.clone(), initiator: start_request.continue_as_new_initiator.clone(),
+            continued_failure_details: start_request.continued_failure_details.clone(), initiator: start_request.continue_as_new_initiator,
             first_decision_task_backoff_seconds: start_request.first_decision_task_backoff_seconds,
             first_execution_run_id: first_run_id.to_string(), first_scheduled_time_nano: scheduled,
             original_execution_run_id: original_run_id.to_string(), memo: request.memo.clone(), search_attributes: request.search_attributes.clone(),
@@ -316,22 +316,24 @@ impl HistoryBuilder {
         })
     }
     /// Go `AddActivityTaskStartedEvent`.
+    #[allow(clippy::too_many_arguments)]
     pub fn add_activity_task_started(&mut self, schedule_event_id: i64, attempt: i32, request_id: &str, identity: &str, last_failure_reason: &str, last_failure_details: Vec<u8>, last_failure_options: Option<FailureOptions>) -> HistoryEvent {
         self.add_activity_task_started_event(t::ActivityTaskStartedEventAttributes { scheduled_event_id: schedule_event_id, attempt, identity: identity.to_string(), request_id: request_id.to_string(), last_failure_reason: Some(last_failure_reason.to_string()), last_failure_details, last_failure_options })
     }
     /// Go `AddActivityTaskTimedOutEvent`.
+    #[allow(clippy::too_many_arguments)]
     pub fn add_activity_task_timed_out(&mut self, schedule_event_id: i64, started_event_id: i64, timeout_type: TimeoutType, last_heartbeat_details: Vec<u8>, last_failure_reason: &str, last_failure_details: Vec<u8>, last_failure_options: Option<FailureOptions>) -> HistoryEvent {
         self.add_activity_task_timed_out_event(t::ActivityTaskTimedOutEventAttributes { scheduled_event_id: schedule_event_id, started_event_id, timeout_type: Some(timeout_type), details: last_heartbeat_details, last_failure_reason: Some(last_failure_reason.to_string()), last_failure_details, last_failure_options })
     }
     /// Go `AddContinuedAsNewEvent`.
     pub fn add_continued_as_new(&mut self, decision_completed_event_id: i64, new_run_id: &str, a: &t::ContinueAsNewWorkflowExecutionDecisionAttributes) -> HistoryEvent {
-        let initiator = a.initiator.clone().unwrap_or(ContinueAsNewInitiator::Decider);
+        let initiator = a.initiator.unwrap_or(ContinueAsNewInitiator::Decider);
         self.add_workflow_execution_continued_as_new_event(t::WorkflowExecutionContinuedAsNewEventAttributes {
             new_execution_run_id: new_run_id.to_string(), workflow_type: a.workflow_type.clone(), task_list: a.task_list.clone(), header: a.header.clone(), input: a.input.clone(),
             execution_start_to_close_timeout_seconds: a.execution_start_to_close_timeout_seconds, task_start_to_close_timeout_seconds: a.task_start_to_close_timeout_seconds,
             decision_task_completed_event_id: decision_completed_event_id, backoff_start_interval_in_seconds: Some(a.backoff_start_interval_in_seconds.unwrap_or_default()),
             initiator: Some(initiator), failure_reason: a.failure_reason.clone(), failure_details: a.failure_details.clone(), last_completion_result: a.last_completion_result.clone(),
-            memo: a.memo.clone(), search_attributes: a.search_attributes.clone(), cron_overlap_policy: a.cron_overlap_policy.clone(),
+            memo: a.memo.clone(), search_attributes: a.search_attributes.clone(), cron_overlap_policy: a.cron_overlap_policy,
         })
     }
     /// Go `AddTimerFiredEvent`.
@@ -407,9 +409,9 @@ impl HistoryBuilder {
         self.add_start_child_workflow_execution_initiated_event(t::StartChildWorkflowExecutionInitiatedEventAttributes {
             domain, workflow_id: a.workflow_id.clone(), workflow_type: a.workflow_type.clone(), task_list: a.task_list.clone(), header: a.header.clone(), input: a.input.clone(),
             execution_start_to_close_timeout_seconds: a.execution_start_to_close_timeout_seconds, task_start_to_close_timeout_seconds: a.task_start_to_close_timeout_seconds,
-            control: a.control.clone(), decision_task_completed_event_id: decision_completed_event_id, workflow_id_reuse_policy: a.workflow_id_reuse_policy.clone(),
+            control: a.control.clone(), decision_task_completed_event_id: decision_completed_event_id, workflow_id_reuse_policy: a.workflow_id_reuse_policy,
             retry_policy: a.retry_policy.clone(), cron_schedule: a.cron_schedule.clone(), memo: a.memo.clone(), search_attributes: a.search_attributes.clone(),
-            parent_close_policy: Some(a.parent_close_policy.clone().unwrap_or(ParentClosePolicy::Abandon)), cron_overlap_policy: a.cron_overlap_policy.clone(), ..Default::default()
+            parent_close_policy: Some(a.parent_close_policy.unwrap_or(ParentClosePolicy::Abandon)), cron_overlap_policy: a.cron_overlap_policy, ..Default::default()
         })
     }
     /// Go `AddChildWorkflowExecutionStartedEvent`.
@@ -438,6 +440,6 @@ impl HistoryBuilder {
     }
     /// Go `AddChildWorkflowExecutionTimedOutEvent`.
     pub fn add_child_timed_out(&mut self, domain: &str, execution: Option<WorkflowExecution>, workflow_type: Option<WorkflowType>, initiated_id: i64, started_id: i64, timed_out: &t::WorkflowExecutionTimedOutEventAttributes) -> HistoryEvent {
-        self.add_child_workflow_execution_timed_out_event(t::ChildWorkflowExecutionTimedOutEventAttributes { domain: domain.to_string(), timeout_type: timed_out.timeout_type.clone(), workflow_execution: execution, workflow_type, initiated_event_id: initiated_id, started_event_id: started_id })
+        self.add_child_workflow_execution_timed_out_event(t::ChildWorkflowExecutionTimedOutEventAttributes { domain: domain.to_string(), timeout_type: timed_out.timeout_type, workflow_execution: execution, workflow_type, initiated_event_id: initiated_id, started_event_id: started_id })
     }
 }
