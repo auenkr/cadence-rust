@@ -209,7 +209,7 @@ pub struct HistoryBranchRequest {
     pub fork_node_id:i64, pub source_branch_id:String, pub current_timestamp_unix_nanos:i64,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct HistoryBranchPage { pub nodes:Vec<DataBlob>, pub next_page_token:Vec<u8> }
+pub struct HistoryBranchPage { pub nodes:Vec<DataBlob>, pub next_page_token:Vec<u8>, pub last_node_id:i64, pub last_transaction_id:i64 }
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct HistoryTreeBranch { pub shard_id:i32, pub tree_id:String, pub branch_id:String, pub fork_time_unix_nanos:i64, pub info:String, pub ancestors:Vec<HistoryBranchRange> }
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
