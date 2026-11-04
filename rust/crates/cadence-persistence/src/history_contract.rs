@@ -196,6 +196,8 @@ pub trait GoExecutionStore: Send+Sync {
     async fn complete_history_task(&self, shard_id:i32, category:HistoryTaskCategory, task_id:i64)->Result<(),PersistenceError>;
     async fn range_complete_history_tasks(&self, range:TaskRange, category:HistoryTaskCategory)->Result<u64,PersistenceError>;
     async fn get_replication_dlq_page(&self, request:crate::history_task_sql::ReplicationDlqQuery)->Result<crate::history_task_sql::ReplicationDlqPage,PersistenceError>;
+    async fn get_replication_dlq_size_for_shard(&self, shard_id:i32, source_cluster:String)->Result<i64,PersistenceError>;
+    async fn put_replication_task_to_dlq_for_shard(&self, shard_id:i32, source_cluster:String, task:ReplicationTask)->Result<(),PersistenceError>;
     async fn range_delete_replication_dlq_page(&self, shard_id:i32, source_cluster:String, inclusive_min_id:i64, exclusive_max_id:i64, page_size:i32)->Result<u64,PersistenceError>;
     async fn get_history_task_page(&self, request:crate::history_task_sql::HistoryTaskQuery)->Result<crate::history_task_sql::HistoryTaskPage,PersistenceError>;
     async fn complete_history_task_batch(&self, shard_id:i32, category:HistoryTaskCategory, keys:Vec<(i64,i64)>)->Result<(),PersistenceError>;
