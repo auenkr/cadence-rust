@@ -1,0 +1,45 @@
+{
+  "containers": {
+    "cadence-fm-benchmark-frontend-1": {
+      "average_cpu_cores": 0.05981184604307569,
+      "cgroup_version": "v2",
+      "cpu_seconds": 5.671117,
+      "final_cpu_ns": 6396706000,
+      "initial_cpu_ns": 725589000,
+      "peak_cgroup_memory_bytes": 23560192
+    },
+    "cadence-fm-benchmark-history-1": {
+      "average_cpu_cores": 0.17019857957329673,
+      "cgroup_version": "v2",
+      "cpu_seconds": 16.13754,
+      "final_cpu_ns": 17896650000,
+      "initial_cpu_ns": 1759110000,
+      "peak_cgroup_memory_bytes": 81510400
+    },
+    "cadence-fm-benchmark-matching-1": {
+      "average_cpu_cores": 0.0565571404770997,
+      "cgroup_version": "v2",
+      "cpu_seconds": 5.362519,
+      "final_cpu_ns": 6064481000,
+      "initial_cpu_ns": 701962000,
+      "peak_cgroup_memory_bytes": 26918912
+    },
+    "cadence-fm-benchmark-worker-1": {
+      "average_cpu_cores": 0.003765041643742039,
+      "cgroup_version": "v2",
+      "cpu_seconds": 0.356986,
+      "final_cpu_ns": 727186000,
+      "initial_cpu_ns": 370200000,
+      "peak_cgroup_memory_bytes": 31539200
+    }
+  },
+  "cpu_method": "exact delta of cumulative cgroup cpu usage counters",
+  "duration_seconds": 94.81594993599992,
+  "ended_at_utc": "2026-11-04T03:56:38.817375+00:00",
+  "interval_method": "start/end marker files",
+  "memory_method": "peak sampled cgroup memory usage; includes charged cache and is not RSS",
+  "samples": 1883,
+  "sampling_interval_seconds": 0.05,
+  "schema_version": 2,
+  "started_at_utc": "2026-11-04T03:55:04.001370+00:00"
+}

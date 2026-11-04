@@ -160,3 +160,13 @@ release Rust image and SDK/CLI builds all passed. Paired workload started
 at 03:51:10 UTC; strict evidence verification has not run yet. Leave this
 run active; no restart or second benchmark dispatched. Final measurements
 remain unaccepted until terminal success and artifact inspection.
+
+## Final corrected evidence accepted
+
+Run41767896292 succeeded, strict CI/local verification passed with no
+warnings, all30,000 measured workflows succeeded. Reports reproduced
+exactly. Final results and limitations: [final report](frontend-matching-benchmark-final-results-41767896292.md).
+Compact raw evidence and standalone charts saved under
+`memory/evidence/frontend-matching-benchmark-full-41767896292/`.
+The earlier uncapped results remain separate; benchmarking objective is
+fulfilled without making any service parity or causal profiling claim.

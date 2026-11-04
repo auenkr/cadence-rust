@@ -94,9 +94,9 @@
 </header>
 <main>
   <section class="est">
-    <h2>Frontend + Matching benchmark — validation in progress</h2>
-    <p>Go versus release Rust Frontend/Matching, with Go History and system Worker held constant. Initial 30-run workload evidence is retained separately. Corrected capped smoke 41764102198 passed both 100-workflow arms with zero failures and valid CPU counter deltas. Full five-repetition, 1000-workflow comparison 41767896292 with strict artifact verification is running (04:15 UTC: all builds passed, paired workload in progress); final resource results remain pending.</p>
-    <p><a href="https://github.com/auenkr/cadence-rust/actions/runs/41764102198">Integrated smoke CI</a> · <a href="frontend-matching-benchmark-20261104.md">Scope and evidence</a></p>
+    <h2>Frontend + Matching benchmark — verified results</h2>
+    <p>Corrected capped run 41767896292 passed all 30,000 workflows in 30 measured runs. Five-run median Go/Rust throughput: concurrency1 12.77/10.78, concurrency16 33.58/29.82, concurrency64 31.13/27.55 workflows/s. Rust used more Frontend/Matching CPU time per fixed workload and less sampled cgroup memory. Strict CI/local evidence verification and report reproduction passed. Go History/Worker stayed constant; initial uncapped measurements remain separate.</p>
+    <p><a href="https://github.com/auenkr/cadence-rust/actions/runs/41767896292">Verified comparison CI</a> · <a href="frontend-matching-benchmark-20261104.md">Scope and evidence</a> · <a href="frontend-matching-benchmark-final-results-41767896292.md">Final report</a></p>
   </section>
   <div class="overall" id="overall"></div>
   <div id="services"></div>

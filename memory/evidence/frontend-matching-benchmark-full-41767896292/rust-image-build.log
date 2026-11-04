@@ -1,0 +1,942 @@
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.65kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/cadence-go:ci
+#2 DONE 0.0s
+
+#3 [internal] load metadata for docker.io/library/rust:1-alpine
+#3 ...
+
+#4 [auth] library/rust:pull token for registry-1.docker.io
+#4 DONE 0.0s
+
+#3 [internal] load metadata for docker.io/library/rust:1-alpine
+#3 DONE 0.8s
+
+#5 [internal] load .dockerignore
+#5 transferring context: 2B done
+#5 DONE 0.0s
+
+#6 [builder 1/8] FROM docker.io/library/rust:1-alpine@sha256:27cd9befd4a05d6f6eb407c3e28365f5092f008bfc5946207cca76ae5179ef23
+#6 resolve docker.io/library/rust:1-alpine@sha256:27cd9befd4a05d6f6eb407c3e28365f5092f008bfc5946207cca76ae5179ef23 0.0s done
+#6 DONE 0.1s
+
+#7 [final 1/4] FROM docker.io/library/cadence-go:ci@sha256:1024a5209dc1f6d564a83748883a559df46f3cf609274d0c85f0574945b5cf46
+#7 resolve docker.io/library/cadence-go:ci@sha256:1024a5209dc1f6d564a83748883a559df46f3cf609274d0c85f0574945b5cf46 0.0s done
+#7 DONE 0.2s
+
+#8 [internal] load build context
+#8 transferring context: 19.02MB 0.1s done
+#8 DONE 0.1s
+
+#6 [builder 1/8] FROM docker.io/library/rust:1-alpine@sha256:27cd9befd4a05d6f6eb407c3e28365f5092f008bfc5946207cca76ae5179ef23
+#6 sha256:e519d70869f7163811ac346342e4e35dcf5f77c4415191a5d9174990efcfe3cf 17.83MB / 273.19MB 0.2s
+#6 sha256:e519d70869f7163811ac346342e4e35dcf5f77c4415191a5d9174990efcfe3cf 74.45MB / 273.19MB 0.3s
+#6 sha256:4428542a62d2e117cf086a5f5b8f34791a85737965554d16a329a1385ac9a477 0B / 75.08MB 0.2s
+#6 sha256:4428542a62d2e117cf086a5f5b8f34791a85737965554d16a329a1385ac9a477 75.08MB / 75.08MB 0.4s done
+#6 sha256:e519d70869f7163811ac346342e4e35dcf5f77c4415191a5d9174990efcfe3cf 192.94MB / 273.19MB 0.6s
+#6 extracting sha256:4428542a62d2e117cf086a5f5b8f34791a85737965554d16a329a1385ac9a477
+#6 sha256:e519d70869f7163811ac346342e4e35dcf5f77c4415191a5d9174990efcfe3cf 250.61MB / 273.19MB 0.8s
+#6 sha256:e519d70869f7163811ac346342e4e35dcf5f77c4415191a5d9174990efcfe3cf 273.19MB / 273.19MB 0.9s done
+#6 extracting sha256:4428542a62d2e117cf086a5f5b8f34791a85737965554d16a329a1385ac9a477 0.9s done
+#6 DONE 1.4s
+
+#6 [builder 1/8] FROM docker.io/library/rust:1-alpine@sha256:27cd9befd4a05d6f6eb407c3e28365f5092f008bfc5946207cca76ae5179ef23
+#6 extracting sha256:e519d70869f7163811ac346342e4e35dcf5f77c4415191a5d9174990efcfe3cf
+#6 extracting sha256:e519d70869f7163811ac346342e4e35dcf5f77c4415191a5d9174990efcfe3cf 2.6s done
+#6 DONE 4.0s
+
+#9 [builder 2/8] RUN apk add --no-cache musl-dev gcc g++ make cmake perl git pkgconf openssl-dev openssl-libs-static linux-headers
+#9 0.367 ( 1/30) Installing acl-libs (2.3.2-r1)
+#9 0.376 ( 2/30) Installing libbz2 (1.0.8-r6)
+#9 0.384 ( 3/30) Installing libexpat (2.10.0-r0)
+#9 0.395 ( 4/30) Installing lz4-libs (1.10.0-r1)
+#9 0.408 ( 5/30) Installing xz-libs (5.8.4-r0)
+#9 0.417 ( 6/30) Installing libarchive (3.8.11-r0)
+#9 0.463 ( 7/30) Installing rhash-libs (1.4.6-r0)
+#9 0.491 ( 8/30) Installing libuv (1.52.1-r0)
+#9 0.506 ( 9/30) Installing cmake (4.2.3-r0)
+#9 0.916 (10/30) Installing libstdc++-dev (15.2.0-r5)
+#9 1.021 (11/30) Installing g++ (15.2.0-r5)
+#9 1.271 (12/30) Installing brotli-libs (1.2.1-r0)
+#9 1.285 (13/30) Installing c-ares (1.34.9-r0)
+#9 1.297 (14/30) Installing libunistring (1.4.2-r0)
+#9 1.316 (15/30) Installing libidn2 (2.3.8-r0)
+#9 1.324 (16/30) Installing nghttp2-libs (1.70.0-r0)
+#9 1.334 (17/30) Installing libpsl (0.21.5-r3)
+#9 1.344 (18/30) Installing libcurl (8.23.0-r0)
+#9 1.359 (19/30) Installing pcre2 (10.49-r0)
+#9 1.371 (20/30) Installing git (2.54.0-r0)
+#9 1.423 (21/30) Installing git-init-template (2.54.0-r0)
+#9 1.432 (22/30) Installing linux-headers (7.0.0-r1)
+#9 1.501 (23/30) Installing make (4.4.1-r4)
+#9 1.515 (24/30) Installing pkgconf (2.5.1-r0)
+#9 1.524 (25/30) Installing openssl-dev (3.5.9-r0)
+#9 1.546 (26/30) Installing openssl-libs-static (3.5.9-r0)
+#9 1.671 (27/30) Installing perl (5.42.3-r0)
+#9 1.876 (28/30) Installing perl-error (0.17030-r0)
+#9 1.887 (29/30) Installing perl-git (2.54.0-r0)
+#9 1.904 (30/30) Installing git-perl (2.54.0-r0)
+#9 1.918 Executing busybox-1.37.0-r31.trigger
+#9 1.923 OK: 417.6 MiB in 61 packages
+#9 DONE 6.0s
+
+#10 [builder 3/8] WORKDIR /src
+#10 DONE 0.1s
+
+#11 [builder 4/8] COPY go/idls go/idls
+#11 DONE 0.1s
+
+#12 [builder 5/8] COPY go/proto go/proto
+#12 DONE 0.0s
+
+#13 [builder 6/8] COPY rust rust
+#13 DONE 0.1s
+
+#14 [builder 7/8] WORKDIR /src/rust
+#14 DONE 0.0s
+
+#15 [builder 8/8] RUN cargo build --release -p cadence-server -j2     && sha256sum target/release/cadence-server > /cadence-server.sha256
+#15 0.177     Updating crates.io index
+#15 0.576 warning: spurious network error (3 tries remaining): [56] Failure when receiving data from the peer (Recv failure: Connection reset by peer)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: OpenSSL/3.6.3: error:0A000126:SSL routines::unexpected eof while reading, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.576 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 0.577 warning: spurious network error (3 tries remaining): [55] Failed sending data to the peer (OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 0)
+#15 2.339      Locking 11 packages to highest compatible versions
+#15 2.339       Adding deunicode v1.6.2
+#15 2.339       Adding hmac v0.12.1
+#15 2.340       Adding integer-encoding v4.1.0
+#15 2.340       Adding jmespath v0.3.0 (available: v0.5.0)
+#15 2.340       Adding jsonwebtoken v9.3.1 (available: v11.1.0)
+#15 2.340       Adding pbkdf2 v0.12.2
+#15 2.340       Adding rsasl v2.3.1
+#15 2.340       Adding rskafka v0.6.0
+#15 2.340       Adding simple_asn1 v0.6.4
+#15 2.340       Adding slug v0.1.6
+#15 2.340       Adding time-macros v0.2.32
+#15 2.362  Downloading crates ...
+#15 2.419   Downloaded core_detect v1.0.0
+#15 2.422   Downloaded crypto-common v0.2.2
+#15 2.423   Downloaded cpufeatures v0.3.1
+#15 2.434   Downloaded data-encoding v2.11.1
+#15 2.436   Downloaded httparse v1.10.1
+#15 2.437   Downloaded fastrand v2.5.0
+#15 2.438   Downloaded foldhash v0.2.0
+#15 2.439   Downloaded deunicode v1.6.2
+#15 2.442   Downloaded hyper-util v0.1.21
+#15 2.446   Downloaded dashmap v6.2.1
+#15 2.447   Downloaded ident_case v1.0.1
+#15 2.448   Downloaded const-oid v0.10.2
+#15 2.458   Downloaded cpufeatures v0.2.17
+#15 2.459   Downloaded errno v0.3.14
+#15 2.460   Downloaded either v1.19.0
+#15 2.463   Downloaded dunce v1.0.5
+#15 2.469   Downloaded adler2 v2.0.1
+#15 2.470   Downloaded rand v0.9.5
+#15 2.472   Downloaded futures-macro v0.3.34
+#15 2.478   Downloaded hmac v0.13.0
+#15 2.479   Downloaded itertools v0.14.0
+#15 2.484   Downloaded icu_properties_data v2.3.0
+#15 2.490   Downloaded colorchoice v1.0.5
+#15 2.491   Downloaded getrandom v0.2.17
+#15 2.493   Downloaded indexmap v2.14.2
+#15 2.496   Downloaded synstructure v0.14.0
+#15 2.497   Downloaded icu_locale_core v2.3.0
+#15 2.503   Downloaded derive_utils v0.16.0
+#15 2.504   Downloaded form_urlencoded v1.2.2
+#15 2.505   Downloaded futures-io v0.3.34
+#15 2.506   Downloaded crypto-common v0.1.7
+#15 2.506   Downloaded crc32fast v1.5.2
+#15 2.508   Downloaded foreign-types v0.3.2
+#15 2.509   Downloaded hyper v1.12.0
+#15 2.513   Downloaded deranged v0.5.9
+#15 2.515   Downloaded h2 v0.4.20
+#15 2.519   Downloaded fs_extra v1.3.0
+#15 2.520   Downloaded displaydoc v0.2.7
+#15 2.521   Downloaded futures-core v0.3.34
+#15 2.528   Downloaded hashlink v0.9.1
+#15 2.529   Downloaded hybrid-array v0.4.15
+#15 2.531   Downloaded native-tls v0.2.18
+#15 2.532   Downloaded fs-err v3.3.2
+#15 2.533   Downloaded http v1.5.0
+#15 2.535   Downloaded hyper-timeout v0.5.2
+#15 2.536   Downloaded ipnet v2.12.2
+#15 2.537   Downloaded if-addrs v0.13.4
+#15 2.539   Downloaded icu_normalizer_data v2.3.0
+#15 2.540   Downloaded hashbrown v0.12.3
+#15 2.552   Downloaded icu_collections v2.3.0
+#15 2.556   Downloaded anstyle-query v1.1.5
+#15 2.571   Downloaded idna v1.1.0
+#15 2.573   Downloaded axum-core v0.4.5
+#15 2.575   Downloaded digest v0.10.7
+#15 2.576   Downloaded darling v0.24.1
+#15 2.581   Downloaded futures-task v0.3.34
+#15 2.581   Downloaded futures v0.3.34
+#15 2.585   Downloaded io-enum v1.3.0
+#15 2.586   Downloaded flate2 v1.1.10
+#15 2.590   Downloaded parking_lot_core v0.9.12
+#15 2.591   Downloaded icu_normalizer v2.3.0
+#15 2.599   Downloaded prettyplease v0.2.37
+#15 2.602   Downloaded aws-lc-rs v1.18.2
+#15 2.610   Downloaded chacha20 v0.10.2
+#15 2.614   Downloaded fallible-iterator v0.2.0
+#15 2.615   Downloaded find-msvc-tools v0.1.14
+#15 2.617   Downloaded rskafka v0.6.0
+#15 2.623   Downloaded zerovec-derive v0.11.6
+#15 2.624   Downloaded futures-channel v0.3.34
+#15 2.626   Downloaded untrusted v0.9.0
+#15 2.627   Downloaded zeroize v1.9.1
+#15 2.628   Downloaded http-body v1.1.0
+#15 2.629   Downloaded libc v0.2.190
+#15 2.660   Downloaded foreign-types-shared v0.1.1
+#15 2.660   Downloaded serde_core v1.0.229
+#15 2.662   Downloaded crossbeam-utils v0.8.23
+#15 2.664   Downloaded hashbrown v0.14.5
+#15 2.667   Downloaded utf8parse v0.2.2
+#15 2.668   Downloaded time-macros v0.2.32
+#15 2.670   Downloaded zmij v1.0.23
+#15 2.671   Downloaded regex-automata v0.4.18
+#15 2.680   Downloaded crc32c v0.6.8
+#15 2.681   Downloaded heck v0.5.0
+#15 2.682   Downloaded stringprep v0.1.5
+#15 2.683   Downloaded tonic-build v0.12.3
+#15 2.684   Downloaded tonic v0.12.3
+#15 2.687   Downloaded getrandom v0.3.4
+#15 2.690   Downloaded clap_derive v4.6.7
+#15 2.691   Downloaded icu_properties v2.3.0
+#15 2.693   Downloaded darling_macro v0.24.1
+#15 2.694   Downloaded enum-as-inner v0.6.1
+#15 2.695   Downloaded thiserror-impl v2.0.21
+#15 2.696   Downloaded fixedbitset v0.5.7
+#15 2.697   Downloaded matchit v0.7.3
+#15 2.698   Downloaded fallible-streaming-iterator v0.1.9
+#15 2.699   Downloaded is_terminal_polyfill v1.70.2
+#15 2.700   Downloaded iana-time-zone v0.1.65
+#15 2.702   Downloaded itertools v0.15.0
+#15 2.706   Downloaded simdutf8 v0.1.5
+#15 2.708   Downloaded webpki-roots v1.0.10
+#15 2.711   Downloaded postgres v0.19.14
+#15 2.712   Downloaded rand_core v0.9.5
+#15 2.713   Downloaded hickory-resolver v0.24.4
+#15 2.716   Downloaded btoi v0.4.3
+#15 2.717   Downloaded hmac v0.12.1
+#15 2.718   Downloaded block-buffer v0.10.4
+#15 2.719   Downloaded httpdate v1.0.3
+#15 2.720   Downloaded prost-derive v0.13.5
+#15 2.721   Downloaded shlex v2.0.1
+#15 2.722   Downloaded async-stream v0.3.6
+#15 2.723   Downloaded jsonwebtoken v9.3.1
+#15 2.727   Downloaded btoi v0.5.0
+#15 2.728   Downloaded hickory-proto v0.24.4
+#15 2.739   Downloaded regex-syntax v0.8.11
+#15 2.745   Downloaded ahash v0.8.12
+#15 2.746   Downloaded reqwest v0.12.28
+#15 2.751   Downloaded anstream v1.0.0
+#15 2.753   Downloaded num-traits v0.2.19
+#15 2.755   Downloaded fallible-iterator v0.3.0
+#15 2.756   Downloaded postgres-protocol v0.6.12
+#15 2.758   Downloaded lru v0.12.5
+#15 2.759   Downloaded once_cell v1.21.4
+#15 2.761   Downloaded openssl-macros v0.1.1
+#15 2.762   Downloaded resolv-conf v0.7.6
+#15 2.763   Downloaded pem v3.0.6
+#15 2.764   Downloaded autocfg v1.5.1
+#15 2.765   Downloaded clap_builder v4.6.7
+#15 2.770   Downloaded nu-ansi-term v0.50.3
+#15 2.772   Downloaded protoc-bin-vendored-macos-aarch_64 v3.3.0
+#15 2.797   Downloaded multimap v0.10.1
+#15 2.797   Downloaded anyhow v1.0.104
+#15 2.800   Downloaded pin-project-lite v0.2.17
+#15 2.803   Downloaded tokio v1.53.3
+#15 2.831   Downloaded matchers v0.2.0
+#15 2.832   Downloaded rand_chacha v0.9.0
+#15 2.833   Downloaded mio v1.2.4
+#15 2.837   Downloaded num-conv v0.2.2
+#15 2.838   Downloaded cfg-if v1.0.5
+#15 2.839   Downloaded rusqlite v0.32.1
+#15 2.843   Downloaded rustversion v1.0.23
+#15 2.845   Downloaded crossbeam-queue v0.3.14
+#15 2.846   Downloaded hyper-rustls v0.27.10
+#15 2.847   Downloaded darling_core v0.24.1
+#15 2.850   Downloaded itoa v1.0.18
+#15 2.851   Downloaded prost-types v0.13.5
+#15 2.852   Downloaded rustix v1.1.5
+#15 2.868   Downloaded bitflags v2.13.2
+#15 2.870   Downloaded equivalent v1.0.3
+#15 2.871   Downloaded protoc-bin-vendored-linux-ppcle_64 v3.3.0
+#15 2.905   Downloaded phf_shared v0.13.1
+#15 2.906   Downloaded pkg-config v0.3.34
+#15 2.907   Downloaded base64 v0.22.1
+#15 2.909   Downloaded chrono-tz v0.10.4
+#15 2.920   Downloaded regex v1.13.1
+#15 2.924   Downloaded zerovec v0.11.8
+#15 2.928   Downloaded generic-array v0.14.7
+#15 2.929   Downloaded prost v0.13.5
+#15 2.930   Downloaded protoc-bin-vendored-win32 v3.3.0
+#15 2.963   Downloaded allocator-api2 v0.2.21
+#15 2.965   Downloaded protoc-bin-vendored-linux-aarch_64 v3.3.0
+#15 2.995   Downloaded memchr v2.8.3
+#15 2.999   Downloaded phf v0.12.1
+#15 2.999   Downloaded block-buffer v0.12.1
+#15 3.000   Downloaded jobserver v0.1.35
+#15 3.002   Downloaded powerfmt v0.2.1
+#15 3.003   Downloaded chrono v0.4.45
+#15 3.007   Downloaded openssl v0.10.81
+#15 3.013   Downloaded atomic-waker v1.1.2
+#15 3.014   Downloaded anstyle v1.0.14
+#15 3.015   Downloaded rand_pcg v0.9.0
+#15 3.017   Downloaded phf_shared v0.12.1
+#15 3.017   Downloaded axum v0.7.9
+#15 3.022   Downloaded quote v1.0.47
+#15 3.024   Downloaded zerotrie v0.2.5
+#15 3.027   Downloaded protoc-bin-vendored-linux-s390_64 v3.3.0
+#15 3.067   Downloaded rand_core v0.10.1
+#15 3.068   Downloaded miniz_oxide v0.9.1
+#15 3.070   Downloaded strsim v0.11.1
+#15 3.071   Downloaded utf8_iter v1.0.4
+#15 3.071   Downloaded mime v0.3.17
+#15 3.072   Downloaded protoc-bin-vendored v3.3.0
+#15 3.073   Downloaded proc-macro2 v1.0.107
+#15 3.075   Downloaded mysql v26.0.1
+#15 3.077   Downloaded parking_lot v0.12.5
+#15 3.079   Downloaded pbkdf2 v0.12.2
+#15 3.080   Downloaded lru-cache v0.1.2
+#15 3.081   Downloaded cc v1.8.0
+#15 3.083   Downloaded futures-sink v0.3.34
+#15 3.084   Downloaded prost-build v0.13.5
+#15 3.086   Downloaded typenum v1.20.1
+#15 3.088   Downloaded uuid v1.28.0
+#15 3.090   Downloaded serde_yaml v0.9.34+deprecated
+#15 3.092   Downloaded yoke-derive v0.8.4
+#15 3.093   Downloaded rustls-native-certs v0.8.5
+#15 3.094   Downloaded async-trait v0.1.92
+#15 3.096   Downloaded digest v0.11.3
+#15 3.098   Downloaded encoding_rs v0.8.42
+#15 3.105   Downloaded num-bigint v0.4.8
+#15 3.108   Downloaded ctutils v0.4.3
+#15 3.110   Downloaded rustls-pki-types v1.15.1
+#15 3.111   Downloaded axum v0.8.9
+#15 3.116   Downloaded rustls v0.23.46
+#15 3.124   Downloaded rand_chacha v0.3.1
+#15 3.124   Downloaded unicode-bidi v0.3.18
+#15 3.126   Downloaded tokio-macros v2.7.2
+#15 3.127   Downloaded writeable v0.6.4
+#15 3.128   Downloaded clap v4.6.7
+#15 3.134   Downloaded linked-hash-map v0.5.6
+#15 3.134   Downloaded rand v0.10.3
+#15 3.137   Downloaded tracing v0.1.44
+#15 3.147   Downloaded lazy_static v1.5.1
+#15 3.148   Downloaded num-integer v0.1.47
+#15 3.149   Downloaded bufstream v0.1.4
+#15 3.150   Downloaded yoke v0.8.3
+#15 3.151   Downloaded matchit v0.8.4
+#15 3.152   Downloaded whoami v2.1.3
+#15 3.154   Downloaded integer-encoding v4.1.0
+#15 3.155   Downloaded futures-util v0.3.34
+#15 3.163   Downloaded icu_provider v2.3.1
+#15 3.165   Downloaded fnv v1.0.7
+#15 3.165   Downloaded hashbrown v0.17.1
+#15 3.169   Downloaded time-core v0.1.9
+#15 3.170   Downloaded libsqlite3-sys v0.30.1
+#15 3.227   Downloaded tokio-stream v0.1.19
+#15 3.230   Downloaded try-lock v0.2.5
+#15 3.230   Downloaded tinystr v0.8.4
+#15 3.232   Downloaded syn v2.0.119
+#15 3.239   Downloaded scylla-cql v2.0.0
+#15 3.242   Downloaded rand v0.8.8
+#15 3.244   Downloaded thiserror v1.0.69
+#15 3.248   Downloaded http-body-util v0.1.5
+#15 3.249   Downloaded hyper-tls v0.6.0
+#15 3.250   Downloaded ryu v1.0.23
+#15 3.253   Downloaded serde_path_to_error v0.1.20
+#15 3.254   Downloaded signal-hook-registry v1.4.8
+#15 3.255   Downloaded socket2 v0.5.10
+#15 3.256   Downloaded tracing-attributes v0.1.31
+#15 3.258   Downloaded postgres-types v0.2.14
+#15 3.260   Downloaded protoc-bin-vendored-macos-x86_64 v3.3.0
+#15 3.284   Downloaded tracing-log v0.2.0
+#15 3.285   Downloaded scylla-macros v1.9.0
+#15 3.286   Downloaded serde_derive v1.0.229
+#15 3.287   Downloaded percent-encoding v2.3.2
+#15 3.288   Downloaded farmhash v1.1.5
+#15 3.298   Downloaded indexmap v1.9.3
+#15 3.300   Downloaded axum-server v0.8.0
+#15 3.302   Downloaded rustls-webpki v0.103.15
+#15 3.304   Downloaded base64 v0.23.1
+#15 3.307   Downloaded async-stream-impl v0.3.6
+#15 3.307   Downloaded mysql_common v0.37.3
+#15 3.312   Downloaded rustls-pemfile v2.2.0
+#15 3.314   Downloaded aho-corasick v1.1.5
+#15 3.317   Downloaded postgres-openssl v0.5.3
+#15 3.318   Downloaded lru v0.18.5
+#15 3.319   Downloaded bytes v1.12.1
+#15 3.321   Downloaded sha1_smol v1.0.1
+#15 3.322   Downloaded sync_wrapper v1.0.2
+#15 3.323   Downloaded lz4_flex v0.14.0
+#15 3.324   Downloaded phf v0.13.1
+#15 3.325   Downloaded lock_api v0.4.14
+#15 3.326   Downloaded rand_core v0.6.4
+#15 3.327   Downloaded log v0.4.34
+#15 3.329   Downloaded pin-project v1.1.13
+#15 3.336   Downloaded arc-swap v1.9.2
+#15 3.338   Downloaded rsasl v2.3.1
+#15 3.342   Downloaded tower v0.4.13
+#15 3.347   Downloaded sha1 v0.10.7
+#15 3.348   Downloaded openssl-probe v0.2.1
+#15 3.349   Downloaded rustc_version v0.4.1
+#15 3.350   Downloaded byteorder v1.5.0
+#15 3.351   Downloaded tonic-reflection v0.12.3
+#15 3.352   Downloaded siphasher v1.0.4
+#15 3.353   Downloaded protoc-bin-vendored-linux-x86_32 v3.3.0
+#15 3.387   Downloaded protoc-bin-vendored-linux-x86_64 v3.3.0
+#15 3.418   Downloaded idna_adapter v1.2.2
+#15 3.418   Downloaded tower-layer v0.3.3
+#15 3.419   Downloaded tokio-rustls v0.26.6
+#15 3.420   Downloaded serde_urlencoded v0.7.1
+#15 3.421   Downloaded tokio-openssl v0.6.5
+#15 3.422   Downloaded tokio-util v0.7.20
+#15 3.427   Downloaded scylla-cql-core v1.9.0
+#15 3.429   Downloaded url v2.5.8
+#15 3.440   Downloaded futures-executor v0.3.34
+#15 3.447   Downloaded tower-http v0.6.11
+#15 3.488   Downloaded multiversion_no_op v1.0.0
+#15 3.567   Downloaded tokio-native-tls v0.3.1
+#15 3.574   Downloaded tower-service v0.3.3
+#15 3.586   Downloaded zerofrom-derive v0.1.8
+#15 3.597   Downloaded sharded-slab v0.1.7
+#15 3.599   Downloaded thiserror v2.0.21
+#15 3.606   Downloaded stable_deref_trait v1.2.1
+#15 3.661   Downloaded unicode-normalization v0.1.26
+#15 3.664   Downloaded unsafe-libyaml v0.2.11
+#15 3.678   Downloaded saturating v0.1.0
+#15 3.703   Downloaded subtle v2.6.1
+#15 3.734   Downloaded pin-project-internal v1.1.13
+#15 3.745   Downloaded cmov v0.5.4
+#15 3.806   Downloaded aws-lc-sys v0.46.0
+#15 3.993   Downloaded keyed_priority_queue v0.4.2
+#15 3.993   Downloaded mysql_common v0.35.5
+#15 4.088   Downloaded getrandom v0.4.3
+#15 4.097   Downloaded petgraph v0.7.1
+#15 4.212   Downloaded ring v0.17.14
+#15 4.238   Downloaded clap_lex v1.1.1
+#15 4.238   Downloaded simple_asn1 v0.6.4
+#15 4.329   Downloaded socket2 v0.6.5
+#15 4.400   Downloaded thiserror-impl v1.0.69
+#15 4.534   Downloaded simd-adler32 v0.3.10
+#15 4.537   Downloaded tracing-core v0.1.36
+#15 4.588   Downloaded tempfile v3.27.0
+#15 4.666   Downloaded axum-core v0.5.6
+#15 4.667   Downloaded serde v1.0.229
+#15 4.710   Downloaded tinyvec v1.13.3
+#15 4.753   Downloaded version_check v0.9.5
+#15 4.764   Downloaded time v0.3.55
+#15 4.777   Downloaded openssl-sys v0.9.117
+#15 4.791   Downloaded twox-hash v2.1.5
+#15 4.835   Downloaded scopeguard v1.2.0
+#15 4.836   Downloaded anstyle-parse v1.0.0
+#15 4.839   Downloaded md-5 v0.11.0
+#15 4.841   Downloaded slab v0.4.12
+#15 4.844   Downloaded litemap v0.8.3
+#15 4.848   Downloaded tower v0.5.3
+#15 4.889   Downloaded want v0.3.2
+#15 4.939   Downloaded cmake v0.1.58
+#15 4.946   Downloaded vcpkg v0.2.15
+#15 4.972   Downloaded serde_json v1.0.154
+#15 4.977   Downloaded jmespath v0.3.0
+#15 5.006   Downloaded semver v1.0.28
+#15 5.014   Downloaded tokio-postgres v0.7.18
+#15 5.023   Downloaded syn v3.0.9
+#15 5.046   Downloaded snap v1.1.2
+#15 5.052   Downloaded slug v0.1.6
+#15 5.053   Downloaded sha2 v0.10.9
+#15 5.054   Downloaded unicode-ident v1.0.27
+#15 5.056   Downloaded sqlparser v0.53.0
+#15 5.060   Downloaded webpki-roots v0.26.11
+#15 5.061   Downloaded sha2 v0.11.1
+#15 5.079   Downloaded ppv-lite86 v0.2.21
+#15 5.086   Downloaded zerofrom v0.1.8
+#15 5.098   Downloaded thread_local v1.1.10
+#15 5.104   Downloaded potential_utf v0.1.6
+#15 5.109   Downloaded zerocopy v0.8.63
+#15 5.126   Downloaded tracing-subscriber v0.3.23
+#15 5.133   Downloaded smallvec v1.16.3
+#15 5.153   Downloaded webpki v0.22.4
+#15 5.163   Downloaded unicode-properties v0.1.4
+#15 6.127   Downloaded linux-raw-sys v0.12.1
+#15 6.253    Compiling proc-macro2 v1.0.107
+#15 6.253    Compiling unicode-ident v1.0.27
+#15 6.314    Compiling quote v1.0.47
+#15 6.461    Compiling libc v0.2.190
+#15 6.708    Compiling cfg-if v1.0.5
+#15 7.156    Compiling syn v3.0.9
+#15 8.411    Compiling syn v2.0.119
+#15 11.36    Compiling bytes v1.12.1
+#15 12.14    Compiling memchr v2.8.3
+#15 12.20    Compiling jobserver v0.1.35
+#15 12.43    Compiling smallvec v1.16.3
+#15 12.62    Compiling find-msvc-tools v0.1.14
+#15 12.75    Compiling shlex v2.0.1
+#15 12.85    Compiling cc v1.8.0
+#15 13.12    Compiling pin-project-lite v0.2.17
+#15 13.16    Compiling parking_lot_core v0.9.12
+#15 13.28    Compiling scopeguard v1.2.0
+#15 13.32    Compiling futures-core v0.3.34
+#15 13.39    Compiling itoa v1.0.18
+#15 13.55    Compiling pkg-config v0.3.34
+#15 14.13    Compiling lock_api v0.4.14
+#15 14.33    Compiling log v0.4.34
+#15 14.38    Compiling once_cell v1.21.4
+#15 14.48    Compiling autocfg v1.5.1
+#15 14.53    Compiling errno v0.3.14
+#15 14.62    Compiling signal-hook-registry v1.4.8
+#15 14.73    Compiling parking_lot v0.12.5
+#15 14.97    Compiling tokio-macros v2.7.2
+#15 15.46    Compiling socket2 v0.6.5
+#15 15.46    Compiling mio v1.2.4
+#15 16.06    Compiling tokio v1.53.3
+#15 16.15    Compiling futures-sink v0.3.34
+#15 16.20    Compiling slab v0.4.12
+#15 16.32    Compiling futures-channel v0.3.34
+#15 16.50    Compiling typenum v1.20.1
+#15 17.19    Compiling futures-macro v0.3.34
+#15 17.77    Compiling futures-io v0.3.34
+#15 17.89    Compiling futures-task v0.3.34
+#15 17.99    Compiling serde_core v1.0.229
+#15 18.16    Compiling futures-util v0.3.34
+#15 20.86    Compiling synstructure v0.14.0
+#15 21.27    Compiling getrandom v0.2.17
+#15 21.45    Compiling version_check v0.9.5
+#15 21.63    Compiling zerocopy v0.8.63
+#15 23.99    Compiling tracing-core v0.1.36
+#15 24.78    Compiling zmij v1.0.23
+#15 26.21    Compiling zerofrom-derive v0.1.8
+#15 27.18    Compiling num-traits v0.2.19
+#15 27.30    Compiling tracing-attributes v0.1.31
+#15 28.25    Compiling serde v1.0.229
+#15 28.44    Compiling tracing v0.1.44
+#15 28.51    Compiling zerofrom v0.1.8
+#15 28.58    Compiling yoke-derive v0.8.4
+#15 28.79    Compiling serde_derive v1.0.229
+#15 29.40    Compiling percent-encoding v2.3.2
+#15 29.57    Compiling stable_deref_trait v1.2.1
+#15 29.60    Compiling yoke v0.8.3
+#15 30.44    Compiling base64 v0.22.1
+#15 30.86    Compiling zeroize v1.9.1
+#15 30.99    Compiling equivalent v1.0.3
+#15 31.02    Compiling allocator-api2 v0.2.21
+#15 31.36    Compiling foldhash v0.2.0
+#15 31.50    Compiling subtle v2.6.1
+#15 31.58    Compiling hashbrown v0.17.1
+#15 31.78    Compiling cmake v0.1.58
+#15 32.02    Compiling zerovec-derive v0.11.6
+#15 32.28    Compiling thiserror v2.0.21
+#15 32.45    Compiling serde_json v1.0.154
+#15 32.56    Compiling dunce v1.0.5
+#15 32.60    Compiling fs_extra v1.3.0
+#15 32.77    Compiling vcpkg v0.2.15
+#15 32.86    Compiling zerovec v0.11.8
+#15 33.23    Compiling aws-lc-sys v0.46.0
+#15 33.77    Compiling rustls-pki-types v1.15.1
+#15 34.21    Compiling ppv-lite86 v0.2.21
+#15 34.45    Compiling tokio-util v0.7.20
+#15 34.50    Compiling ring v0.17.14
+#15 34.86    Compiling http v1.5.0
+#15 35.39    Compiling thiserror-impl v2.0.21
+#15 36.35    Compiling displaydoc v0.2.7
+#15 36.48    Compiling getrandom v0.4.3
+#15 36.60    Compiling rand_core v0.10.1
+#15 36.69    Compiling anyhow v1.0.104
+#15 44.29    Compiling generic-array v0.14.7
+#15 44.40    Compiling rustversion v1.0.23
+#15 44.80    Compiling http-body v1.1.0
+#15 44.87    Compiling indexmap v2.14.2
+#15 45.66    Compiling aws-lc-rs v1.18.2
+#15 45.82    Compiling untrusted v0.9.0
+#15 45.88    Compiling tower-service v0.3.3
+#15 49.94    Compiling tinystr v0.8.4
+#15 50.08    Compiling rand_core v0.6.4
+#15 50.27    Compiling litemap v0.8.3
+#15 50.42    Compiling writeable v0.6.4
+#15 50.64    Compiling bitflags v2.13.2
+#15 50.88    Compiling icu_locale_core v2.3.0
+#15 53.16    Compiling rand_chacha v0.3.1
+#15 53.78    Compiling zerotrie v0.2.5
+#15 54.19    Compiling potential_utf v0.1.6
+#15 54.29    Compiling openssl-sys v0.9.117
+#15 54.66    Compiling utf8_iter v1.0.4
+#15 54.75    Compiling icu_normalizer_data v2.3.0
+#15 54.85    Compiling siphasher v1.0.4
+#15 55.00    Compiling byteorder v1.5.0
+#15 55.18    Compiling icu_properties_data v2.3.0
+#15 55.28    Compiling either v1.19.0
+#15 55.43    Compiling itertools v0.14.0
+#15 56.69    Compiling icu_collections v2.3.0
+#15 57.53    Compiling icu_provider v2.3.1
+#15 58.01    Compiling rand v0.8.8
+#15 58.79    Compiling crypto-common v0.1.7
+#15 58.85    Compiling block-buffer v0.10.4
+#15 58.93    Compiling hybrid-array v0.4.15
+#15 59.37    Compiling async-trait v0.1.92
+#15 60.06    Compiling httparse v1.10.1
+#15 60.24    Compiling tinyvec v1.13.3
+#15 60.65    Compiling getrandom v0.3.4
+#15 60.81    Compiling rustls v0.23.46
+#15 60.92    Compiling digest v0.10.7
+#15 61.09    Compiling prost-derive v0.13.5
+#15 62.39    Compiling atomic-waker v1.1.2
+#15 62.45    Compiling fnv v1.0.7
+#15 62.48    Compiling cmov v0.5.4
+#15 62.65    Compiling try-lock v0.2.5
+#15 62.70    Compiling iana-time-zone v0.1.65
+#15 63.04    Compiling ipnet v2.12.2
+#15 64.13    Compiling tower-layer v0.3.3
+#15 64.27    Compiling chrono v0.4.45
+#15 66.92    Compiling want v0.3.2
+#15 67.02    Compiling ctutils v0.4.3
+#15 67.20    Compiling h2 v0.4.20
+#15 74.32    Compiling icu_properties v2.3.0
+#15 75.85    Compiling icu_normalizer v2.3.0
+#15 77.32    Compiling block-buffer v0.12.1
+#15 77.43    Compiling crypto-common v0.2.2
+#15 78.84    Compiling form_urlencoded v1.2.2
+#15 79.02    Compiling sync_wrapper v1.0.2
+#15 79.06    Compiling cpufeatures v0.3.1
+#15 79.09    Compiling const-oid v0.10.2
+#15 79.29    Compiling httpdate v1.0.3
+#15 79.55    Compiling heck v0.5.0
+#15 79.67    Compiling hyper v1.12.0
+#15 83.28    Compiling digest v0.11.3
+#15 83.42    Compiling idna_adapter v1.2.2
+#15 83.48    Compiling unicode-normalization v0.1.26
+#15 83.92    Compiling http-body-util v0.1.5
+#15 84.14    Compiling aho-corasick v1.1.5
+#15 88.01    Compiling rustls-webpki v0.103.15
+#15 88.22    Compiling cpufeatures v0.2.17
+#15 88.25    Compiling unicode-bidi v0.3.18
+#15 89.88    Compiling unicode-properties v0.1.4
+#15 90.03    Compiling foreign-types-shared v0.1.1
+#15 90.07    Compiling base64 v0.23.1
+#15 90.64    Compiling sha1_smol v1.0.1
+#15 90.85    Compiling regex-syntax v0.8.11
+#15 95.94    Compiling openssl v0.10.81
+#15 96.08    Compiling tokio-rustls v0.26.6
+#15 96.29    Compiling regex-automata v0.4.18
+#15 103.5    Compiling uuid v1.28.0
+#15 104.0    Compiling hyper-util v0.1.21
+#15 106.6    Compiling foreign-types v0.3.2
+#15 106.6    Compiling stringprep v0.1.5
+#15 107.7    Compiling idna v1.1.0
+#15 108.1    Compiling chacha20 v0.10.2
+#15 108.8    Compiling num-integer v0.1.47
+#15 109.2    Compiling ahash v0.8.12
+#15 109.2    Compiling openssl-macros v0.1.1
+#15 109.3    Compiling ident_case v1.0.1
+#15 109.3    Compiling strsim v0.11.1
+#15 109.4    Compiling crc32fast v1.5.2
+#15 109.5    Compiling rustix v1.1.5
+#15 109.6    Compiling mime v0.3.17
+#15 109.7    Compiling crossbeam-utils v0.8.23
+#15 110.0    Compiling darling_core v0.24.1
+#15 112.4    Compiling num-bigint v0.4.8
+#15 114.8    Compiling rand v0.10.3
+#15 115.5    Compiling url v2.5.8
+#15 115.6    Compiling sha2 v0.10.9
+#15 116.7    Compiling tower v0.5.3
+#15 117.2    Compiling phf_shared v0.12.1
+#15 117.5    Compiling linux-raw-sys v0.12.1
+#15 117.8    Compiling adler2 v2.0.1
+#15 118.3    Compiling prettyplease v0.2.37
+#15 118.4    Compiling chrono-tz v0.10.4
+#15 118.6    Compiling simd-adler32 v0.3.10
+#15 119.5    Compiling miniz_oxide v0.9.1
+#15 120.8    Compiling prost v0.13.5
+#15 121.2    Compiling phf v0.12.1
+#15 121.4    Compiling darling_macro v0.24.1
+#15 122.6    Compiling md-5 v0.11.0
+#15 122.6    Compiling sha2 v0.11.1
+#15 122.8    Compiling hmac v0.13.0
+#15 122.9    Compiling indexmap v1.9.3
+#15 123.0    Compiling twox-hash v2.1.5
+#15 123.3    Compiling openssl-probe v0.2.1
+#15 123.6    Compiling fixedbitset v0.5.7
+#15 123.8    Compiling fastrand v2.5.0
+#15 123.9    Compiling fallible-iterator v0.2.0
+#15 124.1    Compiling tempfile v3.27.0
+#15 124.2    Compiling postgres-protocol v0.6.12
+#15 124.4    Compiling petgraph v0.7.1
+#15 125.3    Compiling flate2 v1.1.10
+#15 125.5    Compiling darling v0.24.1
+#15 125.5    Compiling hashbrown v0.14.5
+#15 126.2    Compiling prost-types v0.13.5
+#15 127.7    Compiling regex v1.13.1
+#15 129.1    Compiling sha1 v0.10.7
+#15 129.4    Compiling rand_core v0.9.5
+#15 129.6    Compiling phf_shared v0.13.1
+#15 129.8    Compiling rustls-pemfile v2.2.0
+#15 129.9    Compiling pin-project-internal v1.1.13
+#15 130.0    Compiling socket2 v0.5.10
+#15 130.7    Compiling snap v1.1.2
+#15 130.8    Compiling thiserror v1.0.69
+#15 130.9    Compiling multimap v0.10.1
+#15 131.0    Compiling native-tls v0.2.18
+#15 131.0    Compiling hashbrown v0.12.3
+#15 131.1    Compiling semver v1.0.28
+#15 131.3    Compiling farmhash v1.1.5
+#15 131.5    Compiling saturating v0.1.0
+#15 131.6    Compiling cadence-common v0.1.0 (/src/rust/crates/cadence-common)
+#15 132.0    Compiling rustc_version v0.4.1
+#15 132.2    Compiling prost-build v0.13.5
+#15 133.0    Compiling pin-project v1.1.13
+#15 133.1    Compiling phf v0.13.1
+#15 133.2    Compiling scylla-macros v1.9.0
+#15 134.7    Compiling postgres-types v0.2.14
+#15 135.4    Compiling itertools v0.15.0
+#15 137.0    Compiling axum-core v0.4.5
+#15 139.7    Compiling arc-swap v1.9.2
+#15 139.9    Compiling webpki-roots v1.0.10
+#15 139.9    Compiling libsqlite3-sys v0.30.1
+#15 140.2    Compiling futures-executor v0.3.34
+#15 140.5    Compiling thiserror-impl v1.0.69
+#15 140.9    Compiling async-stream-impl v0.3.6
+#15 141.3    Compiling whoami v2.1.3
+#15 141.4    Compiling protoc-bin-vendored-linux-s390_64 v3.3.0
+#15 141.5    Compiling time-core v0.1.9
+#15 141.6    Compiling protoc-bin-vendored-linux-x86_32 v3.3.0
+#15 141.7    Compiling protoc-bin-vendored-linux-x86_64 v3.3.0
+#15 141.7    Compiling protoc-bin-vendored-macos-aarch_64 v3.3.0
+#15 141.7    Compiling protoc-bin-vendored-macos-x86_64 v3.3.0
+#15 141.8    Compiling protoc-bin-vendored-win32 v3.3.0
+#15 142.0    Compiling protoc-bin-vendored-linux-aarch_64 v3.3.0
+#15 142.0    Compiling utf8parse v0.2.2
+#15 142.0    Compiling mysql_common v0.35.5
+#15 142.0    Compiling protoc-bin-vendored-linux-ppcle_64 v3.3.0
+#15 142.1    Compiling matchit v0.7.3
+#15 142.1    Compiling tokio-openssl v0.6.5
+#15 142.2    Compiling mysql_common v0.37.3
+#15 142.3    Compiling num-conv v0.2.2
+#15 142.4    Compiling ryu v1.0.23
+#15 142.4    Compiling time-macros v0.2.32
+#15 142.6    Compiling axum v0.7.9
+#15 143.4    Compiling protoc-bin-vendored v3.3.0
+#15 143.4    Compiling anstyle-parse v1.0.0
+#15 143.6    Compiling tokio-postgres v0.7.18
+#15 147.0    Compiling async-stream v0.3.6
+#15 147.1    Compiling futures v0.3.34
+#15 149.0    Compiling scylla-cql-core v1.9.0
+#15 154.7    Compiling cadence-api v0.1.0 (/src/rust/crates/cadence-api)
+#15 166.3    Compiling tower v0.4.13
+#15 167.8    Compiling tonic-build v0.12.3
+#15 169.0    Compiling crc32c v0.6.8
+#15 169.2    Compiling rand_chacha v0.9.0
+#15 169.6    Compiling lz4_flex v0.14.0
+#15 170.2    Compiling crossbeam-queue v0.3.14
+#15 170.3    Compiling hyper-timeout v0.5.2
+#15 170.4    Compiling encoding_rs v0.8.42
+#15 170.5    Compiling pem v3.0.6
+#15 171.0    Compiling btoi v0.4.3
+#15 171.1    Compiling btoi v0.5.0
+#15 171.2    Compiling tokio-stream v0.1.19
+#15 171.7    Compiling fs-err v3.3.2
+#15 171.8    Compiling derive_utils v0.16.0
+#15 171.9    Compiling colorchoice v1.0.5
+#15 172.0    Compiling is_terminal_polyfill v1.70.2
+#15 172.1    Compiling mysql v26.0.1
+#15 172.2    Compiling deranged v0.5.9
+#15 173.4    Compiling powerfmt v0.2.1
+#15 173.5    Compiling anstyle v1.0.14
+#15 173.9    Compiling anstyle-query v1.1.5
+#15 173.9    Compiling anstream v1.0.0
+#15 174.3    Compiling time v0.3.55
+#15 177.0    Compiling io-enum v1.3.0
+#15 177.4    Compiling tonic v0.12.3
+#15 194.4    Compiling scylla-cql v2.0.0
+#15 196.9    Compiling rand v0.9.5
+#15 197.6    Compiling tokio-native-tls v0.3.1
+#15 197.7    Compiling cadence-proto v0.1.0 (/src/rust/crates/cadence-proto)
+#15 200.4    Compiling serde_urlencoded v0.7.1
+#15 200.5    Compiling webpki-roots v0.26.11
+#15 200.6    Compiling rand_pcg v0.9.0
+#15 200.7    Compiling dashmap v6.2.1
+#15 201.2    Compiling hashlink v0.9.1
+#15 201.5    Compiling enum-as-inner v0.6.1
+#15 201.8    Compiling webpki v0.22.4
+#15 202.4    Compiling keyed_priority_queue v0.4.2
+#15 202.5    Compiling lru v0.18.5
+#15 202.5    Compiling lazy_static v1.5.1
+#15 202.6    Compiling simdutf8 v0.1.5
+#15 202.6    Compiling fallible-iterator v0.3.0
+#15 202.7    Compiling clap_lex v1.1.1
+#15 203.0    Compiling fallible-streaming-iterator v0.1.9
+#15 203.1    Compiling lru v0.12.5
+#15 203.2    Compiling linked-hash-map v0.5.6
+#15 203.3    Compiling core_detect v1.0.0
+#15 203.6    Compiling bufstream v0.1.4
+#15 203.6    Compiling data-encoding v2.11.1
+#15 204.0    Compiling deunicode v1.6.2
+#15 204.1    Compiling multiversion_no_op v1.0.0
+#15 205.8    Compiling slug v0.1.6
+#15 205.9    Compiling hickory-proto v0.24.4
+#15 212.4    Compiling lru-cache v0.1.2
+#15 212.4    Compiling clap_builder v4.6.7
+#15 213.5    Compiling rusqlite v0.32.1
+#15 215.4    Compiling mysql_async v0.37.1 (/src/rust/vendor/mysql_async-0.37.1)
+#15 220.3    Compiling scylla v1.9.0 (/src/rust/vendor/scylla-1.9.0)
+#15 246.0    Compiling postgres-openssl v0.5.3
+#15 247.1    Compiling hyper-tls v0.6.0
+#15 248.0    Compiling simple_asn1 v0.6.4
+#15 250.2    Compiling cadence-thrift v0.1.0 (/src/rust/crates/cadence-thrift)
+#15 250.4    Compiling postgres v0.19.14
+#15 257.7    Compiling rustls-native-certs v0.8.5
+#15 258.4    Compiling tower-http v0.6.11
+#15 258.9    Compiling axum-core v0.5.6
+#15 260.8    Compiling clap_derive v4.6.7
+#15 260.9    Compiling serde_path_to_error v0.1.20
+#15 261.4    Compiling sqlparser v0.53.0
+#15 262.2    Compiling resolv-conf v0.7.6
+#15 262.7    Compiling unsafe-libyaml v0.2.11
+#15 264.4    Compiling matchit v0.8.4
+#15 264.9    Compiling axum v0.8.9
+#15 269.9    Compiling cadence-persistence v0.1.0 (/src/rust/crates/cadence-persistence)
+#15 292.8    Compiling serde_yaml v0.9.34+deprecated
+#15 295.7    Compiling hickory-resolver v0.24.4
+#15 302.6    Compiling clap v4.6.7
+#15 302.6    Compiling reqwest v0.12.28
+#15 314.8    Compiling jsonwebtoken v9.3.1
+#15 317.2    Compiling axum-server v0.8.0
+#15 345.2    Compiling jmespath v0.3.0
+#15 345.4    Compiling sharded-slab v0.1.7
+#15 345.9    Compiling tonic-reflection v0.12.3
+#15 349.5    Compiling matchers v0.2.0
+#15 349.6    Compiling hmac v0.12.1
+#15 349.7    Compiling pbkdf2 v0.12.2
+#15 349.8    Compiling tracing-log v0.2.0
+#15 350.0    Compiling if-addrs v0.13.4
+#15 350.5    Compiling thread_local v1.1.10
+#15 351.2    Compiling nu-ansi-term v0.50.3
+#15 351.6    Compiling tracing-subscriber v0.3.23
+#15 355.8    Compiling cadence-service-core v0.1.0 (/src/rust/crates/cadence-service-core)
+#15 408.0    Compiling rsasl v2.3.1
+#15 411.0    Compiling integer-encoding v4.1.0
+#15 411.2    Compiling rskafka v0.6.0
+#15 424.7    Compiling cadence-matching v0.1.0 (/src/rust/crates/cadence-matching)
+#15 470.4    Compiling cadence-frontend v0.1.0 (/src/rust/crates/cadence-frontend)
+#15 701.5    Compiling cadence-server v0.1.0 (/src/rust/crates/cadence-server)
+#15 844.8     Finished `release` profile [optimized] target(s) in 14m 04s
+#15 DONE 845.6s
+
+#16 [final 2/4] COPY --from=builder --chown=cadence:cadence /src/rust/target/release/cadence-server /usr/local/bin/cadence-server
+#16 DONE 0.2s
+
+#17 [final 3/4] COPY --from=builder /cadence-server.sha256 /etc/cadence/cadence-server.sha256
+#17 DONE 0.0s
+
+#18 [final 4/4] COPY --chown=cadence:cadence rust/docker/cadence-auto-setup.sh /usr/local/bin/cadence-auto-setup.sh
+#18 DONE 0.1s
+
+#19 exporting to image
+#19 exporting layers
+#19 exporting layers 3.4s done
+#19 exporting manifest sha256:ee115f417112d23790069761dcb1adcb3307054d483479965b64db633e71829c 0.0s done
+#19 exporting config sha256:f1c3c8bb047b8c7b173a9f1ded84a31d9800c28fd061a591f2b68e404e180a77 0.0s done
+#19 exporting attestation manifest sha256:17722ca0f1a3c9b10b79d49ef68dc8a029a064fa9d48258ad640ee340aa932fb 0.0s done
+#19 exporting manifest list sha256:c60b41a9cf83a27531a3d221b25a8e07c3bbb289914b5cd88a9f92fd176a0879 0.0s done
+#19 naming to docker.io/library/cadence-rust:ci done
+#19 unpacking to docker.io/library/cadence-rust:ci
+#19 unpacking to docker.io/library/cadence-rust:ci 0.4s done
+#19 DONE 3.9s
