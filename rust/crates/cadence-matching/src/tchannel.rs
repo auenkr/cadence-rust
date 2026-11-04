@@ -555,6 +555,11 @@ async fn handle_call(
                 .await
             }
             None => {
+                if definition.service == "HistoryService" {
+                    return Err(format!(
+                        "HistoryService::{method} is not implemented yet"
+                    ));
+                }
                 let caller_headers = call
                     .headers
                     .iter()
@@ -616,7 +621,7 @@ fn accepts_thrift_service(service: &str, has_matching_handler: bool) -> bool {
         || if has_matching_handler {
             service == "MatchingService"
         } else {
-            matches!(service, "WorkflowService" | "AdminService")
+            matches!(service, "WorkflowService" | "AdminService" | "HistoryService")
         }
 }
 
@@ -809,6 +814,7 @@ mod tests {
     fn frontend_tchannel_accepts_admin_while_matching_service_set_is_unchanged() {
         assert!(accepts_thrift_service("WorkflowService", false));
         assert!(accepts_thrift_service("AdminService", false));
+        assert!(accepts_thrift_service("HistoryService", false));
         assert!(accepts_thrift_service("Meta", false));
         assert!(!accepts_thrift_service("MatchingService", false));
 
