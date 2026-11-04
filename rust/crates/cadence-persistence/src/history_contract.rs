@@ -148,7 +148,7 @@ pub trait GoExecutionStore: Send+Sync {
     async fn update_workflow_execution(&self, request:UpdateWorkflowExecutionRequest)->Result<(),PersistenceError>;
     async fn conflict_resolve_workflow_execution(&self, request:ConflictResolveWorkflowExecutionRequest)->Result<(),PersistenceError>;
     async fn delete_workflow_execution(&self, shard_id:i32, domain_id:String, workflow_id:String, run_id:String)->Result<(),PersistenceError>;
-    async fn delete_current_workflow_execution(&self, shard_id:i32, domain_id:String, workflow_id:String, run_id:String, condition:i64)->Result<(),PersistenceError>;
+    async fn delete_current_workflow_execution(&self, shard_id:i32, domain_id:String, workflow_id:String, run_id:String)->Result<(),PersistenceError>;
     async fn get_current_execution(&self, shard_id:i32, domain_id:String, workflow_id:String)->Result<CurrentExecution,PersistenceError>;
     async fn is_workflow_execution_exists(&self, shard_id:i32, domain_id:String, workflow_id:String, run_id:String)->Result<bool,PersistenceError>;
     async fn list_concrete_executions(&self, filter:ExecutionListFilter)->Result<ExecutionPage,PersistenceError>;
