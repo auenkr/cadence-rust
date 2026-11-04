@@ -49,3 +49,13 @@ failover 575, query 372, workflowcache 320.
 - Running: H1 SQL slice 1 (history-h1-sql-s1), H3a2 decision methods + CI fix (history-h3a2-decision-activity).
 - Next: SQL slices 2-4, H3a3 activity, H3a4 timer/child/signal/cancel/completed, H3b builders/caches, H4, H5, H6, H7.
 - Lesson: workers return early with partial work; require green CI on final head and narrow per-file scope.
+
+## Paused 2026-11-04 (user request)
+- Also merged: sqlblobs Go-compatible codecs (41798998970), H3a2 decision replicate transitions (41799001510),
+  ActivityInfo sqlblobs adapter (41804173705).
+- Unmerged / in-flight when paused: `history-h3a3-decision-x` (decision Add*Event port, WIP unverified, see branch);
+  `history-h1-sql-s1b`, `history-h3a3-decision` (no code, can be deleted).
+- Resume order: remaining 5 sqlblobs adapters (ChildExecution, Signal, RequestCancel, Timer, WorkflowExecutionInfo),
+  then SQL slice 1-4 (memory/history-h1-sql-impl-guide.md), decision add-events (finish h3a3-decision-x), activity,
+  timer/child/signal/cancel, builders/caches, H4-H7.
+- Worker lesson: simple workers need explicit per-function step lists (see h3a3-decision-x brief style).
