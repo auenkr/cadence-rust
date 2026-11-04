@@ -13,9 +13,7 @@ pub trait HandlerMetrics: Send + Sync {
     fn non_deterministic(&self, domain_id: &str);
 }
 #[async_trait]
-pub trait HandlerResources: Send + Sync {
-    fn start(&self);
-    fn stop(&self);
+pub trait HandlerResources: super::lifecycle::HandlerComponentFactory + Send + Sync {
     fn prepare_controller_to_stop(&self);
     fn allow(&self) -> bool;
     fn engine_for_workflow(&self, workflow_id: &str) -> HResult<Arc<dyn Handler>>;
@@ -34,8 +32,8 @@ impl HistoryHandler {
     pub fn new(resources: Arc<dyn HandlerResources>, metrics: Arc<dyn HandlerMetrics>, admin: super::admin::AdminResourcesRef) -> Self {
         Self { resources, metrics, admin, shutting_down: AtomicBool::new(false), started: tokio::sync::Semaphore::new(0) }
     }
-    pub fn start(&self) { self.resources.start(); self.started.add_permits(1); }
-    pub fn stop(&self) { self.shutting_down.store(true, Ordering::SeqCst); self.resources.stop(); }
+    pub fn start(&self) { super::lifecycle::start_components(&*self.resources); self.started.add_permits(1); }
+    pub fn stop(&self) { self.shutting_down.store(true, Ordering::SeqCst); super::lifecycle::stop_components(&*self.resources); }
     pub async fn prepare_to_stop(&self, remaining: std::time::Duration) -> std::time::Duration {
         tracing::info!("ShutdownHandler: Initiating shardController shutdown");
         self.resources.prepare_controller_to_stop();

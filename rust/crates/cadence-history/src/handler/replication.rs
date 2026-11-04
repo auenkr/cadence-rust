@@ -39,10 +39,9 @@ pub async fn get_replication_shard_messages(controller: &dyn ReplicationControll
 }
 
 pub fn cmp_replication_shard_messages(a: &ReplicationShardMessages, b: &ReplicationShardMessages) -> Ordering {
-    // Go's comparator returns +1 even when both times are nil. Preserve the
-    // resulting rule that unknown creation times are visited after known ones.
+    // Go returns +1 whenever a's time is nil, including two nil times.
     match (a.earliest_creation_time, b.earliest_creation_time) {
-        (None, None) => Ordering::Equal,
+        (None, None) => Ordering::Greater,
         (None, Some(_)) => Ordering::Greater,
         (Some(_), None) => Ordering::Less,
         (Some(a_time), Some(b_time)) => a_time.cmp(&b_time).then_with(|| a.size.cmp(&b.size)),

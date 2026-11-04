@@ -19,6 +19,8 @@ pub trait ActiveClusterManager: Send + Sync {
 pub enum QueueAction { Reset, GetState }
 #[async_trait]
 pub trait QueueProcessor: Send + Sync {
+    fn start(&self);
+    fn stop(&self);
     async fn handle_action(&self, cluster: &str, action: QueueAction) -> HResult<Vec<String>>;
     fn notify_new_task(&self, cluster: &str, tasks: &[Task]);
 }
@@ -27,10 +29,11 @@ pub enum Task {
     History { info: ReplicationTaskInfo, branch_token: Vec<u8>, new_run_branch_token: Vec<u8> },
     SyncActivity(ReplicationTaskInfo),
     FailoverMarker(ReplicationTaskInfo),
+    Other(ReplicationTaskInfo),
 }
 impl Task {
     pub fn info(&self) -> &ReplicationTaskInfo {
-        match self { Self::History { info, .. } | Self::SyncActivity(info) | Self::FailoverMarker(info) => info }
+        match self { Self::History { info, .. } | Self::SyncActivity(info) | Self::FailoverMarker(info) | Self::Other(info) => info }
     }
 }
 #[async_trait]
@@ -79,6 +82,8 @@ pub trait EngineMetrics: Send + Sync {
 }
 /// Components are supplied by the shard factory. TODO(link): factory wiring in history_engine.go.
 pub struct HistoryEngine {
+    pub replication_notifications: super::notify_tasks::ReplicationNotificationComponents,
+    pub lifecycle: super::history_engine::EngineLifecycle,
     pub start_backend: Arc<dyn super::start_dependencies::StartBackend>,
     pub current_cluster_name: String,
     pub domain_cache: Arc<dyn DomainCache>,
