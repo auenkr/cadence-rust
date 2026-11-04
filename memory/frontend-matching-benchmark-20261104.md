@@ -152,3 +152,11 @@ Settings: 1000 measured workflows, 100 warmup, five alternating repetitions,
 concurrency 1/16/64, payload1024. Standard public ubuntu-latest, 90-minute
 job limit, explicit resource caps, strict artifact verification. Status at
 dispatch: in progress. No final performance/resource claims accepted yet.
+
+## Full run checkpoint — 2026-11-04 04:15 UTC
+
+Run 41767896292 remains in progress. Benchmark Python checks, Go image,
+release Rust image and SDK/CLI builds all passed. Paired workload started
+at 03:51:10 UTC; strict evidence verification has not run yet. Leave this
+run active; no restart or second benchmark dispatched. Final measurements
+remain unaccepted until terminal success and artifact inspection.
