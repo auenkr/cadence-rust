@@ -1,73 +1,130 @@
 #!/usr/bin/env python3
-"""Sample Docker drop-in service CPU/RSS during an SDK benchmark interval."""
+"""Collect cumulative cgroup CPU and memory measurements for Docker containers."""
 import argparse
 import json
-import re
 import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 
-def parse_bytes(text):
-    m = re.fullmatch(r"\s*([0-9.]+)\s*([KMGT]i?B)?\s*", text, re.I)
-    if not m:
-        raise ValueError(f"unrecognized Docker memory value: {text!r}")
-    scale = {None: 1, "b": 1, "kb": 1000, "kib": 1024, "mb": 1000**2, "mib": 1024**2, "gb": 1000**3, "gib": 1024**3, "tb": 1000**4, "tib": 1024**4}
-    return int(float(m.group(1)) * scale[m.group(2).lower() if m.group(2) else None])
+def _container_cgroups():
+    raw = subprocess.check_output(["docker", "inspect", "--format", "{{.Name}}\t{{.State.Pid}}", *subprocess.check_output(["docker", "ps", "-q"], text=True).split()], text=True)
+    result = {}
+    for line in raw.splitlines():
+        name, pid = line.lstrip("/").split("\t", 1)
+        if int(pid) <= 0:
+            continue
+        entries = Path(f"/proc/{pid}/cgroup").read_text().splitlines()
+        groups = {parts[0]: parts[2].lstrip("/") for row in entries if len(parts := row.split(":", 2)) == 3}
+        # Cgroup v2 stores cpu.stat and memory.current under the unified path.
+        unified = Path("/sys/fs/cgroup") / groups.get("", "")
+        if (unified / "cpu.stat").exists() and (unified / "memory.current").exists():
+            result[name] = (unified, "v2")
+            continue
+        cpu = Path("/sys/fs/cgroup/cpu") / groups.get("cpu", "")
+        memory = Path("/sys/fs/cgroup/memory") / groups.get("memory", "")
+        if (cpu / "cpuacct.usage").exists() and (memory / "memory.usage_in_bytes").exists():
+            result[name] = ((cpu, memory), "v1")
+    return result
 
 
-def snapshot():
-    out = subprocess.check_output(["docker", "stats", "--no-stream", "--format", "{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"], text=True)
-    services = {}
-    for line in out.splitlines():
-        name, cpu, mem = line.split("\t", 2)
-        used = mem.split("/", 1)[0].strip()
-        services[name] = {"cpu_percent": float(cpu.rstrip("%")), "rss_bytes": parse_bytes(used)}
-    return services
+def snapshot(containers):
+    current = {}
+    for name, (paths, version) in containers.items():
+        if version == "v2":
+            cpu_stat = dict(line.split() for line in (paths / "cpu.stat").read_text().splitlines())
+            cpu_ns = int(cpu_stat["usage_usec"]) * 1000
+            memory_bytes = int((paths / "memory.current").read_text())
+        else:
+            cpu, memory = paths
+            cpu_ns = int((cpu / "cpuacct.usage").read_text())
+            memory_bytes = int((memory / "memory.usage_in_bytes").read_text())
+        current[name] = {"cpu_ns": cpu_ns, "memory_bytes": memory_bytes}
+    return current
 
 
-def collect(duration, interval, output, services_filter):
-    start_wall = datetime.now(timezone.utc).isoformat()
-    start = time.monotonic()
-    previous = None
-    totals, peaks, samples = {}, {}, 0
+def cpu_seconds(before_ns, after_ns):
+    if after_ns < before_ns:
+        raise ValueError("cgroup CPU counter reset during measurement")
+    return (after_ns - before_ns) / 1_000_000_000
+
+
+def collect(interval, output, names, start_event=None, end_event=None, duration=None):
+    if bool(start_event) != bool(end_event):
+        raise ValueError("--start-event and --end-event must be provided together")
+    if not start_event and duration is None:
+        raise ValueError("provide marker events or --duration")
+    selected = _container_cgroups()
+    if names:
+        missing = set(names) - selected.keys()
+        if missing:
+            raise RuntimeError("containers missing accessible cgroup counters: " + ", ".join(sorted(missing)))
+        selected = {n: selected[n] for n in names}
+    if not selected:
+        raise RuntimeError("no running Docker containers with accessible cgroup counters")
+
+    def wait_event(path):
+        marker = Path(path)
+        while not marker.exists():
+            time.sleep(1)
+        return None
+
+    if start_event:
+        wait_event(start_event)
+    started_at = datetime.now(timezone.utc).isoformat()
+    started = time.monotonic()
+    first = snapshot(selected)
+    peak = dict((name, data["memory_bytes"]) for name, data in first.items())
+    samples = 1
     while True:
-        now = time.monotonic()
-        current = snapshot()
-        if services_filter:
-            missing = set(services_filter) - current.keys()
-            if missing:
-                raise RuntimeError("requested Docker containers not running: " + ", ".join(sorted(missing)))
-            current = {k: current[k] for k in services_filter}
-        if previous is not None:
-            dt = now - previous[0]
-            for name, data in current.items():
-                before = previous[1].get(name, data)["cpu_percent"]
-                totals[name] = totals.get(name, 0.0) + (before + data["cpu_percent"]) * 0.5 * dt / 100
-        for name, data in current.items():
-            peaks[name] = max(peaks.get(name, 0), data["rss_bytes"])
-        samples += 1
-        previous = (now, current)
-        elapsed = now - start
-        if elapsed >= duration:
+        if end_event and Path(end_event).exists():
             break
-        time.sleep(min(interval, duration - elapsed))
-    elapsed = time.monotonic() - start
-    result = {"schema_version": 1, "started_at_utc": start_wall, "duration_seconds": elapsed, "sampling_interval_seconds": interval, "samples": samples, "method": "docker stats polling; CPU seconds are trapezoidal interval estimates from sampled container CPU percent; RSS is sampled Docker memory usage", "containers": {name: {"estimated_cpu_seconds": totals.get(name, 0.0), "average_cpu_cores": totals.get(name, 0.0) / elapsed, "peak_rss_bytes": rss} for name, rss in sorted(peaks.items())}}
+        elapsed = time.monotonic() - started
+        if duration is not None and elapsed >= duration:
+            break
+        time.sleep(min(interval, max(0.01, duration - elapsed)) if duration is not None else interval)
+        now = snapshot(selected)
+        for name, data in now.items():
+            peak[name] = max(peak[name], data["memory_bytes"])
+        last = now
+        samples += 1
+    if samples == 1:
+        last = snapshot(selected)
+        samples += 1
+    elapsed = time.monotonic() - started
+    containers_result = {}
+    for name, (_, version) in selected.items():
+        try:
+            consumed_cpu_seconds = cpu_seconds(first[name]["cpu_ns"], last[name]["cpu_ns"])
+        except ValueError as error:
+            raise RuntimeError(f"{error} for {name}") from error
+        containers_result[name] = {"cpu_seconds": consumed_cpu_seconds, "average_cpu_cores": consumed_cpu_seconds / elapsed,
+                                   "peak_cgroup_memory_bytes": peak[name], "cgroup_version": version}
+    result = {"schema_version": 2, "started_at_utc": started_at, "duration_seconds": elapsed,
+              "sampling_interval_seconds": interval, "samples": samples,
+              "cpu_method": "exact delta of cumulative cgroup cpu usage counters",
+              "memory_method": "peak sampled cgroup memory usage; includes charged cache and is not RSS",
+              "interval_method": "start/end marker files" if start_event else "fixed duration",
+              "containers": containers_result}
     Path(output).write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--duration", type=float, required=True, help="sampling interval duration in seconds; start immediately before measured SDK run")
+    ap.add_argument("--duration", type=float, help="duration in seconds (alternative to marker files)")
     ap.add_argument("--interval", type=float, default=1.0)
     ap.add_argument("--output", required=True)
-    ap.add_argument("--containers", nargs="*", help="Docker container names to include; default samples all running containers")
+    ap.add_argument("--containers", nargs="*", help="Docker container names; default is all accessible running containers")
+    ap.add_argument("--start-event", help="wait for this marker file before the measured interval")
+    ap.add_argument("--end-event", help="stop the measured interval when this marker file appears")
     a = ap.parse_args()
-    if a.duration <= 0 or a.interval <= 0:
+    if a.duration is not None and a.duration <= 0 or a.interval <= 0:
         ap.error("duration and interval must be positive")
-    collect(a.duration, a.interval, a.output, a.containers)
+    try:
+        collect(a.interval, a.output, a.containers, a.start_event, a.end_event, a.duration)
+    except ValueError as error:
+        ap.error(str(error))
 
 
 if __name__ == "__main__":
