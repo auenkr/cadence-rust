@@ -5,3 +5,8 @@ pub mod domain_cache;
 pub mod dynconfig;
 pub mod membership;
 pub mod metrics;
+pub mod config_adapters;
+pub mod domain_source;
+pub mod failover_domain_manager;
+pub mod membership_feed;
+pub mod persistent_dynconfig;
