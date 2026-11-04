@@ -15,7 +15,7 @@ pub const CLOSE_STATUS_TIMED_OUT: i64 = 6;
 pub const EMPTY_VERSION: i64 = -24;
 
 fn invalid_transition(cur: i64, state: i64, close: i64) -> String {
-    format!("Invalid workflow state transition. Current state: {cur}, target state: {state}, target close status: {close}")
+    format!("unable to change workflow state from {cur} to {state}, close status {close}")
 }
 
 impl MutableStateBuilder {
