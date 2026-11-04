@@ -24,7 +24,7 @@ def run(a):
     out.mkdir(parents=True, exist_ok=True)
     rows = [json.loads(l) for l in (d / 'samples.jsonl').read_text().splitlines() if l.strip()]
     steps = json.loads((d / 'steps.json').read_text()) if (d / 'steps.json').exists() else []
-    cols = ['t', 'load1', 'fe_rss_mb', 'fe_cpu_pct', 'fe_fds', 'fe_threads', 'mt_rss_mb', 'mt_cpu_pct', 'mt_fds', 'started', 'completed',
+    cols = ['t', 'load1', 'fe_rss_mb', 'fe_cpu_pct', 'fe_fds', 'fe_threads', 'mt_rss_mb', 'mt_cpu_pct', 'mt_fds', 'mt_threads', 'started', 'completed',
             'failed', 'inflight', 'retried_calls', 'query_init_attempts', 'query_init_workflows',
             'e2e_p50_ms', 'e2e_p95_ms', 'e2e_p99_ms', 'start_p95_ms', 'query_p50_ms', 'query_p95_ms', 'query_p99_ms']
     prev = {}

@@ -1,10 +1,5 @@
 name: Frontend soak (Go baseline vs Rust Frontend+Matching, MySQL)
-# TEMPORARY push trigger (branch t3/fe-soak, this file only) so the workflow is dispatchable before it is on
-# master. REMOVE the `push:` block after the branch is merged.
 on:
-  push:
-    branches: [t3/fe-soak]
-    paths: ['.github/workflows/frontend-soak.yml']
   workflow_dispatch:
     inputs:
       rate:
