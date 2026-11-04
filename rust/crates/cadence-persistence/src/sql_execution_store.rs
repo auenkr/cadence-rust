@@ -148,6 +148,14 @@ pub struct CreateExecutionRowRequest<'a> {
     pub previous_last_write_version: i64,
 }
 
+/// Conditional execution-row update used by Go's `lockAndCheckNextEventID`
+/// followed by `updateExecution`. Higher-level mutation/map/task writes must
+/// run in this same transaction when they are supplied by the caller.
+pub struct ConditionedExecutionUpdate<'a> {
+    pub row: &'a ExecutionRow,
+    pub condition: i64,
+}
+
 /// Statement source for the execution/current rows and concrete-execution
 /// cleanup. Placeholder spelling matches the Go SQL plugins.
 pub fn statement(dialect: Dialect, query: Statement) -> &'static str {
@@ -232,6 +240,18 @@ impl MySqlExecutionRows {
         tx.exec_drop(statement(Dialect::MySql, Statement::InsertExecution), (row.key.shard_id, row.key.domain_id.as_slice(), row.key.workflow_id.as_str(), row.key.run_id.as_slice(), row.next_event_id, row.last_write_version, row.data.as_slice(), row.data_encoding.as_str())).map_err(internal)?;
         tx.commit().map_err(internal)
     }
+
+    pub fn update_conditioned(&self, request: &ConditionedExecutionUpdate<'_>) -> Result<(), PersistenceError> {
+        let row = request.row;
+        let mut conn = self.pool.checkout().map_err(internal)?;
+        let mut tx = conn.start_transaction(mysql::TxOpts::default()).map_err(internal)?;
+        let current: Option<i64> = tx.exec_first(statement(Dialect::MySql, Statement::LockExecution), (row.key.shard_id, row.key.domain_id.as_slice(), row.key.workflow_id.as_str(), row.key.run_id.as_slice())).map_err(internal)?;
+        let Some(current) = current else { return Err(PersistenceError::EntityNotExists(format!("Workflow execution not found. WorkflowId: {}, RunId: {}", row.key.workflow_id, uuid::Uuid::from_bytes(row.key.run_id)))); };
+        if current != request.condition { return Err(PersistenceError::ConditionFailed(format!("NextEventID condition failed. Expected: {}, Actual: {}", request.condition, current))); }
+        tx.exec_drop(statement(Dialect::MySql, Statement::UpdateExecution), (row.next_event_id, row.last_write_version, row.data.as_slice(), row.data_encoding.as_str(), row.key.shard_id, row.key.domain_id.as_slice(), row.key.workflow_id.as_str(), row.key.run_id.as_slice())).map_err(internal)?;
+        if tx.affected_rows() != 1 { return Err(PersistenceError::ConditionFailed("execution row update affected no rows".into())); }
+        tx.commit().map_err(internal)
+    }
 }
 
 /// PostgreSQL execution-row operations share Matching's existing SQL pool.
@@ -302,6 +322,18 @@ impl PostgresExecutionRows {
             }
         }
         tx.execute(statement(Dialect::Postgres, Statement::InsertExecution), &[&row.key.shard_id, &&row.key.domain_id[..], &row.key.workflow_id, &&row.key.run_id[..], &row.next_event_id, &row.last_write_version, &row.data, &row.data_encoding]).map_err(internal)?;
+        tx.commit().map_err(internal)
+    }
+
+    pub fn update_conditioned(&self, request: &ConditionedExecutionUpdate<'_>) -> Result<(), PersistenceError> {
+        let row = request.row;
+        let mut conn = self.pool.checkout().map_err(internal)?;
+        let mut tx = conn.transaction().map_err(internal)?;
+        let current = tx.query_opt(statement(Dialect::Postgres, Statement::LockExecution), &[&row.key.shard_id, &&row.key.domain_id[..], &row.key.workflow_id, &&row.key.run_id[..]]).map_err(internal)?.map(|r| r.get::<_, i64>(0));
+        let Some(current) = current else { return Err(PersistenceError::EntityNotExists(format!("Workflow execution not found. WorkflowId: {}, RunId: {}", row.key.workflow_id, uuid::Uuid::from_bytes(row.key.run_id)))); };
+        if current != request.condition { return Err(PersistenceError::ConditionFailed(format!("NextEventID condition failed. Expected: {}, Actual: {}", request.condition, current))); }
+        let affected = tx.execute(statement(Dialect::Postgres, Statement::UpdateExecution), &[&row.next_event_id, &row.last_write_version, &row.data, &row.data_encoding, &row.key.shard_id, &&row.key.domain_id[..], &row.key.workflow_id, &&row.key.run_id[..]]).map_err(internal)?;
+        if affected != 1 { return Err(PersistenceError::ConditionFailed("execution row update affected no rows".into())); }
         tx.commit().map_err(internal)
     }
 }
