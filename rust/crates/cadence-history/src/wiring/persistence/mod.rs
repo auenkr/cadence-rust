@@ -3,3 +3,4 @@ pub mod shard_events;
 pub mod engine_ndc;
 pub mod queues;
 pub mod replication;
+pub mod domain_dlq;
