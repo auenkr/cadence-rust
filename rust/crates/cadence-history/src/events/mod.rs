@@ -1,6 +1,6 @@
 //! History event cache, blob index, and notification pub/sub ported from Go.
 use cadence_api::{service_types::HistoryEvent, types::{DataBlob, VersionHistories}};
-use std::{collections::{HashMap,VecDeque}, sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}}, time::{Duration,Instant}};
+use std::{collections::{HashMap,VecDeque}, sync::{Arc, Mutex, atomic::{AtomicI32, Ordering}}, time::{Duration,Instant}};
 use uuid::Uuid;
 use tokio::sync::mpsc;
 
@@ -33,12 +33,12 @@ impl<R:HistoryEventReader> EventCache<R>{pub fn new(reader:Arc<R>,max_count:usiz
 impl Default for WorkflowIdentifier {fn default()->Self{Self{domain_id:String::new(),workflow_id:String::new(),run_id:String::new()}}}
 #[allow(clippy::too_many_arguments)]
 pub fn new_notification(domain_id:impl Into<String>,workflow_id:impl Into<String>,run_id:impl Into<String>,last_first_event_id:i64,next_event_id:i64,previous_started_event_id:i64,workflow_state:i32,workflow_close_state:i32,version_histories:Option<VersionHistories>)->Notification{Notification{id:WorkflowIdentifier{domain_id:domain_id.into(),workflow_id:workflow_id.into(),run_id:run_id.into()},last_first_event_id,next_event_id,previous_started_event_id,timestamp_unix_millis:0,workflow_state,workflow_close_state,version_histories}}
-pub struct Notifier{running:AtomicBool,stop_signal:tokio::sync::Notify,subscribers:Mutex<HashMap<WorkflowIdentifier,HashMap<String,mpsc::Sender<Arc<Notification>>>>>,events_tx:mpsc::Sender<Arc<Notification>>,events_rx:tokio::sync::Mutex<mpsc::Receiver<Arc<Notification>>>}
-impl Notifier{pub const EVENTS_CHAN_SIZE:usize=1000;pub fn new()->Arc<Self>{let(tx,rx)=mpsc::channel(Self::EVENTS_CHAN_SIZE);Arc::new(Self{running:AtomicBool::new(false),stop_signal:tokio::sync::Notify::new(),subscribers:Mutex::new(HashMap::new()),events_tx:tx,events_rx:tokio::sync::Mutex::new(rx)})}
+pub struct Notifier{status:AtomicI32,stop_signal:tokio::sync::Notify,subscribers:Mutex<HashMap<WorkflowIdentifier,HashMap<String,mpsc::Sender<Arc<Notification>>>>>,events_tx:mpsc::Sender<Arc<Notification>>,events_rx:tokio::sync::Mutex<mpsc::Receiver<Arc<Notification>>>}
+impl Notifier{pub const EVENTS_CHAN_SIZE:usize=1000;pub fn new()->Arc<Self>{let(tx,rx)=mpsc::channel(Self::EVENTS_CHAN_SIZE);Arc::new(Self{status:AtomicI32::new(0),stop_signal:tokio::sync::Notify::new(),subscribers:Mutex::new(HashMap::new()),events_tx:tx,events_rx:tokio::sync::Mutex::new(rx)})}
  pub fn watch_history_event(&self,id:WorkflowIdentifier)->(String,mpsc::Receiver<Arc<Notification>>){let subscriber_id=Uuid::new_v4().to_string();let(tx,rx)=mpsc::channel(1);self.subscribers.lock().unwrap().entry(id).or_default().insert(subscriber_id.clone(),tx);(subscriber_id,rx)}
  pub fn unwatch_history_event(&self,id:&WorkflowIdentifier,subscriber_id:&str)->Result<(),EventCacheError>{let mut all=self.subscribers.lock().unwrap();let Some(subs)=all.get_mut(id) else{return Err(EventCacheError("Unable to unwatch on workflow execution.".into()))};if subs.remove(subscriber_id).is_none(){return Err(EventCacheError("Unable to unwatch on workflow execution.".into()))}if subs.is_empty(){all.remove(id);}Ok(())}
  pub fn notify_new_history_event(&self,event:Notification){let _=self.events_tx.try_send(Arc::new(event));}
  pub async fn dispatch_one(&self)->bool{let event={self.events_rx.lock().await.recv().await};let Some(event)=event else{return false};if let Some(subs)=self.subscribers.lock().unwrap().get(&event.id){for tx in subs.values(){let _=tx.try_send(event.clone());}}true}
- pub fn start(self:&Arc<Self>){if self.running.swap(true,Ordering::SeqCst){return}let this=self.clone();tokio::spawn(async move{this.run().await;});}
- async fn run(self:Arc<Self>){loop{let next=tokio::select!{event=self.events_rx.lock().await.recv()=>event,_=self.stop_signal.notified()=>None};let Some(event)=next else{break};if let Some(subs)=self.subscribers.lock().unwrap().get(&event.id){for tx in subs.values(){let _=tx.try_send(event.clone());}}}self.running.store(false,Ordering::SeqCst);}
- pub fn stop(&self){if self.running.swap(false,Ordering::SeqCst){self.stop_signal.notify_waiters();}}pub fn is_running(&self)->bool{self.running.load(Ordering::SeqCst)} }
+ pub fn start(self:&Arc<Self>){if self.status.compare_exchange(0,1,Ordering::SeqCst,Ordering::SeqCst).is_err(){return}let this=self.clone();tokio::spawn(async move{this.run().await;});}
+ async fn run(self:Arc<Self>){loop{let next=tokio::select!{event=self.events_rx.lock().await.recv()=>event,_=self.stop_signal.notified()=>None};let Some(event)=next else{break};if let Some(subs)=self.subscribers.lock().unwrap().get(&event.id){for tx in subs.values(){let _=tx.try_send(event.clone());}}}self.status.store(2,Ordering::SeqCst);}
+ pub fn stop(&self){if self.status.compare_exchange(1,2,Ordering::SeqCst,Ordering::SeqCst).is_ok(){self.stop_signal.notify_waiters();}}pub fn is_running(&self)->bool{self.status.load(Ordering::SeqCst)==1} }
