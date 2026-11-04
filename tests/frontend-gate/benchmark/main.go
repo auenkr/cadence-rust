@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -38,8 +39,30 @@ func main() {
 	concurrency := flag.Int("concurrency", 16, "closed-loop workflow concurrency")
 	bytes := flag.Int("payload-bytes", 1024, "activity input/output bytes")
 	output := flag.String("output", "benchmark.json", "JSON result path")
+	measurementStartFile := flag.String("measurement-start-file", "", "write when warmup is complete and the collector may start its baseline")
+	measurementEndFile := flag.String("measurement-end-file", "", "write after the last measured workflow (also written on failure)")
+	collectorReadyFile := flag.String("collector-ready-file", "", "wait for the collector to create this after taking its baseline")
+	collectorReadyTimeout := flag.Duration("collector-ready-timeout", 2*time.Minute, "maximum wait for collector readiness")
 	flag.Parse()
 	if *n < 1 || *warmup < 0 || *concurrency < 1 || *bytes < 0 || *label == "" { panic("invalid benchmark parameters") }
+	if (*measurementStartFile == "") != (*measurementEndFile == "") { panic("measurement start and end marker files must be provided together") }
+	if *collectorReadyFile != "" && *measurementStartFile == "" { panic("collector-ready-file requires measurement marker files") }
+	if *collectorReadyTimeout <= 0 { panic("collector-ready-timeout must be positive") }
+	// The collector waits for the start marker. Always release it on early exit,
+	// including warmup/worker failures, so its process cannot wait forever.
+	measurementStarted := false
+	measuredStartUTC, measuredEndUTC := "", ""
+	defer func() {
+		if *measurementStartFile == "" { return }
+		if !measurementStarted { _ = writeMarker(*measurementStartFile) }
+		if measuredEndUTC == "" { measuredEndUTC = time.Now().UTC().Format(time.RFC3339Nano) }
+		_ = writeMarker(*measurementEndFile)
+	}()
+	for _, path := range []string{*measurementStartFile, *measurementEndFile, *collectorReadyFile} {
+		if path != "" {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) { panic(err) }
+		}
+	}
 	tr, err := tchannel.NewTransport(tchannel.ServiceName("cadence-benchmark"))
 	if err != nil { panic(err) }
 	d := yarpc.NewDispatcher(yarpc.Config{Name: "cadence-benchmark", Outbounds: yarpc.Outbounds{"cadence-frontend": {Unary: tr.NewSingleOutbound(*peer)}}})
@@ -86,16 +109,43 @@ func main() {
 	}
 	_, warmupErrors, _ := run(*warmup)
 	if len(warmupErrors) != 0 { panic(fmt.Sprintf("warmup failed: %s", warmupErrors[0])) }
+	if *measurementStartFile != "" {
+		if err = writeMarker(*measurementStartFile); err != nil { panic(err) }
+		measurementStarted = true
+		if *collectorReadyFile != "" {
+			// Collector contract: after observing measurement-start-file, take the
+			// baseline snapshot, then create collector-ready-file. We start timing
+			// only after that signal, so warmup and baseline setup are excluded.
+			deadline := time.Now().Add(*collectorReadyTimeout)
+			for {
+				if _, err = os.Stat(*collectorReadyFile); err == nil { break }
+				if !os.IsNotExist(err) { panic(err) }
+				if time.Now().After(deadline) { panic(fmt.Sprintf("timeout waiting for collector readiness file %s", *collectorReadyFile)) }
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+	}
+	measuredStartUTC = time.Now().UTC().Format(time.RFC3339Nano)
 	latencies, failures, seconds := run(*n)
+	measuredEndUTC = time.Now().UTC().Format(time.RFC3339Nano)
+	if *measurementEndFile != "" {
+		if err = writeMarker(*measurementEndFile); err != nil { panic(err) }
+	}
 	sort.Float64s(latencies)
 	percentile := func(p float64) interface{} {
 		if len(latencies) == 0 { return nil }
 		return latencies[int(float64(len(latencies)-1)*p)]
 	}
-	result := map[string]interface{}{"label": *label, "endpoint": *peer, "requests": *n, "warmup": *warmup, "concurrency": *concurrency, "payload_bytes": *bytes, "successful": len(latencies), "failed": len(failures), "elapsed_seconds": seconds, "successful_workflows_per_second": float64(len(latencies))/seconds, "latency_ms": map[string]interface{}{"p50": percentile(.50), "p95": percentile(.95), "p99": percentile(.99)}, "errors": failures, "successful_latency_samples_ms": latencies, "transport": "tchannel", "sticky_execution": false}
+	result := map[string]interface{}{"label": *label, "endpoint": *peer, "requests": *n, "warmup": *warmup, "concurrency": *concurrency, "payload_bytes": *bytes, "successful": len(latencies), "failed": len(failures), "elapsed_seconds": seconds, "measured_start_utc": measuredStartUTC, "measured_end_utc": measuredEndUTC, "successful_workflows_per_second": float64(len(latencies))/seconds, "latency_ms": map[string]interface{}{"p50": percentile(.50), "p95": percentile(.95), "p99": percentile(.99)}, "errors": failures, "successful_latency_samples_ms": latencies, "transport": "tchannel", "sticky_execution": false}
 	f, err := os.Create(*output)
 	if err != nil { panic(err) }
 	if err = json.NewEncoder(f).Encode(result); err != nil { panic(err) }
 	if err = f.Close(); err != nil { panic(err) }
 	if len(failures) != 0 { os.Exit(1) }
+}
+
+func writeMarker(path string) error {
+	if path == "" { return nil }
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil { return err }
+	return os.WriteFile(path, []byte(time.Now().UTC().Format(time.RFC3339Nano)), 0o644)
 }
