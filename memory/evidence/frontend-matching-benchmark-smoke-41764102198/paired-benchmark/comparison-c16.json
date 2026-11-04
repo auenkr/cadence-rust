@@ -1,0 +1,424 @@
+{
+  "schema_version": 1,
+  "scope": "combined Frontend+Matching end-to-end SDK workflow; same Go History/system Worker and persistence required",
+  "workload": {
+    "requests": 100,
+    "warmup": 10,
+    "concurrency": 16,
+    "payload_bytes": 1024,
+    "transport": "tchannel",
+    "sticky_execution": false
+  },
+  "arms": {
+    "go": {
+      "repetitions": 1,
+      "median_throughput_workflows_per_second": 52.90018447860173,
+      "median_latency_ms": {
+        "p50": 297.413539,
+        "p95": 416.47092200000003,
+        "p99": 490.21000799999996
+      },
+      "runs": [
+        {
+          "concurrency": 16,
+          "elapsed_seconds": 1.890352576,
+          "endpoint": "127.0.0.1:7933",
+          "errors": [],
+          "failed": 0,
+          "label": "go",
+          "latency_ms": {
+            "p50": 297.413539,
+            "p95": 416.47092200000003,
+            "p99": 490.21000799999996
+          },
+          "measured_end_utc": "2026-11-04T03:25:48.075037577Z",
+          "measured_start_utc": "2026-11-04T03:25:46.18467659Z",
+          "payload_bytes": 1024,
+          "requests": 100,
+          "sticky_execution": false,
+          "successful": 100,
+          "successful_latency_samples_ms": [
+            98.759745,
+            137.92628100000002,
+            141.04815200000002,
+            145.611459,
+            150.73049,
+            151.86158899999998,
+            163.496689,
+            164.19093600000002,
+            171.407121,
+            185.21125899999998,
+            185.41326899999999,
+            191.74245100000002,
+            195.10628899999998,
+            196.445541,
+            201.06379199999998,
+            202.33737,
+            206.39390799999998,
+            208.779823,
+            210.729828,
+            217.904578,
+            219.423643,
+            220.05423800000003,
+            224.683607,
+            225.365809,
+            233.47599,
+            234.458595,
+            236.187298,
+            237.28024200000002,
+            242.377731,
+            243.50275499999998,
+            243.939513,
+            249.87485800000002,
+            253.608479,
+            253.721207,
+            255.69416,
+            258.996908,
+            259.11550300000005,
+            264.27853899999997,
+            268.71830800000004,
+            269.719736,
+            275.20293899999996,
+            280.634983,
+            284.16450100000003,
+            285.63645199999996,
+            286.266235,
+            288.85477399999996,
+            293.12174600000003,
+            293.975685,
+            294.444237,
+            297.413539,
+            299.664515,
+            303.580654,
+            305.029802,
+            306.748328,
+            307.87635,
+            312.912935,
+            315.186015,
+            315.962911,
+            317.694645,
+            320.002001,
+            321.02395099999995,
+            322.971971,
+            323.071969,
+            323.76534200000003,
+            326.259205,
+            327.252756,
+            331.65128799999997,
+            333.01818,
+            333.517599,
+            336.445618,
+            337.10366400000004,
+            337.87796799999995,
+            338.09029000000004,
+            340.64144000000005,
+            345.679819,
+            346.116805,
+            346.930314,
+            349.728647,
+            349.80908500000004,
+            356.001381,
+            357.562896,
+            362.69595100000004,
+            363.91033,
+            366.78761399999996,
+            367.927193,
+            373.263842,
+            374.80339899999996,
+            380.06592099999995,
+            383.66762700000004,
+            388.264041,
+            392.001399,
+            399.40929,
+            403.376342,
+            404.033708,
+            416.47092200000003,
+            428.929857,
+            447.692558,
+            477.83768599999996,
+            490.21000799999996,
+            521.522648
+          ],
+          "successful_workflows_per_second": 52.90018447860173,
+          "transport": "tchannel",
+          "warmup": 10
+        }
+      ],
+      "metadata": {
+        "host": {
+          "runner_os": "Linux",
+          "runner_arch": "X64",
+          "github_runner": "ubuntu26",
+          "requests": 100,
+          "warmup": 10,
+          "repetitions": 1,
+          "payload_bytes": 1024,
+          "concurrency": [
+            16
+          ],
+          "order": "alternates by repetition; each arm gets a new database",
+          "database": "mysql:8.0",
+          "history": "Go image",
+          "system_worker": "Go image",
+          "transport": "TChannel",
+          "frontend_matching_rust_image": "cadence-rust:ci",
+          "cpu_memory_limits": "Each service: 1 CPU/1400 MiB, DB: 1.5 CPU/1800 MiB; see resolved compose configs"
+        },
+        "sources": "head=38fa2af71007f5e13ac84f0927735c3544977932\ngo_tree=36b5af995abeea69cdca171d449c93c835c84871\nrust_tree=33b78ae30a6cdabbae4e3992032658a9f5761608\ndriver_tree=627e8218a65366ca0d68afec6d96e68ffbeb4146\ngo_image=sha256:042afd26bd3c8a78d51f2788082653e2237c97c00c98dc0db2692d6d148b5589\nrust_image=sha256:df190f06e60f6b8ddd693aac7aa9a4275bd63b9af54e5f83efbf15253177a8ba\n"
+      }
+    },
+    "rust": {
+      "repetitions": 1,
+      "median_throughput_workflows_per_second": 40.49376757406482,
+      "median_latency_ms": {
+        "p50": 387.77768699999996,
+        "p95": 510.47840600000006,
+        "p99": 612.668129
+      },
+      "runs": [
+        {
+          "concurrency": 16,
+          "elapsed_seconds": 2.469515829,
+          "endpoint": "127.0.0.1:7933",
+          "errors": [],
+          "failed": 0,
+          "label": "rust",
+          "latency_ms": {
+            "p50": 387.77768699999996,
+            "p95": 510.47840600000006,
+            "p99": 612.668129
+          },
+          "measured_end_utc": "2026-11-04T03:26:25.928435452Z",
+          "measured_start_utc": "2026-11-04T03:26:23.458910424Z",
+          "payload_bytes": 1024,
+          "requests": 100,
+          "sticky_execution": false,
+          "successful": 100,
+          "successful_latency_samples_ms": [
+            124.1324,
+            192.888333,
+            196.881332,
+            201.146174,
+            206.300811,
+            209.043127,
+            216.789405,
+            240.88886200000002,
+            244.943026,
+            251.92639300000002,
+            259.584498,
+            261.070052,
+            268.396551,
+            274.304512,
+            274.81581,
+            278.34843,
+            280.044364,
+            284.080788,
+            293.035494,
+            294.314523,
+            295.50527700000004,
+            295.932278,
+            310.284805,
+            314.109216,
+            314.49303299999997,
+            319.043461,
+            328.147269,
+            334.304321,
+            340.75314099999997,
+            342.581026,
+            344.806134,
+            344.89227900000003,
+            345.928204,
+            346.00686,
+            349.774414,
+            349.93050999999997,
+            350.444619,
+            353.98356600000005,
+            356.211706,
+            357.940241,
+            364.684247,
+            365.908131,
+            369.201361,
+            369.328176,
+            371.15033200000005,
+            375.615016,
+            383.489626,
+            385.839101,
+            387.47394,
+            387.77768699999996,
+            391.98024,
+            395.119747,
+            397.182196,
+            398.220714,
+            398.267733,
+            399.313346,
+            400.554849,
+            404.348201,
+            405.35817499999996,
+            405.39968999999996,
+            405.62230900000003,
+            405.79904799999997,
+            407.65990600000003,
+            412.82480300000003,
+            419.571706,
+            420.80467500000003,
+            422.30686899999995,
+            422.460465,
+            423.671877,
+            424.782155,
+            425.378368,
+            425.597587,
+            432.19768,
+            436.86931699999997,
+            437.01901300000003,
+            437.85636999999997,
+            443.97105999999997,
+            445.866827,
+            451.127101,
+            452.13383899999997,
+            453.876515,
+            457.038561,
+            458.889653,
+            459.410441,
+            464.755181,
+            467.286046,
+            468.541849,
+            469.421961,
+            475.56361400000003,
+            480.356916,
+            493.042657,
+            493.801777,
+            499.44698,
+            503.783673,
+            510.47840600000006,
+            544.042433,
+            546.35172,
+            561.057549,
+            612.668129,
+            655.680245
+          ],
+          "successful_workflows_per_second": 40.49376757406482,
+          "transport": "tchannel",
+          "warmup": 10
+        }
+      ],
+      "metadata": {
+        "host": {
+          "runner_os": "Linux",
+          "runner_arch": "X64",
+          "github_runner": "ubuntu26",
+          "requests": 100,
+          "warmup": 10,
+          "repetitions": 1,
+          "payload_bytes": 1024,
+          "concurrency": [
+            16
+          ],
+          "order": "alternates by repetition; each arm gets a new database",
+          "database": "mysql:8.0",
+          "history": "Go image",
+          "system_worker": "Go image",
+          "transport": "TChannel",
+          "frontend_matching_rust_image": "cadence-rust:ci",
+          "cpu_memory_limits": "Each service: 1 CPU/1400 MiB, DB: 1.5 CPU/1800 MiB; see resolved compose configs"
+        },
+        "sources": "head=38fa2af71007f5e13ac84f0927735c3544977932\ngo_tree=36b5af995abeea69cdca171d449c93c835c84871\nrust_tree=33b78ae30a6cdabbae4e3992032658a9f5761608\ndriver_tree=627e8218a65366ca0d68afec6d96e68ffbeb4146\ngo_image=sha256:042afd26bd3c8a78d51f2788082653e2237c97c00c98dc0db2692d6d148b5589\nrust_image=sha256:df190f06e60f6b8ddd693aac7aa9a4275bd63b9af54e5f83efbf15253177a8ba\n"
+      }
+    }
+  },
+  "median_deltas": {
+    "throughput_workflows_per_second": -12.406416904536911,
+    "throughput_percent": -23.452502154421296,
+    "latency_ms": {
+      "p50": 90.36414799999994,
+      "p95": 94.00748400000003,
+      "p99": 122.45812100000006
+    }
+  },
+  "paired_runs": [
+    {
+      "go_throughput": 52.90018447860173,
+      "rust_throughput": 40.49376757406482,
+      "go_latency_ms": {
+        "p50": 297.413539,
+        "p95": 416.47092200000003,
+        "p99": 490.21000799999996
+      },
+      "rust_latency_ms": {
+        "p50": 387.77768699999996,
+        "p95": 510.47840600000006,
+        "p99": 612.668129
+      }
+    }
+  ],
+  "resources": {
+    "status": "comparable",
+    "arms": {
+      "go": {
+        "cadence-fm-benchmark-frontend-1": {
+          "cpu_seconds": 0.617051,
+          "average_cpu_cores": 0.31148996085962816,
+          "peak_cgroup_memory_bytes": 34086912
+        },
+        "cadence-fm-benchmark-history-1": {
+          "cpu_seconds": 1.471453,
+          "average_cpu_cores": 0.7427957127964826,
+          "peak_cgroup_memory_bytes": 41492480
+        },
+        "cadence-fm-benchmark-matching-1": {
+          "cpu_seconds": 0.373152,
+          "average_cpu_cores": 0.18836871162139265,
+          "peak_cgroup_memory_bytes": 28729344
+        },
+        "cadence-fm-benchmark-worker-1": {
+          "cpu_seconds": 0.007054,
+          "average_cpu_cores": 0.003560889106255102,
+          "peak_cgroup_memory_bytes": 21114880
+        }
+      },
+      "rust": {
+        "cadence-fm-benchmark-frontend-1": {
+          "cpu_seconds": 0.800687,
+          "average_cpu_cores": 0.3146939563278643,
+          "peak_cgroup_memory_bytes": 17776640
+        },
+        "cadence-fm-benchmark-history-1": {
+          "cpu_seconds": 1.831468,
+          "average_cpu_cores": 0.7198217415892614,
+          "peak_cgroup_memory_bytes": 42991616
+        },
+        "cadence-fm-benchmark-matching-1": {
+          "cpu_seconds": 0.787965,
+          "average_cpu_cores": 0.30969382954623415,
+          "peak_cgroup_memory_bytes": 19320832
+        },
+        "cadence-fm-benchmark-worker-1": {
+          "cpu_seconds": 0.011233,
+          "average_cpu_cores": 0.004414905214435727,
+          "peak_cgroup_memory_bytes": 23089152
+        }
+      }
+    },
+    "rust_minus_go": {
+      "cadence-fm-benchmark-frontend-1": {
+        "cpu_seconds": 0.18363600000000002,
+        "average_cpu_cores": 0.0032039954682361316,
+        "peak_cgroup_memory_bytes": -16310272
+      },
+      "cadence-fm-benchmark-history-1": {
+        "cpu_seconds": 0.3600150000000002,
+        "average_cpu_cores": -0.022973971207221222,
+        "peak_cgroup_memory_bytes": 1499136
+      },
+      "cadence-fm-benchmark-matching-1": {
+        "cpu_seconds": 0.41481300000000004,
+        "average_cpu_cores": 0.12132511792484149,
+        "peak_cgroup_memory_bytes": -9408512
+      },
+      "cadence-fm-benchmark-worker-1": {
+        "cpu_seconds": 0.0041789999999999996,
+        "average_cpu_cores": 0.000854016108180625,
+        "peak_cgroup_memory_bytes": 1974272
+      }
+    }
+  }
+}

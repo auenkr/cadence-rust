@@ -1,0 +1,22 @@
+{
+  "frontend": {
+    "container_id": "24f78906d2c25fa31eb6363bdf5275231dae73de5bb905a97afdeb558aa92591",
+    "container_name": "cadence-fm-benchmark-frontend-1",
+    "image": "cadence-rust:ci"
+  },
+  "matching": {
+    "container_id": "b66307bde14c3fd8ce10db7d80d00df78782f8328fe1b5c3694fefdbb1f9eed7",
+    "container_name": "cadence-fm-benchmark-matching-1",
+    "image": "cadence-rust:ci"
+  },
+  "history": {
+    "container_id": "c2cdc83ce5ac6f7063b7f8ec3c8ad624132cb747ac92d271fb26258db4fdb77a",
+    "container_name": "cadence-fm-benchmark-history-1",
+    "image": "cadence-go:ci"
+  },
+  "worker": {
+    "container_id": "65f0ae03a80ab66dcff12bd956df6a57720af1aaa20c7256b5e4cd2939ccb756",
+    "container_name": "cadence-fm-benchmark-worker-1",
+    "image": "cadence-go:ci"
+  }
+}

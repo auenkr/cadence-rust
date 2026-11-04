@@ -129,3 +129,17 @@ release-image build and is building the CLI/SDK driver as last observed.
 The smoke source predates the final identity and MySQL inspection hardening,
 so it cannot satisfy the new full artifact verifier; the final repeated run
 must use the newly integrated workflow. No local Go/Cargo commands were run.
+
+## Corrected runtime smoke accepted — 41764102198
+
+https://github.com/auenkr/cadence-rust/actions/runs/41764102198 succeeded
+at source `38fa2af71007f5e13ac84f0927735c3544977932`. Both arms completed
+100/100 workflows with zero failures (concurrency16, warmup10, payload1024).
+Go/Rust resource collectors captured 41/52 samples with exact CPU counter
+deltas consistent with recorded CPU seconds; run/collector/teardown/cleanup
+commands all exited zero. Compact raw evidence is in
+`memory/evidence/frontend-matching-benchmark-smoke-41764102198/`.
+This smoke predates collector ended_at_utc and final deployment identity
+evidence; it establishes runtime viability, not full evidence acceptance.
+CI-generated driver formatting was applied locally as a patch without
+running Go. Dispatch the full comparison from the resulting final head.

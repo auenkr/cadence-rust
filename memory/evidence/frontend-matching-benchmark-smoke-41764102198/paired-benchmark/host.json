@@ -1,0 +1,19 @@
+{
+  "runner_os": "Linux",
+  "runner_arch": "X64",
+  "github_runner": "ubuntu26",
+  "requests": 100,
+  "warmup": 10,
+  "repetitions": 1,
+  "payload_bytes": 1024,
+  "concurrency": [
+    16
+  ],
+  "order": "alternates by repetition; each arm gets a new database",
+  "database": "mysql:8.0",
+  "history": "Go image",
+  "system_worker": "Go image",
+  "transport": "TChannel",
+  "frontend_matching_rust_image": "cadence-rust:ci",
+  "cpu_memory_limits": "Each service: 1 CPU/1400 MiB, DB: 1.5 CPU/1800 MiB; see resolved compose configs"
+}
