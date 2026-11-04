@@ -132,7 +132,6 @@ fn decision_task_failed_event_attributes(
         fork_event_version: v.fork_event_version,
         binary_checksum: v.binary_checksum,
         request_id: v.request_id,
-        ..Default::default()
     }
 }
 fn activity_task_scheduled_event_attributes(
