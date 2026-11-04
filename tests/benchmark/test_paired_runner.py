@@ -13,6 +13,20 @@ spec.loader.exec_module(runner)
 
 
 class PairedRunnerTests(unittest.TestCase):
+    def test_stale_markers_and_measurements_are_removed_before_collection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            paths = [Path(directory) / name for name in ("start", "end", "ready", "result.json", "resources.json")]
+            for path in paths:
+                path.write_text("old measurement")
+            runner.prepare_measurement_files(paths)
+            self.assertTrue(all(not path.exists() for path in paths))
+            runner.prepare_measurement_files(paths)
+
+    def test_marker_cleanup_failure_is_not_ignored(self):
+        with patch.object(Path, "unlink", side_effect=PermissionError("marker cannot be removed")):
+            with self.assertRaisesRegex(PermissionError, "cannot be removed"):
+                runner.prepare_measurement_files(["start"])
+
     def test_timed_out_commands_preserve_exit_and_command_evidence(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

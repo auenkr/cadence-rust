@@ -45,6 +45,13 @@ def persist_events():
     (OUT / "commands.json").write_text(json.dumps(EVENTS, indent=2) + "\n")
 
 
+def prepare_measurement_files(paths):
+    # The collector starts before the SDK process. Driver-side cleanup is too
+    # late to stop it observing markers from an earlier attempt.
+    for path in paths:
+        Path(path).unlink(missing_ok=True)
+
+
 def write_summary(repetitions, concurrency):
     metadata = {"host": json.loads((OUT / "host.json").read_text()),
                 "sources": (OUT / "source.txt").read_text()}
@@ -164,6 +171,7 @@ def main():
                     prefix = OUT / f"measurement-{rep:02d}-{arm}-c{conc}"
                     start_marker, end_marker, ready_marker = [str(prefix) + suffix for suffix in (".start", ".end", ".ready")]
                     resources = OUT / f"resources-{rep:02d}-{arm}-c{conc}.json"
+                    prepare_measurement_files((start_marker, end_marker, ready_marker, result, resources))
                     collector_command = [sys.executable, str(ROOT / "tests/benchmark/collect_resources.py"),
                         "--start-event", start_marker, "--end-event", end_marker, "--ready-event", ready_marker,
                         "--event-timeout", "1800", "--interval", "0.05", "--output", str(resources), "--containers", *containers]

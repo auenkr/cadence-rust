@@ -54,3 +54,38 @@ SDK driver compilation/vet passed in CI run 41761570862 at full source
 driver preflight, not runtime throughput or service resource consumption.
 Two user-requested gpt-6-luna medium-reasoning/default-tier workers implement
 paired deployment and metrics/reporting separately; integration remains open.
+
+## Integrated checkpoint
+
+Integration branch: `benchmark-frontend-matching-integration`.
+Paired runner and workflow integrated at
+`38fa2af71007f5e13ac84f0927735c3544977932`.
+
+- Updated SDK marker driver passed CI run
+  https://github.com/auenkr/cadence-rust/actions/runs/41763602522 at
+  `d79a33e7c8f63a51316c021ef31308dc1d3c8b31` (driver-only preflight).
+- Integrated smoke comparison (100 requests, 10 warmups, concurrency 16,
+  one repetition) is running at exact source `38fa2af71007f5e13ac84f0927735c3544977932`:
+  https://github.com/auenkr/cadence-rust/actions/runs/41764102198 .
+  Last observed status: in progress, benchmark Python checks passed and image
+  builds underway. No runtime comparison accepted yet.
+- Earlier orchestration worker run
+  https://github.com/auenkr/cadence-rust/actions/runs/41762497645 remains in
+  progress. Its draft estimated Docker CPU and mislabeled memory; its resource
+  outputs cannot establish the corrected benchmark's resource claims.
+- Integration fixes cgroup controller parsing (hierarchy IDs are not controller
+  names), captures final counters, adds SDK/collector baseline readiness and
+  bounded event waits, applies identical service CPU/memory limits, preserves
+  timeout command exits and produces one validated report per concurrency.
+- Independent audit found stale marker reuse on runner reruns. Cleanup now
+  removes old start/end/ready/result/resource files before collector startup;
+  cleanup failures propagate. This correction is newer than smoke source 38fa.
+- All 19 lightweight Python tests passed locally through
+  `/mnt/storage/service/bin/work-safe nice -n 10 ionice -c3 python3 -m unittest discover -s tests/benchmark -p 'test_*.py'`.
+  Log and exit evidence live under `memory/evidence/frontend-matching-benchmark-integration/`.
+  No local Cargo/Go command ran.
+
+Next: collect smoke terminal artifacts, resolve any runtime problems, dispatch
+the corrected-source repeated comparison, inspect every pair's correctness,
+identity/config/resource windows and cleanup, then retain and present real
+results. No speedup or service resource improvement is claimed yet.
