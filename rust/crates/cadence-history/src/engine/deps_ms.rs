@@ -1,14 +1,24 @@
 //! Dependency contracts used by the engine port.
 //! TODO(link): implement with execution and workflow packages when their ports land.
+use super::{
+    deps::{ActivityInfo, DomainCacheEntry, HResult, WorkflowExecutionInfo},
+    types::*,
+};
 use async_trait::async_trait;
 use cadence_api::{tasks::*, types::*};
-use super::{deps::{ActivityInfo, DomainCacheEntry, HResult, WorkflowExecutionInfo}, types::*};
 
 #[async_trait]
 pub trait MutableState: Send + Sync {
     fn set_history_tree(&self, run_id: &str) -> HResult<()>;
-    fn add_workflow_execution_started_event(&self, execution: &WorkflowExecution, request: &HistoryStartWorkflowExecutionRequest) -> HResult<cadence_api::service_types::HistoryEvent>;
-    fn add_first_decision_task_scheduled(&self, event: &cadence_api::service_types::HistoryEvent) -> HResult<()>;
+    fn add_workflow_execution_started_event(
+        &self,
+        execution: &WorkflowExecution,
+        request: &HistoryStartWorkflowExecutionRequest,
+    ) -> HResult<cadence_api::service_types::HistoryEvent>;
+    fn add_first_decision_task_scheduled(
+        &self,
+        event: &cadence_api::service_types::HistoryEvent,
+    ) -> HResult<()>;
     fn add_decision_task_scheduled_event(&self, bypass_task_generation: bool) -> HResult<()>;
     fn is_workflow_execution_running(&self) -> bool;
     fn get_next_event_id(&self) -> i64;
@@ -24,11 +34,36 @@ pub trait MutableState: Send + Sync {
     fn get_pending_child_execution_infos(&self) -> Vec<ChildExecutionInfo>;
     fn get_pending_decision(&self) -> Option<PendingDecision>;
     async fn get_completion_event(&self) -> HResult<cadence_api::service_types::HistoryEvent>;
-    fn add_child_workflow_execution_completed_event(&self, initiated_id: i64, execution: &WorkflowExecution, attrs: Option<&cadence_api::tasks::WorkflowExecutionCompletedEventAttributes>) -> HResult<()>;
-    fn add_child_workflow_execution_failed_event(&self, initiated_id: i64, execution: &WorkflowExecution, attrs: Option<&cadence_api::tasks::WorkflowExecutionFailedEventAttributes>) -> HResult<()>;
-    fn add_child_workflow_execution_canceled_event(&self, initiated_id: i64, execution: &WorkflowExecution, attrs: Option<&cadence_api::tasks::WorkflowExecutionCanceledEventAttributes>) -> HResult<()>;
-    fn add_child_workflow_execution_terminated_event(&self, initiated_id: i64, execution: &WorkflowExecution, attrs: Option<&cadence_api::service_types::WorkflowExecutionTerminatedEventAttributes>) -> HResult<()>;
-    fn add_child_workflow_execution_timed_out_event(&self, initiated_id: i64, execution: &WorkflowExecution, attrs: Option<&cadence_api::tasks::WorkflowExecutionTimedOutEventAttributes>) -> HResult<()>;
+    fn add_child_workflow_execution_completed_event(
+        &self,
+        initiated_id: i64,
+        execution: &WorkflowExecution,
+        attrs: Option<&cadence_api::tasks::WorkflowExecutionCompletedEventAttributes>,
+    ) -> HResult<()>;
+    fn add_child_workflow_execution_failed_event(
+        &self,
+        initiated_id: i64,
+        execution: &WorkflowExecution,
+        attrs: Option<&cadence_api::tasks::WorkflowExecutionFailedEventAttributes>,
+    ) -> HResult<()>;
+    fn add_child_workflow_execution_canceled_event(
+        &self,
+        initiated_id: i64,
+        execution: &WorkflowExecution,
+        attrs: Option<&cadence_api::tasks::WorkflowExecutionCanceledEventAttributes>,
+    ) -> HResult<()>;
+    fn add_child_workflow_execution_terminated_event(
+        &self,
+        initiated_id: i64,
+        execution: &WorkflowExecution,
+        attrs: Option<&cadence_api::service_types::WorkflowExecutionTerminatedEventAttributes>,
+    ) -> HResult<()>;
+    fn add_child_workflow_execution_timed_out_event(
+        &self,
+        initiated_id: i64,
+        execution: &WorkflowExecution,
+        attrs: Option<&cadence_api::tasks::WorkflowExecutionTimedOutEventAttributes>,
+    ) -> HResult<()>;
     fn get_last_write_version(&self) -> HResult<i64>;
     fn is_event_reapplied(&self, run_id: &str, event_id: i64, version: i64) -> bool;
     fn get_current_version(&self) -> i64;
@@ -41,32 +76,90 @@ pub trait MutableState: Send + Sync {
     fn get_workflow_type(&self) -> Option<WorkflowType>;
     async fn get_resurrected_activities(&self) -> HResult<std::collections::HashSet<i64>>;
     fn delete_activity(&self, schedule_id: i64) -> HResult<()>;
-    async fn get_activity_scheduled_event(&self, schedule_id: i64) -> HResult<cadence_api::service_types::HistoryEvent>;
-    fn add_activity_task_started_event(&self, info: &ActivityInfo, schedule_id: i64, request_id: &str, identity: &str) -> HResult<ActivityInfo>;
+    async fn get_activity_scheduled_event(
+        &self,
+        schedule_id: i64,
+    ) -> HResult<cadence_api::service_types::HistoryEvent>;
+    fn add_activity_task_started_event(
+        &self,
+        info: &ActivityInfo,
+        schedule_id: i64,
+        request_id: &str,
+        identity: &str,
+    ) -> HResult<ActivityInfo>;
     fn is_signal_requested(&self, request_id: &str) -> bool;
     fn add_signal_requested(&self, request_id: &str);
     fn has_processed_or_pending_decision(&self) -> bool;
     fn set_workflow_state(&self, state: i32);
     fn copy_to_persistence(&self) -> HResult<serde_json::Value>;
-    fn add_workflow_execution_signaled(&self, name: &str, input: &[u8], identity: &str, request_id: &str) -> HResult<()>;
+    fn add_workflow_execution_signaled(
+        &self,
+        name: &str,
+        input: &[u8],
+        identity: &str,
+        request_id: &str,
+    ) -> HResult<()>;
     fn delete_signal_requested(&self, request_id: &str);
     fn clear_stickyness(&self);
     fn is_cancel_requested(&self) -> (bool, String);
     async fn get_start_event(&self) -> HResult<cadence_api::service_types::HistoryEvent>;
-    fn add_activity_task_completed_event(&self, schedule_id: i64, started_id: i64, request: &RespondActivityTaskCompletedRequest) -> HResult<()>;
-    fn add_activity_task_failed_event(&self, schedule_id: i64, started_id: i64, request: &RespondActivityTaskFailedRequest) -> HResult<()>;
-    fn add_activity_task_canceled_event(&self, schedule_id: i64, started_id: i64, cancel_request_id: i64, details: &[u8], identity: &str) -> HResult<()>;
-    fn retry_activity(&self, info: &ActivityInfo, reason: &str, details: &[u8], options: Option<&FailureOptions>) -> HResult<bool>;
-    fn update_activity_progress(&self, info: &ActivityInfo, request: &RecordActivityTaskHeartbeatRequest);
-    fn add_workflow_execution_cancel_requested_event(&self, cause: &str, request: &HistoryRequestCancelWorkflowExecutionRequest) -> HResult<()>;
-    fn terminate_workflow(&self, first_event_id: i64, reason: &str, details: &[u8], identity: &str) -> HResult<()>;
+    fn add_activity_task_completed_event(
+        &self,
+        schedule_id: i64,
+        started_id: i64,
+        request: &RespondActivityTaskCompletedRequest,
+    ) -> HResult<()>;
+    fn add_activity_task_failed_event(
+        &self,
+        schedule_id: i64,
+        started_id: i64,
+        request: &RespondActivityTaskFailedRequest,
+    ) -> HResult<()>;
+    fn add_activity_task_canceled_event(
+        &self,
+        schedule_id: i64,
+        started_id: i64,
+        cancel_request_id: i64,
+        details: &[u8],
+        identity: &str,
+    ) -> HResult<()>;
+    fn retry_activity(
+        &self,
+        info: &ActivityInfo,
+        reason: &str,
+        details: &[u8],
+        options: Option<&FailureOptions>,
+    ) -> HResult<bool>;
+    fn update_activity_progress(
+        &self,
+        info: &ActivityInfo,
+        request: &RecordActivityTaskHeartbeatRequest,
+    );
+    fn add_workflow_execution_cancel_requested_event(
+        &self,
+        cause: &str,
+        request: &HistoryRequestCancelWorkflowExecutionRequest,
+    ) -> HResult<()>;
+    fn terminate_workflow(
+        &self,
+        first_event_id: i64,
+        reason: &str,
+        details: &[u8],
+        identity: &str,
+    ) -> HResult<()>;
 }
 #[async_trait]
 pub trait ExecutionContext: Send + Sync {
     fn get_execution(&self) -> WorkflowExecution;
     fn clear(&self);
     async fn update_workflow_execution_as_active(&self, now: i64) -> HResult<()>;
-    async fn update_workflow_execution_with_new_as_active(&self, now: i64, domain: &str, execution: &WorkflowExecution, state: super::deps::MutableStateRef) -> HResult<()>;
+    async fn update_workflow_execution_with_new_as_active(
+        &self,
+        now: i64,
+        domain: &str,
+        execution: &WorkflowExecution,
+        state: super::deps::MutableStateRef,
+    ) -> HResult<()>;
     fn get_workflow_execution(&self) -> Option<super::deps::MutableStateRef>;
     async fn load_workflow_execution(&self) -> HResult<super::deps::MutableStateRef>;
     async fn update_workflow_execution_tasks(&self, now: i64) -> HResult<()>;
@@ -74,12 +167,21 @@ pub trait ExecutionContext: Send + Sync {
 
 #[derive(Debug, Clone, Default)]
 pub struct ChildExecutionInfo {
-    pub started_id: i64, pub started_workflow_id: String, pub started_run_id: String,
-    pub domain_id: String, pub domain_name_deprecated: String, pub workflow_type_name: String,
-    pub initiated_id: i64, pub parent_close_policy: cadence_api::enums::ParentClosePolicy,
+    pub started_id: i64,
+    pub started_workflow_id: String,
+    pub started_run_id: String,
+    pub domain_id: String,
+    pub domain_name_deprecated: String,
+    pub workflow_type_name: String,
+    pub initiated_id: i64,
+    pub parent_close_policy: cadence_api::enums::ParentClosePolicy,
 }
 #[derive(Debug, Clone, Default)]
 pub struct PendingDecision {
-    pub scheduled_timestamp: i64, pub started_timestamp: i64, pub original_scheduled_timestamp: i64,
-    pub attempt: i64, pub schedule_id: i64, pub started_id: i64,
+    pub scheduled_timestamp: i64,
+    pub started_timestamp: i64,
+    pub original_scheduled_timestamp: i64,
+    pub attempt: i64,
+    pub schedule_id: i64,
+    pub started_id: i64,
 }

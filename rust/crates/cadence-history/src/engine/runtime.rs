@@ -1,22 +1,41 @@
 //! TODO(link): adapters for packages being ported concurrently. No engine policy lives here.
-use std::{collections::HashMap, sync::Arc};
+use super::{deps::*, types::*};
 use async_trait::async_trait;
 use cadence_api::{admin::*, types::*};
-use super::{deps::*, types::*};
+use std::{collections::HashMap, sync::Arc};
 
 #[derive(Clone, Copy, Default)]
-pub struct UpdateAction { pub create_decision: bool, pub noop: bool }
-pub type UpdateFn<'a> = Box<dyn Fn(ExecutionContextRef, MutableStateRef) -> Fut<'a, UpdateAction> + Send + Sync + 'a>;
+pub struct UpdateAction {
+    pub create_decision: bool,
+    pub noop: bool,
+}
+pub type UpdateFn<'a> =
+    Box<dyn Fn(ExecutionContextRef, MutableStateRef) -> Fut<'a, UpdateAction> + Send + Sync + 'a>;
 #[async_trait]
 pub trait WorkflowUpdater: Send + Sync {
-    async fn update<'a>(&self, domain_id: &str, execution: &WorkflowExecution, current: bool, now: i64, action: UpdateFn<'a>) -> HResult<()>;
+    async fn update<'a>(
+        &self,
+        domain_id: &str,
+        execution: &WorkflowExecution,
+        current: bool,
+        now: i64,
+        action: UpdateFn<'a>,
+    ) -> HResult<()>;
 }
 #[async_trait]
 pub trait ActiveClusterManager: Send + Sync {
-    async fn active_cluster_by_workflow(&self, domain_id: &str, workflow_id: &str, run_id: &str) -> HResult<String>;
+    async fn active_cluster_by_workflow(
+        &self,
+        domain_id: &str,
+        workflow_id: &str,
+        run_id: &str,
+    ) -> HResult<String>;
 }
 #[derive(Clone, Copy)]
-pub enum QueueAction { Reset, GetState }
+pub enum QueueAction {
+    Reset,
+    GetState,
+}
 #[async_trait]
 pub trait QueueProcessor: Send + Sync {
     fn start(&self);
@@ -26,14 +45,23 @@ pub trait QueueProcessor: Send + Sync {
 }
 #[derive(Clone, Debug)]
 pub enum Task {
-    History { info: ReplicationTaskInfo, branch_token: Vec<u8>, new_run_branch_token: Vec<u8> },
+    History {
+        info: ReplicationTaskInfo,
+        branch_token: Vec<u8>,
+        new_run_branch_token: Vec<u8>,
+    },
     SyncActivity(ReplicationTaskInfo),
     FailoverMarker(ReplicationTaskInfo),
     Other(ReplicationTaskInfo),
 }
 impl Task {
     pub fn info(&self) -> &ReplicationTaskInfo {
-        match self { Self::History { info, .. } | Self::SyncActivity(info) | Self::FailoverMarker(info) | Self::Other(info) => info }
+        match self {
+            Self::History { info, .. }
+            | Self::SyncActivity(info)
+            | Self::FailoverMarker(info)
+            | Self::Other(info) => info,
+        }
     }
 }
 #[async_trait]
@@ -44,13 +72,29 @@ pub trait ReplicationHydrator: Send + Sync {
 pub trait ReplicationAckManager: Send + Sync {
     async fn get_tasks(&self, cluster: &str, last_read_id: i64) -> HResult<ReplicationMessages>;
 }
-pub type DLQRead = (Vec<Option<ReplicationTask>>, Vec<ReplicationTaskInfo>, Vec<u8>);
+pub type DLQRead = (
+    Vec<Option<ReplicationTask>>,
+    Vec<ReplicationTaskInfo>,
+    Vec<u8>,
+);
 #[async_trait]
 pub trait ReplicationDLQHandler: Send + Sync {
     async fn get_message_count(&self, force_fetch: bool) -> HResult<HashMap<String, i64>>;
-    async fn read_messages(&self, cluster: &str, end: i64, page_size: i32, token: &[u8]) -> HResult<DLQRead>;
+    async fn read_messages(
+        &self,
+        cluster: &str,
+        end: i64,
+        page_size: i32,
+        token: &[u8],
+    ) -> HResult<DLQRead>;
     async fn purge_messages(&self, cluster: &str, end: i64) -> HResult<()>;
-    async fn merge_messages(&self, cluster: &str, end: i64, page_size: i32, token: &[u8]) -> HResult<Vec<u8>>;
+    async fn merge_messages(
+        &self,
+        cluster: &str,
+        end: i64,
+        page_size: i32,
+        token: &[u8],
+    ) -> HResult<Vec<u8>>;
 }
 #[async_trait]
 pub trait Replicator: Send + Sync {
@@ -59,10 +103,22 @@ pub trait Replicator: Send + Sync {
 }
 #[async_trait]
 pub trait DecisionHandler: Send + Sync {
-    async fn handle_decision_task_started(&self, request: &RecordDecisionTaskStartedRequest) -> HResult<RecordDecisionTaskStartedResponse>;
-    async fn handle_decision_task_completed(&self, request: &HistoryRespondDecisionTaskCompletedRequest) -> HResult<HistoryRespondDecisionTaskCompletedResponse>;
-    async fn handle_decision_task_failed(&self, request: &HistoryRespondDecisionTaskFailedRequest) -> HResult<()>;
-    async fn handle_decision_task_scheduled(&self, request: &ScheduleDecisionTaskRequest) -> HResult<()>;
+    async fn handle_decision_task_started(
+        &self,
+        request: &RecordDecisionTaskStartedRequest,
+    ) -> HResult<RecordDecisionTaskStartedResponse>;
+    async fn handle_decision_task_completed(
+        &self,
+        request: &HistoryRespondDecisionTaskCompletedRequest,
+    ) -> HResult<HistoryRespondDecisionTaskCompletedResponse>;
+    async fn handle_decision_task_failed(
+        &self,
+        request: &HistoryRespondDecisionTaskFailedRequest,
+    ) -> HResult<()>;
+    async fn handle_decision_task_scheduled(
+        &self,
+        request: &ScheduleDecisionTaskRequest,
+    ) -> HResult<()>;
 }
 pub trait EngineConfig: Send + Sync {
     fn enable_consistent_query(&self) -> bool;
@@ -73,11 +129,21 @@ pub trait EngineConfig: Send + Sync {
     fn maximum_signals_per_execution(&self, domain: &str) -> i32;
     fn enable_history_corruption_check(&self, domain: &str) -> bool;
 }
-pub trait ShardClock: Send + Sync { fn set_current_time(&self, cluster: &str, timestamp: i64); }
+pub trait ShardClock: Send + Sync {
+    fn set_current_time(&self, cluster: &str, timestamp: i64);
+}
 pub trait EngineMetrics: Send + Sync {
     fn event_reapply_skipped(&self);
     fn stale_mutable_state(&self, operation: &str);
-    fn activity_e2e_latency(&self, operation: &str, domain: &str, workflow_type: &str, activity_type: &str, task_list: &str, started_time: i64);
+    fn activity_e2e_latency(
+        &self,
+        operation: &str,
+        domain: &str,
+        workflow_type: &str,
+        activity_type: &str,
+        task_list: &str,
+        started_time: i64,
+    );
     fn replication_latency(&self, operation: &str, elapsed: std::time::Duration);
 }
 /// Components are supplied by the shard factory. TODO(link): factory wiring in history_engine.go.
@@ -127,45 +193,101 @@ pub struct HistoryNotification {
     pub version_histories: VersionHistories,
 }
 pub trait HistoryEventNotifier: Send + Sync {
-    fn watch_history_event(&self, domain_id: &str, execution: &WorkflowExecution) -> HResult<(String, tokio::sync::mpsc::UnboundedReceiver<HistoryNotification>)>;
-    fn unwatch_history_event(&self, domain_id: &str, execution: &WorkflowExecution, subscriber: &str);
+    fn watch_history_event(
+        &self,
+        domain_id: &str,
+        execution: &WorkflowExecution,
+    ) -> HResult<(
+        String,
+        tokio::sync::mpsc::UnboundedReceiver<HistoryNotification>,
+    )>;
+    fn unwatch_history_event(
+        &self,
+        domain_id: &str,
+        execution: &WorkflowExecution,
+        subscriber: &str,
+    );
     fn notify_new_history_event(&self, event: HistoryNotification);
 }
 
 #[async_trait]
 pub trait CurrentExecutionReader: Send + Sync {
-    async fn get_current_execution(&self, domain_id: &str, workflow_id: &str, domain_name: &str) -> HResult<String>;
+    async fn get_current_execution(
+        &self,
+        domain_id: &str,
+        workflow_id: &str,
+        domain_name: &str,
+    ) -> HResult<String>;
 }
 pub struct ResetWorkflow {
-    pub domain_id: String, pub workflow_id: String, pub base_run_id: String,
-    pub base_branch_token: Vec<u8>, pub rebuild_last_event_id: i64, pub rebuild_last_event_version: i64,
-    pub base_next_event_id: i64, pub reset_run_id: String, pub request_id: String,
-    pub current_context: ExecutionContextRef, pub current_state: MutableStateRef,
-    pub current_release: Option<ReleaseFunc>, pub reason: String,
-    pub events: Vec<cadence_api::service_types::HistoryEvent>, pub skip_signal_reapply: bool,
+    pub domain_id: String,
+    pub workflow_id: String,
+    pub base_run_id: String,
+    pub base_branch_token: Vec<u8>,
+    pub rebuild_last_event_id: i64,
+    pub rebuild_last_event_version: i64,
+    pub base_next_event_id: i64,
+    pub reset_run_id: String,
+    pub request_id: String,
+    pub current_context: ExecutionContextRef,
+    pub current_state: MutableStateRef,
+    pub current_release: Option<ReleaseFunc>,
+    pub reason: String,
+    pub events: Vec<cadence_api::service_types::HistoryEvent>,
+    pub skip_signal_reapply: bool,
 }
 #[async_trait]
-pub trait WorkflowResetter: Send + Sync { async fn reset_workflow(&self, request: ResetWorkflow) -> HResult<()>; }
+pub trait WorkflowResetter: Send + Sync {
+    async fn reset_workflow(&self, request: ResetWorkflow) -> HResult<()>;
+}
 #[async_trait]
 pub trait HistoryReader: Send + Sync {
-    async fn paginate_history(&self, first: i64, next: i64, branch: &[u8], token: &[u8], page_size: i32, domain: &str) -> HResult<(Vec<Vec<cadence_api::service_types::HistoryEvent>>, Vec<u8>)>;
+    async fn paginate_history(
+        &self,
+        first: i64,
+        next: i64,
+        branch: &[u8],
+        token: &[u8],
+        page_size: i32,
+        domain: &str,
+    ) -> HResult<(Vec<Vec<cadence_api::service_types::HistoryEvent>>, Vec<u8>)>;
 }
 
-pub enum QueryTermination { Completed(cadence_api::tasks::WorkflowQueryResult), Unblocked, Failed(HistoryError), Invalid }
+pub enum QueryTermination {
+    Completed(cadence_api::tasks::WorkflowQueryResult),
+    Unblocked,
+    Failed(HistoryError),
+    Invalid,
+}
 pub trait QueryRegistry: Send + Sync {
     fn buffered_count(&self) -> usize;
-    fn buffer_query(&self, query: Option<&cadence_api::tasks::WorkflowQuery>) -> (String, tokio::sync::oneshot::Receiver<()>);
+    fn buffer_query(
+        &self,
+        query: Option<&cadence_api::tasks::WorkflowQuery>,
+    ) -> (String, tokio::sync::oneshot::Receiver<()>);
     fn remove_query(&self, id: &str);
     fn get_termination_state(&self, id: &str) -> HResult<QueryTermination>;
 }
 #[async_trait]
 pub trait QueryMatchingClient: Send + Sync {
-    async fn query_workflow(&self, domain_id: &str, request: &cadence_api::tasks::QueryWorkflowRequest, task_list: Option<&TaskList>) -> HResult<cadence_api::tasks::QueryWorkflowResponse>;
+    async fn query_workflow(
+        &self,
+        domain_id: &str,
+        request: &cadence_api::tasks::QueryWorkflowRequest,
+        task_list: Option<&TaskList>,
+    ) -> HResult<cadence_api::tasks::QueryWorkflowResponse>;
 }
-pub trait ClientChecker: Send + Sync { fn supports_sticky_query(&self, implementation: &str, feature_version: &str) -> bool; }
+pub trait ClientChecker: Send + Sync {
+    fn supports_sticky_query(&self, implementation: &str, feature_version: &str) -> bool;
+}
 
 /// TODO(link): ndc.EventsReapplier; implementations must maintain resource deduplication.
 #[async_trait]
 pub trait EventsReapplier: Send + Sync {
-    async fn reapply_events(&self, state: MutableStateRef, events: &[cadence_api::service_types::HistoryEvent], run_id: &str) -> HResult<Vec<cadence_api::service_types::HistoryEvent>>;
+    async fn reapply_events(
+        &self,
+        state: MutableStateRef,
+        events: &[cadence_api::service_types::HistoryEvent],
+        run_id: &str,
+    ) -> HResult<Vec<cadence_api::service_types::HistoryEvent>>;
 }

@@ -15,8 +15,8 @@ use async_trait::async_trait;
 use cadence_api::errors::{
     AccessDeniedError, BadRequestError, CancellationAlreadyRequestedError,
     ClientVersionNotSupportedError, DomainNotActiveError, EntityNotExistsError,
-    InternalServiceError, LimitExceededError, QueryFailedError, ServiceBusyError, EventAlreadyStartedError,
-    ShardOwnershipLostError, WorkflowExecutionAlreadyCompletedError,
+    EventAlreadyStartedError, InternalServiceError, LimitExceededError, QueryFailedError,
+    ServiceBusyError, ShardOwnershipLostError, WorkflowExecutionAlreadyCompletedError,
     WorkflowExecutionAlreadyStartedError,
 };
 use cadence_api::CadenceError;
@@ -53,7 +53,10 @@ pub enum HistoryError {
     Canceled,
     /// `persistence.DuplicateRequestError`
     #[error("Request already started.  RequestType: {request_type:?}, RunID: {run_id}")]
-    DuplicateRequest { request_type: WorkflowRequestType, run_id: String },
+    DuplicateRequest {
+        request_type: WorkflowRequestType,
+        run_id: String,
+    },
     /// `persistence.WorkflowExecutionAlreadyStartedError`
     #[error("{0}")]
     PersistenceAlreadyStarted(Box<PersistenceAlreadyStarted>),
@@ -75,7 +78,10 @@ pub enum HistoryError {
     #[error("{0}")]
     PersistenceTimeout(String),
     #[error("{message}")]
-    CurrentBranchChanged { message: String, current_branch_token: Vec<u8> },
+    CurrentBranchChanged {
+        message: String,
+        current_branch_token: Vec<u8>,
+    },
     #[error("cluster attribute not found")]
     ClusterAttributeNotFound,
     #[error("sticky worker unavailable")]
@@ -118,7 +124,11 @@ impl HistoryError {
         InternalServiceError::new(msg).into()
     }
     pub fn entity_not_exists(msg: impl Into<String>) -> Self {
-        EntityNotExistsError { message: msg.into(), ..Default::default() }.into()
+        EntityNotExistsError {
+            message: msg.into(),
+            ..Default::default()
+        }
+        .into()
     }
     pub fn is_entity_not_exists(&self) -> bool {
         matches!(self, HistoryError::Cadence(e) if matches!(&**e, CadenceError::EntityNotExists(_)))
@@ -131,7 +141,10 @@ impl HistoryError {
     }
     /// `persistence.IsTimeoutError`
     pub fn is_timeout(&self) -> bool {
-        matches!(self, HistoryError::PersistenceTimeout(_) | HistoryError::DeadlineExceeded)
+        matches!(
+            self,
+            HistoryError::PersistenceTimeout(_) | HistoryError::DeadlineExceeded
+        )
     }
     /// `execution.IsConflictError`
     pub fn is_conflict_error(&self) -> bool {
@@ -380,4 +393,8 @@ pub type Fut<'a, T> = BoxFuture<'a, HResult<T>>;
 
 pub type Map<K, V> = HashMap<K, V>;
 
-impl From<CadenceError> for HistoryError { fn from(error: CadenceError) -> Self { Self::Cadence(Box::new(error)) } }
+impl From<CadenceError> for HistoryError {
+    fn from(error: CadenceError) -> Self {
+        Self::Cadence(Box::new(error))
+    }
+}

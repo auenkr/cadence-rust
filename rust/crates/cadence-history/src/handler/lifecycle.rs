@@ -34,21 +34,32 @@ pub fn start_components(factory: &dyn HandlerComponentFactory) {
         tracing::error!(error = %error, "Creating replication task fetchers failed");
         panic!("Creating replication task fetchers failed: {error}");
     }
-    factory.start_replication_task_fetchers(); factory.create_task_priority_assigner();
-    factory.create_replication_budget_manager(); factory.create_shard_controller();
+    factory.start_replication_task_fetchers();
+    factory.create_task_priority_assigner();
+    factory.create_replication_budget_manager();
+    factory.create_shard_controller();
     if let Err(error) = factory.create_priority_task_processor() {
         tracing::error!(error = %error, "Creating priority task processor failed");
         panic!("Creating priority task processor failed: {error}");
     }
-    factory.create_task_rate_limiter(); factory.create_rate_limited_task_processor();
-    factory.start_queue_task_processor(); factory.create_transfer_queue_factory(); factory.create_timer_queue_factory();
-    factory.create_history_event_notifier(); factory.start_history_event_notifier();
+    factory.create_task_rate_limiter();
+    factory.create_rate_limited_task_processor();
+    factory.start_queue_task_processor();
+    factory.create_transfer_queue_factory();
+    factory.create_timer_queue_factory();
+    factory.create_history_event_notifier();
+    factory.start_history_event_notifier();
     factory.create_failover_coordinator();
-    if factory.enable_graceful_failover() { factory.start_failover_coordinator(); }
+    if factory.enable_graceful_failover() {
+        factory.start_failover_coordinator();
+    }
     factory.start_shard_controller();
 }
 pub fn stop_components(factory: &dyn HandlerComponentFactory) {
-    factory.stop_replication_budget_manager_if_present(); factory.stop_replication_task_fetchers();
-    factory.stop_shard_controller(); factory.stop_queue_task_processor(); factory.stop_history_event_notifier();
+    factory.stop_replication_budget_manager_if_present();
+    factory.stop_replication_task_fetchers();
+    factory.stop_shard_controller();
+    factory.stop_queue_task_processor();
+    factory.stop_history_event_notifier();
     factory.stop_failover_coordinator();
 }

@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 use cadence_api::admin::{ReapplyEventsRequest, RefreshWorkflowTasksRequest};
 use cadence_api::enums::ContinueAsNewInitiator;
+use cadence_api::service_types::HistoryEvent;
 use cadence_api::service_types::{
     DescribeWorkflowExecutionRequest, RequestCancelWorkflowExecutionRequest,
     SignalWithStartWorkflowExecutionRequest,
@@ -24,7 +25,6 @@ use cadence_api::types::{
     StartWorkflowExecutionRequest, TaskList, TerminateWorkflowExecutionRequest, VersionHistories,
     VersionHistory, VersionHistoryItem, WorkflowExecution, WorkflowType,
 };
-use cadence_api::service_types::HistoryEvent;
 use serde::{Deserialize, Serialize};
 
 macro_rules! wire {

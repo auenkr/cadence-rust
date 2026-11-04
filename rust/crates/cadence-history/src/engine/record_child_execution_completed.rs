@@ -1,10 +1,19 @@
 //! Port of engineimpl/record_child_execution_completed.go.
-use cadence_api::enums::EventType;
 use super::{deps::*, runtime::*, types::*};
+use cadence_api::enums::EventType;
 impl HistoryEngine {
-    pub async fn record_child_execution_completed(&self, request: &RecordChildExecutionCompletedRequest) -> HResult<()> {
+    pub async fn record_child_execution_completed(
+        &self,
+        request: &RecordChildExecutionCompletedRequest,
+    ) -> HResult<()> {
         let execution = request.workflow_execution.clone().unwrap_or_default();
-        let domain = self.get_active_domain_by_workflow(&request.domain_uuid, &execution.workflow_id, &execution.run_id).await?;
+        let domain = self
+            .get_active_domain_by_workflow(
+                &request.domain_uuid,
+                &execution.workflow_id,
+                &execution.run_id,
+            )
+            .await?;
         self.updater.update(&domain.info.id, &execution, false, self.time_source.now(), Box::new(|_, state| Box::pin(async move {
             if !state.is_workflow_execution_running() { return Err(HistoryError::entity_not_exists("workflow execution already completed")); }
             let initiated = request.initiated_id;

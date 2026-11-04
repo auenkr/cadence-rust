@@ -1,10 +1,19 @@
 //! Port of engineimpl/record_activity_task_started.go.
-use cadence_api::errors::EventAlreadyStartedError;
 use super::{deps::*, runtime::*, types::*};
+use cadence_api::errors::EventAlreadyStartedError;
 impl HistoryEngine {
-    pub async fn record_activity_task_started(&self, request: &RecordActivityTaskStartedRequest) -> HResult<RecordActivityTaskStartedResponse> {
+    pub async fn record_activity_task_started(
+        &self,
+        request: &RecordActivityTaskStartedRequest,
+    ) -> HResult<RecordActivityTaskStartedResponse> {
         let execution = request.workflow_execution.clone().unwrap_or_default();
-        let domain = self.get_active_domain_by_workflow(&request.domain_uuid, &execution.workflow_id, &execution.run_id).await?;
+        let domain = self
+            .get_active_domain_by_workflow(
+                &request.domain_uuid,
+                &execution.workflow_id,
+                &execution.run_id,
+            )
+            .await?;
         let response = std::sync::Mutex::new(RecordActivityTaskStartedResponse::default());
         let resurrected = std::sync::atomic::AtomicBool::new(false);
         self.updater.update(&domain.info.id, &execution, false, self.time_source.now(), Box::new(|_, state| {
@@ -51,7 +60,9 @@ impl HistoryEngine {
                 Ok(UpdateAction::default())
             })
         })).await?;
-        if resurrected.into_inner() { return Err(HistoryError::entity_not_exists("activity task not found")); }
+        if resurrected.into_inner() {
+            return Err(HistoryError::entity_not_exists("activity task not found"));
+        }
         Ok(response.into_inner().unwrap())
     }
 }

@@ -242,3 +242,20 @@ Dependency contracts and inline mappings require final review.
 | wrappers/thrift/thrift_handler_generated.go: CloseShard, DescribeHistoryHost, DescribeMutableState, DescribeQueue, DescribeWorkflowExecution, GetCrossClusterTasks, GetDLQReplicationMessages, GetFailoverInfo, GetMutableState, GetReplicationMessages, MergeDLQMessages, NotifyFailoverMarkers, PollMutableState, PurgeDLQMessages, QueryWorkflow, RatelimitUpdate, ReadDLQMessages, ReapplyEvents, RecordActivityTaskHeartbeat, RecordActivityTaskStarted, RecordChildExecutionCompleted, RecordDecisionTaskStarted, RefreshWorkflowTasks, RemoveSignalMutableState, RemoveTask, ReplicateEventsV2, RequestCancelWorkflowExecution, ResetQueue, ResetStickyTaskList, ResetWorkflowExecution, RespondActivityTaskCanceled, RespondActivityTaskCompleted, RespondActivityTaskFailed, RespondCrossClusterTasksCompleted, RespondDecisionTaskCompleted, RespondDecisionTaskFailed, ScheduleDecisionTask, SignalWithStartWorkflowExecution, SignalWorkflowExecution, StartWorkflowExecution, SyncActivity, SyncShardStatus, TerminateWorkflowExecution | wrappers/thrift.rs; concrete mapper/dispatcher TODO(link) |
 | wrappers/ratelimited/handler_generated.go: NewHistoryHandler, CloseShard, CountDLQMessages, DescribeHistoryHost, DescribeMutableState, DescribeQueue, DescribeWorkflowExecution, GetCrossClusterTasks, GetDLQReplicationMessages, GetFailoverInfo, GetMutableState, GetReplicationMessages, Health, MergeDLQMessages, NotifyFailoverMarkers, PollMutableState, PrepareToStop, PurgeDLQMessages, QueryWorkflow, RatelimitUpdate, ReadDLQMessages, ReapplyEvents, RecordActivityTaskHeartbeat, RecordActivityTaskStarted, RecordChildExecutionCompleted, RecordDecisionTaskStarted, RefreshWorkflowTasks, RemoveSignalMutableState, RemoveTask, ReplicateEventsV2, RequestCancelWorkflowExecution, ResetQueue, ResetStickyTaskList, ResetWorkflowExecution, RespondActivityTaskCanceled, RespondActivityTaskCompleted, RespondActivityTaskFailed, RespondCrossClusterTasksCompleted, RespondDecisionTaskCompleted, RespondDecisionTaskFailed, ScheduleDecisionTask, SignalWithStartWorkflowExecution, SignalWorkflowExecution, Start, StartWorkflowExecution, Stop, SyncActivity, SyncShardStatus, TerminateWorkflowExecution | wrappers/ratelimited.rs; rate policy wrapper |
 | wrappers/ratelimited/ratelimit.go: allowWfID | wrappers/ratelimited.rs; rate policy wrapper |
+
+## Interface and dependency boundaries
+
+- engine/interface.go: engine/interface.rs (Engine trait and HistoryEngine forwarding).
+- handler/interface.go: handler/interface.rs and handler/implementation.rs.
+- Engine dependency implementations remain in deps.rs, deps_ms.rs, runtime.rs and
+  start_dependencies.rs as the requested TODO(link) stand-ins for concurrent ports.
+- Wrappers expose all upstream RPC conversions and registration through mapper/dispatcher
+  contracts. Concrete upstream proto/Thrift conversion adapters remain TODO(link);
+  these wrappers are not registered in the running server yet.
+- No mixed-cluster or integration validation was performed, as requested.
+
+CI diagnostics: run 41916262079, head a002b7075, failed compilation (missing response
+import, RefreshWorkflowTasks field, misplaced decision metric block, shard width).
+Fixed in 05394d39f; validation https://github.com/auenkr/cadence-rust/actions/runs/41917112333
+is pending. Applied formatting patch from that runner only to engine/handler/wrappers.
+No local Cargo, rustfmt, or Go validation commands were used.
