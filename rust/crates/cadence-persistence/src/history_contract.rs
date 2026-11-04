@@ -99,7 +99,6 @@ pub struct ReplicationTask {
     pub first_event_id:i64, pub next_event_id:i64, pub version:i64, pub scheduled_id:i64,
     pub branch_token:Vec<u8>, pub new_run_branch_token:Vec<u8>, pub creation_time_unix_nanos:i64,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub type CrossClusterTask = TransferTask;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,9 +113,13 @@ pub struct CurrentExecution { pub run_id:String, pub create_request_id:String, p
 pub struct ExecutionListFilter { pub shard_id:i32, pub domain_id:String, pub workflow_id:Option<String>, pub page_size:i32, pub next_page_token:Vec<u8> }
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ExecutionPage { pub executions:Vec<WorkflowSnapshot>, pub next_page_token:Vec<u8> }
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TaskRange { pub shard_id:i32, pub min_task_id:i64, pub max_task_id:i64, pub batch_size:i32 }
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TimerTaskRange { pub shard_id:i32, pub min_visibility_time_unix_nanos:i64, pub min_task_id:i64, pub max_visibility_time_unix_nanos:i64, pub batch_size:i32 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PersistenceError { ShardOwnershipLost{shard_id:i32,expected_range_id:i64,actual_range_id:i64}, ConditionFailed(String), WorkflowAlreadyStarted{message:String,start_request_id:String,run_id:String,state:i32,close_status:i32,last_write_version:i64}, CurrentWorkflowConditionFailed(String), EntityNotExists(String), AlreadyExists(String), InvalidArgument(String), Internal(String) }
+pub enum PersistenceError { ShardOwnershipLost{shard_id:i32,expected_range_id:i64,actual_range_id:i64}, ConditionFailed(String), WorkflowAlreadyStarted{message:String,start_request_id:String,run_id:String,state:i32,close_status:i32,last_write_version:i64}, CurrentWorkflowConditionFailed(String), EntityNotExists(String), AlreadyExists(String), InvalidPersistenceRequest(String), InternalDataInconsistency(String), InvalidArgument(String), Internal(String) }
 impl std::fmt::Display for PersistenceError { fn fmt(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result { write!(f,"{self:?}") } }
 impl std::error::Error for PersistenceError {}
 
@@ -141,6 +144,7 @@ pub trait GoExecutionStore: Send+Sync {
     async fn create_timer_tasks(&self, shard_id:i32, tasks:Vec<TimerTask>)->Result<(),PersistenceError>;
     async fn select_timer_tasks(&self, shard_id:i32, min_timestamp:i64, max_timestamp:i64, batch_size:i32)->Result<Vec<TimerTask>,PersistenceError>;
     async fn complete_timer_task(&self, shard_id:i32, visibility_timestamp:i64, task_id:i64)->Result<(),PersistenceError>;
+    async fn select_workflow_timer_tasks(&self, range:TimerTaskRange)->Result<Vec<HistoryTaskKey>,PersistenceError>;
     async fn create_replication_tasks(&self, shard_id:i32, tasks:Vec<ReplicationTask>)->Result<(),PersistenceError>;
     async fn get_replication_tasks(&self, shard_id:i32, min_id:i64, max_id:i64, batch_size:i32)->Result<Vec<ReplicationTask>,PersistenceError>;
     async fn complete_replication_task(&self, shard_id:i32, task_id:i64)->Result<(),PersistenceError>;
@@ -153,6 +157,11 @@ pub trait GoExecutionStore: Send+Sync {
     async fn get_cross_cluster_tasks(&self, shard_id:i32, min_id:i64, max_id:i64, batch_size:i32)->Result<Vec<CrossClusterTask>,PersistenceError>;
     async fn complete_cross_cluster_task(&self, shard_id:i32, task_id:i64)->Result<(),PersistenceError>;
     async fn create_replication_tasks_from_dlq(&self, source_cluster:String, tasks:Vec<ReplicationTask>)->Result<(),PersistenceError>;
+    async fn get_history_tasks(&self, range:TaskRange, category:HistoryTaskCategory)->Result<Vec<Task>,PersistenceError>;
+    async fn complete_history_task(&self, shard_id:i32, category:HistoryTaskCategory, task_id:i64)->Result<(),PersistenceError>;
+    async fn range_complete_history_tasks(&self, range:TaskRange, category:HistoryTaskCategory)->Result<u64,PersistenceError>;
+    async fn get_active_cluster_selection_policy(&self, shard_id:i32, domain_id:String, workflow_id:String, run_id:String)->Result<Option<DataBlob>,PersistenceError>;
+    async fn delete_active_cluster_selection_policy(&self, shard_id:i32, domain_id:String, workflow_id:String, run_id:String)->Result<(),PersistenceError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
