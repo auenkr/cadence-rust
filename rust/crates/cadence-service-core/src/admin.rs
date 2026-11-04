@@ -1246,6 +1246,7 @@ fn decode_reapply_events(
             blob.encoding_type = Some(cadence_api::enums::EncodingType::ThriftRW);
             cadence_thrift::history_blob::decode(&blob).map_err(|e| e.to_string())
         }
+        Some(other) => Err(format!("unknown encoding type: {other:?}")),
     }
 }
 

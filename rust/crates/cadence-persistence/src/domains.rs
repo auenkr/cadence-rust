@@ -3015,7 +3015,7 @@ mod go_sql_frontend_manager_tests {
             persistence,
             std::sync::Arc::new(|| "thriftrw_snappy".to_string()),
         );
-        assert_eq!(manager.exists_for_register("missing").unwrap(), false);
+        assert!(!manager.exists_for_register("missing").unwrap());
     }
 
     #[test]
