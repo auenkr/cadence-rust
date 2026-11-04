@@ -373,9 +373,38 @@ pub fn validate_create_transition(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::history_contract::WorkflowSnapshot;
 
     fn info(run_id: &str) -> WorkflowExecutionInfo {
         WorkflowExecutionInfo { workflow_id: "wf".into(), run_id: run_id.into(), ..Default::default() }
+    }
+
+    #[test]
+    fn snapshot_execution_row_round_trips_go_sqlblobs_payload() {
+        let mut execution_info = info("00000000-0000-0000-0000-000000000002");
+        execution_info.domain_id = "00000000-0000-0000-0000-000000000001".into();
+        execution_info.next_event_id = 42;
+        execution_info.workflow_timeout_nanos = NANOS_PER_SECOND * 17;
+        execution_info.create_request_id = "request".into();
+        let snapshot = WorkflowSnapshot {
+            execution_info,
+            start_version: 7,
+            last_write_version: 9,
+            version_histories: Some(DataBlob { encoding: "thriftrw".into(), data: vec![1, 2] }),
+            checksum: Some(DataBlob { encoding: "thriftrw".into(), data: vec![3, 4] }),
+            ..Default::default()
+        };
+        let row = snapshot_to_execution_row(&snapshot, 5, crate::sqlblobs::Encoding::ThriftRW).unwrap();
+        let (decoded, start_version, histories, checksum) = decode_execution_info(&row).unwrap();
+        assert_eq!(decoded.workflow_id, snapshot.execution_info.workflow_id);
+        assert_eq!(decoded.run_id, snapshot.execution_info.run_id);
+        assert_eq!(decoded.domain_id, snapshot.execution_info.domain_id);
+        assert_eq!(decoded.next_event_id, 42);
+        assert_eq!(decoded.workflow_timeout_nanos, NANOS_PER_SECOND * 17);
+        assert_eq!(decoded.create_request_id, "request");
+        assert_eq!(start_version, 7);
+        assert_eq!(histories, snapshot.version_histories);
+        assert_eq!(checksum, snapshot.checksum);
     }
     fn current() -> CurrentExecution {
         CurrentExecution { run_id: "old".into(), create_request_id: "request".into(), state: 2, close_status: 1, start_version: 4, last_write_version: 7 }
