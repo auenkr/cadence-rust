@@ -70,3 +70,8 @@ Work units (each a worker, own branch history-port-<unit>, own Rust module dir u
  U9 decision (3.1k)  U10 handler (2.4k) + wrappers (grpc/thrift/ratelimited) + main wiring
  Plus persistence: history_store/execution store slices 2-4 + cassandra (separate worker after s1d).
 In flight (Luna, let finish): history-h1-sql-s1d, history-h3a3-decision-y, history-h3a4-activity.
+
+## Worker update 2026-11-04 (user): hard workers only
+Luna workers cancelled; relaunched on the same branches as Codex gpt-6.1-sol (low, default speed): history-port-persist, history-port-exec-a,
+history-port-decision. Claude Sonnet 5.5 low: history-port-task (task+taskdlq), history-port-engine (engine+handler+wrappers). 5 total.
+Unassigned: queue, queuev2, ndc, replication, failover, shard remainder, main wiring. Scheduled continuation 03:45 local daily (T3 scheduled task).

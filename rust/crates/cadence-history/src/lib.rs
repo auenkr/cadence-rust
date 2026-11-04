@@ -1,6 +1,7 @@
 //! History service bootstrap and shard ownership primitives.
 
 pub mod config;
+pub mod execution;
 pub mod mutable_state;
 pub mod mutable_state_activity;
 pub mod shard;
@@ -121,3 +122,8 @@ mod rpc_tests {
 }
 pub mod task;
 pub mod taskdlq;
+pub mod decision;
+pub mod events;
+pub mod query;
+pub mod reset;
+pub mod workflowcache;
