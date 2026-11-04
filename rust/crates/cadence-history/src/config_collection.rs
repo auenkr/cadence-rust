@@ -124,6 +124,21 @@ pub fn parse_go_duration(s: &str) -> Option<Duration> {
     Some(Duration::from_nanos(total as u64))
 }
 
+/// Default-value conversion: identity, plus `&str` -> `String` (Go string defaults).
+pub trait DefaultValue<T> {
+    fn into_default(self) -> T;
+}
+impl<T> DefaultValue<T> for T {
+    fn into_default(self) -> T {
+        self
+    }
+}
+impl DefaultValue<String> for &str {
+    fn into_default(self) -> String {
+        self.to_string()
+    }
+}
+
 pub type Prop<T> = Arc<dyn Fn() -> T + Send + Sync>;
 pub type PropDomain<T> = Arc<dyn Fn(&str) -> T + Send + Sync>;
 pub type PropShard<T> = Arc<dyn Fn(i32) -> T + Send + Sync>;
@@ -153,15 +168,15 @@ impl Collection {
             .unwrap_or_else(|| default.clone())
     }
 
-    pub fn prop<T: FromDynamic>(&self, key: &str, default: impl Into<T>) -> Prop<T> {
+    pub fn prop<T: FromDynamic>(&self, key: &str, default: impl DefaultValue<T>) -> Prop<T> {
         let (c, k) = (self.client.clone(), key.to_string());
-        let default: T = default.into();
+        let default: T = default.into_default();
         Arc::new(move || Self::lookup(&c, &k, &Filters::default(), &default))
     }
 
-    pub fn prop_domain<T: FromDynamic>(&self, key: &str, default: impl Into<T>) -> PropDomain<T> {
+    pub fn prop_domain<T: FromDynamic>(&self, key: &str, default: impl DefaultValue<T>) -> PropDomain<T> {
         let (c, k) = (self.client.clone(), key.to_string());
-        let default: T = default.into();
+        let default: T = default.into_default();
         Arc::new(move |domain: &str| {
             let f = Filters {
                 domain_name: Some(domain.to_string()),
@@ -171,9 +186,9 @@ impl Collection {
         })
     }
 
-    pub fn prop_domain_id<T: FromDynamic>(&self, key: &str, default: impl Into<T>) -> PropDomain<T> {
+    pub fn prop_domain_id<T: FromDynamic>(&self, key: &str, default: impl DefaultValue<T>) -> PropDomain<T> {
         let (c, k) = (self.client.clone(), key.to_string());
-        let default: T = default.into();
+        let default: T = default.into_default();
         Arc::new(move |domain_id: &str| {
             let f = Filters {
                 domain_id: Some(domain_id.to_string()),
@@ -183,9 +198,9 @@ impl Collection {
         })
     }
 
-    pub fn prop_shard<T: FromDynamic>(&self, key: &str, default: impl Into<T>) -> PropShard<T> {
+    pub fn prop_shard<T: FromDynamic>(&self, key: &str, default: impl DefaultValue<T>) -> PropShard<T> {
         let (c, k) = (self.client.clone(), key.to_string());
-        let default: T = default.into();
+        let default: T = default.into_default();
         Arc::new(move |shard_id: i32| {
             let f = Filters {
                 shard_id: Some(shard_id as i64),
@@ -198,10 +213,10 @@ impl Collection {
     pub fn prop_domain_task_list<T: FromDynamic>(
         &self,
         key: &str,
-        default: impl Into<T>,
+        default: impl DefaultValue<T>,
     ) -> PropDomainTaskList<T> {
         let (c, k) = (self.client.clone(), key.to_string());
-        let default: T = default.into();
+        let default: T = default.into_default();
         Arc::new(move |domain: &str, task_list: &str| {
             let f = Filters {
                 domain_name: Some(domain.to_string()),
@@ -215,10 +230,10 @@ impl Collection {
     pub fn prop_domain_id_workflow_id<T: FromDynamic>(
         &self,
         key: &str,
-        default: impl Into<T>,
+        default: impl DefaultValue<T>,
     ) -> PropDomainIDWorkflowID<T> {
         let (c, k) = (self.client.clone(), key.to_string());
-        let default: T = default.into();
+        let default: T = default.into_default();
         Arc::new(move |domain_id: &str, workflow_id: &str| {
             let f = Filters {
                 domain_id: Some(domain_id.to_string()),
@@ -266,6 +281,6 @@ mod tests {
         assert_eq!(dc.prop::<i64>("k.int", 7)(), 7);
         client.update_value("k.int", Value::from(9));
         assert_eq!(dc.prop::<i64>("k.int", 7)(), 9);
-        assert_eq!(dc.prop_domain::<bool>("k.none", true)("d"), true);
+        assert!(dc.prop_domain::<bool>("k.none", true)("d"));
     }
 }
