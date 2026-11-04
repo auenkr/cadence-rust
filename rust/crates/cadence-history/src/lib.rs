@@ -1,6 +1,7 @@
 //! History service bootstrap and shard ownership primitives.
 
 pub mod config;
+pub mod mutable_state;
 pub mod shard;
 
 pub const SERVICE_NAME: &str = "history";
