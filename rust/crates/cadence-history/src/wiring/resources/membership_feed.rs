@@ -35,13 +35,8 @@ pub async fn spawn_membership_feed(
     let mut rx = provider.subscribe(&service).await.map_err(|e| e.to_string())?;
     refresh_from_snapshot(&resolver, &provider, &service);
     Ok(tokio::spawn(async move {
-        loop {
-            match rx.recv().await {
-                Ok(_) | Err(RecvError::Lagged(_)) => {
-                    refresh_from_snapshot(&resolver, &provider, &service);
-                }
-                Err(RecvError::Closed) => break,
-            }
+        while matches!(rx.recv().await, Ok(_) | Err(RecvError::Lagged(_))) {
+            refresh_from_snapshot(&resolver, &provider, &service);
         }
     }))
 }
