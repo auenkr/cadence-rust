@@ -12,11 +12,12 @@ from pathlib import Path
 ap = argparse.ArgumentParser()
 ap.add_argument('--database', choices=['mysql', 'postgres', 'cassandra'], default='mysql')
 ap.add_argument('--out', type=Path, required=True)
-ap.add_argument('--rust-binary', type=Path, required=True)
+ap.add_argument('--mode', choices=['go', 'rust'], default='rust', help='go: all-Go baseline; rust: Rust Frontend+Matching, Go History/Worker')
+ap.add_argument('--rust-binary', type=Path, default=Path('/nonexistent-rust-binary'))
 ap.add_argument('--go-server', type=Path, required=True)
 ap.add_argument('--go-cli', type=Path, required=True)
 ap.add_argument('--driver', type=Path, required=True)
-ap.add_argument('--rust-root', type=Path, required=True, help='checkout of rust_ref (for rust/config/development.yaml)')
+ap.add_argument('--rust-root', type=Path, default=Path('.'), help='checkout of rust_ref (for rust/config/development.yaml)')
 ap.add_argument('--rust-outbound', choices=['grpc', 'tchannel'], default='grpc')
 ap.add_argument('--sdk-timeout-seconds', type=int, default=900,
                 help='SDK driver wall-clock limit, including restart and shutdown (default: 900)')
@@ -80,7 +81,7 @@ if args.es_url:
 (work / 'dynamic-config.yaml').write_text(dyn)
 (work / 'rust-dynamic-config.yaml').write_text(dyn + f'\nsystem.enableGRPCOutbound:\n  - value: {str(args.rust_outbound == "grpc").lower()}\nfrontend.sendRawWorkflowHistory:\n  - value: true\n')
 (work / 'config/base.yaml').write_text((root / 'go/config/base.yaml').read_text())
-seeds = ', '.join(f'"127.0.0.1:{ports[k]}"' for k in ['FRONTEND_PORT', 'HISTORY_PORT', 'WORKER_PORT', 'RUST_MATCHING_PORT'] + (['HISTORY2_PORT'] if args.two_history else []))
+seeds = ', '.join(f'"127.0.0.1:{ports[k]}"' for k in ['FRONTEND_PORT', 'HISTORY_PORT', 'WORKER_PORT', 'RUST_MATCHING_PORT' if args.mode == 'rust' else 'MATCHING_PORT'] + (['HISTORY2_PORT'] if args.two_history else []))
 text = (root / 'go/config/development.yaml').read_text()
 for k, v in ports.items():
     text = re.sub(r'\$\{' + k + r':\d+\}', v, text)
@@ -152,25 +153,27 @@ if args.es_url:
     (work / f'config/development_{plugin}.yaml').write_text(persistence)
     if args.two_history:
         (work / f'config2/development_{plugin}.yaml').write_text(persistence)
-rt = (args.rust_root / 'rust/config/development.yaml').read_text()
-for k, v in ports.items():
-    rt = re.sub(r'\$\{' + k + r':\d+\}', v, rt)
-rt, n = re.subn(r'(?ms)^persistence:\n.*?(?=^ringpop:\n)', persistence, rt, count=1); assert n == 1
-rt, n = re.subn(r'(?m)^  bootstrapHosts: \[.*\]$', f'  bootstrapHosts: [{seeds}]', rt, count=1); assert n == 1
-rt = rt.replace('filepath: "config/dynamicconfig/development.yaml"', 'filepath: ' + json.dumps(str(work / 'rust-dynamic-config.yaml')))
-rt = rt.replace('localhost:7833', f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}')
-rt = rt.replace('/tmp/cadence_archival/development', str(work / 'history-archive'))
-rt = rt.replace('/tmp/cadence_vis_archival/development', str(work / 'visibility-archive'))
-rt = rt.replace('/tmp/blobstore', str(work / 'blobstore'))
-rt = add_gcs(add_s3(rt))
-_ms = socket.socket(); _ms.bind(('127.0.0.1', 0)); prom_port = _ms.getsockname()[1]; _ms.close()
-rt, n = re.subn(r'(?m)^(  frontend:\n(?:.*\n)*?    metrics:\n)      statsd:\n        hostPort: "127.0.0.1:8125"\n        prefix: "cadence"\n',
-                lambda m: m.group(1) + f'      prometheus:\n        timerType: histogram\n        listenAddress: "127.0.0.1:{prom_port}"\n', rt, count=1)
-assert n == 1, 'frontend metrics block not found'
-assert not re.search(r'(?m)^histograms:', rt)
-# Go emits cadence_latency_ns only when histogram migration allows it (default "timer").
-rt = rt.rstrip('\n') + '\nhistograms:\n  default: both\n' + async_yaml
-(work / 'rust.yaml').write_text(rt)
+if args.mode == 'rust':
+    rt = (args.rust_root / 'rust/config/development.yaml').read_text()
+    for k, v in ports.items():
+        rt = re.sub(r'\$\{' + k + r':\d+\}', v, rt)
+    rt, n = re.subn(r'(?ms)^persistence:\n.*?(?=^ringpop:\n)', persistence, rt, count=1); assert n == 1
+    rt, n = re.subn(r'(?m)^  bootstrapHosts: \[.*\]$', f'  bootstrapHosts: [{seeds}]', rt, count=1); assert n == 1
+    rt = rt.replace('filepath: "config/dynamicconfig/development.yaml"', 'filepath: ' + json.dumps(str(work / 'rust-dynamic-config.yaml')))
+    rt = rt.replace('localhost:7833', f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}')
+    rt = rt.replace('/tmp/cadence_archival/development', str(work / 'history-archive'))
+    rt = rt.replace('/tmp/cadence_vis_archival/development', str(work / 'visibility-archive'))
+    rt = rt.replace('/tmp/blobstore', str(work / 'blobstore'))
+    rt = add_gcs(add_s3(rt))
+    _ms = socket.socket(); _ms.bind(('127.0.0.1', 0)); prom_port = _ms.getsockname()[1]; _ms.close()
+    rt, n = re.subn(r'(?m)^(  frontend:\n(?:.*\n)*?    metrics:\n)      statsd:\n        hostPort: "127.0.0.1:8125"\n        prefix: "cadence"\n',
+                    lambda m: m.group(1) + f'      prometheus:\n        timerType: histogram\n        listenAddress: "127.0.0.1:{prom_port}"\n', rt, count=1)
+    assert n == 1, 'frontend metrics block not found'
+    assert not re.search(r'(?m)^histograms:', rt)
+    # Go emits cadence_latency_ns only when histogram migration allows it (default "timer").
+    rt = rt.rstrip('\n') + '\nhistograms:\n  default: both\n' + async_yaml
+    (work / 'rust.yaml').write_text(rt)
+
 
 # ---- process helpers
 procs = {}
@@ -224,7 +227,7 @@ def dump_domain_rows(tag):
         (work / f'db-domains-{tag}.log').write_text(repr(e))
 
 def record_services_alive(phase):
-    for name in ['go-history-worker', 'rust-matching', 'rust-frontend'] + (['go-history-2'] if args.two_history else []):
+    for name in ['go-history-worker', MT, FE] + (['go-history-2'] if args.two_history else []):
         exit_code = procs[name].poll()
         record(f'{name}-alive-{phase}', exit_code is None, f'exit={exit_code}')
 def run(name, cmd, timeout=120, env=None):
@@ -234,6 +237,7 @@ def run(name, cmd, timeout=120, env=None):
     record(name, r.returncode == 0, out.strip())
     return r.returncode == 0
 
+FE, MT = ('rust-frontend', 'rust-matching') if args.mode == 'rust' else ('go-frontend', 'go-matching')
 rust_matching = lambda: [args.rust_binary, 'start', '--config', work / 'rust.yaml', '--root', work, '--services', 'matching', '--port', '0',
     '--history-grpc-port', ports['HISTORY_PORT_GRPC'], '--matching-grpc-port', ports['RUST_MATCHING_PORT_GRPC'],
     '--matching-tchannel-port', ports['RUST_MATCHING_PORT'], '--data-dir', work / 'rust-matching-data']
@@ -244,11 +248,16 @@ frontend_env = {
     'CADENCE_HISTORY_TCHANNEL_ADDR': f'127.0.0.1:{ports["HISTORY_PORT"]}',
     'CADENCE_MATCHING_TCHANNEL_ADDR': f'127.0.0.1:{ports["RUST_MATCHING_PORT"]}',
 }
+go_matching = lambda: [args.go_server, '--config', work / 'config', '--zone', plugin, 'start', '--services', 'matching']
+go_frontend = lambda: [args.go_server, '--config', work / 'config', '--zone', plugin, 'start', '--services', 'frontend']
+frontend_cmd = rust_frontend if args.mode == 'rust' else go_frontend
+frontend_env = frontend_env if args.mode == 'rust' else None
 cli_t = [args.go_cli, '--address', f'127.0.0.1:{ports["FRONTEND_PORT"]}', '--transport', 'tchannel']
 cli_g = [args.go_cli, '--address', f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', '--transport', 'grpc']
 status = 0
 try:
-    (work / 'rust-binary.sha256').write_text(subprocess.run(['sha256sum', str(args.rust_binary)], capture_output=True, text=True).stdout)
+    if args.mode == 'rust':
+        (work / 'rust-binary.sha256').write_text(subprocess.run(['sha256sum', str(args.rust_binary)], capture_output=True, text=True).stdout)
     start('go-history-worker', [args.go_server, '--config', work / 'config', '--zone', plugin, 'start', '--auto-setup', '--services', 'history,worker'])
     history_ready = wait_port(ports['HISTORY_PORT_GRPC'], 240, 'go-history-worker')
     record('go-history-listening', history_ready)
@@ -263,14 +272,15 @@ try:
             raise SystemExit(1)
     # Matching opens gRPC only after Ringpop bootstrap. Launch its Frontend
     # seed before waiting for Matching readiness so both can join the ring.
-    start('rust-matching', rust_matching())
-    start('rust-frontend', rust_frontend(), env=frontend_env)
-    matching_ready = wait_port(ports['RUST_MATCHING_PORT_GRPC'], 120, 'rust-matching')
-    record('rust-matching-listening', matching_ready)
-    fe_t = wait_port(ports['FRONTEND_PORT'], 120, 'rust-frontend')
-    fe_g = wait_port(ports['FRONTEND_PORT_GRPC'], 10, 'rust-frontend')
-    record('rust-frontend-tchannel-listening', fe_t)
-    record('rust-frontend-grpc-listening', fe_g)
+    start(MT, (rust_matching if args.mode == 'rust' else go_matching)())
+    start(FE, frontend_cmd(), env=frontend_env)
+    mt_port = ports['RUST_MATCHING_PORT_GRPC'] if args.mode == 'rust' else ports['MATCHING_PORT_GRPC']
+    matching_ready = wait_port(mt_port, 120, MT)
+    record(MT + '-listening', matching_ready)
+    fe_t = wait_port(ports['FRONTEND_PORT'], 120, FE)
+    fe_g = wait_port(ports['FRONTEND_PORT_GRPC'], 10, FE)
+    record(FE + '-tchannel-listening', fe_t)
+    record(FE + '-grpc-listening', fe_g)
     if not (matching_ready and fe_t and fe_g):
         raise SystemExit(1)
     time.sleep(20)  # ring convergence
@@ -297,8 +307,10 @@ try:
     SOAK_RATE = os.environ.get('SOAK_RATE', '8')
     RESTART_AT = int(os.environ.get('SOAK_RESTART_AT', str(SOAK_SECONDS // 2)))
     SAMPLE = 60
+    if args.mode == 'go':
+        (work / 'mode.txt').write_text('go')
     env = {**os.environ, 'FE_TCHANNEL': f'127.0.0.1:{ports["FRONTEND_PORT"]}', 'FE_DOMAIN': dom_t,
-           'SOAK_DURATION': f'{SOAK_SECONDS}s', 'SOAK_RATE': SOAK_RATE, 'SOAK_DRAIN': '15m'}
+           'SOAK_DURATION': f'{SOAK_SECONDS}s', 'SOAK_RATE': SOAK_RATE, 'SOAK_DRAIN': '8m'}
     drv = subprocess.Popen([str(args.driver)], cwd=work, stdout=(work / 'soak-driver.log').open('w'), stderr=subprocess.STDOUT, env=env, start_new_session=True)
     procs['sdk-driver'] = drv
     def pid_of(name):
@@ -332,34 +344,34 @@ try:
     while drv.poll() is None:
         el = time.monotonic() - t0
         row = {'t': int(el), 'wall': int(time.time()), 'load1': os.getloadavg()[0]}
-        for n in ['rust-frontend', 'rust-matching']:
-            row[n] = proc_stats(n)
+        for n, key in [(FE, 'frontend'), (MT, 'matching')]:
+            row[key] = proc_stats(n)
         lines = [l for l in driver_log.read_text(errors='replace').splitlines() if l.startswith('STATS ')]
         row['driver'] = json.loads(lines[-1][6:]) if lines else None
         row['fail_lines'] = sum(1 for l in driver_log.read_text(errors='replace').splitlines() if l.startswith('FAIL '))
-        for n in ['rust-frontend', 'rust-matching', 'go-history-worker']:
+        for n in [FE, MT, 'go-history-worker']:
             if procs[n].poll() is not None:
                 record(f'{n}-died-during-soak', False, f'exit={procs[n].poll()} t={int(el)}')
         samples.write(json.dumps(row) + '\n'); samples.flush()
         if not restarted and el >= RESTART_AT:
             restarted = True
-            kill('rust-frontend')
-            record('rust-frontend-killed-mid-soak', True, f't={int(el)}')
+            kill(FE)
+            record(FE + '-killed-mid-soak', True, f't={int(el)}')
             time.sleep(3)
-            start('rust-frontend', rust_frontend(), env=frontend_env)
-            restart_ok = wait_port(ports['FRONTEND_PORT'], 120, 'rust-frontend') and wait_port(ports['FRONTEND_PORT_GRPC'], 10, 'rust-frontend')
-            record('rust-frontend-restarted-listening', bool(restart_ok), f't={int(time.monotonic()-t0)}')
-        if el > SOAK_SECONDS + 1200:
-            record('soak-driver-timeout', False, 'exceeded soak+20m')
+            start(FE, frontend_cmd(), env=frontend_env)
+            restart_ok = wait_port(ports['FRONTEND_PORT'], 120, FE) and wait_port(ports['FRONTEND_PORT_GRPC'], 10, FE)
+            record(FE + '-restarted-listening', bool(restart_ok), f't={int(time.monotonic()-t0)}')
+        if el > SOAK_SECONDS + 600:
+            record('soak-driver-timeout', False, 'exceeded soak+10m')
             kill('sdk-driver')
             break
         time.sleep(SAMPLE)
     record('soak-driver-exit', drv.returncode == 0, f'exit={drv.returncode}')
     print('DRIVER TAIL\n' + '\n'.join(driver_log.read_text(errors='replace').splitlines()[-8:]), flush=True)
     record_services_alive('after-soak')
-    for n in ['rust-frontend', 'rust-matching']:
+    for n in [FE, MT]:
         txt = (work / f'{n}.log').read_text(errors='replace')
-        record(f'{n}-no-panic', 'panicked at' not in txt, '')
+        record(f'{n}-no-panic', 'panicked at' not in txt and '\npanic:' not in txt, '')
 
 
 except SystemExit:
@@ -369,7 +381,7 @@ except Exception as e:
 finally:
     for n in list(procs):
         kill(n)
-    for n in ['rust-frontend', 'rust-matching', 'go-history-worker'] + (['go-history-2'] if args.two_history else []):
+    for n in [FE, MT, 'go-history-worker'] + (['go-history-2'] if args.two_history else []):
         lp = work / f'{n}.log'
         print(f'--- {n}.log tail', flush=True)
         print('\n'.join(lp.read_text(errors='replace').splitlines()[-25:]) if lp.exists() else '(none)', flush=True)

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -53,7 +54,35 @@ func SoakWorkflow(ctx workflow.Context, in string) (string, error) {
 }
 
 var started, completed, failed, retries, signals, queries, inflight int64
-var latNs, latCount, latMax int64
+var latNs, latCount, latMax, queryInit, queryInitWfs int64
+
+// Latency samples (ms) for percentiles: end-to-end, start call, query call (successful attempt only).
+var latMu sync.Mutex
+var lat = map[string][]int64{"e2e": nil, "start": nil, "query": nil}
+
+func record(kind string, ms int64) {
+	latMu.Lock()
+	lat[kind] = append(lat[kind], ms)
+	latMu.Unlock()
+}
+
+func pcts(kind string) map[string]int64 {
+	latMu.Lock()
+	v := append([]int64(nil), lat[kind]...)
+	latMu.Unlock()
+	out := map[string]int64{}
+	if len(v) == 0 {
+		return out
+	}
+	sort.Slice(v, func(i, j int) bool { return v[i] < v[j] })
+	for _, q := range []struct {
+		n string
+		p float64
+	}{{"p50", .5}, {"p95", .95}, {"p99", .99}} {
+		out[kind+"_"+q.n+"_ms"] = v[int(float64(len(v)-1)*q.p)]
+	}
+	return out
+}
 
 // retry retries transient errors (Frontend restart window) up to 90s and counts them.
 func retry(f func() error) error {
@@ -73,9 +102,16 @@ func snapshot() map[string]int64 {
 	if n > 0 {
 		avg = atomic.LoadInt64(&latNs) / n / 1e6
 	}
-	return map[string]int64{"ts": time.Now().Unix(), "started": atomic.LoadInt64(&started), "completed": atomic.LoadInt64(&completed),
+	m := map[string]int64{"ts": time.Now().Unix(), "started": atomic.LoadInt64(&started), "completed": atomic.LoadInt64(&completed),
 		"failed": atomic.LoadInt64(&failed), "retried_calls": atomic.LoadInt64(&retries), "signals": atomic.LoadInt64(&signals),
-		"queries": atomic.LoadInt64(&queries), "inflight": atomic.LoadInt64(&inflight), "e2e_avg_ms": avg, "e2e_max_ms": atomic.LoadInt64(&latMax)}
+		"queries": atomic.LoadInt64(&queries), "inflight": atomic.LoadInt64(&inflight), "e2e_avg_ms": avg, "e2e_max_ms": atomic.LoadInt64(&latMax),
+		"query_init_attempts": atomic.LoadInt64(&queryInit), "query_init_workflows": atomic.LoadInt64(&queryInitWfs)}
+	for _, k := range []string{"e2e", "start", "query"} {
+		for a, b := range pcts(k) {
+			m[a] = b
+		}
+	}
+	return m
 }
 
 func main() {
@@ -133,6 +169,12 @@ func main() {
 		var run client.WorkflowRun
 		err := retry(func() error {
 			var e error
+			ts := time.Now()
+			defer func() {
+				if e == nil {
+					record("start", time.Since(ts).Milliseconds())
+				}
+			}()
 			run, e = c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: id, TaskList: tl, ExecutionStartToCloseTimeout: 10 * time.Minute, DecisionTaskStartToCloseTimeout: 10 * time.Second}, SoakWorkflow, id)
 			return e
 		})
@@ -147,7 +189,9 @@ func main() {
 			return
 		}
 		atomic.AddInt64(&signals, 1)
+		sawInit := false
 		if err = retry(func() error {
+			qs := time.Now()
 			resp, e := c.QueryWorkflow(ctx, id, run.GetRunID(), "state")
 			if e != nil {
 				return e
@@ -157,8 +201,16 @@ func main() {
 				return e
 			}
 			if s != "w-"+id {
+				if s == "init" {
+					atomic.AddInt64(&queryInit, 1)
+					if !sawInit {
+						sawInit = true
+						atomic.AddInt64(&queryInitWfs, 1)
+					}
+				}
 				return fmt.Errorf("query state %q", s)
 			}
+			record("query", time.Since(qs).Milliseconds())
 			return nil
 		}); err != nil {
 			fail("query", err)
@@ -186,6 +238,7 @@ func main() {
 		atomic.AddInt64(&completed, 1)
 		atomic.AddInt64(&latNs, ms*1e6)
 		atomic.AddInt64(&latCount, 1)
+		record("e2e", ms)
 		for {
 			m := atomic.LoadInt64(&latMax)
 			if ms <= m || atomic.CompareAndSwapInt64(&latMax, m, ms) {
