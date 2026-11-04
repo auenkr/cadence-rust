@@ -226,7 +226,7 @@ impl<M: TransactionState, S: WorkflowContextStore<M>> WorkflowContext<M, S> {
         }
         self.set_history_size(size); mutation.execution_info.history_size = size;
         let mut snapshot = None; let mut new_events = Vec::new();
-        if let (Some(context), Some(new_policy)) = (new.as_deref_mut(), new_policy) {
+        if let (Some(context), Some(new_policy)) = (new, new_policy) {
             if let Some(state) = &mut context.mutable_state {
                 let (mut image, events) = state.close_snapshot(now, new_policy)?;
                 if !image.workflow_requests.is_empty() && !mutation.workflow_requests.is_empty() {
@@ -267,7 +267,8 @@ impl<M: TransactionState, S: ConflictContextStore<M>> WorkflowContext<M, S> {
     #[allow(clippy::too_many_arguments)]
     pub async fn conflict_resolve_workflow_execution(&mut self, now: i64, mode: cadence_persistence::history_contract::ConflictResolveWorkflowMode, reset: &mut M, mut new: Option<&mut Self>, mut current: Option<&mut Self>, current_policy: Option<TransactionPolicy>) -> Result<(), M::Error> {
         let result = self.conflict_resolve_inner(now, mode, reset, new.as_deref_mut(), current.as_deref_mut(), current_policy).await;
-        if result.is_err() { self.clear(); if let Some(new) = new { new.clear(); } if current_policy.is_some() { if let Some(current) = current { current.clear(); } } }
+        if result.is_err() { self.clear(); if let Some(new) = new { new.clear(); }
+ if current_policy.is_some() { if let Some(current) = current { current.clear(); } } }
         result
     }
     #[allow(clippy::too_many_arguments)]

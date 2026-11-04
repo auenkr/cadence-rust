@@ -1,6 +1,6 @@
 //! In-memory history event builder from `history_builder.go`.
 
-use cadence_api::service_types::HistoryEvent;
+use cadence_api::service_types::{HistoryEvent, WorkflowExecutionCancelRequestedEventAttributes, WorkflowExecutionSignaledEventAttributes, WorkflowExecutionStartedEventAttributes, WorkflowExecutionTerminatedEventAttributes};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HistoryBuilder {
@@ -72,115 +72,115 @@ impl HistoryBuilder {
     pub fn add_workflow_execution_cancel_requested_event(&mut self, attributes: WorkflowExecutionCancelRequestedEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::WorkflowExecutionCancelRequested), workflow_execution_cancel_requested_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_workflow_execution_completed_event(&mut self, attributes: crate::tasks::WorkflowExecutionCompletedEventAttributes) -> HistoryEvent {
+    pub fn add_workflow_execution_completed_event(&mut self, attributes: cadence_api::tasks::WorkflowExecutionCompletedEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::WorkflowExecutionCompleted), workflow_execution_completed_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_workflow_execution_failed_event(&mut self, attributes: crate::tasks::WorkflowExecutionFailedEventAttributes) -> HistoryEvent {
+    pub fn add_workflow_execution_failed_event(&mut self, attributes: cadence_api::tasks::WorkflowExecutionFailedEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::WorkflowExecutionFailed), workflow_execution_failed_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_workflow_execution_canceled_event(&mut self, attributes: crate::tasks::WorkflowExecutionCanceledEventAttributes) -> HistoryEvent {
+    pub fn add_workflow_execution_canceled_event(&mut self, attributes: cadence_api::tasks::WorkflowExecutionCanceledEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::WorkflowExecutionCanceled), workflow_execution_canceled_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_decision_task_scheduled_event(&mut self, attributes: crate::tasks::DecisionTaskScheduledEventAttributes) -> HistoryEvent {
+    pub fn add_decision_task_scheduled_event(&mut self, attributes: cadence_api::tasks::DecisionTaskScheduledEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::DecisionTaskScheduled), decision_task_scheduled_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_decision_task_started_event(&mut self, attributes: crate::tasks::DecisionTaskStartedEventAttributes) -> HistoryEvent {
+    pub fn add_decision_task_started_event(&mut self, attributes: cadence_api::tasks::DecisionTaskStartedEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::DecisionTaskStarted), decision_task_started_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_decision_task_completed_event(&mut self, attributes: crate::tasks::DecisionTaskCompletedEventAttributes) -> HistoryEvent {
+    pub fn add_decision_task_completed_event(&mut self, attributes: cadence_api::tasks::DecisionTaskCompletedEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::DecisionTaskCompleted), decision_task_completed_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_decision_task_failed_event(&mut self, attributes: crate::tasks::DecisionTaskFailedEventAttributes) -> HistoryEvent {
+    pub fn add_decision_task_failed_event(&mut self, attributes: cadence_api::tasks::DecisionTaskFailedEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::DecisionTaskFailed), decision_task_failed_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_activity_task_scheduled_event(&mut self, attributes: crate::tasks::ActivityTaskScheduledEventAttributes) -> HistoryEvent {
+    pub fn add_activity_task_scheduled_event(&mut self, attributes: cadence_api::tasks::ActivityTaskScheduledEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::ActivityTaskScheduled), activity_task_scheduled_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_activity_task_started_event(&mut self, attributes: crate::tasks::ActivityTaskStartedEventAttributes) -> HistoryEvent {
+    pub fn add_activity_task_started_event(&mut self, attributes: cadence_api::tasks::ActivityTaskStartedEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::ActivityTaskStarted), activity_task_started_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_activity_task_completed_event(&mut self, attributes: crate::tasks::ActivityTaskCompletedEventAttributes) -> HistoryEvent {
+    pub fn add_activity_task_completed_event(&mut self, attributes: cadence_api::tasks::ActivityTaskCompletedEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::ActivityTaskCompleted), activity_task_completed_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_activity_task_failed_event(&mut self, attributes: crate::tasks::ActivityTaskFailedEventAttributes) -> HistoryEvent {
+    pub fn add_activity_task_failed_event(&mut self, attributes: cadence_api::tasks::ActivityTaskFailedEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::ActivityTaskFailed), activity_task_failed_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_activity_task_cancel_requested_event(&mut self, attributes: crate::tasks::ActivityTaskCancelRequestedEventAttributes) -> HistoryEvent {
+    pub fn add_activity_task_cancel_requested_event(&mut self, attributes: cadence_api::tasks::ActivityTaskCancelRequestedEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::ActivityTaskCancelRequested), activity_task_cancel_requested_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_activity_task_canceled_event(&mut self, attributes: crate::tasks::ActivityTaskCanceledEventAttributes) -> HistoryEvent {
+    pub fn add_activity_task_canceled_event(&mut self, attributes: cadence_api::tasks::ActivityTaskCanceledEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::ActivityTaskCanceled), activity_task_canceled_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_timer_started_event(&mut self, attributes: crate::tasks::TimerStartedEventAttributes) -> HistoryEvent {
+    pub fn add_timer_started_event(&mut self, attributes: cadence_api::tasks::TimerStartedEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::TimerStarted), timer_started_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_timer_canceled_event(&mut self, attributes: crate::tasks::TimerCanceledEventAttributes) -> HistoryEvent {
+    pub fn add_timer_canceled_event(&mut self, attributes: cadence_api::tasks::TimerCanceledEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::TimerCanceled), timer_canceled_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_cancel_timer_failed_event(&mut self, attributes: crate::tasks::CancelTimerFailedEventAttributes) -> HistoryEvent {
+    pub fn add_cancel_timer_failed_event(&mut self, attributes: cadence_api::tasks::CancelTimerFailedEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::CancelTimerFailed), cancel_timer_failed_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_marker_recorded_event(&mut self, attributes: crate::tasks::MarkerRecordedEventAttributes) -> HistoryEvent {
+    pub fn add_marker_recorded_event(&mut self, attributes: cadence_api::tasks::MarkerRecordedEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::MarkerRecorded), marker_recorded_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_workflow_execution_continued_as_new_event(&mut self, attributes: crate::tasks::WorkflowExecutionContinuedAsNewEventAttributes) -> HistoryEvent {
+    pub fn add_workflow_execution_continued_as_new_event(&mut self, attributes: cadence_api::tasks::WorkflowExecutionContinuedAsNewEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::WorkflowExecutionContinuedAsNew), workflow_execution_continued_as_new_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_start_child_workflow_execution_initiated_event(&mut self, attributes: crate::tasks::StartChildWorkflowExecutionInitiatedEventAttributes) -> HistoryEvent {
+    pub fn add_start_child_workflow_execution_initiated_event(&mut self, attributes: cadence_api::tasks::StartChildWorkflowExecutionInitiatedEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::StartChildWorkflowExecutionInitiated), start_child_workflow_execution_initiated_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_start_child_workflow_execution_failed_event(&mut self, attributes: crate::tasks::StartChildWorkflowExecutionFailedEventAttributes) -> HistoryEvent {
+    pub fn add_start_child_workflow_execution_failed_event(&mut self, attributes: cadence_api::tasks::StartChildWorkflowExecutionFailedEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::StartChildWorkflowExecutionFailed), start_child_workflow_execution_failed_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_child_workflow_execution_started_event(&mut self, attributes: crate::tasks::ChildWorkflowExecutionStartedEventAttributes) -> HistoryEvent {
+    pub fn add_child_workflow_execution_started_event(&mut self, attributes: cadence_api::tasks::ChildWorkflowExecutionStartedEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::ChildWorkflowExecutionStarted), child_workflow_execution_started_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_child_workflow_execution_completed_event(&mut self, attributes: crate::tasks::ChildWorkflowExecutionCompletedEventAttributes) -> HistoryEvent {
+    pub fn add_child_workflow_execution_completed_event(&mut self, attributes: cadence_api::tasks::ChildWorkflowExecutionCompletedEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::ChildWorkflowExecutionCompleted), child_workflow_execution_completed_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_child_workflow_execution_failed_event(&mut self, attributes: crate::tasks::ChildWorkflowExecutionFailedEventAttributes) -> HistoryEvent {
+    pub fn add_child_workflow_execution_failed_event(&mut self, attributes: cadence_api::tasks::ChildWorkflowExecutionFailedEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::ChildWorkflowExecutionFailed), child_workflow_execution_failed_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_child_workflow_execution_canceled_event(&mut self, attributes: crate::tasks::ChildWorkflowExecutionCanceledEventAttributes) -> HistoryEvent {
+    pub fn add_child_workflow_execution_canceled_event(&mut self, attributes: cadence_api::tasks::ChildWorkflowExecutionCanceledEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::ChildWorkflowExecutionCanceled), child_workflow_execution_canceled_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_child_workflow_execution_terminated_event(&mut self, attributes: crate::tasks::ChildWorkflowExecutionTerminatedEventAttributes) -> HistoryEvent {
+    pub fn add_child_workflow_execution_terminated_event(&mut self, attributes: cadence_api::tasks::ChildWorkflowExecutionTerminatedEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::ChildWorkflowExecutionTerminated), child_workflow_execution_terminated_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_signal_external_workflow_execution_initiated_event(&mut self, attributes: crate::tasks::SignalExternalWorkflowExecutionInitiatedEventAttributes) -> HistoryEvent {
+    pub fn add_signal_external_workflow_execution_initiated_event(&mut self, attributes: cadence_api::tasks::SignalExternalWorkflowExecutionInitiatedEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::SignalExternalWorkflowExecutionInitiated), signal_external_workflow_execution_initiated_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_signal_external_workflow_execution_failed_event(&mut self, attributes: crate::tasks::SignalExternalWorkflowExecutionFailedEventAttributes) -> HistoryEvent {
+    pub fn add_signal_external_workflow_execution_failed_event(&mut self, attributes: cadence_api::tasks::SignalExternalWorkflowExecutionFailedEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::SignalExternalWorkflowExecutionFailed), signal_external_workflow_execution_failed_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_request_cancel_external_workflow_execution_initiated_event(&mut self, attributes: crate::tasks::RequestCancelExternalWorkflowExecutionInitiatedEventAttributes) -> HistoryEvent {
+    pub fn add_request_cancel_external_workflow_execution_initiated_event(&mut self, attributes: cadence_api::tasks::RequestCancelExternalWorkflowExecutionInitiatedEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::RequestCancelExternalWorkflowExecutionInitiated), request_cancel_external_workflow_execution_initiated_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_request_cancel_external_workflow_execution_failed_event(&mut self, attributes: crate::tasks::RequestCancelExternalWorkflowExecutionFailedEventAttributes) -> HistoryEvent {
+    pub fn add_request_cancel_external_workflow_execution_failed_event(&mut self, attributes: cadence_api::tasks::RequestCancelExternalWorkflowExecutionFailedEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::RequestCancelExternalWorkflowExecutionFailed), request_cancel_external_workflow_execution_failed_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_upsert_workflow_search_attributes_event(&mut self, attributes: crate::tasks::UpsertWorkflowSearchAttributesEventAttributes) -> HistoryEvent {
+    pub fn add_upsert_workflow_search_attributes_event(&mut self, attributes: cadence_api::tasks::UpsertWorkflowSearchAttributesEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::UpsertWorkflowSearchAttributes), upsert_workflow_search_attributes_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_timer_fired_event(&mut self, attributes: crate::tasks::TimerFiredEventAttributes) -> HistoryEvent {
+    pub fn add_timer_fired_event(&mut self, attributes: cadence_api::tasks::TimerFiredEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::TimerFired), timer_fired_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_external_workflow_execution_signaled_event(&mut self, attributes: crate::tasks::ExternalWorkflowExecutionSignaledEventAttributes) -> HistoryEvent {
+    pub fn add_external_workflow_execution_signaled_event(&mut self, attributes: cadence_api::tasks::ExternalWorkflowExecutionSignaledEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::ExternalWorkflowExecutionSignaled), external_workflow_execution_signaled_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_external_workflow_execution_cancel_requested_event(&mut self, attributes: crate::tasks::ExternalWorkflowExecutionCancelRequestedEventAttributes) -> HistoryEvent {
+    pub fn add_external_workflow_execution_cancel_requested_event(&mut self, attributes: cadence_api::tasks::ExternalWorkflowExecutionCancelRequestedEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::ExternalWorkflowExecutionCancelRequested), external_workflow_execution_cancel_requested_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_workflow_execution_timed_out_event(&mut self, attributes: crate::tasks::WorkflowExecutionTimedOutEventAttributes) -> HistoryEvent {
+    pub fn add_workflow_execution_timed_out_event(&mut self, attributes: cadence_api::tasks::WorkflowExecutionTimedOutEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::WorkflowExecutionTimedOut), workflow_execution_timed_out_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_decision_task_timed_out_event(&mut self, attributes: crate::tasks::DecisionTaskTimedOutEventAttributes) -> HistoryEvent {
+    pub fn add_decision_task_timed_out_event(&mut self, attributes: cadence_api::tasks::DecisionTaskTimedOutEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::DecisionTaskTimedOut), decision_task_timed_out_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_activity_task_timed_out_event(&mut self, attributes: crate::tasks::ActivityTaskTimedOutEventAttributes) -> HistoryEvent {
+    pub fn add_activity_task_timed_out_event(&mut self, attributes: cadence_api::tasks::ActivityTaskTimedOutEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::ActivityTaskTimedOut), activity_task_timed_out_event_attributes: Some(attributes), ..Default::default() })
     }
-    pub fn add_child_workflow_execution_timed_out_event(&mut self, attributes: crate::tasks::ChildWorkflowExecutionTimedOutEventAttributes) -> HistoryEvent {
+    pub fn add_child_workflow_execution_timed_out_event(&mut self, attributes: cadence_api::tasks::ChildWorkflowExecutionTimedOutEventAttributes) -> HistoryEvent {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::ChildWorkflowExecutionTimedOut), child_workflow_execution_timed_out_event_attributes: Some(attributes), ..Default::default() })
     }
 }
