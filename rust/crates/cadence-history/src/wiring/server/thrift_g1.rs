@@ -43,6 +43,7 @@ const SIGNAL: Table = &[(BadRequest, 1), (Internal, 2), (EntityNotExists, 3), (S
 const TERMINATE: Table = &[(BadRequest, 1), (Internal, 2), (EntityNotExists, 3), (ShardOwnershipLost, 4), (DomainNotActive, 5), (LimitExceeded, 6), (ServiceBusy, 7), (AlreadyCompleted, 8)];
 const CANCEL: Table = &[(BadRequest, 1), (Internal, 2), (EntityNotExists, 3), (ShardOwnershipLost, 4), (CancelAlready, 5), (DomainNotActive, 6), (LimitExceeded, 7), (ServiceBusy, 8), (AlreadyCompleted, 10)];
 const STICKY: Table = &[(BadRequest, 1), (Internal, 2), (EntityNotExists, 3), (ShardOwnershipLost, 4), (LimitExceeded, 5), (ServiceBusy, 6), (AlreadyCompleted, 7)];
+const RESET: Table = &[(BadRequest, 1), (Internal, 2), (EntityNotExists, 3), (ShardOwnershipLost, 4), (DomainNotActive, 5), (LimitExceeded, 6), (ServiceBusy, 7)];
 const QUERY: Table = &[(BadRequest, 1), (Internal, 2), (EntityNotExists, 3), (QueryFailed, 4), (LimitExceeded, 5), (ServiceBusy, 6), (ClientVersion, 7)];
 const DESCRIBE: Table = &[(BadRequest, 1), (Internal, 2), (EntityNotExists, 3), (ShardOwnershipLost, 4), (LimitExceeded, 5), (ServiceBusy, 6)];
 const REAPPLY: Table = &[(BadRequest, 1), (Internal, 2), (DomainNotActive, 3), (LimitExceeded, 4), (ServiceBusy, 5), (ShardOwnershipLost, 6), (EntityNotExists, 7)];
@@ -231,9 +232,10 @@ pub async fn dispatch_rich(state: &ServerState, method: &str, args: &Struct) -> 
             Ok(r) => Ok(finish(h.schedule_decision_task(Some(&r)).await, SCHEDULE, |()| None)),
             Err(e) => Err(e),
         },
-        // ResetWorkflowExecution is NOT served: engine::types::
-        // HistoryResetWorkflowExecutionRequest carries `failed_request`
-        // (RespondDecisionTaskFailedRequest) instead of Go's `resetRequest`.
+        "ResetWorkflowExecution" => match request(args) {
+            Ok(r) => Ok(finish(h.reset_workflow_execution(Some(&r)).await, RESET, |v| Some(v.to_thrift()))),
+            Err(e) => Err(e),
+        },
         _ => return None,
     })
 }

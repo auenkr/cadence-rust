@@ -145,8 +145,8 @@ impl HistoryApi for GrpcHistory {
     async fn merge_dlq_messages(&self, request: Request<pb::MergeDlqMessagesRequest>) -> Result<Response<pb::MergeDlqMessagesResponse>, Status> {
         super::grpc_g3::merge_dlq_messages(&self.state, request.into_inner()).await.map(Response::new)
     }
-    async fn reset_workflow_execution(&self, _request: Request<pb::ResetWorkflowExecutionRequest>) -> Result<Response<pb::ResetWorkflowExecutionResponse>, Status> {
-        Err(Status::unimplemented("ResetWorkflowExecution is not implemented"))
+    async fn reset_workflow_execution(&self, request: Request<pb::ResetWorkflowExecutionRequest>) -> Result<Response<pb::ResetWorkflowExecutionResponse>, Status> {
+        super::grpc_g1::reset_workflow_execution(&self.state, request.into_inner()).await.map(Response::new)
     }
     async fn close_shard(&self, request: Request<pb::CloseShardRequest>) -> Result<Response<pb::CloseShardResponse>, Status> {
         gate(&self.state)?;

@@ -125,8 +125,9 @@ async fn thrift_close_shard_and_health() {
     let (_, app, res) = call(&mut c, 4, "cadence-history", "Meta::health", None).await;
     assert!(!app);
     assert!(res.unwrap().get(0).is_some());
-    let (k, _, _) = call(&mut c, 5, "cadence-history", "HistoryService::ResetWorkflowExecution", None).await;
-    assert_eq!(k, 0xff);
+    let (_, app, res) = call(&mut c, 5, "cadence-history", "HistoryService::ResetWorkflowExecution", None).await;
+    assert!(app);
+    assert!(res.unwrap().get(2).is_some());
     let (k, _, _) = call(&mut c, 6, "other", "HistoryService::CloseShard", Some(shard_req(1))).await;
     assert_eq!(k, 0xff);
     srv.shutdown().await;
@@ -161,7 +162,7 @@ async fn grpc_admin_rpcs_and_unimplemented() {
     c.remove_task(pb::RemoveTaskRequest::default()).await.unwrap();
     assert_eq!(h.removed.load(Ordering::SeqCst), 1);
     let err = c.reset_workflow_execution(pb::ResetWorkflowExecutionRequest::default()).await.unwrap_err();
-    assert_eq!(err.code(), tonic::Code::Unimplemented);
+    assert_eq!(err.code(), tonic::Code::Internal);
     srv.shutdown().await;
     assert!(h.stopped.load(Ordering::SeqCst));
 }
@@ -175,4 +176,35 @@ fn limiter_and_error_mapping() {
     assert_eq!(errors::grpc_status(&HistoryError::entity_not_exists("x")).code(), tonic::Code::NotFound);
     assert_eq!(errors::grpc_status(&errors::busy()).code(), tonic::Code::ResourceExhausted);
     assert_eq!(errors::thrift_exception(&HistoryError::internal("x")).0, "InternalServiceError");
+}
+
+#[tokio::test]
+async fn reset_workflow_execution_both_transports() {
+    let h = Arc::new(MockHandler::default());
+    let srv = HistoryServer::start(cfg(0.0), h.clone()).await.unwrap();
+    // gRPC
+    let mut g = HistoryApiClient::connect(format!("http://{}", srv.grpc_addr)).await.unwrap();
+    let resp = g
+        .reset_workflow_execution(pb::ResetWorkflowExecutionRequest {
+            domain_id: "dom".into(),
+            request: Some(cadence_proto::api::ResetWorkflowExecutionRequest { decision_finish_event_id: 9, ..Default::default() }),
+        })
+        .await
+        .unwrap();
+    assert_eq!(resp.into_inner().run_id, "dom:9");
+    // Thrift request {10: domainUUID, 20: {40: decisionFinishEventId}}
+    let mut c = connect(srv.thrift_addr).await;
+    let mut req = Struct::default();
+    req.fields.push((10, Value::Bytes(b"dom".to_vec())));
+    let mut inner = Struct::default();
+    inner.fields.push((40, Value::I64(5)));
+    req.fields.push((20, Value::Struct(inner)));
+    let (_, app, res) = call(&mut c, 7, "cadence-history", "HistoryService::ResetWorkflowExecution", Some(req)).await;
+    assert!(!app);
+    let ok = match res.unwrap().get(0) {
+        Some(Value::Struct(s)) => s.clone(),
+        other => panic!("unexpected {other:?}"),
+    };
+    assert_eq!(ok.get(10), Some(&Value::Bytes(b"dom:5".to_vec())));
+    srv.shutdown().await;
 }

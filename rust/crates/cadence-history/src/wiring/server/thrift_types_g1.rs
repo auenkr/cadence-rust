@@ -4,7 +4,7 @@ use crate::engine::types::{
     HistoryDescribeWorkflowExecutionRequest, HistoryQueryWorkflowRequest,
     HistoryQueryWorkflowResponse, HistoryReapplyEventsRequest, HistoryRefreshWorkflowTasksRequest,
     HistoryRequestCancelWorkflowExecutionRequest, HistoryResetStickyTaskListRequest,
-    HistoryResetStickyTaskListResponse, HistorySignalWithStartWorkflowExecutionRequest,
+    HistoryResetStickyTaskListResponse, HistoryResetWorkflowExecutionRequest, HistorySignalWithStartWorkflowExecutionRequest,
     HistorySignalWorkflowExecutionRequest, HistoryStartWorkflowExecutionRequest,
     HistoryTerminateWorkflowExecutionRequest, ParentExecutionInfo, ScheduleDecisionTaskRequest,
 };
@@ -193,6 +193,24 @@ impl FromThrift for HistoryResetStickyTaskListResponse {
 impl ToThrift for HistoryResetStickyTaskListResponse {
     fn to_thrift(&self) -> Struct {
         Struct::default()
+    }
+}
+
+impl FromThrift for HistoryResetWorkflowExecutionRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, Error> {
+        Ok(Self {
+            domain_uuid: s.req_string(10, "")?,
+            reset_request: s.opt_struct(20)?,
+        })
+    }
+}
+
+impl ToThrift for HistoryResetWorkflowExecutionRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain_uuid);
+        f.ostruct(20, self.reset_request.as_ref());
+        f.finish()
     }
 }
 
@@ -387,6 +405,24 @@ mod tests {
         };
         let b = HistoryTerminateWorkflowExecutionRequest::from_thrift(&t.to_thrift()).unwrap();
         assert_eq!(b.domain_uuid, "d");
+    }
+
+    #[test]
+    fn reset_request_round_trip() {
+        let r = HistoryResetWorkflowExecutionRequest {
+            domain_uuid: "d".into(),
+            reset_request: Some(cadence_api::types::ResetWorkflowExecutionRequest {
+                domain: "dom".into(),
+                workflow_execution: Some(we()),
+                reason: "r".into(),
+                decision_finish_event_id: 4,
+                request_id: "q".into(),
+                skip_signal_reapply: true,
+            }),
+        };
+        let b = HistoryResetWorkflowExecutionRequest::from_thrift(&r.to_thrift()).unwrap();
+        assert_eq!(b.domain_uuid, "d");
+        assert_eq!(b.reset_request.unwrap().decision_finish_event_id, 4);
     }
 
     #[test]

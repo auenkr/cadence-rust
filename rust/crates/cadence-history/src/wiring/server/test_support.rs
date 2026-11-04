@@ -56,7 +56,12 @@ impl Handler for MockHandler {
     async fn replicate_events_v2(&self, request: Option<&crate::engine::types::ReplicateEventsV2Request>) -> HResult<()> { Err(HistoryError::internal("mock")) }
     async fn request_cancel_workflow_execution(&self, request: Option<&crate::engine::types::HistoryRequestCancelWorkflowExecutionRequest>) -> HResult<()> { Err(HistoryError::internal("mock")) }
     async fn reset_sticky_task_list(&self, request: Option<&crate::engine::types::HistoryResetStickyTaskListRequest>) -> HResult<crate::engine::types::HistoryResetStickyTaskListResponse> { Err(HistoryError::internal("mock")) }
-    async fn reset_workflow_execution(&self, request: Option<&crate::engine::types::HistoryResetWorkflowExecutionRequest>) -> HResult<cadence_api::types::ResetWorkflowExecutionResponse> { Err(HistoryError::internal("mock")) }
+    async fn reset_workflow_execution(&self, request: Option<&crate::engine::types::HistoryResetWorkflowExecutionRequest>) -> HResult<cadence_api::types::ResetWorkflowExecutionResponse> {
+        match request.and_then(|r| r.reset_request.as_ref().map(|x| (r.domain_uuid.clone(), x.decision_finish_event_id))) {
+            Some((d, id)) => Ok(cadence_api::types::ResetWorkflowExecutionResponse { run_id: format!("{d}:{id}") }),
+            None => Err(HistoryError::internal("mock")),
+        }
+    }
     async fn respond_activity_task_canceled(&self, request: Option<&crate::engine::types::HistoryRespondActivityTaskCanceledRequest>) -> HResult<()> { Err(HistoryError::internal("mock")) }
     async fn respond_activity_task_completed(&self, request: Option<&crate::engine::types::HistoryRespondActivityTaskCompletedRequest>) -> HResult<()> { Err(HistoryError::internal("mock")) }
     async fn respond_activity_task_failed(&self, request: Option<&crate::engine::types::HistoryRespondActivityTaskFailedRequest>) -> HResult<()> { Err(HistoryError::internal("mock")) }
