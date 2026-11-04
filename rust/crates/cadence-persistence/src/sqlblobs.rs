@@ -514,3 +514,171 @@ mod tests {
         assert_eq!(replication_task_from_struct(&replication_task_to_struct(&replication).unwrap()).unwrap(), replication);
     }
 }
+
+// ---- History shard row (`sqlblobs.ShardInfo`) plain-data codec -------------------------
+
+/// One `types.ProcessingQueueState` as stored inside the shard blob.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ShardProcessingQueueRecord { pub level: i32, pub ack_level: i64, pub max_level: i64, pub domain_ids: Vec<String>, pub reverse_match: bool }
+
+/// `types.QueueState`; keys are `(scheduled_time_nano, task_id)`.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ShardQueueStateRecord { pub exclusive_max_read_level: (i64, i64), pub virtual_slice_inclusive_mins: Vec<(i64, i64)> }
+
+/// Plain-data view of `sqlblobs.ShardInfo` (the `shards.data` blob).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ShardInfoRecord {
+    pub stolen_since_renew: i32,
+    pub updated_at_nanos: i64,
+    pub replication_ack_level: i64,
+    pub transfer_ack_level: i64,
+    pub timer_ack_level_nanos: i64,
+    pub domain_notification_version: i64,
+    pub cluster_transfer_ack_level: std::collections::BTreeMap<String, i64>,
+    pub cluster_timer_ack_level: std::collections::BTreeMap<String, i64>,
+    pub owner: String,
+    pub cluster_replication_level: std::collections::BTreeMap<String, i64>,
+    /// `(domain_id, failover_version, creation_time)`
+    pub pending_failover_markers: Vec<(String, i64, i64)>,
+    pub transfer_processing_queue_states: std::collections::BTreeMap<String, Vec<ShardProcessingQueueRecord>>,
+    pub timer_processing_queue_states: std::collections::BTreeMap<String, Vec<ShardProcessingQueueRecord>>,
+    pub queue_states: std::collections::BTreeMap<i32, ShardQueueStateRecord>,
+}
+
+fn i64_map(map: &std::collections::BTreeMap<String, i64>) -> Value {
+    Value::Map(map.iter().map(|(k, v)| (string_field(k), Value::I64(*v))).collect())
+}
+fn read_i64_map(value: &Struct, id: i16) -> Result<std::collections::BTreeMap<String, i64>> {
+    let mut out = std::collections::BTreeMap::new();
+    match value.get(id) {
+        None => {}
+        Some(Value::Map(entries)) => {
+            for (k, v) in entries {
+                let (Value::Bytes(k), Value::I64(v)) = (k, v) else { return Err(Error::Invalid(format!("field {id}: bad map<string,i64> entry"))) };
+                out.insert(String::from_utf8(k.clone())?, *v);
+            }
+        }
+        Some(v) => return Err(Error::Invalid(format!("field {id}: expected map, got {v:?}"))),
+    }
+    Ok(out)
+}
+fn task_key_struct(key: (i64, i64)) -> Value { Value::Struct(Struct { fields: vec![(10, Value::I64(key.0)), (20, Value::I64(key.1))] }) }
+fn read_task_key(value: Option<&Value>) -> Result<(i64, i64)> {
+    match value { Some(Value::Struct(s)) => Ok((contract_i64(s, 10)?, contract_i64(s, 20)?)), _ => Ok((0, 0)) }
+}
+fn processing_queue_states_blob(states: &std::collections::BTreeMap<String, Vec<ShardProcessingQueueRecord>>) -> Result<Vec<u8>> {
+    let entries = states.iter().map(|(cluster, list)| {
+        let list = list.iter().map(|s| {
+            let mut fields = vec![(10, Value::I32(s.level)), (20, Value::I64(s.ack_level)), (30, Value::I64(s.max_level))];
+            let mut filter = Vec::new();
+            if !s.domain_ids.is_empty() { filter.push((10, Value::List(s.domain_ids.iter().map(|d| string_field(d)).collect()))); }
+            filter.push((20, Value::Bool(s.reverse_match)));
+            fields.push((40, Value::Struct(Struct { fields: filter })));
+            Value::Struct(Struct { fields })
+        }).collect();
+        (string_field(cluster), Value::List(list))
+    }).collect();
+    Encoding::ThriftRW.encode(&Struct { fields: vec![(10, Value::Map(entries))] })
+}
+fn read_processing_queue_states(data: &[u8]) -> Result<std::collections::BTreeMap<String, Vec<ShardProcessingQueueRecord>>> {
+    let mut out = std::collections::BTreeMap::new();
+    if data.is_empty() { return Ok(out); }
+    let root = Encoding::ThriftRW.decode(data)?;
+    if let Some(Value::Map(entries)) = root.get(10) {
+        for (k, v) in entries {
+            let (Value::Bytes(k), Value::List(list)) = (k, v) else { return Err(Error::Invalid("bad ProcessingQueueStates entry".into())) };
+            let mut states = Vec::new();
+            for item in list {
+                let Value::Struct(s) = item else { return Err(Error::Invalid("bad ProcessingQueueState".into())) };
+                let mut rec = ShardProcessingQueueRecord { level: contract_i32(s, 10)?, ack_level: contract_i64(s, 20)?, max_level: contract_i64(s, 30)?, ..Default::default() };
+                if let Some(Value::Struct(f)) = s.get(40) {
+                    if let Some(Value::List(ids)) = f.get(10) {
+                        for id in ids { if let Value::Bytes(b) = id { rec.domain_ids.push(String::from_utf8(b.clone())?); } }
+                    }
+                    rec.reverse_match = matches!(f.get(20), Some(Value::Bool(true)));
+                }
+                states.push(rec);
+            }
+            out.insert(String::from_utf8(k.clone())?, states);
+        }
+    }
+    Ok(out)
+}
+
+impl ShardInfoRecord {
+    pub fn to_struct(&self) -> Result<Struct> {
+        let mut f: Vec<(i16, Value)> = vec![
+            (10, Value::I32(self.stolen_since_renew)), (12, Value::I64(self.updated_at_nanos)), (14, Value::I64(self.replication_ack_level)),
+            (16, Value::I64(self.transfer_ack_level)), (18, Value::I64(self.timer_ack_level_nanos)), (24, Value::I64(self.domain_notification_version)),
+            (38, string_field(&self.owner)),
+        ];
+        if !self.cluster_transfer_ack_level.is_empty() { f.push((34, i64_map(&self.cluster_transfer_ack_level))); }
+        if !self.cluster_timer_ack_level.is_empty() { f.push((36, i64_map(&self.cluster_timer_ack_level))); }
+        if !self.cluster_replication_level.is_empty() { f.push((40, i64_map(&self.cluster_replication_level))); }
+        if !self.pending_failover_markers.is_empty() {
+            let list = self.pending_failover_markers.iter().map(|(d, v, c)| Value::Struct(Struct { fields: vec![(10, string_field(d)), (20, Value::I64(*v)), (30, Value::I64(*c))] })).collect();
+            let blob = Encoding::ThriftRW.encode(&Struct { fields: vec![(10, Value::List(list))] })?;
+            f.push((42, Value::Bytes(blob))); f.push((44, string_field("thriftrw")));
+        }
+        if !self.transfer_processing_queue_states.is_empty() {
+            f.push((50, Value::Bytes(processing_queue_states_blob(&self.transfer_processing_queue_states)?))); f.push((51, string_field("thriftrw")));
+        }
+        if !self.timer_processing_queue_states.is_empty() {
+            f.push((55, Value::Bytes(processing_queue_states_blob(&self.timer_processing_queue_states)?))); f.push((56, string_field("thriftrw")));
+        }
+        if !self.queue_states.is_empty() {
+            let entries = self.queue_states.iter().map(|(category, state)| {
+                let mut qf = Vec::new();
+                if !state.virtual_slice_inclusive_mins.is_empty() {
+                    let slices = state.virtual_slice_inclusive_mins.iter().map(|k| Value::Struct(Struct { fields: vec![(10, Value::Struct(Struct { fields: vec![(10, task_key_struct(*k))] }))] })).collect();
+                    qf.push((10, Value::Map(vec![(Value::I64(0), Value::Struct(Struct { fields: vec![(10, Value::List(slices))] }))])));
+                }
+                qf.push((20, task_key_struct(state.exclusive_max_read_level)));
+                (Value::I32(*category), Value::Struct(Struct { fields: qf }))
+            }).collect();
+            f.push((64, Value::Map(entries)));
+        }
+        Ok(Struct { fields: f })
+    }
+
+    pub fn from_struct(v: &Struct) -> Result<Self> {
+        let mut rec = Self {
+            stolen_since_renew: contract_i32(v, 10)?, updated_at_nanos: contract_i64(v, 12)?, replication_ack_level: contract_i64(v, 14)?,
+            transfer_ack_level: contract_i64(v, 16)?, timer_ack_level_nanos: contract_i64(v, 18)?, domain_notification_version: contract_i64(v, 24)?,
+            cluster_transfer_ack_level: read_i64_map(v, 34)?, cluster_timer_ack_level: read_i64_map(v, 36)?, owner: contract_string(v, 38)?,
+            cluster_replication_level: read_i64_map(v, 40)?, ..Default::default()
+        };
+        let markers = contract_bytes(v, 42)?;
+        if !markers.is_empty() {
+            let root = Encoding::ThriftRW.decode(&markers)?;
+            if let Some(Value::List(list)) = root.get(10) {
+                for item in list { if let Value::Struct(s) = item { rec.pending_failover_markers.push((contract_string(s, 10)?, contract_i64(s, 20)?, contract_i64(s, 30)?)); } }
+            }
+        }
+        rec.transfer_processing_queue_states = read_processing_queue_states(&contract_bytes(v, 50)?)?;
+        rec.timer_processing_queue_states = read_processing_queue_states(&contract_bytes(v, 55)?)?;
+        if let Some(Value::Map(entries)) = v.get(64) {
+            for (k, s) in entries {
+                let (Value::I32(k), Value::Struct(s)) = (k, s) else { return Err(Error::Invalid("bad queueStates entry".into())) };
+                let mut q = ShardQueueStateRecord { exclusive_max_read_level: read_task_key(s.get(20))?, ..Default::default() };
+                if let Some(Value::Map(vqs)) = s.get(10) {
+                    for (_, vq) in vqs {
+                        let Value::Struct(vq) = vq else { continue };
+                        if let Some(Value::List(slices)) = vq.get(10) {
+                            for slice in slices {
+                                let Value::Struct(slice) = slice else { continue };
+                                let min = match slice.get(10) { Some(Value::Struct(range)) => read_task_key(range.get(10))?, _ => (0, 0) };
+                                q.virtual_slice_inclusive_mins.push(min);
+                            }
+                        }
+                    }
+                }
+                rec.queue_states.insert(*k, q);
+            }
+        }
+        Ok(rec)
+    }
+
+    pub fn encode(&self, encoding: Encoding) -> Result<Vec<u8>> { encoding.encode(&self.to_struct()?) }
+    pub fn decode(data: &[u8], encoding: Encoding) -> Result<Self> { Self::from_struct(&encoding.decode(data)?) }
+}
