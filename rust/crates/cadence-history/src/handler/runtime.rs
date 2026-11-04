@@ -174,7 +174,8 @@ impl HistoryHandler {
             HistoryError::TransportStatus { code, .. } => {
                 // YARPC uses the canonical gRPC code numbers (DeadlineExceeded = 4).
                 if *code == 4 {
-                    self.metrics.error_counter(operation, "CadenceErrContextTimeoutCounter");
+                    self.metrics
+                        .error_counter(operation, "CadenceErrContextTimeoutCounter");
                 }
                 "CadenceFailures"
             }

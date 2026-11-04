@@ -4,7 +4,12 @@ Branch: `history-port-engine`; leave unmerged and undeleted.
 
 Current validation: https://github.com/auenkr/cadence-rust/actions/runs/41917909636
 Head: `dabe8eab4`; conclusion **success** (cadence-history clippy, all targets, warnings denied; package tests).
-Final fresh workspace gate pending.
+Fresh uncached workspace gate: https://github.com/auenkr/cadence-rust/actions/runs/41921033898
+Head: `a5aa15449e2d429515b9ec125c15832721034976`; conclusion **success**.
+Inputs: `clean_target=true`, `format_all=true`, no package selector.
+Workspace Clippy (all targets, warnings denied) followed by workspace tests passed.
+Runner-generated formatting patch applied only to owned engine/handler/wrapper files.
+Final-head package gate pending after formatting/evidence commit.
 
 Source entry points for every requested non-test/non-mock engine, handler and
 wrapper file are represented below. The implementation uses the requested
@@ -262,3 +267,23 @@ handler records deadline-exceeded timeout plus failure counters, and sticky
 query dispatch recognizes status code 4 as a fallback condition. Confirmed
 code 4 against cached upstream yarpcerrors/codes.go. Concrete adapters must
 preserve this status rather than flattening it into Other.
+
+## Fresh validation evidence (2026-11-05)
+
+- Successful fresh workspace run: https://github.com/auenkr/cadence-rust/actions/runs/41921033898
+- Full source head: `a5aa15449e2d429515b9ec125c15832721034976`.
+- Command: `gh workflow run rust-ci.yml --ref history-port-engine -f clean_target=true -f format_all=true`.
+- Conclusion: success; fresh dedicated target, workspace Clippy then workspace tests.
+- Earlier runs 41919069574 and 41920693471 were superseded/cancelled; they are not successful evidence.
+- Source checklist cross-check: all 38 requested non-test/non-mock Go files are named; 300 Go functions across these files.
+- Local `git diff --check` passed. No local Cargo/rustfmt/Go builds or tests.
+- No integration gates, SDK runs or binary SHA evidence: those are deferred by this source-port task.
+- Query metrics now cover first-decision rejection, buffer overflow, registry errors,
+  consistent query deadline, decision/direct/sticky/clear-stickiness/non-sticky latency
+  timer+histogram contracts, and dispatch successes/timeouts. Runtime metrics adapters remain TODO(link).
+
+Remaining integration work: concrete execution/persistence/queue/shard adapters,
+wire type conversions and live server dispatcher registration. This source-port
+inventory does not certify service or SDK parity. Go's partial response alongside
+CountDLQMessages errors is still represented by the Rust Result convention; the
+wire adapter must account for that when concrete upstream transport adapters land.

@@ -16,12 +16,18 @@ struct QueryTimer<'a> {
 }
 impl Drop for QueryTimer<'_> {
     fn drop(&mut self) {
-        self.metrics.query_latency(self.domain, self.name, self.started.elapsed());
+        self.metrics
+            .query_latency(self.domain, self.name, self.started.elapsed());
     }
 }
 impl HistoryEngine {
     fn query_timer<'a>(&'a self, domain: &'a str, name: &'static str) -> QueryTimer<'a> {
-        QueryTimer { metrics: &*self.metrics, domain, name, started: Instant::now() }
+        QueryTimer {
+            metrics: &*self.metrics,
+            domain,
+            name,
+            started: Instant::now(),
+        }
     }
     pub async fn query_workflow(
         &self,
@@ -76,7 +82,8 @@ impl HistoryEngine {
                 .await?;
         }
         if response.previous_started_event_id.unwrap_or_default() <= 0 {
-            self.metrics.query_counter(&req.domain, "QueryBeforeFirstDecisionCount");
+            self.metrics
+                .query_counter(&req.domain, "QueryBeforeFirstDecisionCount");
             return Err(QueryFailedError {
                 message: "workflow must handle at least one decision task before it can be queried"
                     .into(),
@@ -133,10 +140,18 @@ impl HistoryEngine {
                     )
                     .await;
             }
-            let _timer = self.query_timer(request.request.as_ref().map(|r| r.domain.as_str()).unwrap_or_default(), "DecisionTaskQueryLatency");
+            let _timer = self.query_timer(
+                request
+                    .request
+                    .as_ref()
+                    .map(|r| r.domain.as_str())
+                    .unwrap_or_default(),
+                "DecisionTaskQueryLatency",
+            );
             let registry = state.get_query_registry();
             if registry.buffered_count() >= self.config.max_buffered_query_count() {
-                self.metrics.query_counter(&req.domain, "QueryBufferExceededCount");
+                self.metrics
+                    .query_counter(&req.domain, "QueryBufferExceededCount");
                 return Err(HistoryError::internal(
                     "consistent query buffer is full, cannot accept new consistent queries",
                 ));
@@ -149,7 +164,8 @@ impl HistoryEngine {
                         tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), channel)
                             .await
                             .map_err(|_| {
-                                self.metrics.query_counter(&req.domain, "ConsistentQueryTimeoutCount");
+                                self.metrics
+                                    .query_counter(&req.domain, "ConsistentQueryTimeoutCount");
                                 HistoryError::DeadlineExceeded
                             })?
                             .map_err(|_| HistoryError::Canceled)?
@@ -157,7 +173,8 @@ impl HistoryEngine {
                     None => channel.await.map_err(|_| HistoryError::Canceled)?,
                 }
                 match registry.get_termination_state(&id).inspect_err(|_| {
-                    self.metrics.query_counter(&req.domain, "QueryRegistryInvalidStateCount");
+                    self.metrics
+                        .query_counter(&req.domain, "QueryRegistryInvalidStateCount");
                 })? {
                     QueryTermination::Completed(result) => {
                         match result.result_type.unwrap_or(QueryResultType::Answered) {
@@ -172,9 +189,10 @@ impl HistoryEngine {
                             }
                             .into()),
                             _ => {
-                                self.metrics.query_counter(&req.domain, "QueryRegistryInvalidStateCount");
+                                self.metrics
+                                    .query_counter(&req.domain, "QueryRegistryInvalidStateCount");
                                 Err(invalid_query_state())
-                            },
+                            }
                         }
                     }
                     QueryTermination::Unblocked => {
@@ -193,9 +211,10 @@ impl HistoryEngine {
                     }
                     QueryTermination::Failed(err) => Err(err),
                     QueryTermination::Invalid => {
-                        self.metrics.query_counter(&req.domain, "QueryRegistryInvalidStateCount");
+                        self.metrics
+                            .query_counter(&req.domain, "QueryRegistryInvalidStateCount");
                         Err(invalid_query_state())
-                    },
+                    }
                 }
             }
             .await;
@@ -247,12 +266,17 @@ impl HistoryEngine {
             drop(sticky_timer);
             match result {
                 Ok(Ok(response)) => {
-                    self.metrics.query_counter(&req.domain, "DirectQueryDispatchStickySuccessCount");
+                    self.metrics
+                        .query_counter(&req.domain, "DirectQueryDispatchStickySuccessCount");
                     return Ok(HistoryQueryWorkflowResponse {
                         response: Some(response),
-                    })
+                    });
                 }
-                Ok(Err(HistoryError::StickyWorkerUnavailable | HistoryError::DeadlineExceeded | HistoryError::TransportStatus { code: 4, .. }))
+                Ok(Err(
+                    HistoryError::StickyWorkerUnavailable
+                    | HistoryError::DeadlineExceeded
+                    | HistoryError::TransportStatus { code: 4, .. },
+                ))
                 | Err(_) => {}
                 Ok(Err(err)) => {
                     tracing::error!(error = %err, "query directly though matching on sticky failed, will not attempt query on non-sticky");
@@ -265,7 +289,8 @@ impl HistoryEngine {
                     domain_uuid: domain_id.into(),
                     execution: req.execution.clone(),
                 };
-                let clear_timer = self.query_timer(&req.domain, "DirectQueryDispatchClearStickinessLatency");
+                let clear_timer =
+                    self.query_timer(&req.domain, "DirectQueryDispatchClearStickinessLatency");
                 let result = tokio::time::timeout(
                     Duration::from_secs(5),
                     self.reset_sticky_task_list(&reset),
@@ -278,12 +303,18 @@ impl HistoryEngine {
                         return Err(err);
                     }
                 }
-                self.metrics.query_counter(&req.domain, "DirectQueryDispatchClearStickinessSuccessCount");
+                self.metrics.query_counter(
+                    &req.domain,
+                    "DirectQueryDispatchClearStickinessSuccessCount",
+                );
             }
         }
         if deadline.is_some_and(|d| d <= Instant::now()) {
             tracing::info!(domain = %req.domain, "query context timed out before query on non-sticky task list could be attempted");
-            self.metrics.query_counter(&req.domain, "DirectQueryDispatchTimeoutBeforeNonStickyCount");
+            self.metrics.query_counter(
+                &req.domain,
+                "DirectQueryDispatchTimeoutBeforeNonStickyCount",
+            );
             return Err(HistoryError::DeadlineExceeded);
         }
         let non_sticky_timer = self.query_timer(&req.domain, "DirectQueryDispatchNonStickyLatency");
@@ -306,7 +337,8 @@ impl HistoryEngine {
                 tracing::error!(error = %err, domain = %req.domain, "query directly though matching on non-sticky failed");
             }
         })?;
-        self.metrics.query_counter(&req.domain, "DirectQueryDispatchNonStickySuccessCount");
+        self.metrics
+            .query_counter(&req.domain, "DirectQueryDispatchNonStickySuccessCount");
         Ok(HistoryQueryWorkflowResponse {
             response: Some(response),
         })
