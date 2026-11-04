@@ -42,3 +42,10 @@ failover 575, query 372, workflowcache 320.
 - H4a decision/ (checker, task handler, attr validator)
 - H4b engine/engineimpl start/signal/terminate/describe/query/reset
 - H5a queue/ transfer+timer active executors; H5b standby + queuev2
+
+## Progress 2026-11-04
+- Merged: H2 skeleton (41787078112), H2b TChannel+shards (41790419418), H1a SQL shard stores (41789544521),
+  H1 typed contracts + SQL impl guide (41793573331, memory/history-h1-sql-impl-guide.md), H3a mutable-state foundation (41791690758).
+- Running: H1 SQL slice 1 (history-h1-sql-s1), H3a2 decision methods + CI fix (history-h3a2-decision-activity).
+- Next: SQL slices 2-4, H3a3 activity, H3a4 timer/child/signal/cancel/completed, H3b builders/caches, H4, H5, H6, H7.
+- Lesson: workers return early with partial work; require green CI on final head and narrow per-file scope.
