@@ -16,6 +16,14 @@ pub trait Limiter: Send + Sync {
 pub trait LimiterFactory: Send + Sync {
     fn limiter(&self, domain_name: &str) -> Arc<dyn Limiter>;
 }
+pub trait WorkflowCacheObserver: Send + Sync {
+    fn cache_size(&self, _size: usize) {}
+    fn per_workflow_request_count(&self, _domain_name: &str, _kind: RequestKind, _count: i32) {}
+    fn rate_limited(&self, _domain_id: &str, _workflow_id: &str, _domain_name: &str, _kind: RequestKind) {}
+    fn unexpected_error(&self, _domain_id: &str, _workflow_id: &str, _message: &str) {}
+}
+struct NoopObserver;
+impl WorkflowCacheObserver for NoopObserver {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestKind {
     External,
@@ -35,6 +43,7 @@ pub struct WorkflowCache {
     items: Mutex<HashMap<(String, String), Item>>,
     ttl: Duration,
     max_count: usize,
+    observer: Arc<dyn WorkflowCacheObserver>,
 }
 impl WorkflowCache {
     pub fn new(
@@ -51,7 +60,12 @@ impl WorkflowCache {
             items: Mutex::new(HashMap::new()),
             ttl,
             max_count,
+            observer: Arc::new(NoopObserver),
         }
+    }
+    pub fn with_observer(mut self, observer: Arc<dyn WorkflowCacheObserver>) -> Self {
+        self.observer = observer;
+        self
     }
     pub fn allow_external(&self, domain_id: &str, workflow_id: &str) -> bool {
         self.allow(domain_id, workflow_id, RequestKind::External)
@@ -60,9 +74,11 @@ impl WorkflowCache {
         self.allow(domain_id, workflow_id, RequestKind::Internal)
     }
     pub fn allow(&self, domain_id: &str, workflow_id: &str, kind: RequestKind) -> bool {
-        let Ok(domain_name) = self.domains.domain_name(domain_id) else {
-            return true;
+        let domain_name = match self.domains.domain_name(domain_id) {
+            Ok(name) => name,
+            Err(_) => { self.observer.unexpected_error(domain_id, workflow_id, ERR_DOMAIN_NAME); return true; }
         };
+        self.observer.cache_size(self.size());
         let key = (domain_name.clone(), workflow_id.to_owned());
         let now = Instant::now();
         let mut items = self.items.lock().unwrap();
@@ -71,12 +87,18 @@ impl WorkflowCache {
             v.last_access = now;
             return match kind {
                 RequestKind::External => {
-                    v.external_count.update(now);
-                    v.external.allow()
+                    let count = v.external_count.update(now);
+                    self.observer.per_workflow_request_count(&domain_name, kind, count);
+                    let allowed = v.external.allow();
+                    if !allowed { self.observer.rate_limited(domain_id, workflow_id, &domain_name, kind); }
+                    allowed
                 }
                 RequestKind::Internal => {
-                    v.internal_count.update(now);
-                    v.internal.allow()
+                    let count = v.internal_count.update(now);
+                    self.observer.per_workflow_request_count(&domain_name, kind, count);
+                    let allowed = v.internal.allow();
+                    if !allowed { self.observer.rate_limited(domain_id, workflow_id, &domain_name, kind); }
+                    allowed
                 }
             };
         }
@@ -98,12 +120,18 @@ impl WorkflowCache {
         }
         let allowed = match kind {
             RequestKind::External => {
-                value.external_count.update(now);
-                value.external.allow()
+                let count = value.external_count.update(now);
+                self.observer.per_workflow_request_count(&domain_name, kind, count);
+                let allowed = value.external.allow();
+                if !allowed { self.observer.rate_limited(domain_id, workflow_id, &domain_name, kind); }
+                allowed
             }
             RequestKind::Internal => {
-                value.internal_count.update(now);
-                value.internal.allow()
+                let count = value.internal_count.update(now);
+                self.observer.per_workflow_request_count(&domain_name, kind, count);
+                let allowed = value.internal.allow();
+                if !allowed { self.observer.rate_limited(domain_id, workflow_id, &domain_name, kind); }
+                allowed
             }
         };
         items.insert(key, value);

@@ -5,8 +5,9 @@ use std::time::Duration;
 
 pub const ACTIVITY_CANCELLATION_MSG_ACTIVITY_ID_UNKNOWN: &str = "ACTIVITY_ID_UNKNOWN";
 pub const ACTIVITY_CANCELLATION_MSG_ACTIVITY_NOT_STARTED: &str = "ACTIVITY_ID_NOT_STARTED";
-pub const FAILURE_REASON_HISTORY_SIZE_EXCEEDS_LIMIT: &str =
-    "Workflow history size / count exceeds limit.";
+pub const FAILURE_REASON_HISTORY_SIZE_EXCEEDS_LIMIT: &str = "HISTORY_EXCEEDS_LIMIT";
+pub const FAILURE_REASON_DECISION_BLOB_SIZE_EXCEEDS_LIMIT: &str = "DECISION_BLOB_SIZE_EXCEEDS_LIMIT";
+pub const FAILURE_REASON_SEMAPHORE_NOT_FOUND: &str = "SEMAPHORE_NOT_FOUND";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecisionError {
     pub message: String,
@@ -298,7 +299,8 @@ pub fn convert_search_attributes_to_byte_array(
 pub trait DecisionWorkflowBackend {
     fn handle_decision(&mut self, decision: &Decision) -> Result<(), DecisionError>;
     fn fail_decision(&mut self, cause: &str, message: Option<&str>) -> Result<(), DecisionError>;
-    fn complete_decision(&mut self, execution_context: &[u8]) -> Result<(), DecisionError>;
+    fn fail_workflow(&mut self, reason: &str, details: &[u8]) -> Result<(), DecisionError>;
+    fn set_execution_context(&mut self, execution_context: &[u8]) -> Result<(), DecisionError>;
 }
 pub struct DecisionTaskHandler<B> {
     pub backend: B,
@@ -339,8 +341,8 @@ impl<B: DecisionWorkflowBackend> DecisionTaskHandler<B> {
             }
             self.backend.handle_decision(d)?;
         }
-        if !self.fail_decision {
-            self.backend.complete_decision(execution_context)?
+        if !self.fail_decision && !self.stop_processing {
+            self.backend.set_execution_context(execution_context)?
         }
         Ok(())
     }
@@ -404,18 +406,22 @@ impl<B: DecisionWorkflowBackend> DecisionTaskHandler<B> {
         reason: &str,
         details: &str,
     ) -> Result<(), DecisionError> {
-        self.backend.fail_decision(reason, Some(details))
+        self.stop_processing = true;
+        self.backend.fail_workflow(reason, details.as_bytes())
     }
     pub fn handle_workflow_failure(
         &mut self,
         reason: &str,
         message: Option<&str>,
     ) -> Result<(), DecisionError> {
-        self.backend.fail_decision(reason, message)
+        self.backend.fail_workflow(reason, message.unwrap_or_default().as_bytes())
     }
-    pub fn fail_workflow_semaphore_not_found(&mut self, name: &str) -> Result<(), DecisionError> {
-        self.backend
-            .fail_decision("SEMAPHORE_NOT_FOUND", Some(name))
+    pub fn fail_workflow_semaphore_not_found(&mut self, name: &str, domain_name: &str) -> Result<(), DecisionError> {
+        if self.has_unhandled_events_before_decisions {
+            return self.handler_fail_decision("UNHANDLED_DECISION", Some("cannot fail workflow for a missing semaphore, new events arrived while this decision was processing"));
+        }
+        self.stop_processing = true;
+        self.backend.fail_workflow(FAILURE_REASON_SEMAPHORE_NOT_FOUND, fail_workflow_semaphore_not_found_details(name, domain_name).as_bytes())
     }
     pub fn handler_fail_decision(
         &mut self,
@@ -1102,3 +1108,7 @@ pub fn validate_continue_as_new_workflow_execution_attributes(
     }
     Ok(())
 }
+
+#[derive(Debug,Clone,Default,PartialEq,Eq)]pub struct AcquireSemaphoreDecisionAttributes{pub semaphore_name:String,pub permits:i64,pub wait_timeout_seconds:Option<i32>}
+pub fn validate_acquire_semaphore_attributes(a:Option<&AcquireSemaphoreDecisionAttributes>,max_name_length:usize)->Result<(),DecisionError>{let a=a.ok_or_else(||DecisionError::new("AcquireSemaphoreDecisionAttributes is not set on decision."))?;if a.semaphore_name.is_empty(){return Err(DecisionError::new("SemaphoreName is not set on decision."))}if max_name_length>0&&a.semaphore_name.len()>max_name_length{return Err(DecisionError::new("SemaphoreName exceeds length limit."))}if a.wait_timeout_seconds.unwrap_or(0)<0{return Err(DecisionError::new(format!("Invalid WaitTimeoutSeconds: {}",a.wait_timeout_seconds.unwrap())))}Ok(())}
+pub fn fail_workflow_semaphore_not_found_details(name:&str,domain_name:&str)->String{format!("semaphore \"{name}\" does not exist in domain \"{domain_name}\"")}
