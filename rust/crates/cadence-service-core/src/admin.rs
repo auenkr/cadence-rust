@@ -1188,19 +1188,33 @@ pub async fn reapply_events(
     if req.domain.is_empty() {
         return bad_request(validation::err_domain_not_set());
     }
+    if req.workflow_execution.is_none() {
+        return bad_request(BadRequestError::new("Execution is not set on request."));
+    }
     let execution = req.workflow_execution.clone().unwrap_or_default();
     if execution.workflow_id.is_empty() {
-        return bad_request(BadRequestError::new("WorkflowID is not set on request."));
+        return bad_request(BadRequestError::new("WorkflowId is not set on request."));
     }
     // Go quirks a missing events blob into ErrWorkflowIDNotSet.
     let blob = match req.events.as_ref() {
         Some(b) => b,
         None => {
-            return bad_request(BadRequestError::new("WorkflowID is not set on request."));
+            return bad_request(BadRequestError::new("WorkflowId is not set on request."));
         }
     };
     if let Some(e) = require_domain(&state, &req.domain).await {
         return e;
+    }
+    // Go forwards to History, which owns the workflow and applies the events.
+    if state.history_admin_channel.is_some() {
+        let domain_id = match state.domain_manager.domain_id(&req.domain) {
+            Ok(id) => id,
+            Err(error) => return entity_not_exists(error),
+        };
+        return match crate::admin_replication::reapply_events(&state, &domain_id, &req).await {
+            Ok(()) => ok_json(cadence_api::admin::ReapplyEventsResponse {}),
+            Err(error) => proxy_error_response(error),
+        };
     }
     let executions = match state.execution_store(&req.domain) {
         Ok(store) => store,
@@ -1713,7 +1727,7 @@ pub async fn get_cross_cluster_tasks(
 ) -> Response {
     if req.target_cluster.is_empty() {
         return bad_request(BadRequestError::new(
-            "Target cluster is not set on request.",
+            "Cluster name is not set.",
         ));
     }
     if state.history_admin_channel.is_none() {
@@ -1732,7 +1746,7 @@ pub async fn respond_cross_cluster_tasks_completed(
 ) -> Response {
     if req.target_cluster.is_empty() {
         return bad_request(BadRequestError::new(
-            "Target cluster is not set on request.",
+            "Cluster name is not set.",
         ));
     }
     if state.history_admin_channel.is_none() {

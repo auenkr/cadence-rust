@@ -841,17 +841,19 @@ impl a::admin_api_server::AdminApi for Admin {
     ) -> Result<Response<a::ReapplyEventsResponse>, Status> {
         let r = request.into_inner();
         if r.domain.is_empty() {
-            return Err(Status::invalid_argument("Domain is not set."));
+            return Err(Status::invalid_argument("Domain not set on request."));
         }
-        let execution = r.workflow_execution.unwrap_or_default();
+        let Some(execution) = r.workflow_execution else {
+            return Err(Status::invalid_argument("Execution is not set on request."));
+        };
         if execution.workflow_id.is_empty() {
             return Err(Status::invalid_argument(
-                "WorkflowID is not set on request.",
+                "WorkflowId is not set on request.",
             ));
         }
         let events = r
             .events
-            .ok_or_else(|| Status::invalid_argument("WorkflowID is not set on request."))?;
+            .ok_or_else(|| Status::invalid_argument("WorkflowId is not set on request."))?;
         let input = cadence_api::admin::ReapplyEventsRequest {
             domain: r.domain,
             workflow_execution: Some(cadence_api::types::WorkflowExecution {
@@ -1088,7 +1090,7 @@ impl a::admin_api_server::AdminApi for Admin {
     ) -> Result<Response<a::GetCrossClusterTasksResponse>, Status> {
         let r = request.into_inner();
         if r.target_cluster.is_empty() {
-            return Err(Status::invalid_argument("Target cluster is not set."));
+            return Err(Status::invalid_argument("Cluster name is not set."));
         }
         let input = cadence_api::admin::GetCrossClusterTasksRequest {
             shard_ids: r.shard_ids,
@@ -1108,7 +1110,7 @@ impl a::admin_api_server::AdminApi for Admin {
     ) -> Result<Response<a::RespondCrossClusterTasksCompletedResponse>, Status> {
         let r = request.into_inner();
         if r.target_cluster.is_empty() {
-            return Err(Status::invalid_argument("Target cluster is not set."));
+            return Err(Status::invalid_argument("Cluster name is not set."));
         }
         let input = cadence_api::admin::RespondCrossClusterTasksCompletedRequest {
             shard_id: r.shard_id,

@@ -209,8 +209,14 @@ mod resend_tests {
     }
 }
 
+/// History's typed errors cross the Frontend unchanged (Go returns them as is).
 fn internal(error: tonic::Status) -> ProxyError {
-    ProxyError::Internal(error.message().to_string())
+    let message = error.message().to_string();
+    match error.code() {
+        tonic::Code::InvalidArgument => ProxyError::BadRequest(message),
+        tonic::Code::NotFound => ProxyError::NotFound(message),
+        _ => ProxyError::Internal(message),
+    }
 }
 
 fn client(state: &AppState) -> Result<HistoryApiClient<tonic::transport::Channel>, ProxyError> {
@@ -403,6 +409,36 @@ pub async fn merge_dlq_messages(
     })
 }
 
+/// Go admin `ReapplyEvents`: forward to History after domain resolution.
+pub async fn reapply_events(
+    state: &AppState,
+    domain_id: &str,
+    request: &api_admin::ReapplyEventsRequest,
+) -> Result<(), ProxyError> {
+    let mut history = client(state)?;
+    let execution = request.workflow_execution.clone().unwrap_or_default();
+    history
+        .reapply_events(history_admin_request(ph::ReapplyEventsRequest {
+            domain: request.domain.clone(),
+            domain_id: domain_id.to_owned(),
+            workflow_execution: Some(cadence_proto::api::WorkflowExecution {
+                workflow_id: execution.workflow_id,
+                run_id: execution.run_id,
+            }),
+            events: request.events.as_ref().map(|blob| cadence_proto::api::DataBlob {
+                encoding_type: match blob.encoding_type {
+                    Some(cadence_api::enums::EncodingType::ThriftRW) => 1,
+                    Some(cadence_api::enums::EncodingType::JSON) => 2,
+                    _ => 0,
+                },
+                data: blob.data.clone(),
+            }),
+        }))
+        .await
+        .map_err(internal)?;
+    Ok(())
+}
+
 /// Go `GetCrossClusterTasks`: validate then forward to History; task payloads
 /// and failure causes are converted to the API model.
 pub async fn get_cross_cluster_tasks(
@@ -411,7 +447,7 @@ pub async fn get_cross_cluster_tasks(
 ) -> Result<api_admin::GetCrossClusterTasksResponse, ProxyError> {
     if request.target_cluster.is_empty() {
         return Err(ProxyError::BadRequest(
-            "Target cluster is not set on request.".to_string(),
+            "Cluster name is not set.".to_string(),
         ));
     }
     let mut history = client(state)?;
@@ -443,7 +479,7 @@ pub async fn respond_cross_cluster_tasks_completed(
 ) -> Result<api_admin::RespondCrossClusterTasksCompletedResponse, ProxyError> {
     if request.target_cluster.is_empty() {
         return Err(ProxyError::BadRequest(
-            "Target cluster is not set on request.".to_string(),
+            "Cluster name is not set.".to_string(),
         ));
     }
     let mut history = client(state)?;
@@ -479,7 +515,7 @@ mod tests {
             get_cross_cluster_tasks(&state, Default::default())
                 .await
                 .unwrap_err(),
-            ProxyError::BadRequest("Target cluster is not set on request.".into())
+            ProxyError::BadRequest("Cluster name is not set.".into())
         );
         let req = api_admin::RespondCrossClusterTasksCompletedRequest {
             target_cluster: "c".into(),
