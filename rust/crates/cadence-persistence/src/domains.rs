@@ -3210,7 +3210,7 @@ mod failover_notification_version_tests {
                     domain_active_cluster_name: Some("b".into()),
                     ..Default::default()
                 },
-                "a",
+                "b",
                 &cluster_metadata(),
                 &no_cooldown(),
             )
