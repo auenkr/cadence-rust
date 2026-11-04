@@ -3072,3 +3072,151 @@ mod go_sql_frontend_manager_tests {
         assert!(persistence.get_domain(Some("durable"), None).is_err());
     }
 }
+
+#[cfg(test)]
+mod failover_notification_version_tests {
+    use super::*;
+    use cadence_api::service_types::DomainReplicationConfigurationUpdate;
+    use cadence_api::types::ClusterReplicationConfiguration;
+    use cadence_common::cluster::ClusterInformation;
+
+    use crate::matching_domain_metadata::{DomainMetadataPersistence, MatchingDomainMetadata};
+
+    type Store = crate::matching_domain_metadata::MatchingDomainMetadataStore;
+
+    /// Delegates to SQLite but accepts replication-queue writes.
+    #[derive(Debug)]
+    struct QueueingStore(Arc<Store>);
+
+    impl DomainMetadataPersistence for QueueingStore {
+        fn metadata_version(&self) -> Result<i64, String> {
+            DomainMetadataPersistence::metadata_version(&*self.0)
+        }
+        fn get_domain(
+            &self,
+            name: Option<&str>,
+            id: Option<&str>,
+        ) -> Result<MatchingDomainMetadata, String> {
+            DomainMetadataPersistence::get_domain(&*self.0, name, id)
+        }
+        fn create_domain(&self, m: &MatchingDomainMetadata, v: i64) -> Result<(), String> {
+            DomainMetadataPersistence::create_domain(&*self.0, m, v)
+        }
+        fn update_domain(&self, m: &MatchingDomainMetadata, v: i64) -> Result<(), String> {
+            DomainMetadataPersistence::update_domain(&*self.0, m, v)
+        }
+        fn delete_domain(&self, id: &str) -> Result<(), String> {
+            DomainMetadataPersistence::delete_domain(&*self.0, id)
+        }
+        fn enqueue_domain_replication_message(&self, _payload: Vec<u8>) -> Result<i64, String> {
+            Ok(1)
+        }
+    }
+
+    fn cluster_metadata() -> cadence_common::cluster::Metadata {
+        let info = |v| ClusterInformation {
+            enabled: true,
+            initial_failover_version: v,
+            ..Default::default()
+        };
+        cadence_common::cluster::Metadata {
+            failover_version_increment: 10,
+            primary_cluster_name: "a".into(),
+            current_cluster_name: "a".into(),
+            clusters: std::collections::BTreeMap::from([
+                ("a".into(), info(0)),
+                ("b".into(), info(2)),
+            ]),
+        }
+    }
+
+    fn manager_with_global_domain() -> (
+        PersistedFrontendDomainManager,
+        Arc<Store>,
+    ) {
+        let connection = rusqlite::Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE domains (shard_id INTEGER, id BLOB, name TEXT, is_global BOOLEAN, data BLOB, data_encoding TEXT, PRIMARY KEY (shard_id, id));
+                 CREATE TABLE domain_metadata (id INTEGER PRIMARY KEY, notification_version INTEGER);
+                 INSERT INTO domain_metadata VALUES (1, 7);",
+            )
+            .unwrap();
+        let persistence = Arc::new(
+            crate::matching_domain_metadata::MatchingDomainMetadataStore::from_connection(
+                connection, "a",
+            ),
+        );
+        let manager = PersistedFrontendDomainManager::new(
+            InMemoryDomainStore::new(),
+            Arc::new(QueueingStore(persistence.clone())),
+            Arc::new(|| "thriftrw_snappy".to_string()),
+        );
+        let id = uuid::Uuid::from_u128(0x99).to_string();
+        let (info, config, mut replication) = super::tests::sample("global", &id);
+        replication.active_cluster_name = "a".into();
+        replication.clusters = ["a", "b"]
+            .into_iter()
+            .map(|c| ClusterReplicationConfiguration {
+                cluster_name: c.into(),
+            })
+            .collect();
+        manager
+            .create_with_version(info, config, replication, true, 0)
+            .unwrap();
+        (manager, persistence)
+    }
+
+    fn no_cooldown() -> crate::domain_update::DomainPolicy {
+        crate::domain_update::DomainPolicy {
+            cooldown_nanos: 0,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn update_domain_failover_sets_failover_notification_version() {
+        let (manager, persistence) = manager_with_global_domain();
+        let before = persistence.get_domain(Some("global"), None).unwrap();
+        let version = persistence.get_metadata_version().unwrap();
+        assert!(before.failover_notification_version < version);
+        manager
+            .update(
+                &UpdateDomainRequest {
+                    name: "global".into(),
+                    replication_configuration: Some(DomainReplicationConfigurationUpdate {
+                        active_cluster_name: Some("b".into()),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                &cluster_metadata(),
+                &no_cooldown(),
+            )
+            .unwrap();
+        let after = persistence.get_domain(Some("global"), None).unwrap();
+        assert_ne!(after.failover_version, before.failover_version);
+        assert_eq!(after.failover_notification_version, version);
+    }
+
+    #[test]
+    fn failover_domain_sets_failover_notification_version() {
+        let (manager, persistence) = manager_with_global_domain();
+        let version = persistence.get_metadata_version().unwrap();
+        manager
+            .failover(
+                &cadence_api::types::FailoverDomainRequest {
+                    domain_name: "global".into(),
+                    domain_active_cluster_name: Some("b".into()),
+                    ..Default::default()
+                },
+                "b",
+                &cluster_metadata(),
+                &no_cooldown(),
+            )
+            .unwrap();
+        let after = persistence.get_domain(Some("global"), None).unwrap();
+        assert_eq!(after.failover_notification_version, version);
+        assert!(after.failover_version > 0);
+    }
+}
