@@ -232,7 +232,7 @@ mod tests {
         let r = sync_shard_status_in(pb::SyncShardStatusRequest {
             source_cluster: "a".into(),
             shard_id: 3,
-            time: Some(prost_types::Timestamp { seconds: 2, nanos: 5 }),
+            time: Some(c::timestamp_from_nanos(2_000_000_005)),
         });
         assert_eq!((r.shard_id, r.timestamp), (3, Some(2_000_000_005)));
     }
