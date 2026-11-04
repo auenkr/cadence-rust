@@ -58,7 +58,7 @@ pub struct ActivityInfo {
     pub retry_initial_interval_seconds:i32, pub retry_maximum_interval_seconds:i32, pub retry_maximum_attempts:i32,
     pub retry_expiration_time_unix_nanos:i64, pub retry_backoff_coefficient:f64, pub retry_jitter_coefficient:f64,
     pub retry_non_retriable_errors:Vec<String>, pub retry_last_failure_reason:String, pub retry_last_worker_identity:String,
-    pub retry_last_failure_details:Vec<u8>,
+    pub retry_last_failure_details:Vec<u8>, pub retry_last_failure_category:i32, pub retry_last_retry_interval_seconds:i32,
 }
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ChildExecutionInfo { pub version:i64, pub initiated_event_batch_id:i64, pub started_id:i64, pub initiated_event:Vec<u8>, pub initiated_event_encoding:String, pub started_workflow_id:String, pub started_run_id:Vec<u8>, pub started_event:Vec<u8>, pub started_event_encoding:String, pub create_request_id:String, pub domain_id:String, pub domain_name:String, pub workflow_type_name:String, pub parent_close_policy:i32 }
