@@ -40,3 +40,14 @@ reapply_events, notify_tasks, get_replication_messages, terminate/request_cancel
 | engineimpl/signal_workflow_execution.go | engine/signal_workflow_execution.rs | ported |
 | engineimpl/start_workflow_execution.go | - | todo/partial (check engine/*.rs) |
 | engineimpl/terminate_workflow_execution.go | - | todo/partial (check engine/*.rs) |
+
+## Continuation checkpoint (2026-11-05)
+
+Fetched origin and inspected existing worktree `/mnt/storage/service/wt-port-engine`;
+branch already contains newer integration commits than the previous handoff summary.
+Baseline CI run 41897923483 succeeded. No Cargo or Go validation ran locally.
+
+Added `engine/notify_tasks.rs`: NotifyNewHistoryEvent, NotifyNewTransferTasks,
+NotifyNewTimerTasks, including empty batches, first-task failover version resolution,
+lookup failure logging and missing processor behavior. NotifyNewReplicationTasks and
+hydrateReplicationTask remain unported. This is a checkpoint, not a parity claim.
