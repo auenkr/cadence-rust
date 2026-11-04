@@ -8,6 +8,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+def parse_cgroups(entries):
+    groups = {}
+    for row in entries:
+        _, controllers, relative = row.split(":", 2)
+        for controller in controllers.split(","):
+            groups[controller] = relative.lstrip("/")
+    return groups
+
+
 def _container_cgroups():
     raw = subprocess.check_output(["docker", "inspect", "--format", "{{.Name}}\t{{.State.Pid}}", *subprocess.check_output(["docker", "ps", "-q"], text=True).split()], text=True)
     result = {}
@@ -16,15 +25,15 @@ def _container_cgroups():
         if int(pid) <= 0:
             continue
         entries = Path(f"/proc/{pid}/cgroup").read_text().splitlines()
-        groups = {parts[0]: parts[2].lstrip("/") for row in entries if len(parts := row.split(":", 2)) == 3}
+        groups = parse_cgroups(entries)
         # Cgroup v2 stores cpu.stat and memory.current under the unified path.
         unified = Path("/sys/fs/cgroup") / groups.get("", "")
-        if (unified / "cpu.stat").exists() and (unified / "memory.current").exists():
+        if "" in groups and (unified / "cpu.stat").exists() and (unified / "memory.current").exists():
             result[name] = (unified, "v2")
             continue
-        cpu = Path("/sys/fs/cgroup/cpu") / groups.get("cpu", "")
+        cpu = Path("/sys/fs/cgroup/cpuacct") / groups.get("cpuacct", "")
         memory = Path("/sys/fs/cgroup/memory") / groups.get("memory", "")
-        if (cpu / "cpuacct.usage").exists() and (memory / "memory.usage_in_bytes").exists():
+        if "cpuacct" in groups and "memory" in groups and (cpu / "cpuacct.usage").exists() and (memory / "memory.usage_in_bytes").exists():
             result[name] = ((cpu, memory), "v1")
     return result
 
@@ -89,9 +98,10 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
             peak[name] = max(peak[name], data["memory_bytes"])
         last = now
         samples += 1
-    if samples == 1:
-        last = snapshot(selected)
-        samples += 1
+    last = snapshot(selected)
+    samples += 1
+    for name, data in last.items():
+        peak[name] = max(peak[name], data["memory_bytes"])
     elapsed = time.monotonic() - started
     containers_result = {}
     for name, (_, version) in selected.items():
