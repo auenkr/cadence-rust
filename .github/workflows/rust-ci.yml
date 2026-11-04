@@ -61,6 +61,29 @@ jobs:
   clippy-test:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: cadence
+          MYSQL_DATABASE: cadence
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -pcadence"
+          --health-interval=10s --health-timeout=5s --health-retries=12
+          --memory=1800m --memory-swap=1800m --cpus=1.5 --pids-limit=2048
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: cadence
+          POSTGRES_DB: cadence
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d cadence"
+          --health-interval=10s --health-timeout=5s --health-retries=12
+          --memory=1800m --memory-swap=1800m --cpus=1.5 --pids-limit=2048
     env:
       CARGO_TERM_COLOR: never
       PKG: ${{ github.event.inputs.package }}
