@@ -7,4 +7,7 @@ pub mod timer;
 pub mod child_workflow;
 pub mod signal;
 pub mod retry;
+pub mod workflow_close;
+pub mod cancellation;
+pub mod markers;
 

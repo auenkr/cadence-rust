@@ -42,11 +42,13 @@ impl MutableStateBuilder {
             workflow_execution_signaled_event_attributes: Some(cadence_api::service_types::WorkflowExecutionSignaledEventAttributes { signal_name: signal_name.into(), input, identity: identity.into(), request_id: request_id.into() }),
             ..Default::default()
         });
-        self.execution_info["signal_count"] = self.execution_info.get("signal_count").and_then(serde_json::Value::as_i64).unwrap_or_default().saturating_add(1).into();
+        let count = self.execution_info.get("signal_count").and_then(serde_json::Value::as_i64).unwrap_or_default().saturating_add(1);
+        self.execution_info["signal_count"] = count.into();
         event
     }
     pub fn replicate_workflow_execution_signaled_event(&mut self, _event: &HistoryEvent) {
-        self.execution_info["signal_count"] = self.execution_info.get("signal_count").and_then(serde_json::Value::as_i64).unwrap_or_default().saturating_add(1).into();
+        let count = self.execution_info.get("signal_count").and_then(serde_json::Value::as_i64).unwrap_or_default().saturating_add(1);
+        self.execution_info["signal_count"] = count.into();
     }
     pub fn add_signal_external_workflow_execution_initiated_event(&mut self, attributes: SignalExternalWorkflowExecutionInitiatedEventAttributes, signal_request_id: impl Into<String>, first_event_id: i64, timestamp_unix_nanos: i64, version: i64) -> (HistoryEvent, SignalInfo) {
         let event = self.add_event(HistoryEvent { event_type: Some(EventType::SignalExternalWorkflowExecutionInitiated), timestamp: Some(timestamp_unix_nanos), version, signal_external_workflow_execution_initiated_event_attributes: Some(attributes), ..Default::default() });
