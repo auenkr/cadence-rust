@@ -111,6 +111,7 @@ Branch: `history-h2-skeleton`, based on `master` at `797ff0f15`.
 
 - Corrected `ShardOwnershipLost` redirect data to carry the selected member's named TChannel address, matching Go `CreateShardOwnershipLostError`; membership identity remains the ownership comparison key. Added a focused regression test.
 - The generic TChannel dispatcher now recognizes the `HistoryService` IDL and emits an explicit `HistoryService::<method> is not implemented yet` transport error instead of “unknown procedure”. This does not yet make the History service listen on its own TChannel endpoint.
+- CI exposed an incorrect test expectation for the empty workflow ID modulo 4096: the correct Go-compatible result is 378 (the modulo-1000 result is 242). Corrected the expected value; no hashing algorithm change was needed.
 - Validation status: GitHub Actions `rust-ci.yml` must be rerun for the final pushed head; run URL, final head SHA, and conclusion will be recorded after CI. No local Cargo command was run.
 - Important H2 gap: the shared launcher starts History gRPC, but does not yet bind a History TChannel/Thrift listener, and History Thrift requests are not dispatched to a service-specific handler. The static method lists plus generic explicit error are not full handler registration.
 - Dynamic config coverage is intentionally incomplete: the current `Config` carries the shard/controller and selected cache/rate-limit values only; the full ~200-field Go `service/history/config.Config` and every dynamic key/default remain for follow-up.

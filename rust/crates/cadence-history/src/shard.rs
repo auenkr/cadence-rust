@@ -114,7 +114,7 @@ mod tests {
     fn go_workflow_shard_vectors() {
         assert_eq!(ShardController::workflow_id_to_shard("",1000),242);
         assert_eq!(ShardController::workflow_id_to_shard("workflowId",1000),580);
-        assert_eq!(ShardController::workflow_id_to_shard("",4096), 242);
+        assert_eq!(ShardController::workflow_id_to_shard("",4096), 378);
     }
     #[test]
     fn acquires_then_steals_and_closes_when_ownership_moves() {
