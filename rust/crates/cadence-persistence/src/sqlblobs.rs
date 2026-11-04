@@ -336,6 +336,32 @@ mod tests {
     }
 
     #[test]
+    fn all_go_sqlblobs_golden_fixtures_decode_and_reencode_byte_for_byte() {
+        fn decode_hex(hex: &str) -> Vec<u8> {
+            assert_eq!(hex.len() % 2, 0, "fixture hex must have full bytes");
+            hex.as_bytes().chunks_exact(2).map(|pair| {
+                let digit = |byte: u8| match byte {
+                    b'0'..=b'9' => byte - b'0', b'a'..=b'f' => byte - b'a' + 10,
+                    _ => panic!("invalid fixture hex byte {byte}"),
+                };
+                (digit(pair[0]) << 4) | digit(pair[1])
+            }).collect()
+        }
+
+        let mut seen = std::collections::BTreeSet::new();
+        for line in include_str!("../tests/fixtures/sqlblobs_go_golden.txt").lines() {
+            let (name, hex) = line.split_once(' ').expect("fixture line includes a struct name");
+            let bytes = decode_hex(hex);
+            let decoded = Encoding::ThriftRW.decode(&bytes).unwrap_or_else(|error| panic!("{name}: {error}"));
+            let encoded = Encoding::ThriftRW.encode(&decoded).unwrap_or_else(|error| panic!("{name}: {error}"));
+            assert_eq!(encoded, bytes, "Go {name} ThriftRW bytes changed");
+            seen.insert(name);
+        }
+        let expected: std::collections::BTreeSet<_> = HISTORY_STRUCTS.iter().copied().collect();
+        assert_eq!(seen, expected);
+    }
+
+    #[test]
     fn snappy_wraps_the_same_struct_and_encoding_names_match_go() {
         let mut value = Struct::default();
         value.fields.push((13, Value::I64(7)));
