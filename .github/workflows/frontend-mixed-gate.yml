@@ -67,6 +67,8 @@ jobs:
             go/go.sum
             tests/frontend-gate/go.sum
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install admin probe deps
+        run: python3 -m pip install --user grpcio grpcio-tools
       - name: Build Rust cadence-server (fresh target dir)
         run: |
           mkdir -p out

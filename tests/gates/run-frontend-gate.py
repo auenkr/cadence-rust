@@ -484,6 +484,21 @@ try:
             record_services_alive('after-es-restart')
     run('cli-list-workflows-grpc', [*cli_g, '--domain', dom_t, 'workflow', 'list', '--open'])
     run('cli-list-workflows-tchannel', [*cli_t, '--domain', dom_t, 'workflow', 'list', '--open'])
+    # ---- admin probe: ReapplyEvents / GetCrossClusterTasks via Rust Frontend (Go History behind it)
+    try:
+        pr = subprocess.run([sys.executable, str(Path(__file__).resolve().parent / 'admin_probe.py'), f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', dom_t,
+                             str(Path(__file__).resolve().parents[2] / 'go' / 'idls' / 'proto'), str(work)], capture_output=True, text=True, timeout=240)
+        (work / 'admin-probe.log').write_text(pr.stdout + pr.stderr)
+        for line in pr.stdout.splitlines():
+            try:
+                item = json.loads(line)
+            except ValueError:
+                continue
+            record('admin-probe-' + item['name'], item['ok'], item['detail'])
+        if pr.returncode != 0 and not any(l.startswith('{') for l in pr.stdout.splitlines()):
+            record('admin-probe-run', False, pr.stdout + pr.stderr)
+    except Exception as e:
+        record('admin-probe-run', False, repr(e))
     # ---- archival phase: Go History/Worker archive (filestore), Rust Frontend registers/reads
     hist_uri, vis_uri = f'file://{work / "history-archive"}', f'file://{work / "visibility-archive"}'
     dom_ar = 'fe-gate-arch-' + secrets.token_hex(3)
