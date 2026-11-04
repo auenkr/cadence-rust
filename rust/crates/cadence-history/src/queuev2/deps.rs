@@ -540,6 +540,7 @@ pub trait QueueEnv: Send + Sync {
         logger: Arc<dyn Logger>,
         scope: Arc<dyn MetricsScope>,
     ) -> Arc<dyn Rescheduler>;
+    #[allow(clippy::too_many_arguments)]
     fn new_history_task(
         &self,
         shard: &Arc<dyn ShardContext>,

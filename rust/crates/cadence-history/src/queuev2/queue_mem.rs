@@ -4,6 +4,7 @@ use super::deps::*;
 use super::predicate::Predicate;
 
 /// Go `InMemQueue`.
+#[allow(clippy::len_without_is_empty)]
 pub trait InMemQueue: Send {
     fn put_tasks(&mut self, tasks: &[PTask]);
     fn look_ahead(&self, min_task_key: HistoryTaskKey) -> Option<PTask>;

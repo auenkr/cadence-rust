@@ -108,7 +108,7 @@ impl MitigatorImpl {
         }
         let domains_to_clear_per_slice = self.find_domains_to_clear(stats, target_pending_task_count);
         if self.logger.debug_on() {
-            for (_, domains) in &domains_to_clear_per_slice {
+            for domains in domains_to_clear_per_slice.values() {
                 self.logger.debug(&format!(
                     "mitigating queue alert, get domains to clear domains={domains:?}"
                 ));
