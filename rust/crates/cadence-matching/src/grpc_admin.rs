@@ -1064,18 +1064,7 @@ impl a::admin_api_server::AdminApi for Admin {
         &self,
         request: Request<a::ResendReplicationTasksRequest>,
     ) -> Result<Response<a::ResendReplicationTasksResponse>, Status> {
-        let r = request.into_inner();
-        let execution = r.workflow_execution.unwrap_or_default();
-        let input = cadence_api::admin::ResendReplicationTasksRequest {
-            domain_id: r.domain_id,
-            workflow_id: execution.workflow_id,
-            run_id: execution.run_id,
-            remote_cluster: r.remote_cluster,
-            start_event_id: r.start_event.as_ref().map(|i| i.event_id),
-            start_version: r.start_event.as_ref().map(|i| i.version),
-            end_event_id: r.end_event.as_ref().map(|i| i.event_id),
-            end_version: r.end_event.as_ref().map(|i| i.version),
-        };
+        let input = resend_replication_input(request.into_inner());
         let _: cadence_api::admin::ResendReplicationTasksResponse = self
             .call("/api/v1/admin/replication/resend", &input)
             .await?;
@@ -1154,6 +1143,22 @@ pub async fn serve(
     Ok(())
 }
 
+fn resend_replication_input(
+    r: a::ResendReplicationTasksRequest,
+) -> cadence_api::admin::ResendReplicationTasksRequest {
+    let execution = r.workflow_execution.unwrap_or_default();
+    cadence_api::admin::ResendReplicationTasksRequest {
+        domain_id: r.domain_id,
+        workflow_id: execution.workflow_id,
+        run_id: execution.run_id,
+        remote_cluster: r.remote_cluster,
+        start_event_id: r.start_event.as_ref().map(|i| i.event_id),
+        start_version: r.start_event.as_ref().map(|i| i.version),
+        end_event_id: r.end_event.as_ref().map(|i| i.event_id),
+        end_version: r.end_event.as_ref().map(|i| i.version),
+    }
+}
+
 #[cfg(test)]
 mod fix_fe_admin_tests {
     use super::*;
@@ -1178,5 +1183,24 @@ mod fix_fe_admin_tests {
             let back = data_blob_in(Some(out)).unwrap();
             assert_eq!(back.encoding_type, enc);
         }
+    }
+
+    #[test]
+    fn resend_replication_passes_event_ids_and_versions() {
+        let input = resend_replication_input(a::ResendReplicationTasksRequest {
+            domain_id: "d".into(),
+            workflow_execution: Some(cadence_proto::api::WorkflowExecution {
+                workflow_id: "w".into(),
+                run_id: "r".into(),
+            }),
+            remote_cluster: "c".into(),
+            start_event: Some(a::VersionHistoryItem { event_id: 3, version: 11 }),
+            end_event: Some(a::VersionHistoryItem { event_id: 9, version: 12 }),
+        });
+        assert_eq!(
+            (input.start_event_id, input.start_version, input.end_event_id, input.end_version),
+            (Some(3), Some(11), Some(9), Some(12))
+        );
+        assert_eq!((input.workflow_id.as_str(), input.run_id.as_str()), ("w", "r"));
     }
 }
