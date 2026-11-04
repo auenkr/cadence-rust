@@ -78,6 +78,66 @@ pub fn new_token(tree_id: &str, branch_id: &str) -> Vec<u8> {
     })
 }
 
+/// Go `sqlHistoryStore.ForkHistoryBranch` ancestor selection using the typed
+/// History persistence contract. The new branch inherits an existing range
+/// when the fork point is before the branch's begin node, otherwise it appends
+/// a range for the source branch.
+pub fn fork_request(
+    source: &crate::history_contract::HistoryBranchRequest,
+    fork_node_id: i64,
+    new_branch_id: String,
+) -> std::result::Result<crate::history_contract::HistoryBranchRequest, crate::history_contract::PersistenceError> {
+    let begin = source.ancestors.last().map_or(1, |range| range.end_node_id);
+    let mut ancestors = Vec::with_capacity(source.ancestors.len().saturating_add(1));
+    if begin >= fork_node_id {
+        for range in &source.ancestors {
+            if range.end_node_id >= fork_node_id {
+                let mut clipped = range.clone();
+                clipped.end_node_id = fork_node_id;
+                ancestors.push(clipped);
+                break;
+            }
+            ancestors.push(range.clone());
+        }
+    } else {
+        ancestors.clone_from(&source.ancestors);
+        ancestors.push(crate::history_contract::HistoryBranchRange {
+            branch_id: source.branch_id.clone(), begin_node_id: begin, end_node_id: fork_node_id,
+        });
+    }
+    let mut result = source.clone();
+    result.branch_id = new_branch_id;
+    result.ancestors = ancestors;
+    result.fork_node_id = fork_node_id;
+    Ok(result)
+}
+
+/// Go `GetBranchesMaxReferredNodeIDs`: maximum exclusive end node among all
+/// valid branches' ancestor ranges for each physical branch.
+pub fn max_referred_node_ids(branches: &[crate::history_contract::HistoryTreeBranch]) -> std::collections::BTreeMap<String, i64> {
+    let mut referred = std::collections::BTreeMap::new();
+    for branch in branches {
+        for range in &branch.ancestors {
+            referred.entry(range.branch_id.clone())
+                .and_modify(|end: &mut i64| *end = (*end).max(range.end_node_id))
+                .or_insert(range.end_node_id);
+        }
+    }
+    referred
+}
+
+/// Physical rows that Go's branch deletion considers, ordered from leaf back
+/// through ancestors. A shared ancestor is truncated at its greatest live
+/// reference; unshared ranges are removable from their begin node onward.
+pub fn deletion_ranges(branch: &crate::history_contract::HistoryBranchRequest) -> Vec<crate::history_contract::HistoryBranchRange> {
+    let mut ranges = branch.ancestors.clone();
+    ranges.push(crate::history_contract::HistoryBranchRange {
+        branch_id: branch.branch_id.clone(), begin_node_id: branch.ancestors.last().map_or(1, |range| range.end_node_id), end_node_id: 0,
+    });
+    ranges.reverse();
+    ranges
+}
+
 /// Same ancestor clipping as Go's SQL/Cassandra ForkHistoryBranch stores.
 pub fn fork(source: &HistoryBranch, fork_node: i64, branch_id: &str) -> Result<HistoryBranch> {
     if fork_node <= 1 {
