@@ -3080,6 +3080,39 @@ mod failover_notification_version_tests {
     use cadence_api::types::ClusterReplicationConfiguration;
     use cadence_common::cluster::ClusterInformation;
 
+    use crate::matching_domain_metadata::{DomainMetadataPersistence, MatchingDomainMetadata};
+
+    type Store = crate::matching_domain_metadata::MatchingDomainMetadataStore;
+
+    /// Delegates to SQLite but accepts replication-queue writes.
+    #[derive(Debug)]
+    struct QueueingStore(Arc<Store>);
+
+    impl DomainMetadataPersistence for QueueingStore {
+        fn metadata_version(&self) -> Result<i64, String> {
+            DomainMetadataPersistence::metadata_version(&*self.0)
+        }
+        fn get_domain(
+            &self,
+            name: Option<&str>,
+            id: Option<&str>,
+        ) -> Result<MatchingDomainMetadata, String> {
+            DomainMetadataPersistence::get_domain(&*self.0, name, id)
+        }
+        fn create_domain(&self, m: &MatchingDomainMetadata, v: i64) -> Result<(), String> {
+            DomainMetadataPersistence::create_domain(&*self.0, m, v)
+        }
+        fn update_domain(&self, m: &MatchingDomainMetadata, v: i64) -> Result<(), String> {
+            DomainMetadataPersistence::update_domain(&*self.0, m, v)
+        }
+        fn delete_domain(&self, id: &str) -> Result<(), String> {
+            DomainMetadataPersistence::delete_domain(&*self.0, id)
+        }
+        fn enqueue_domain_replication_message(&self, _payload: Vec<u8>) -> Result<i64, String> {
+            Ok(1)
+        }
+    }
+
     fn cluster_metadata() -> cadence_common::cluster::Metadata {
         let info = |v| ClusterInformation {
             enabled: true,
@@ -3099,7 +3132,7 @@ mod failover_notification_version_tests {
 
     fn manager_with_global_domain() -> (
         PersistedFrontendDomainManager,
-        Arc<crate::matching_domain_metadata::MatchingDomainMetadataStore>,
+        Arc<Store>,
     ) {
         let connection = rusqlite::Connection::open_in_memory().unwrap();
         connection
@@ -3116,7 +3149,7 @@ mod failover_notification_version_tests {
         );
         let manager = PersistedFrontendDomainManager::new(
             InMemoryDomainStore::new(),
-            persistence.clone(),
+            Arc::new(QueueingStore(persistence.clone())),
             Arc::new(|| "thriftrw_snappy".to_string()),
         );
         let id = uuid::Uuid::from_u128(0x99).to_string();
