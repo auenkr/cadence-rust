@@ -114,9 +114,10 @@ impl MetricsScope for NoopScope {
 }
 
 /// Go `common.Daemon`.
+#[async_trait::async_trait]
 pub trait Daemon: Send + Sync {
     fn start(self: Arc<Self>);
-    fn stop(&self);
+    async fn stop(&self);
 }
 
 /// Errors surfaced by the queue package.
@@ -260,3 +261,19 @@ pub enum MetricScopeIdx {
 }
 
 pub type BoxFut<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>;
+
+/// Go `persistence.WorkflowExecutionInfo` (identity fields only).
+#[derive(Clone, Debug, Default)]
+pub struct WorkflowExecutionInfo {
+    pub domain_id: String,
+    pub workflow_id: String,
+    pub run_id: String,
+}
+
+/// Go `hcommon.NotifyTaskInfo` (fields the queue package reads).
+#[derive(Clone, Default)]
+pub struct NotifyTaskInfo {
+    pub execution_info: Option<WorkflowExecutionInfo>,
+    pub tasks: Vec<Arc<dyn PersistenceTask>>,
+    pub persistence_error: bool,
+}
