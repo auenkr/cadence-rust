@@ -7,7 +7,7 @@
 //! contract boundary, while this module owns the byte-compatible wire layer.
 
 use cadence_thrift::{value::{read_struct, write_value, Struct}, Error, Reader, Result, TType, Writer};
-use crate::history_contract::{ActivityInfo, ChildExecutionInfo, HistoryBranchRange, HistoryTreeInfo, ReplicationTask, RequestCancelInfo, SignalInfo, SqlWorkflowExecutionInfo, TimerInfo, TimerTask, TransferTask};
+use crate::history_contract::{ActivityInfo, ChildExecutionInfo, CrossClusterTask, HistoryBranchRange, HistoryTreeInfo, ReplicationTask, RequestCancelInfo, SignalInfo, SqlWorkflowExecutionInfo, TimerInfo, TimerTask, TransferTask};
 use cadence_thrift::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -247,6 +247,16 @@ pub fn transfer_task_from_struct(value: &Struct) -> Result<TransferTask> {
         task_list: get_string(24, "taskList")?, task_type, schedule_id: get_i64(28)?, version: get_i64(30)?, record_visibility: false,
         original_task_list: get_string(36, "originalTaskList")?, original_task_list_kind,
     })
+}
+
+/// Cross-cluster task payload is the same sqlblobs struct as a transfer task;
+/// `target_cluster` belongs to the SQL primary key, not its encoded payload.
+pub fn cross_cluster_task_to_struct(task: &CrossClusterTask) -> Result<Struct> {
+    transfer_task_to_struct(&task.transfer_task)
+}
+
+pub fn cross_cluster_task_from_struct(value: &Struct) -> Result<CrossClusterTask> {
+    Ok(CrossClusterTask { transfer_task: transfer_task_from_struct(value)?, target_cluster: String::new() })
 }
 
 pub fn history_branch_range_to_struct(range: &HistoryBranchRange) -> Struct {

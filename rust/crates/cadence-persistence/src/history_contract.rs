@@ -131,7 +131,8 @@ pub struct ReplicationTask {
     pub event_store_version:i32, pub new_run_event_store_version:i32,
     pub branch_token:Vec<u8>, pub new_run_branch_token:Vec<u8>, pub creation_time_unix_nanos:i64,
 }
-pub type CrossClusterTask = TransferTask;
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CrossClusterTask { pub transfer_task:TransferTask, pub target_cluster:String }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateWorkflowExecutionRequest { pub shard_id:i32, pub range_id:i64, pub mode:CreateWorkflowMode, pub previous_run_id:String, pub previous_last_write_version:i64, pub new_workflow_snapshot:WorkflowSnapshot, pub workflow_request_mode:WorkflowRequestMode, pub current_timestamp_unix_nanos:i64 }
