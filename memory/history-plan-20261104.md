@@ -75,3 +75,7 @@ In flight (Luna, let finish): history-h1-sql-s1d, history-h3a3-decision-y, histo
 Luna workers cancelled; relaunched on the same branches as Codex gpt-6.1-sol (low, default speed): history-port-persist, history-port-exec-a,
 history-port-decision. Claude Sonnet 5.5 low: history-port-task (task+taskdlq), history-port-engine (engine+handler+wrappers). 5 total.
 Unassigned: queue, queuev2, ndc, replication, failover, shard remainder, main wiring. Scheduled continuation 03:45 local daily (T3 scheduled task).
+
+## Progress 2026-11-05
+- All port branches merged to master c97414943 (persist, decision, exec-a, queue, engine, queuev2, repl, ndc, task, shard). CI run 41905397214 (cadence-history clippy+test) = success on master c97414943.
+- Open: history-port-wiring (stubs -> real impl, runnable main), history-port-audit (Go coverage audit). Then: mixed-cluster gate, parity audit, evidence in memory/evidence.
