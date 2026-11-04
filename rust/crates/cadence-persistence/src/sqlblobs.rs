@@ -7,7 +7,7 @@
 //! contract boundary, while this module owns the byte-compatible wire layer.
 
 use cadence_thrift::{value::{read_struct, write_value, Struct}, Error, Reader, Result, TType, Writer};
-use crate::history_contract::{HistoryBranchRange, TimerTask, TransferTask};
+use crate::history_contract::{HistoryBranchRange, HistoryTreeInfo, ReplicationTask, TimerTask, TransferTask};
 use cadence_thrift::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -198,6 +198,31 @@ pub fn history_branch_range_from_struct(value: &Struct) -> Result<HistoryBranchR
     Ok(HistoryBranchRange { branch_id, begin_node_id: number(20)?, end_node_id: number(30)? })
 }
 
+pub fn history_tree_to_struct(tree: &HistoryTreeInfo) -> Struct {
+    let ancestors = tree.ancestors.iter().map(|range| Value::Struct(history_branch_range_to_struct(range))).collect();
+    Struct { fields: vec![(10, i64_field(tree.created_time_unix_nanos)), (12, Value::List(ancestors)), (14, string_field(&tree.info))] }
+}
+
+pub fn history_tree_from_struct(value: &Struct) -> Result<HistoryTreeInfo> {
+    let created_time_unix_nanos = match value.get(10) {
+        Some(Value::I64(v)) => *v, None => 0,
+        Some(other) => return Err(Error::Invalid(format!("createdTimeNanos: expected i64, got {other:?}"))),
+    };
+    let ancestors = match value.get(12) {
+        Some(Value::List(items)) => items.iter().map(|item| match item {
+            Value::Struct(s) => history_branch_range_from_struct(s),
+            other => Err(Error::Invalid(format!("ancestors: expected struct, got {other:?}"))),
+        }).collect::<Result<Vec<_>>>()?,
+        None => Vec::new(),
+        Some(other) => return Err(Error::Invalid(format!("ancestors: expected list, got {other:?}"))),
+    };
+    let info = match value.get(14) {
+        Some(Value::Bytes(bytes)) => String::from_utf8(bytes.clone())?, None => String::new(),
+        Some(other) => return Err(Error::Invalid(format!("info: expected string, got {other:?}"))),
+    };
+    Ok(HistoryTreeInfo { created_time_unix_nanos, ancestors, info })
+}
+
 pub fn timer_task_to_struct(task: &TimerTask) -> Result<Struct> {
     Ok(Struct { fields: vec![
         (10, Value::Bytes(uuid_to_bytes(&task.domain_id, "domainID")?)),
@@ -236,10 +261,55 @@ pub fn timer_task_from_struct(value: &Struct) -> Result<TimerTask> {
     })
 }
 
+pub fn replication_task_to_struct(task: &ReplicationTask) -> Result<Struct> {
+    Ok(Struct { fields: vec![
+        (10, Value::Bytes(uuid_to_bytes(&task.domain_id, "domainID")?)),
+        (12, string_field(&task.workflow_id)),
+        (14, Value::Bytes(uuid_to_bytes(&task.run_id, "runID")?)),
+        (16, Value::I16(task.task_type as i16)), (18, i64_field(task.version)),
+        (20, i64_field(task.first_event_id)), (22, i64_field(task.next_event_id)),
+        (24, i64_field(task.scheduled_id)), (26, Value::I32(task.event_store_version)),
+        (28, Value::I32(task.new_run_event_store_version)), (30, Value::Bytes(task.branch_token.clone())),
+        (34, Value::Bytes(task.new_run_branch_token.clone())), (38, i64_field(task.creation_time_unix_nanos)),
+    ] })
+}
+
+pub fn replication_task_from_struct(value: &Struct) -> Result<ReplicationTask> {
+    let uuid = |id, name| match value.get(id) {
+        Some(Value::Bytes(bytes)) => uuid_from_bytes(bytes, name), None => Ok(String::new()),
+        Some(other) => Err(Error::Invalid(format!("{name}: expected binary, got {other:?}"))),
+    };
+    let string = |id, name| match value.get(id) {
+        Some(Value::Bytes(bytes)) => String::from_utf8(bytes.clone()).map_err(Error::from), None => Ok(String::new()),
+        Some(other) => Err(Error::Invalid(format!("{name}: expected string, got {other:?}"))),
+    };
+    let i64v = |id| match value.get(id) {
+        Some(Value::I64(v)) => Ok(*v), None => Ok(0),
+        Some(other) => Err(Error::Invalid(format!("field {id}: expected i64, got {other:?}"))),
+    };
+    let i32v = |id| match value.get(id) {
+        Some(Value::I32(v)) => Ok(*v), None => Ok(0),
+        Some(other) => Err(Error::Invalid(format!("field {id}: expected i32, got {other:?}"))),
+    };
+    let bytes = |id| match value.get(id) {
+        Some(Value::Bytes(v)) => Ok(v.clone()), None => Ok(Vec::new()),
+        Some(other) => Err(Error::Invalid(format!("field {id}: expected binary, got {other:?}"))),
+    };
+    let task_type = match value.get(16) { Some(Value::I16(v)) => i32::from(*v), None => 0,
+        Some(other) => return Err(Error::Invalid(format!("taskType: expected i16, got {other:?}"))) };
+    Ok(ReplicationTask {
+        domain_id: uuid(10, "domainID")?, workflow_id: string(12, "workflowID")?, run_id: uuid(14, "runID")?,
+        task_id: 0, task_type, first_event_id: i64v(20)?, next_event_id: i64v(22)?, version: i64v(18)?,
+        scheduled_id: i64v(24)?, event_store_version: i32v(26)?, new_run_event_store_version: i32v(28)?,
+        branch_token: bytes(30)?, new_run_branch_token: bytes(34)?, creation_time_unix_nanos: i64v(38)?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use cadence_thrift::Value;
+    use crate::history_contract::{HistoryTreeInfo, ReplicationTask};
 
     // Go sqlblobs.TaskInfo emits these exact field bytes for scheduleID=7.
     const TASK_INFO_SCHEDULE_ID_7: &[u8] = &[8, 0, 13, 0, 0, 0, 0, 0, 0, 0, 7, 0];
@@ -262,5 +332,41 @@ mod tests {
         assert_eq!(Encoding::parse("thriftrw").unwrap().as_str(), "thriftrw");
         assert_eq!(Encoding::parse("thriftrw_snappy").unwrap().as_str(), "thriftrw_snappy");
         assert!(Encoding::parse("json").is_err());
+    }
+
+    #[test]
+    fn typed_history_contract_mappers_round_trip() {
+        let range = HistoryBranchRange { branch_id: "branch".into(), begin_node_id: 4, end_node_id: 9 };
+        assert_eq!(history_branch_range_from_struct(&history_branch_range_to_struct(&range)).unwrap(), range);
+        let tree = HistoryTreeInfo { created_time_unix_nanos: 12, ancestors: vec![range], info: "workflow debug".into() };
+        assert_eq!(history_tree_from_struct(&history_tree_to_struct(&tree)).unwrap(), tree);
+
+        let transfer = TransferTask {
+            domain_id: "6ba7b810-9dad-11d1-80b4-00c04fd430c8".into(), workflow_id: "workflow".into(),
+            run_id: "6ba7b811-9dad-11d1-80b4-00c04fd430c8".into(), visibility_time_unix_nanos: 50, task_id: 7,
+            target_domain_id: "6ba7b812-9dad-11d1-80b4-00c04fd430c8".into(),
+            target_domain_ids: vec!["6ba7b813-9dad-11d1-80b4-00c04fd430c8".into()], target_workflow_id: "target".into(),
+            target_run_id: "6ba7b814-9dad-11d1-80b4-00c04fd430c8".into(), target_child_workflow_only: true,
+            task_list: "queue".into(), task_type: 3, schedule_id: 4, version: 5, record_visibility: false,
+            original_task_list: "old-queue".into(), original_task_list_kind: 1,
+        };
+        assert_eq!(transfer_task_from_struct(&transfer_task_to_struct(&transfer).unwrap()).unwrap(), transfer);
+
+        let timer = TimerTask {
+            domain_id: "6ba7b810-9dad-11d1-80b4-00c04fd430c8".into(), workflow_id: "workflow".into(),
+            run_id: "6ba7b811-9dad-11d1-80b4-00c04fd430c8".into(), visibility_timestamp_unix_nanos: 77,
+            task_id: 0, task_type: 1, timeout_type: 2, event_id: 3, schedule_attempt: 4, version: 5, task_list: "queue".into(),
+        };
+        let timer_struct = timer_task_to_struct(&timer).unwrap();
+        assert_eq!(timer_task_from_struct(&timer_struct).unwrap(), TimerTask { visibility_timestamp_unix_nanos: 0, ..timer });
+
+        let replication = ReplicationTask {
+            domain_id: "6ba7b810-9dad-11d1-80b4-00c04fd430c8".into(), workflow_id: "workflow".into(),
+            run_id: "6ba7b811-9dad-11d1-80b4-00c04fd430c8".into(), task_id: 0, task_type: 1,
+            first_event_id: 2, next_event_id: 3, version: 4, scheduled_id: 5, event_store_version: 6,
+            new_run_event_store_version: 7, branch_token: b"branch".to_vec(), new_run_branch_token: b"new".to_vec(),
+            creation_time_unix_nanos: 8,
+        };
+        assert_eq!(replication_task_from_struct(&replication_task_to_struct(&replication).unwrap()).unwrap(), replication);
     }
 }

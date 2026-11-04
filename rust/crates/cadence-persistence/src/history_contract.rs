@@ -97,6 +97,7 @@ pub struct TimerTask {
 pub struct ReplicationTask {
     pub domain_id:String, pub workflow_id:String, pub run_id:String, pub task_id:i64, pub task_type:i32,
     pub first_event_id:i64, pub next_event_id:i64, pub version:i64, pub scheduled_id:i64,
+    pub event_store_version:i32, pub new_run_event_store_version:i32,
     pub branch_token:Vec<u8>, pub new_run_branch_token:Vec<u8>, pub creation_time_unix_nanos:i64,
 }
 pub type CrossClusterTask = TransferTask;
@@ -166,6 +167,8 @@ pub trait GoExecutionStore: Send+Sync {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct HistoryBranchRange { pub branch_id:String, pub begin_node_id:i64, pub end_node_id:i64 }
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HistoryTreeInfo { pub created_time_unix_nanos:i64, pub ancestors:Vec<HistoryBranchRange>, pub info:String }
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct HistoryBranchRequest {
     pub shard_id:i32, pub tree_id:String, pub branch_id:String, pub node_id:i64, pub transaction_id:i64,
