@@ -67,10 +67,10 @@ impl ExecutorWrapper {
                 if standby { "Process task as standby." } else { "Process task as active." },
                 &[
                     tag::workflow_domain_id(domain_id),
-                    tag::dynamic("task", &format!("{:?}", task)),
-                    tag::dynamic("taskType", &task.get_task_type().to_string()),
+                    tag::dynamic("task", format!("{:?}", task)),
+                    tag::dynamic("taskType", task.get_task_type().to_string()),
                     tag::cluster_name(&info.active_cluster_name),
-                    tag::dynamic("stack", &std::backtrace::Backtrace::force_capture().to_string()),
+                    tag::dynamic("stack", std::backtrace::Backtrace::force_capture().to_string()),
                 ],
             );
         }

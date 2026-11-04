@@ -175,8 +175,7 @@ impl RedispatcherImpl {
         }
 
         for priority in priorities {
-            loop {
-                let Some(pq) = st.pq_map.get_mut(&priority) else { break };
+            while let Some(pq) = st.pq_map.get_mut(&priority) {
                 if pq.is_empty()
                     || total_redispatched >= target_redispatched
                     || *st.task_ch_full.get(&priority).unwrap_or(&false)
