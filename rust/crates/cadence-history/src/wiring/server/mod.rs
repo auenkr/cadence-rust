@@ -7,6 +7,7 @@ pub mod errors;
 pub mod grpc;
 pub mod limiter;
 pub mod tchannel;
+pub mod thrift_g3; pub mod thrift_types_g3; pub mod grpc_g3;
 
 use crate::handler::Handler;
 use std::net::SocketAddr;
