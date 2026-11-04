@@ -22,7 +22,7 @@ impl HistoryEngine {
     pub async fn sync_shard_status(&self, req: &SyncShardStatusRequest) -> HResult<()> {
         self.shard_clock.set_current_time(&req.source_cluster, req.timestamp.unwrap_or_default());
         for processor in self.queue_processors.values() {
-            processor.notify_new_task(&req.source_cluster, &[]);
+            processor.notify_new_task(&req.source_cluster, &super::notify_tasks::NotifyTaskInfo::default());
         }
         Ok(())
     }

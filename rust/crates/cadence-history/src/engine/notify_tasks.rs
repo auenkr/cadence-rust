@@ -1,6 +1,6 @@
 //! Port of engineimpl/notify_tasks.go.
 use std::collections::HashMap;
-use super::{deps::*, runtime::*, types::*};
+use super::{deps::*, runtime::*};
 
 /// Persistence task kind carried by `hcommon.NotifyTaskInfo.Tasks`.
 #[derive(Clone, Debug)]

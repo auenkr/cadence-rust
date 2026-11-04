@@ -27,9 +27,11 @@ impl HistoryEngine {
         // remove run id from the execution so that reapply events to the current run
         let current_execution = WorkflowExecution { workflow_id: workflow_id.to_string(), ..Default::default() };
         let engine = self;
+        let workflow_id_owned = workflow_id.to_string();
         let domain_id_c = domain_id.clone();
         self.updater.update(&domain_id, &current_execution, true, self.time_source.now(), Box::new(move |wf_context, mutable_state| {
             let domain_id = domain_id_c.clone();
+            let workflow_id_owned = workflow_id_owned.clone();
             Box::pin(async move {
                 // Filter out reapply event from the same cluster
                 let mut to_reapply: Vec<HistoryEvent> = Vec::with_capacity(reapply_events.len());
@@ -58,7 +60,7 @@ impl HistoryEngine {
                     // TODO when https://github.com/uber/cadence/issues/2420 is finished, remove this block,
                     //  since cannot reapply event to a finished workflow which had no decisions started
                     if base_rebuild_last_event_id == EMPTY_EVENT_ID_C {
-                        tracing::warn!(domain_id = %domain_id, workflow_id = %current_execution.workflow_id, "cannot reapply event to a finished workflow");
+                        tracing::warn!(domain_id = %domain_id, workflow_id = %workflow_id_owned, "cannot reapply event to a finished workflow");
                         engine.metrics.stale_mutable_state("EventReapplySkippedCount");
                         return Ok(UpdateAction { noop: true, ..Default::default() });
                     }
