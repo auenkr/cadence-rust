@@ -77,3 +77,14 @@ and `workflow.rs` (vector-clock conflict resolution, revive, suppress,
 buffered-event flushing and termination). These use explicit context/reader/
 task sink traits; concrete context integration remains pending and must not
 be represented as completed service parity. No local Cargo commands.
+
+Additional continuation modules: `checksum.rs` implements payload-v1 binary
+encoding (including 0x59 preamble) and IEEE CRC32; `mutable_state_task_generator.rs`
+and `mutable_state_task_refresher.rs` implement task generation/refresh policy;
+`state_rebuilder.rs`, `workflow_repairer.rs`, `context_util.rs`, `semaphore.rs`,
+`cache.rs`, and `mutable_state_decision_task_manager.rs` implement their Go
+control flow against explicit context/state interfaces. Concrete adapters and
+existing partial modules remain incomplete; this is not a parity sign-off.
+CI https://github.com/auenkr/cadence-rust/actions/runs/41886354555 at
+`74b125584` failed compilation on optional first-decision backoff fields;
+fixed by defaulting absent values to zero, matching Go getters.

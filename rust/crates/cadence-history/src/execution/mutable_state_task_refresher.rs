@@ -49,7 +49,7 @@ pub fn refresh_tasks<S: TaskRefreshState>(state: &mut S, start_time: i64, deleti
 pub fn refresh_tasks_for_workflow_start<S: TaskRefreshState>(state: &mut S, start_time: i64) -> Result<(), S::Error> {
     let event = state.start_event()?;
     state.generate_workflow_start_tasks(start_time, &event)?;
-    let backoff = event.workflow_execution_started_event_attributes.as_ref().map(|a| a.first_decision_task_backoff_seconds).unwrap_or_default();
+    let backoff = event.workflow_execution_started_event_attributes.as_ref().and_then(|a| a.first_decision_task_backoff_seconds).unwrap_or_default();
     if !state.has_processed_or_pending_decision() && backoff > 0 { state.generate_delayed_decision_tasks(&event)?; }
     Ok(())
 }

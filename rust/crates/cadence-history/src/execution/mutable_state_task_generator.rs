@@ -67,7 +67,7 @@ impl<S: TaskGeneratorState> MutableStateTaskGenerator<'_, S> {
     pub fn generate_workflow_start_tasks(&mut self, start_time: i64, event: &HistoryEvent) -> Result<(), S::Error> {
         let attr = event.workflow_execution_started_event_attributes.as_ref().ok_or_else(|| self.state.internal_error("missing workflow start attributes".into()))?;
         let info = self.state.execution();
-        let mut timeout = start_time + (i64::from(info.workflow_timeout_seconds) + i64::from(attr.first_decision_task_backoff_seconds)) * 1_000_000_000;
+        let mut timeout = start_time + (i64::from(info.workflow_timeout_seconds) + i64::from(attr.first_decision_task_backoff_seconds.unwrap_or_default())) * 1_000_000_000;
         if attr.attempt > 0 { if let Some(expiration) = info.expiration_unix_nanos { timeout = timeout.min(expiration); } }
         let task = self.task(event.version, Some(timeout), info.task_list, TaskKind::WorkflowTimeout);
         self.state.add_timer_task(task);
@@ -91,7 +91,7 @@ impl<S: TaskGeneratorState> MutableStateTaskGenerator<'_, S> {
             Some(ContinueAsNewInitiator::RetryPolicy) => 0,
             Some(ContinueAsNewInitiator::Decider) => return Err(self.state.internal_error("encounter continue as new iterator & first decision delay not 0".into())),
         };
-        let timestamp = event.timestamp.unwrap_or_default() + i64::from(attr.first_decision_task_backoff_seconds) * 1_000_000_000;
+        let timestamp = event.timestamp.unwrap_or_default() + i64::from(attr.first_decision_task_backoff_seconds.unwrap_or_default()) * 1_000_000_000;
         let task = self.task(event.version, Some(timestamp), self.state.execution().task_list, TaskKind::WorkflowBackoff { timeout_type });
         self.state.add_timer_task(task);
         Ok(())
