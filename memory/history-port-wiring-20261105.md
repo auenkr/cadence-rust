@@ -44,3 +44,9 @@ Per-module local trait universes (engine/deps.rs, task/deps.rs, queue/deps.rs, q
 - 41927893949: failure, clippy result_large_err.
 - 41928648196: success (cadence-history clippy+test).
 - 41929681628 head 5c2cae3fd (adds query_matching.rs): success. https://github.com/auenkr/cadence-rust/actions/runs/41929681628
+
+## Unit D2/D3 (branch history-assembly-d2)
+CI green (clippy + test, package cadence-history): https://github.com/auenkr/cadence-rust/actions/runs/41935841904
+Added rust/crates/cadence-history/src/wiring/assembly/{mod,queues,replication,failover}.rs; fixed base-branch manifest/lib.rs duplicates (cadence-proto, tonic, `pub mod wiring`).
+Real: failover coordinator + marker notifier + shard adapter (stale-marker rule), local single-host failover HistoryClient; replication ThriftPayloadSerializer, ReplicationShardAdapter (repl::ShardContext), LocalReplicationEngine (sync_shard_status); engine QueueProcessor adapter over queue::Processor.
+Remaining stubs: UnwiredHistoryResender; replication Engine sync_activity/replicate_events_v2 need injected inner engine; no SQL MutableStateProvider; no replication builders for fetchers/processors/DLQ/task_ack_manager; build of TransferQueueProcessor/queuev2 (QueueShardContext and queuev2::ShardContext adapters, executors, visibility writer, archival client) not done; no timer processor in queue/; multi-host failover marker routing; domain failover watcher not started (frontend/worker).
