@@ -95,6 +95,16 @@ impl Dialect {
             (Self::Postgres, Statement::SelectTimerTasks) => "SELECT visibility_timestamp,task_id,data,data_encoding FROM timer_tasks WHERE shard_id=$1 AND (visibility_timestamp,task_id)>=($2,$3) AND visibility_timestamp<$4 ORDER BY visibility_timestamp,task_id LIMIT $5",
             (Self::MySql, Statement::DeleteTimerTask) => "DELETE FROM timer_tasks WHERE shard_id=? AND visibility_timestamp=? AND task_id=?",
             (Self::Postgres, Statement::DeleteTimerTask) => "DELETE FROM timer_tasks WHERE shard_id=$1 AND visibility_timestamp=$2 AND task_id=$3",
+            (Self::MySql, Statement::InsertReplicationTaskDLQ) => "INSERT INTO replication_tasks_dlq(source_cluster_name,shard_id,task_id,data,data_encoding) VALUES(?,?,?,?,?)",
+            (Self::Postgres, Statement::InsertReplicationTaskDLQ) => "INSERT INTO replication_tasks_dlq(source_cluster_name,shard_id,task_id,data,data_encoding) VALUES($1,$2,$3,$4,$5)",
+            (Self::MySql, Statement::SelectReplicationTasksDLQ) => "SELECT task_id,data,data_encoding FROM replication_tasks_dlq WHERE source_cluster_name=? AND shard_id=? AND task_id>=? AND task_id<? ORDER BY task_id LIMIT ?",
+            (Self::Postgres, Statement::SelectReplicationTasksDLQ) => "SELECT task_id,data,data_encoding FROM replication_tasks_dlq WHERE source_cluster_name=$1 AND shard_id=$2 AND task_id >= $3 AND task_id < $4 ORDER BY task_id LIMIT $5",
+            (Self::MySql, Statement::CountReplicationTasksDLQ) => "SELECT count(1) FROM replication_tasks_dlq WHERE source_cluster_name=? AND shard_id=?",
+            (Self::Postgres, Statement::CountReplicationTasksDLQ) => "SELECT count(1) FROM replication_tasks_dlq WHERE source_cluster_name=$1 AND shard_id=$2",
+            (Self::MySql, Statement::DeleteReplicationTaskDLQ) => "DELETE FROM replication_tasks_dlq WHERE source_cluster_name=? AND shard_id=? AND task_id=?",
+            (Self::Postgres, Statement::DeleteReplicationTaskDLQ) => "DELETE FROM replication_tasks_dlq WHERE source_cluster_name=$1 AND shard_id=$2 AND task_id=$3",
+            (Self::MySql, Statement::RangeDeleteReplicationTasksDLQ) => "DELETE FROM replication_tasks_dlq WHERE source_cluster_name=? AND shard_id=? AND task_id>=? AND task_id<? ORDER BY task_id LIMIT ?",
+            (Self::Postgres, Statement::RangeDeleteReplicationTasksDLQ) => "DELETE FROM replication_tasks_dlq WHERE source_cluster_name=$1 AND shard_id=$2 AND task_id IN (SELECT task_id FROM replication_tasks_dlq WHERE source_cluster_name=$1 AND shard_id=$2 AND task_id >= $3 AND task_id < $4 ORDER BY task_id LIMIT $5)",
         }
     }
 }
@@ -142,6 +152,11 @@ pub enum Statement {
     InsertTimerTask,
     SelectTimerTasks,
     DeleteTimerTask,
+    InsertReplicationTaskDLQ,
+    SelectReplicationTasksDLQ,
+    CountReplicationTasksDLQ,
+    DeleteReplicationTaskDLQ,
+    RangeDeleteReplicationTasksDLQ,
 }
 
 #[cfg(test)]
