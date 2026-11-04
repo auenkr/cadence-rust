@@ -49,4 +49,9 @@ impl MutableStateBuilder {
         self.update_request_cancel_infos.remove(&initiated_event_id);
         self.delete_request_cancel_infos.insert(initiated_event_id);
     }
+    pub fn replicate_request_cancel_external_workflow_execution_failed_event(&mut self, event: &HistoryEvent) -> bool {
+        let Some(attrs) = event.request_cancel_external_workflow_execution_failed_event_attributes.as_ref() else { return false; };
+        self.delete_pending_request_cancel(attrs.initiated_event_id);
+        true
+    }
 }

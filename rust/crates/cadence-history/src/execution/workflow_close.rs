@@ -13,6 +13,13 @@ pub enum WorkflowCloseStatus { Completed = 1, Failed = 2, Canceled = 3, Terminat
 pub struct MissingWorkflowCompletionEvent;
 
 impl MutableStateBuilder {
+    pub fn add_workflow_close_event(&mut self, first_event_id: i64, event: HistoryEvent) -> Option<HistoryEvent> {
+        let expected = matches!(event.event_type.as_ref(), Some(EventType::WorkflowExecutionCompleted | EventType::WorkflowExecutionFailed | EventType::WorkflowExecutionTimedOut | EventType::WorkflowExecutionCanceled | EventType::WorkflowExecutionTerminated | EventType::WorkflowExecutionContinuedAsNew));
+        if !expected { return None; }
+        let event = self.add_event(event);
+        self.replicate_workflow_close_event(first_event_id, &event)?;
+        Some(event)
+    }
     pub fn is_workflow_completed(&self) -> bool {
         self.execution_info.get("state").and_then(serde_json::Value::as_i64) == Some(2)
     }

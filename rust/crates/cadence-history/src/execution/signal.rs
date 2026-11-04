@@ -67,4 +67,16 @@ impl MutableStateBuilder {
         self.update_signal_infos.insert(info.initiated_id, value);
         Some(info)
     }
+
+    pub fn replicate_signal_external_workflow_execution_failed_event(&mut self, event: &HistoryEvent) -> bool {
+        let Some(attrs) = event.signal_external_workflow_execution_failed_event_attributes.as_ref() else { return false; };
+        self.delete_pending_signal(attrs.initiated_event_id);
+        true
+    }
+
+    pub fn replicate_external_workflow_execution_signaled_event(&mut self, event: &HistoryEvent) -> bool {
+        let Some(attrs) = event.external_workflow_execution_signaled_event_attributes.as_ref() else { return false; };
+        self.delete_pending_signal(attrs.initiated_event_id);
+        true
+    }
 }

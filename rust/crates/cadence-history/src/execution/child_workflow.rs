@@ -72,7 +72,11 @@ impl MutableStateBuilder {
         let info = ChildExecutionInfo {
             version: event.version, initiated_id: event.event_id, initiated_event_batch_id: first_event_id,
             started_id: 0, started_workflow_id: attrs.workflow_id.clone(), create_request_id: create_request_id.into(),
-            domain_id: attrs.domain.clone(), workflow_type_name: attrs.workflow_type.as_ref().map(|v| v.name.clone()).unwrap_or_default(),
+            // Go resolves a non-empty domain name through the domain cache;
+            // absent that service dependency, preserve the parent ID from the
+            // execution record instead of storing a domain name in the ID field.
+            domain_id: self.execution_info.get("domain_id").and_then(serde_json::Value::as_str).unwrap_or_default().to_owned(),
+            workflow_type_name: attrs.workflow_type.as_ref().map(|v| v.name.clone()).unwrap_or_default(),
             parent_close_policy: attrs.parent_close_policy,
             ..Default::default()
         };
@@ -130,5 +134,19 @@ impl MutableStateBuilder {
         let initiated_id = value.get(attrs_name).and_then(|a| a.get("initiatedEventId")).and_then(serde_json::Value::as_i64).ok_or(ChildWorkflowError::InvalidEvent("terminal event missing initiated ID"))?;
         if !self.delete_pending_child_execution(initiated_id) { return Err(ChildWorkflowError::Missing(initiated_id)); }
         Ok(())
+    }
+
+    pub fn add_start_child_workflow_execution_failed_event(&mut self, event: HistoryEvent) -> Result<HistoryEvent, ChildWorkflowError> { self.add_child_terminal_event(event, EventType::StartChildWorkflowExecutionFailed) }
+    pub fn add_child_workflow_execution_completed_event(&mut self, event: HistoryEvent) -> Result<HistoryEvent, ChildWorkflowError> { self.add_child_terminal_event(event, EventType::ChildWorkflowExecutionCompleted) }
+    pub fn add_child_workflow_execution_failed_event(&mut self, event: HistoryEvent) -> Result<HistoryEvent, ChildWorkflowError> { self.add_child_terminal_event(event, EventType::ChildWorkflowExecutionFailed) }
+    pub fn add_child_workflow_execution_canceled_event(&mut self, event: HistoryEvent) -> Result<HistoryEvent, ChildWorkflowError> { self.add_child_terminal_event(event, EventType::ChildWorkflowExecutionCanceled) }
+    pub fn add_child_workflow_execution_timed_out_event(&mut self, event: HistoryEvent) -> Result<HistoryEvent, ChildWorkflowError> { self.add_child_terminal_event(event, EventType::ChildWorkflowExecutionTimedOut) }
+    pub fn add_child_workflow_execution_terminated_event(&mut self, event: HistoryEvent) -> Result<HistoryEvent, ChildWorkflowError> { self.add_child_terminal_event(event, EventType::ChildWorkflowExecutionTerminated) }
+
+    fn add_child_terminal_event(&mut self, event: HistoryEvent, expected: EventType) -> Result<HistoryEvent, ChildWorkflowError> {
+        if event.event_type.as_ref() != Some(&expected) { return Err(ChildWorkflowError::InvalidEvent("unexpected terminal child event type")); }
+        let event = self.add_event(event);
+        self.replicate_child_workflow_terminal_event(&event)?;
+        Ok(event)
     }
 }
