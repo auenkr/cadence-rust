@@ -109,7 +109,7 @@ pub fn standby_task_post_action_write_to_dlq(
                 Ok(a) => a,
                 Err(e) => {
                     if e.is(&err_active_cluster_selection_policy_not_found()) {
-                        logger.warn("Active cluster selection policy not found. Defaulting to default scope and name.");
+                        logger.warn("Active cluster selection policy not found. Defaulting to default scope and name.", &[]);
                         None
                     } else {
                         return Err(e);

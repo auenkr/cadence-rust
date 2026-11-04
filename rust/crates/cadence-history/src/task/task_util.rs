@@ -125,24 +125,24 @@ pub fn verify_task_version(
     let domain_entry = match shard.get_domain_cache().get_domain_by_id(domain_id) {
         Ok(e) => e,
         Err(e) => {
-            logger.debug(&format!("Cannot find domainID: {}, err: {:?}.", domain_id, e));
+            logger.debug(&format!("Cannot find domainID: {}, err: {:?}.", domain_id, e), &[]);
             return Err(e);
         }
     };
     if !domain_entry.is_global_domain() {
-        logger.debug(&format!("DomainID: {} is not active, task: {:?} version check pass", domain_id, task));
+        logger.debug(&format!("DomainID: {} is not active, task: {:?} version check pass", domain_id, task), &[]);
         return Ok(true);
     } else if version != task_version {
         logger.debug(&format!(
             "DomainID: {} is active, task: {:?} version != target version: {}.",
             domain_id, task, version
-        ));
+        ), &[]);
         return Ok(false);
     }
     logger.debug(&format!(
         "DomainID: {} is active, task: {:?} version == target version: {}.",
         domain_id, task, version
-    ));
+    ), &[]);
     Ok(true)
 }
 
@@ -225,6 +225,7 @@ pub async fn retry_workflow(
 /// `getWorkflowExecution`
 pub fn get_workflow_execution(task_info: &dyn PersistenceTask) -> WorkflowIdentifier {
     WorkflowIdentifier {
+        domain_id: task_info.get_domain_id().to_string(),
         workflow_id: task_info.get_workflow_id().to_string(),
         run_id: task_info.get_run_id().to_string(),
     }

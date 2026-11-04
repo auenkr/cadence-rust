@@ -360,7 +360,7 @@ impl TransferActiveTaskExecutor {
    record.workflow_type_name=execution_info.workflow_type_name.clone();record.start_timestamp=start_event.timestamp;
    record.execution_timestamp=workflow_execution_timestamp.unix_nano();record.close_timestamp=wf_close_time;record.close_status=execution_info.close_status;
    record.history_length=workflow_history_length;record.memo=visibility_memo;record.task_list=execution_info.task_list.clone();
-   record.is_cron=!execution_info.cron_schedule.is_empty();record.cron_schedule=execution_info.cron_schedule.clone();record.num_clusters=num_clusters;
+   record.is_cron = !execution_info.cron_schedule.is_empty();record.cron_schedule=execution_info.cron_schedule.clone();record.num_clusters=num_clusters;
    record.update_timestamp=update_timestamp.unix_nano();record.search_attributes=execution_info.search_attributes.clone();record.headers=headers.unwrap_or_default();
    record.cluster_attribute=execution_info.active_cluster_selection_policy.as_ref().and_then(|p|p.cluster_attribute.clone());
    record.execution_status=execution_status;record.scheduled_execution_timestamp=scheduled_execution_timestamp;

@@ -8,7 +8,7 @@ use async_trait::async_trait;
 
 use super::constants::*;
 use super::deps::*;
-use super::event_logger::{new_event_logger, EventLogger};
+use super::event_logger::{detail, new_event_logger, EventLogger};
 use super::interface::*;
 
 /// `redispatchError` is the error indicating that the timer / transfer task should be
@@ -237,6 +237,9 @@ impl std::fmt::Debug for TaskImpl {
 impl PersistenceTask for TaskImpl {
     fn as_any(&self) -> &dyn Any {
         self
+    }
+    fn clone_arc(&self) -> Arc<dyn PersistenceTask> {
+        self.task.clone_arc()
     }
     fn get_task_category(&self) -> HistoryTaskCategory {
         self.task.get_task_category()

@@ -367,6 +367,12 @@ impl Logger {
             .collect::<Vec<_>>()
             .join(" ")
     }
+    pub fn debug_tags(&self, msg: &str, tags: &[Tag]) {
+        self.debug(msg, tags)
+    }
+    pub fn warn_tags(&self, msg: &str, tags: &[Tag]) {
+        self.warn(msg, tags)
+    }
     pub fn debug(&self, msg: &str, tags: &[Tag]) {
         tracing::debug!("{msg} {}", self.fmt(tags));
     }
@@ -405,6 +411,7 @@ pub trait MetricsScope: Send + Sync {
     fn exponential_histogram(&self, name: MetricIdx, d: Duration);
     fn int_exponential_histogram(&self, name: MetricIdx, v: usize);
     fn record_histogram_duration(&self, name: MetricIdx, d: Duration);
+    fn record_histogram_value(&self, name: MetricIdx, v: f64);
     fn update_gauge(&self, name: MetricIdx, v: f64);
     fn tagged(&self, tags: Vec<Tag>) -> Arc<dyn MetricsScope>;
 }
@@ -417,6 +424,7 @@ impl MetricsScope for NoopScope {
     fn exponential_histogram(&self, _: MetricIdx, _: Duration) {}
     fn int_exponential_histogram(&self, _: MetricIdx, _: usize) {}
     fn record_histogram_duration(&self, _: MetricIdx, _: Duration) {}
+    fn record_histogram_value(&self, _: MetricIdx, _: f64) {}
     fn update_gauge(&self, _: MetricIdx, _: f64) {}
     fn tagged(&self, _: Vec<Tag>) -> Arc<dyn MetricsScope> {
         Arc::new(NoopScope)
@@ -652,7 +660,58 @@ pub struct HistoryTaskKey {
     pub task_id: i64,
 }
 
+/// `persistence.HistoryTaskCategoryIDTransfer` / `...IDTimer`
+pub const HISTORY_TASK_CATEGORY_ID_TRANSFER: i32 = 1;
+pub const HISTORY_TASK_CATEGORY_ID_TIMER: i32 = 2;
+/// `shard.TimeBeforeShardClosedIsError`
+pub const TIME_BEFORE_SHARD_CLOSED_IS_ERROR: Duration = Duration::from_secs(10);
+/// `dynamicproperties.DurationPropertyFnWithShardIDFilter`
+pub type DurationPropertyFnWithShardIDFilter = Arc<dyn Fn(i32) -> Duration + Send + Sync>;
+
+impl HistoryTaskCategory {
+    /// `HistoryTaskCategory.ID`
+    pub fn id(&self) -> i32 {
+        match self {
+            HistoryTaskCategory::Transfer => 1,
+            HistoryTaskCategory::Timer => 2,
+            HistoryTaskCategory::Replication => 3,
+            HistoryTaskCategory::CrossCluster => 4,
+        }
+    }
+    /// `HistoryTaskCategory.Type() == HistoryTaskCategoryTypeImmediate`
+    pub fn is_immediate(&self) -> bool {
+        !matches!(self, HistoryTaskCategory::Timer)
+    }
+}
+
 impl HistoryTaskKey {
+    /// `NewHistoryTaskKey`
+    pub fn new(scheduled_time: Time, task_id: i64) -> HistoryTaskKey {
+        HistoryTaskKey { scheduled_time, task_id }
+    }
+    /// `NewImmediateTaskKey`
+    pub fn new_immediate_task_key(task_id: i64) -> HistoryTaskKey {
+        HistoryTaskKey { scheduled_time: Time(0), task_id }
+    }
+    /// `MaximumHistoryTaskKey`
+    pub fn maximum() -> HistoryTaskKey {
+        HistoryTaskKey { scheduled_time: Time(i64::MAX), task_id: i64::MAX }
+    }
+    /// `HistoryTaskKey.Compare`
+    pub fn compare(&self, b: &HistoryTaskKey) -> i32 {
+        match self.cmp(b) {
+            std::cmp::Ordering::Less => -1,
+            std::cmp::Ordering::Greater => 1,
+            std::cmp::Ordering::Equal => 0,
+        }
+    }
+    /// `HistoryTaskKey.Next`
+    pub fn next(&self) -> HistoryTaskKey {
+        if self.task_id == i64::MAX {
+            return HistoryTaskKey { scheduled_time: Time(self.scheduled_time.0.saturating_add(1)), task_id: 0 };
+        }
+        HistoryTaskKey { scheduled_time: self.scheduled_time, task_id: self.task_id + 1 }
+    }
     pub fn get_scheduled_time(&self) -> Time {
         self.scheduled_time
     }
@@ -689,6 +748,8 @@ pub trait PersistenceTask: Send + Sync + Debug {
     fn get_task_key(&self) -> HistoryTaskKey {
         HistoryTaskKey { scheduled_time: self.get_visibility_timestamp(), task_id: self.get_task_id() }
     }
+    /// Owned shared copy of the task (Go passes the interface value around).
+    fn clone_arc(&self) -> Arc<dyn PersistenceTask>;
     /// Go `GetOriginalTaskList` / `GetOriginalTaskListKind` of the executed task (empty for non-matching tasks).
     fn get_original_task_list(&self) -> String {
         String::new()
@@ -713,6 +774,7 @@ macro_rules! define_ptask {
         }
         impl PersistenceTask for $name {
             fn as_any(&self) -> &dyn Any { self }
+            fn clone_arc(&self) -> Arc<dyn PersistenceTask> { Arc::new(self.clone()) }
             fn get_task_category(&self) -> HistoryTaskCategory { $cat }
             fn get_task_type(&self) -> i32 { $ty }
             fn get_domain_id(&self) -> &str { &self.workflow_identifier.domain_id }
@@ -841,8 +903,11 @@ impl ThrottleRetry {
             if !(self.is_retryable)(&err) {
                 return Err(err);
             }
-            let mut rng = rand::thread_rng();
-            match self.policy.compute_next_delay(&mut rng, start.elapsed(), attempt) {
+            let next = {
+                let mut rng = rand::thread_rng();
+                self.policy.compute_next_delay(&mut rng, start.elapsed(), attempt)
+            };
+            match next {
                 None => return Err(err),
                 Some(d) => tokio::time::sleep(d).await,
             }
@@ -964,7 +1029,10 @@ pub trait HistoryConfig: Send + Sync {
 // TODO(link): replace by shard::Controller.
 pub trait ShardController: Send + Sync {fn num_shards(&self)->usize;}
 // TODO(link): replace by resource::Resource.
-pub trait Service: Send + Sync {fn get_domain_metrics_scope_cache(&self)->Arc<dyn DomainMetricsScopeCache>;}
+pub trait Service: Send + Sync {
+ fn get_domain_metrics_scope_cache(&self)->Arc<dyn DomainMetricsScopeCache>;
+ fn get_history_task_dlq_manager(&self)->Arc<dyn crate::taskdlq::processor::HistoryTaskDLQManager>;
+}
 // TODO(link): replace by shard::Context.
 pub trait ShardContext: Send + Sync {
  fn get_shard_id(&self)->i32;
@@ -975,4 +1043,8 @@ pub trait ShardContext: Send + Sync {
  fn get_active_cluster_manager(&self)->Arc<dyn ActiveClusterManager>;
  fn get_metrics_client(&self)->Arc<dyn MetricsClient>;
  fn get_service(&self)->Arc<dyn Service>;
+ fn get_logger(&self)->Logger;
+ fn update_if_needed_and_get_queue_max_read_level(&self,category:HistoryTaskCategory,cluster:&str)->HistoryTaskKey;
+ /// Go `shard.Context` is itself a `TaskReinjector`.
+ fn as_task_reinjector(&self)->Arc<dyn crate::taskdlq::interface::TaskReinjector>;
 }

@@ -54,11 +54,13 @@ impl TimerStandbyTaskExecutor {
  async fn action(&self,task:&dyn PersistenceTask,w:&dyn StandbyTimerWorkflow,action:Action)->Result<Option<HistoryResendInfo>> {
   match action {
    Action::User=>{
-    if let Some(sequence)=w.user_timers().first(){if w.user_timer_info(sequence.event_id).is_none(){return Err(TaskError::Other(format!("failed to find in user timer event ID: {}",sequence.event_id)));}if !task.get_visibility_timestamp().before(sequence.expiry){return w.history_resend_info().map(Some);}}
+    if let Some(sequence)=w.user_timers().first(){if w.user_timer_info(sequence.event_id).is_none(){return Err(TaskError::Other(format!("failed to find in user timer event ID: {}",sequence.event_id)));}
+  if !task.get_visibility_timestamp().before(sequence.expiry){return w.history_resend_info().map(Some);}}
     Ok(None)
    },
    Action::Activity=>{
-    if let Some(sequence)=w.activity_timers().first(){if w.activity_info(sequence.event_id).is_none(){return Err(TaskError::Other(format!("failed to find in memory activity timer: {}",sequence.event_id)));}if !task.get_visibility_timestamp().before(sequence.expiry){return w.history_resend_info().map(Some);}}
+    if let Some(sequence)=w.activity_timers().first(){if w.activity_info(sequence.event_id).is_none(){return Err(TaskError::Other(format!("failed to find in memory activity timer: {}",sequence.event_id)));}
+  if !task.get_visibility_timestamp().before(sequence.expiry){return w.history_resend_info().map(Some);}}
     let timer=task.as_any().downcast_ref::<ActivityTimeoutTask>().ok_or_else(||TaskError::Other(ERR_UNEXPECTED_TASK.into()))?;
     let version=w.last_write_version()?;let mut changed=false;
     if timer.timeout_type==3 {if let Some(mut info)=w.activity_info(timer.event_id){if info.last_heartbeat_timeout_visibility_in_seconds<=timer.get_visibility_timestamp().unix(){info.timer_task_status&=!8;w.update_activity(info)?;changed=true;}}}

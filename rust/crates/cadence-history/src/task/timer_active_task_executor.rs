@@ -94,8 +94,12 @@ impl TimerActiveTaskExecutor {
    let workflow_type=w.workflow_type().ok_or_else(||TaskError::Other(format!("unable to find workflow type, task {task:?}")))?;
    let now=self.base.shard.get_time_source().now();let threshold=self.dependencies.resurrection_check_min_delay(&w.domain_name());let mut changed=false;let mut schedule=false;let mut resurrected=None;
    if task.timeout_type==3 {if let Some(mut info)=w.activity_info(task.event_id){if info.last_heartbeat_timeout_visibility_in_seconds<=task.get_visibility_timestamp().unix(){info.timer_task_status&=!8;w.update_activity(info)?;changed=true;}}}
-   for sequence in w.activity_timers(){let Some(info)=w.activity_info(sequence.event_id) else{continue;};if sequence.attempt<info.attempt{continue;}if now.before(sequence.expiry){break;}
-    if now.sub(sequence.expiry)>=threshold||resurrected.is_some(){if resurrected.is_none(){resurrected=Some(w.resurrected_activities().await?);}if resurrected.as_ref().unwrap().contains(&info.schedule_id){self.base.metrics_client.inc_counter("TimerQueueProcessorScope","ActivityResurrectionCounter");self.base.logger.warn("Encounter resurrected activity, skip",&[]);w.delete_activity(info.schedule_id)?;changed=true;continue;}}
+   for sequence in w.activity_timers(){let Some(info)=w.activity_info(sequence.event_id) else{continue;};
+   if sequence.attempt<info.attempt{continue;}
+   
+   if now.before(sequence.expiry){break;}
+    if now.sub(sequence.expiry)>=threshold||resurrected.is_some(){if resurrected.is_none(){resurrected=Some(w.resurrected_activities().await?);}
+    if resurrected.as_ref().unwrap().contains(&info.schedule_id){self.base.metrics_client.inc_counter("TimerQueueProcessorScope","ActivityResurrectionCounter");self.base.logger.warn("Encounter resurrected activity, skip",&[]);w.delete_activity(info.schedule_id)?;changed=true;continue;}}
     if sequence.timer_type==TimerType::ScheduleToStart&&info.schedule_to_start_timeout>=self.dependencies.activity_max_schedule_to_start_timeout_for_retry(&domain).as_secs() as i32 {self.base.metrics_client.inc_counter("TimerActiveTaskActivityTimeoutScope","ActivityLostCounter");self.base.logger.warn("Potentially activity task lost",&[]);}
     if w.retry_activity(&info,sequence.timer_type)?{changed=true;continue;}
     self.emit_timeout_metric_scope_with_domain_tag(task.get_domain_id(),"TimerActiveTaskActivityTimeoutScope",sequence.timer_type,vec![workflow_type_tag(&workflow_type)]);
