@@ -85,3 +85,40 @@ pub fn validate(context: &impl ValidationContext, decision: &mut Decision, domai
         _ => Err(DecisionError::new("Unknown decision type")),
     }
 }
+
+pub struct AttrValidator<C: ValidationContext> { pub context: C }
+pub fn new_attr_validator<C: ValidationContext>(context: C) -> AttrValidator<C> { AttrValidator { context } }
+impl<C: ValidationContext> AttrValidator<C> {
+    pub fn validate(&self, decision: &mut Decision, domain: &str) -> Result<(), DecisionError> { validate(&self.context, decision, domain) }
+}
+pub struct WorkflowSizeChecker<'a, S, O> {
+    pub mutable_state: &'a mut S, pub observer: &'a O, pub limits: WorkflowSizeLimits, pub completed_id: i64,
+}
+pub fn new_workflow_size_checker<'a, S: WorkflowSizeMutableState, O: WorkflowSizeObserver>(mutable_state: &'a mut S, observer: &'a O, limits: WorkflowSizeLimits, completed_id: i64) -> WorkflowSizeChecker<'a, S, O> { WorkflowSizeChecker { mutable_state, observer, limits, completed_id } }
+impl<S: WorkflowSizeMutableState, O: WorkflowSizeObserver> WorkflowSizeChecker<'_, S, O> {
+    pub fn fail_workflow_size_exceeds_limit(&mut self) -> Result<bool, DecisionError> { fail_workflow_size_exceeds_limit(self.mutable_state, self.observer, self.limits, self.completed_id) }
+    pub fn fail_workflow_if_blob_size_exceeds_limit(&mut self, decision_type: DecisionType, blob: &[u8], message: &str) -> Result<bool, DecisionError> {
+        self.observer.record_blob_size(decision_type, blob.len());
+        let warn = self.limits.blob_size_warn.min(self.limits.blob_size_error);
+        if self.limits.blob_size_error < self.limits.blob_size_warn { self.observer.misconfigured_blob_limits(); }
+        if blob.len() <= warn { return Ok(false); }
+        if blob.len() <= self.limits.blob_size_error { self.observer.warn_blob_limit(decision_type, blob.len()); return Ok(false); }
+        self.observer.error_blob_limit(decision_type, blob.len());
+        self.mutable_state.add_fail_workflow_event(self.completed_id, FAILURE_REASON_DECISION_BLOB_SIZE_EXCEEDS_LIMIT, message.as_bytes())?;
+        Ok(true)
+    }
+}
+
+/// TODO(link): shared Cadence API types currently omit this Go field.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ClusterAttribute { pub scope: String, pub name: String }
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ActiveClusterSelectionPolicy { pub cluster_attribute: Option<ClusterAttribute> }
+#[derive(Debug, Clone, Default)]
+pub struct ContinueAsNewPortAttributes {
+    pub attributes: cadence_api::tasks::ContinueAsNewWorkflowExecutionDecisionAttributes,
+    pub active_cluster_selection_policy: Option<ActiveClusterSelectionPolicy>,
+}
+pub fn inherit_active_cluster_selection_policy(attributes: &mut ContinueAsNewPortAttributes, previous: &Option<ActiveClusterSelectionPolicy>) {
+    if attributes.active_cluster_selection_policy.is_none() { attributes.active_cluster_selection_policy.clone_from(previous); }
+}

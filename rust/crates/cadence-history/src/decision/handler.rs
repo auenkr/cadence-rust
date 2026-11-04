@@ -1,3 +1,4 @@
+#![allow(clippy::too_many_arguments)]
 //! Decision RPC state transitions from handler.go.
 //! TODO(link): execution cache owns locking, conditional persistence and context release.
 use super::DecisionError;
@@ -14,9 +15,11 @@ pub struct DecisionInfo {
 pub struct UpdateAction { pub noop: bool }
 pub trait LifecycleState {
     type Started;
+    type StartEvent;
+    fn get_start_event(&self) -> Result<Self::StartEvent, DecisionError>;
     fn is_running(&self) -> bool;
     fn has_processed_or_pending_decision(&self) -> bool;
-    fn add_first_decision_task_scheduled(&mut self) -> Result<(), DecisionError>;
+    fn add_first_decision_task_scheduled(&mut self, event: Self::StartEvent) -> Result<(), DecisionError>;
     fn next_event_id(&self) -> i64;
     fn decision_info(&self, schedule_id: i64) -> Option<DecisionInfo>;
     fn stale_state(&mut self, operation: &str);
@@ -27,7 +30,8 @@ pub trait LifecycleState {
 pub fn handle_decision_task_scheduled(state: &mut impl LifecycleState) -> Result<UpdateAction, DecisionError> {
     if !state.is_running() { return Err(DecisionError::new("workflow execution already completed")); }
     if state.has_processed_or_pending_decision() { return Ok(UpdateAction { noop: true }); }
-    state.add_first_decision_task_scheduled()?;
+    let start_event = state.get_start_event()?;
+    state.add_first_decision_task_scheduled(start_event)?;
     Ok(UpdateAction::default())
 }
 pub fn handle_decision_task_started<S: LifecycleState>(state: &mut S, schedule_id: i64, request_id: &str, identity: &str) -> Result<(UpdateAction, S::Started), DecisionError> {
@@ -149,7 +153,7 @@ pub fn handle_decision_task_completed<S: CompletionState>(state: &mut S, request
             state.add_decision_failed(&decision, cause, details, &request.identity, &request.checksum)?;
             let max = state.decision_retry_max_attempts();
             if max > 0 && state.decision_attempt() > max {
-                let message = format!("Decision attempt exceeds limit. Last decision failure cause and details: {} - {:?}", cause, details);
+                let message = format!("Decision attempt exceeds limit. Last decision failure cause and details: {} - {}", cause, format!("[{}]", details.iter().map(u8::to_string).collect::<Vec<_>>().join(" ")));
                 state.metric("DecisionRetriesExceededCounter");
                 state.terminate("DECISION_ATTEMPTS_EXCEEDS_LIMIT", message.as_bytes())?;
             }
@@ -157,8 +161,8 @@ pub fn handle_decision_task_completed<S: CompletionState>(state: &mut S, request
         }
         let create_new = state.is_running() && (outcome.has_unhandled_events || request.force_new || outcome.activity_not_started_cancelled);
         let new_decision = if create_new {
-            let new = state.schedule_decision(request.return_new, if heartbeat && !timed_out { Some(decision.original_scheduled_timestamp) } else { None }).map_err(|_| DecisionError::new("Failed to add decision scheduled event."))?;
-            if request.return_new { state.add_decision_started(new.schedule_id, "request-from-RespondDecisionTaskCompleted", &request.identity)?; }
+            let mut new = state.schedule_decision(request.return_new, if heartbeat && !timed_out { Some(decision.original_scheduled_timestamp) } else { None }).map_err(|_| DecisionError::new("Failed to add decision scheduled event."))?;
+            if request.return_new { new = state.add_decision_started(new.schedule_id, "request-from-RespondDecisionTaskCompleted", &request.identity)?; }
             Some(new)
         } else { None };
         match state.update_active(outcome.continued_as_new) {
@@ -172,7 +176,8 @@ pub fn handle_decision_task_completed<S: CompletionState>(state: &mut S, request
         }
         state.buffered_queries(create_new, heartbeat);
         if timed_out { return Err(DecisionError::new("decision heartbeat timeout")); }
-        return state.response(new_decision.as_ref(), request.return_new && create_new, state.is_running());
+        if !state.is_running() { return state.response(None, false, false); }
+        return state.response(new_decision.as_ref(), request.return_new && create_new, true);
     }
     Err(DecisionError::new("maximum attempts exceeded to update history"))
 }
@@ -227,4 +232,40 @@ pub fn get_active_domain_by_workflow<L: ActiveDomainLookup>(lookup: &L, domain: 
     let active = lookup.active_cluster_by_workflow(domain, workflow, run)?;
     let entry = lookup.domain_by_id(domain)?;
     if active == lookup.current_cluster() { Ok(entry) } else { Err(lookup.domain_not_active_error(&entry, lookup.current_cluster(), &active)) }
+}
+
+#[derive(Default)]
+pub struct TaskToken { pub workflow_id: String, pub run_id: String, pub schedule_id: i64, pub schedule_attempt: i64 }
+/// TODO(link): wire common token serializer, domain manager and execution cache.
+pub trait RpcBackend: ActiveDomainLookup {
+    type State: CompletionState;
+    fn deserialize_token(&self, token: &[u8]) -> Result<TaskToken, DecisionError>;
+    /// Owns GetOrCreateWorkflowExecution, deferred release(error), and the
+    /// workflow.UpdateWithAction transaction for non-completion operations.
+    fn with_workflow<T>(&self, domain: &str, workflow: &str, run: &str, schedule_new_decision: bool, action: impl FnOnce(&mut Self::State) -> Result<T, DecisionError>) -> Result<T, DecisionError>;
+    fn conditional_retry_count(&self) -> usize;
+}
+pub struct RpcHandler<B: RpcBackend> { pub backend: B }
+impl<B: RpcBackend> RpcHandler<B> {
+    pub fn new(backend: B) -> Self { Self { backend } }
+    pub fn handle_decision_task_scheduled(&self, domain: &str, workflow: &str, run: &str) -> Result<UpdateAction, DecisionError> {
+        get_active_domain_by_workflow(&self.backend, domain, workflow, run)?;
+        self.backend.with_workflow(domain, workflow, run, false, handle_decision_task_scheduled)
+    }
+    pub fn handle_decision_task_started(&self, domain: &str, workflow: &str, run: &str, schedule_id: i64, request_id: &str, identity: &str) -> Result<(UpdateAction, <B::State as LifecycleState>::Started), DecisionError> {
+        get_active_domain_by_workflow(&self.backend, domain, workflow, run)?;
+        self.backend.with_workflow(domain, workflow, run, false, |state| handle_decision_task_started(state, schedule_id, request_id, identity))
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub fn handle_decision_task_failed(&self, domain: &str, token: &[u8], cause: &str, details: &[u8], identity: &str, checksum: &str) -> Result<(), DecisionError> {
+        let token = self.backend.deserialize_token(token).map_err(|_| DecisionError::new("error deserializing task token"))?;
+        get_active_domain_by_workflow(&self.backend, domain, &token.workflow_id, &token.run_id)?;
+        self.backend.with_workflow(domain, &token.workflow_id, &token.run_id, true, |state| handle_decision_task_failed(state, token.schedule_id, token.schedule_attempt, cause, details, identity, checksum))
+    }
+    pub fn handle_decision_task_completed(&self, domain: &str, token: &[u8], mut request: CompletionRequest) -> Result<<B::State as CompletionState>::Response, DecisionError> {
+        let token = self.backend.deserialize_token(token).map_err(|_| DecisionError::new("error deserializing task token"))?;
+        get_active_domain_by_workflow(&self.backend, domain, &token.workflow_id, &token.run_id)?;
+        request.schedule_id = token.schedule_id; request.attempt = token.schedule_attempt;
+        self.backend.with_workflow(domain, &token.workflow_id, &token.run_id, false, |state| handle_decision_task_completed(state, &request, self.backend.conditional_retry_count()))
+    }
 }

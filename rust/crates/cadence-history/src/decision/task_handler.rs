@@ -135,7 +135,7 @@ impl<O: Operations> TaskHandler<O> {
             D::ContinueAsNewWorkflowExecution => "BAD_CONTINUE_AS_NEW_ATTRIBUTES",
             D::StartChildWorkflowExecution => "BAD_START_CHILD_EXECUTION_ATTRIBUTES",
             D::UpsertWorkflowSearchAttributes => "BAD_SEARCH_ATTRIBUTES",
-            _ => return Err(OperationError { kind: ErrorKind::BadRequest, message: format!("Unknown decision type: {}", kind as i32) }),
+            _ => return Err(OperationError { kind: ErrorKind::BadRequest, message: format!("Unknown decision type: {kind}") }),
         };
         if !self.validate_decision_attr(decision, cause)? { return Ok(None); }
         let blob = match kind {
@@ -155,7 +155,7 @@ impl<O: Operations> TaskHandler<O> {
             D::ScheduleActivityTask => match self.operations.schedule_activity(self.completed_id, decision) {
                 Ok((activity, Some(mut dispatch))) => {
                     self.operations.start_local_activity(&activity, &uuid::Uuid::new_v4().to_string(), &self.identity)?;
-                    self.operations.populate_dispatch_token_and_timestamps(&activity, decision, &mut dispatch)?;
+                    self.operations.populate_dispatch_token_and_timestamps(&activity, decision, &mut dispatch).map_err(|_| OperationError { kind: ErrorKind::BadRequest, message: "error serializing task token".into() })?;
                     return Ok(Some(dispatch));
                 },
                 Ok(_) => {},
@@ -182,9 +182,10 @@ impl<O: Operations> TaskHandler<O> {
             D::CompleteWorkflowExecution => {
                 let result = &decision.complete_workflow_execution_decision_attributes.as_ref().unwrap().result;
                 let backoff = self.cron_backoff()?;
-                if self.operations.cancel_requested() || backoff.is_none() {
-                    self.operations.complete_workflow(self.completed_id, decision).map_err(|_| OperationError { kind: ErrorKind::Internal, message: "Unable to add complete workflow event.".into() })?;
-                } else { self.operations.retry_cron_continue_as_new(self.completed_id, backoff.unwrap(), false, None, &[], Some(result))?; }
+                match (self.operations.cancel_requested(), backoff) {
+                    (false, Some(seconds)) => self.operations.retry_cron_continue_as_new(self.completed_id, seconds, false, None, &[], Some(result))?,
+                    _ => self.operations.complete_workflow(self.completed_id, decision).map_err(|_| OperationError { kind: ErrorKind::Internal, message: "Unable to add complete workflow event.".into() })?,
+                }
             },
             D::FailWorkflowExecution => { let a = decision.fail_workflow_execution_decision_attributes.as_ref().unwrap(); self.handle_workflow_failure(a.reason.as_deref(), &a.details)?; },
             D::CancelWorkflowExecution => self.operations.cancel_workflow(self.completed_id, &decision.cancel_workflow_execution_decision_attributes.as_ref().unwrap().details)?,
@@ -261,4 +262,27 @@ pub fn acquire_wait_timeout_seconds(supplied: Option<i32>, configured: std::time
     if let Some(seconds) = supplied.filter(|s| *s > 0) { return seconds; }
     let timeout = if configured < std::time::Duration::from_secs(1) { warn(); built_in } else { configured };
     timeout.as_secs().min(i32::MAX as u64) as i32
+}
+
+/// TODO(link): cadence-api has not yet exposed semaphore decision attributes.
+/// Keep them lossless in this package until the shared wire type is extended.
+pub enum PortDecision {
+    Decision(Decision),
+    AcquireSemaphore(Option<AcquireSemaphoreDecisionAttributes>),
+}
+impl<O: Operations> TaskHandler<O> {
+    pub fn handle_port_decisions(&mut self, context: &[u8], decisions: &mut [PortDecision], max_semaphore_name: usize) -> Result<Vec<O::Dispatch>> {
+        if self.operations.check_workflow_size()? { return Ok(Vec::new()); }
+        let mut results = Vec::new();
+        for decision in decisions {
+            let result = match decision {
+                PortDecision::Decision(decision) => self.handle_decision_with_result(decision)?,
+                PortDecision::AcquireSemaphore(attributes) => { self.handle_decision_acquire_semaphore(attributes.as_ref(), max_semaphore_name)?; None },
+            };
+            if self.stop_processing { return Ok(Vec::new()); }
+            if let Some(result) = result { results.push(result); }
+        }
+        self.operations.set_execution_context(context);
+        Ok(results)
+    }
 }

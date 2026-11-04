@@ -3,8 +3,11 @@
 pub mod task_handler;
 pub mod handler;
 pub mod checker;
-use cadence_api::{enums::DecisionType, tasks::Decision};
+use cadence_api::enums::DecisionType;
 use std::time::Duration;
+pub use checker::AttrValidator as AttributeValidator;
+pub use handler::RpcHandler as Handler;
+pub use task_handler::TaskHandler as DecisionTaskHandler;
 
 pub const ACTIVITY_CANCELLATION_MSG_ACTIVITY_ID_UNKNOWN: &str = "ACTIVITY_ID_UNKNOWN";
 pub const ACTIVITY_CANCELLATION_MSG_ACTIVITY_NOT_STARTED: &str = "ACTIVITY_ID_NOT_STARTED";
@@ -27,231 +30,6 @@ impl std::fmt::Display for DecisionError {
 }
 impl std::error::Error for DecisionError {}
 
-/// Validates that a decision carries attributes for exactly its declared action.
-/// Detailed per-attribute policy checks are exposed through `AttributeValidator`.
-pub fn validate_decision_attr(d: &Decision) -> Result<DecisionType, DecisionError> {
-    let ty = d
-        .decision_type
-        .ok_or_else(|| DecisionError::new("DecisionType is not set"))?;
-    let set = [
-        d.schedule_activity_task_decision_attributes.is_some(),
-        d.request_cancel_activity_task_decision_attributes.is_some(),
-        d.start_timer_decision_attributes.is_some(),
-        d.complete_workflow_execution_decision_attributes.is_some(),
-        d.fail_workflow_execution_decision_attributes.is_some(),
-        d.cancel_timer_decision_attributes.is_some(),
-        d.cancel_workflow_execution_decision_attributes.is_some(),
-        d.request_cancel_external_workflow_execution_decision_attributes
-            .is_some(),
-        d.record_marker_decision_attributes.is_some(),
-        d.continue_as_new_workflow_execution_decision_attributes
-            .is_some(),
-        d.start_child_workflow_execution_decision_attributes
-            .is_some(),
-        d.signal_external_workflow_execution_decision_attributes
-            .is_some(),
-        d.upsert_workflow_search_attributes_decision_attributes
-            .is_some(),
-    ];
-    let expected = match ty {
-        DecisionType::ScheduleActivityTask => 0,
-        DecisionType::RequestCancelActivityTask => 1,
-        DecisionType::StartTimer => 2,
-        DecisionType::CompleteWorkflowExecution => 3,
-        DecisionType::FailWorkflowExecution => 4,
-        DecisionType::CancelTimer => 5,
-        DecisionType::CancelWorkflowExecution => 6,
-        DecisionType::RequestCancelExternalWorkflowExecution => 7,
-        DecisionType::RecordMarker => 8,
-        DecisionType::ContinueAsNewWorkflowExecution => 9,
-        DecisionType::StartChildWorkflowExecution => 10,
-        DecisionType::SignalExternalWorkflowExecution => 11,
-        DecisionType::UpsertWorkflowSearchAttributes => 12,
-        DecisionType::AcquireSemaphore | DecisionType::ReleaseSemaphore => {
-            return Err(DecisionError::new(
-                "decision type attributes are not supported by this API type",
-            ))
-        }
-        _ => return Err(DecisionError::new("unknown decision type")),
-    };
-    if !set[expected] {
-        return Err(DecisionError::new(format!(
-            "DecisionAttributes for {:?} is not set",
-            ty
-        )));
-    }
-    if set
-        .iter()
-        .enumerate()
-        .any(|(i, present)| *present && i != expected)
-    {
-        return Err(DecisionError::new(format!(
-            "DecisionAttributes do not match decision type {:?}",
-            ty
-        )));
-    }
-    Ok(ty)
-}
-
-/// Port of checker.go's shared decision attribute validation rules.
-pub struct AttributeValidator {
-    pub max_id_bytes: usize,
-    pub max_input_bytes: usize,
-    pub max_reason_bytes: usize,
-    pub max_details_bytes: usize,
-    pub max_marker_bytes: usize,
-    pub max_search_attribute_count: usize,
-    pub max_search_attribute_bytes: usize,
-}
-impl Default for AttributeValidator {
-    fn default() -> Self {
-        Self {
-            max_id_bytes: 256,
-            max_input_bytes: 2 * 1024 * 1024,
-            max_reason_bytes: 256,
-            max_details_bytes: 2 * 1024 * 1024,
-            max_marker_bytes: 256,
-            max_search_attribute_count: 0,
-            max_search_attribute_bytes: 0,
-        }
-    }
-}
-impl AttributeValidator {
-    pub fn validate(&self, d: &Decision) -> Result<(), DecisionError> {
-        let ty = validate_decision_attr(d)?;
-        match ty {
-            DecisionType::ScheduleActivityTask => {
-                let a = d
-                    .schedule_activity_task_decision_attributes
-                    .as_ref()
-                    .unwrap();
-                self.required("ActivityId", &a.activity_id)?;
-                self.limit("ActivityId", a.activity_id.len(), self.max_id_bytes)?;
-                self.limit("Input", a.input.len(), self.max_input_bytes)?;
-                if let Some(t) = &a.task_list {
-                    self.required("TaskList", &t.name)?;
-                }
-            }
-            DecisionType::StartTimer => {
-                let a = d.start_timer_decision_attributes.as_ref().unwrap();
-                self.required("TimerId", &a.timer_id)?;
-                if a.start_to_fire_timeout_seconds.unwrap_or(0) < 0 {
-                    return Err(DecisionError::new(
-                        "StartToFireTimeoutSeconds cannot be negative",
-                    ));
-                }
-            }
-            DecisionType::FailWorkflowExecution => {
-                let a = d
-                    .fail_workflow_execution_decision_attributes
-                    .as_ref()
-                    .unwrap();
-                if let Some(r) = &a.reason {
-                    self.limit("Reason", r.len(), self.max_reason_bytes)?;
-                }
-                self.limit("Details", a.details.len(), self.max_details_bytes)?
-            }
-            DecisionType::RecordMarker => {
-                let a = d.record_marker_decision_attributes.as_ref().unwrap();
-                self.required("MarkerName", &a.marker_name)?;
-                self.limit("MarkerName", a.marker_name.len(), self.max_marker_bytes)?;
-            }
-            DecisionType::RequestCancelActivityTask => self.required(
-                "ActivityId",
-                &d.request_cancel_activity_task_decision_attributes
-                    .as_ref()
-                    .unwrap()
-                    .activity_id,
-            )?,
-            DecisionType::CancelTimer => self.required(
-                "TimerId",
-                &d.cancel_timer_decision_attributes
-                    .as_ref()
-                    .unwrap()
-                    .timer_id,
-            )?,
-            _ => {}
-        }
-        Ok(())
-    }
-    fn required(&self, field: &str, value: &str) -> Result<(), DecisionError> {
-        if value.is_empty() {
-            Err(DecisionError::new(format!("{} is not set", field)))
-        } else {
-            Ok(())
-        }
-    }
-    fn limit(&self, field: &str, n: usize, max: usize) -> Result<(), DecisionError> {
-        if max > 0 && n > max {
-            Err(DecisionError::new(format!("{} exceeds limit", field)))
-        } else {
-            Ok(())
-        }
-    }
-    pub fn validate_activity_schedule_attributes(&self, d: &Decision) -> Result<(), DecisionError> {
-        if d.decision_type != Some(DecisionType::ScheduleActivityTask) {
-            return Err(DecisionError::new("decision is not ScheduleActivityTask"));
-        }
-        self.validate(d)
-    }
-    pub fn validate_timer_schedule_attributes(&self, d: &Decision) -> Result<(), DecisionError> {
-        if d.decision_type != Some(DecisionType::StartTimer) {
-            return Err(DecisionError::new("decision is not StartTimer"));
-        }
-        self.validate(d)
-    }
-    pub fn validate_activity_cancel_attributes(&self, d: &Decision) -> Result<(), DecisionError> {
-        if d.decision_type != Some(DecisionType::RequestCancelActivityTask) {
-            return Err(DecisionError::new(
-                "decision is not RequestCancelActivityTask",
-            ));
-        }
-        self.validate(d)
-    }
-    pub fn validate_timer_cancel_attributes(&self, d: &Decision) -> Result<(), DecisionError> {
-        if d.decision_type != Some(DecisionType::CancelTimer) {
-            return Err(DecisionError::new("decision is not CancelTimer"));
-        }
-        self.validate(d)
-    }
-    pub fn validate_record_marker_attributes(&self, d: &Decision) -> Result<(), DecisionError> {
-        if d.decision_type != Some(DecisionType::RecordMarker) {
-            return Err(DecisionError::new("decision is not RecordMarker"));
-        }
-        self.validate(d)
-    }
-    pub fn validate_complete_workflow_execution_attributes(
-        &self,
-        d: &Decision,
-    ) -> Result<(), DecisionError> {
-        if d.decision_type != Some(DecisionType::CompleteWorkflowExecution) {
-            return Err(DecisionError::new(
-                "decision is not CompleteWorkflowExecution",
-            ));
-        }
-        self.validate(d)
-    }
-    pub fn validate_fail_workflow_execution_attributes(
-        &self,
-        d: &Decision,
-    ) -> Result<(), DecisionError> {
-        if d.decision_type != Some(DecisionType::FailWorkflowExecution) {
-            return Err(DecisionError::new("decision is not FailWorkflowExecution"));
-        }
-        self.validate(d)
-    }
-    pub fn validate_cancel_workflow_execution_attributes(
-        &self,
-        d: &Decision,
-    ) -> Result<(), DecisionError> {
-        if d.decision_type != Some(DecisionType::CancelWorkflowExecution) {
-            return Err(DecisionError::new(
-                "decision is not CancelWorkflowExecution",
-            ));
-        }
-        self.validate(d)
-    }
-}
 #[derive(Debug, Clone, Copy, Default)]
 pub struct WorkflowSizeLimits {
     pub history_size_warn: usize,
@@ -296,216 +74,6 @@ pub fn convert_search_attributes_to_byte_array(
     fields: &std::collections::BTreeMap<String, Vec<u8>>,
 ) -> Vec<u8> {
     fields.iter().flat_map(|(key, value)| key.as_bytes().iter().chain(value).copied()).collect()
-}
-
-/// Workflow mutation seam while the mutable-state port is in progress.
-pub trait DecisionWorkflowBackend {
-    fn handle_decision(&mut self, decision: &Decision) -> Result<(), DecisionError>;
-    fn fail_decision(&mut self, cause: &str, message: Option<&str>) -> Result<(), DecisionError>;
-    fn fail_workflow(&mut self, reason: &str, details: &[u8]) -> Result<(), DecisionError>;
-    fn set_execution_context(&mut self, execution_context: &[u8]) -> Result<(), DecisionError>;
-}
-pub struct DecisionTaskHandler<B> {
-    pub backend: B,
-    pub validator: AttributeValidator,
-    pub stop_processing: bool,
-    pub fail_decision: bool,
-    pub has_unhandled_events_before_decisions: bool,
-}
-impl<B: DecisionWorkflowBackend> DecisionTaskHandler<B> {
-    pub fn new(
-        backend: B,
-        validator: AttributeValidator,
-        has_unhandled_events_before_decisions: bool,
-    ) -> Self {
-        Self {
-            backend,
-            validator,
-            stop_processing: false,
-            fail_decision: false,
-            has_unhandled_events_before_decisions,
-        }
-    }
-    pub fn handle_decisions(
-        &mut self,
-        execution_context: &[u8],
-        decisions: &[Decision],
-    ) -> Result<(), DecisionError> {
-        for d in decisions {
-            if self.stop_processing {
-                break;
-            }
-            if let Err(e) = self.validator.validate(d) {
-                self.backend
-                    .fail_decision("BAD_DECISION_ATTRIBUTES", Some(&e.message))?;
-                self.fail_decision = true;
-                self.stop_processing = true;
-                break;
-            }
-            self.backend.handle_decision(d)?;
-        }
-        if !self.fail_decision && !self.stop_processing {
-            self.backend.set_execution_context(execution_context)?
-        }
-        Ok(())
-    }
-}
-
-macro_rules! typed_decision_handler {
-    ($method:ident,$kind:ident) => {
-        pub fn $method(&mut self, d: &Decision) -> Result<(), DecisionError> {
-            if d.decision_type != Some(DecisionType::$kind) {
-                return Err(DecisionError::new(concat!(
-                    stringify!($method),
-                    " received a different decision type"
-                )));
-            }
-            self.validator.validate(d)?;
-            self.backend.handle_decision(d)
-        }
-    };
-}
-impl<B: DecisionWorkflowBackend> DecisionTaskHandler<B> {
-    typed_decision_handler!(handle_decision_schedule_activity, ScheduleActivityTask);
-    typed_decision_handler!(
-        handle_decision_request_cancel_activity,
-        RequestCancelActivityTask
-    );
-    typed_decision_handler!(handle_decision_start_timer, StartTimer);
-    typed_decision_handler!(handle_decision_complete_workflow, CompleteWorkflowExecution);
-    typed_decision_handler!(handle_decision_fail_workflow, FailWorkflowExecution);
-    typed_decision_handler!(handle_decision_cancel_timer, CancelTimer);
-    typed_decision_handler!(handle_decision_cancel_workflow, CancelWorkflowExecution);
-    typed_decision_handler!(
-        handle_decision_request_cancel_external_workflow,
-        RequestCancelExternalWorkflowExecution
-    );
-    typed_decision_handler!(handle_decision_record_marker, RecordMarker);
-    typed_decision_handler!(
-        handle_decision_continue_as_new_workflow,
-        ContinueAsNewWorkflowExecution
-    );
-    typed_decision_handler!(
-        handle_decision_start_child_workflow,
-        StartChildWorkflowExecution
-    );
-    typed_decision_handler!(
-        handle_decision_signal_external_workflow,
-        SignalExternalWorkflowExecution
-    );
-    typed_decision_handler!(
-        handle_decision_upsert_workflow_search_attributes,
-        UpsertWorkflowSearchAttributes
-    );
-    pub fn handle_decision_with_result(&mut self, d: &Decision) -> Result<(), DecisionError> {
-        self.handle_decision(d)
-    }
-    pub fn handle_decision(&mut self, d: &Decision) -> Result<(), DecisionError> {
-        self.validator.validate(d)?;
-        self.backend.handle_decision(d)
-    }
-    pub fn handle_fail_workflow_error(
-        &mut self,
-        reason: &str,
-        details: &str,
-    ) -> Result<(), DecisionError> {
-        self.stop_processing = true;
-        self.backend.fail_workflow(reason, details.as_bytes())
-    }
-    pub fn handle_workflow_failure(
-        &mut self,
-        reason: &str,
-        message: Option<&str>,
-    ) -> Result<(), DecisionError> {
-        self.backend.fail_workflow(reason, message.unwrap_or_default().as_bytes())
-    }
-    pub fn fail_workflow_semaphore_not_found(&mut self, name: &str, domain_name: &str) -> Result<(), DecisionError> {
-        if self.has_unhandled_events_before_decisions {
-            return self.handler_fail_decision("UNHANDLED_DECISION", Some("cannot fail workflow for a missing semaphore, new events arrived while this decision was processing"));
-        }
-        self.stop_processing = true;
-        self.backend.fail_workflow(FAILURE_REASON_SEMAPHORE_NOT_FOUND, fail_workflow_semaphore_not_found_details(name, domain_name).as_bytes())
-    }
-    pub fn handler_fail_decision(
-        &mut self,
-        cause: &str,
-        message: Option<&str>,
-    ) -> Result<(), DecisionError> {
-        self.fail_decision = true;
-        self.stop_processing = true;
-        self.backend.fail_decision(cause, message)
-    }
-    pub fn retry_cron_continue_as_new(&mut self, d: &Decision) -> Result<(), DecisionError> {
-        if d.decision_type != Some(DecisionType::ContinueAsNewWorkflowExecution) {
-            return Err(DecisionError::new(
-                "decision is not ContinueAsNewWorkflowExecution",
-            ));
-        }
-        self.handle_decision(d)
-    }
-}
-
-/// Inputs shared by Go Handler's schedule/start/fail/complete lifecycle methods.
-#[derive(Debug, Clone, Default)]
-pub struct DecisionTaskRequest {
-    pub domain_id: String,
-    pub workflow_id: String,
-    pub run_id: String,
-    pub schedule_id: i64,
-    pub request_id: String,
-    pub identity: String,
-    pub execution_context: Vec<u8>,
-    pub decisions: Vec<Decision>,
-}
-pub trait DecisionTaskLifecycle: Send + Sync {
-    type Started: Send;
-    type Completed: Send;
-    fn handle_scheduled(&self, request: &DecisionTaskRequest) -> Result<(), DecisionError>;
-    fn handle_started(&self, request: &DecisionTaskRequest)
-        -> Result<Self::Started, DecisionError>;
-    fn handle_failed(&self, request: &DecisionTaskRequest) -> Result<(), DecisionError>;
-    fn handle_completed(
-        &self,
-        request: &DecisionTaskRequest,
-    ) -> Result<Self::Completed, DecisionError>;
-}
-pub struct Handler<B: DecisionTaskLifecycle> {
-    backend: B,
-}
-impl<B: DecisionTaskLifecycle> Handler<B> {
-    pub fn new(backend: B) -> Self {
-        Self { backend }
-    }
-    pub fn handle_decision_task_scheduled(
-        &self,
-        r: &DecisionTaskRequest,
-    ) -> Result<(), DecisionError> {
-        self.backend.handle_scheduled(r)
-    }
-    pub fn handle_decision_task_started(
-        &self,
-        r: &DecisionTaskRequest,
-    ) -> Result<B::Started, DecisionError> {
-        self.backend.handle_started(r)
-    }
-    pub fn handle_decision_task_failed(
-        &self,
-        r: &DecisionTaskRequest,
-    ) -> Result<(), DecisionError> {
-        self.backend.handle_failed(r)
-    }
-    pub fn handle_decision_task_completed(
-        &self,
-        r: &DecisionTaskRequest,
-    ) -> Result<B::Completed, DecisionError> {
-        self.backend.handle_completed(r)
-    }
-}
-pub fn get_decision_info_attempt(attempt: i64) -> i64 {
-    attempt
-}
-pub fn get_decision_info_started_id(started_id: i64) -> i64 {
-    started_id
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -968,11 +536,7 @@ fn search_value_matches(bytes: &[u8], kind: cadence_api::enums::IndexedValueType
             T::Int => v.as_i64().is_some(),
             T::Double => v.as_f64().is_some(),
             T::Bool => v.is_boolean(),
-            T::Datetime => v.as_str().is_some_and(|s| {
-                s.len() >= 20
-                    && s.contains('T')
-                    && (s.ends_with('Z') || s.rfind('+').is_some() || s.rfind('-').is_some())
-            }),
+            T::Datetime => v.as_str().is_some_and(valid_rfc3339),
             _ => false,
         }
     }
@@ -1121,6 +685,30 @@ pub fn fail_workflow_semaphore_not_found_details(name:&str,domain_name:&str)->St
 #[allow(clippy::too_many_arguments)]pub fn validate_signal_external_workflow_execution_attributes(lookup:&impl DomainReplicationLookup,source_domain_id:&str,target_domain_id:&str,a:Option<&cadence_api::tasks::SignalExternalWorkflowExecutionDecisionAttributes>,max_domain_length:usize,max_workflow_id_length:usize)->Result<(),DecisionError>{validate_cross_domain_call(lookup,source_domain_id,target_domain_id)?;let a=a.ok_or_else(||DecisionError::new("SignalExternalWorkflowExecutionDecisionAttributes is not set on decision."))?;let execution=a.execution.as_ref().ok_or_else(||DecisionError::new("Execution is nil on decision."))?;if execution.workflow_id.is_empty(){return Err(DecisionError::new("WorkflowId is not set on decision."))}if a.domain.len()>max_domain_length{return Err(DecisionError::new("Domain exceeds length limit."))}if execution.workflow_id.len()>max_workflow_id_length{return Err(DecisionError::new("WorkflowId exceeds length limit."))}if !execution.run_id.is_empty()&&uuid::Uuid::parse_str(&execution.run_id).is_err(){return Err(DecisionError::new("Invalid RunId set on decision."))}if a.signal_name.is_empty(){return Err(DecisionError::new("SignalName is not set on decision."))}Ok(())}
 
 pub trait WorkflowSizeMutableState{fn next_event_id(&self)->i64;fn history_size(&self)->i64;fn add_fail_workflow_event(&mut self,completed_event_id:i64,reason:&str,details:&[u8])->Result<(),DecisionError>;}
-pub trait WorkflowSizeObserver{fn record_history_size(&self,_size:i64){}fn record_history_count(&self,_count:i64){}fn warn_history_limit(&self,_size:i64,_count:i64){}fn error_history_limit(&self,_size:i64,_count:i64){}}
+pub trait WorkflowSizeObserver{fn record_blob_size(&self,_decision_type:DecisionType,_size:usize){}fn misconfigured_blob_limits(&self){}fn warn_blob_limit(&self,_decision_type:DecisionType,_size:usize){}fn error_blob_limit(&self,_decision_type:DecisionType,_size:usize){}fn record_history_size(&self,_size:i64){}fn record_history_count(&self,_count:i64){}fn warn_history_limit(&self,_size:i64,_count:i64){}fn error_history_limit(&self,_size:i64,_count:i64){}}
 pub fn fail_workflow_size_exceeds_limit(state:&mut impl WorkflowSizeMutableState,observer:&impl WorkflowSizeObserver,limits:WorkflowSizeLimits,completed_event_id:i64)->Result<bool,DecisionError>{let history_count=state.next_event_id()-1;let history_size=state.history_size();observer.record_history_size(history_size);observer.record_history_count(history_count);if history_size>limits.history_size_error as i64||history_count>limits.history_count_error as i64{observer.error_history_limit(history_size,history_count);state.add_fail_workflow_event(completed_event_id,FAILURE_REASON_HISTORY_SIZE_EXCEEDS_LIMIT,b"Workflow history size / count exceeds limit.")?;return Ok(true)}if history_size>limits.history_size_warn as i64||history_count>limits.history_count_warn as i64{observer.warn_history_limit(history_size,history_count)}Ok(false)}
 pub fn fail_workflow_if_blob_size_exceeds_limit(state:&mut impl WorkflowSizeMutableState,blob_size:usize,limits:WorkflowSizeLimits,completed_event_id:i64,message:&str)->Result<bool,DecisionError>{if limits.blob_size_error>0&&blob_size>limits.blob_size_error{state.add_fail_workflow_event(completed_event_id,FAILURE_REASON_DECISION_BLOB_SIZE_EXCEEDS_LIMIT,message.as_bytes())?;return Ok(true)}Ok(false)}
+
+// Go time.Time JSON parsing requires RFC3339 with an explicit zone.
+fn valid_rfc3339(s: &str) -> bool {
+    let b = s.as_bytes();
+    if b.len() < 20 || b[4] != b'-' || b[7] != b'-' || b[10] != b'T' || b[13] != b':' || b[16] != b':' { return false; }
+    fn number(b: &[u8]) -> Option<u32> { if !b.iter().all(u8::is_ascii_digit) { return None; } Some(b.iter().fold(0, |n,d| n * 10 + (d-b'0') as u32)) }
+    let Some(year) = number(&b[..4]) else { return false; };
+    let Some(month) = number(&b[5..7]) else { return false; };
+    let Some(day) = number(&b[8..10]) else { return false; };
+    let Some(hour) = number(&b[11..13]) else { return false; };
+    let Some(minute) = number(&b[14..16]) else { return false; };
+    let Some(second) = number(&b[17..19]) else { return false; };
+    let days = match month { 1|3|5|7|8|10|12 => 31, 4|6|9|11 => 30, 2 => if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {29} else {28}, _ => return false };
+    if day == 0 || day > days || hour > 23 || minute > 59 || second > 59 { return false; }
+    let mut i = 19;
+    if b.get(i) == Some(&b'.') || b.get(i) == Some(&b',') {
+        i += 1; let start = i;
+        while b.get(i).is_some_and(u8::is_ascii_digit) { i += 1; }
+        if start == i { return false; }
+    }
+    if b.get(i) == Some(&b'Z') { return i + 1 == b.len(); }
+    if i+6 != b.len() || !matches!(b.get(i), Some(b'+')|Some(b'-')) || b[i+3] != b':' { return false; }
+    number(&b[i+1..i+3]).is_some_and(|n| n <= 24) && number(&b[i+4..i+6]).is_some_and(|n| n <= 60)
+}

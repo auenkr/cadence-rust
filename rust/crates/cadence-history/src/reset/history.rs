@@ -1,3 +1,4 @@
+#![allow(clippy::too_many_arguments)]
 //! Reset history replay and persistence algorithms from resetter.go.
 //! TODO(link): implement these primitive operations using execution contexts and HistoryManager.
 use super::{reapply_events, ResetError, SignalEventReapplier};
@@ -82,7 +83,8 @@ pub fn prepare_reset_workflow<S: ResetPreparation>(history: &impl ResetHistory, 
     if base_last_event_version > reset_version { return Err(ResetError(super::ERR_VERSION_MISMATCH.into())); }
     state.update_current_version(reset_version, false)?;
     super::close_pending_decision_task(state, base_run_id, reset_run_id, base_last_event_version, reason, reset_request_id)?;
-    super::fail_inflight_activity(state, state.start_timestamp_unix_nanos(), reason)?;
+    let start_timestamp = state.start_timestamp_unix_nanos();
+    super::fail_inflight_activity(state, start_timestamp, reason)?;
     if !skip_signal_reapply {
         reapply_reset_and_continue_as_new_workflow_events(history, state, domain_id, workflow_id, base_branch_token, base_rebuild_last_event_id + 1, base_next_event_id, &current.run_id, current.next_event_id, &current.branch_token)?;
     }
