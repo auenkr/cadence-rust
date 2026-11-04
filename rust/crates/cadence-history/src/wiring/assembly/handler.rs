@@ -446,7 +446,7 @@ impl Handler for HistoryHandler {
             return Err(err_shutting_down());
         }
         let r = nonnil(request)?;
-        let execution = r.request.as_ref().and_then(|q| q.execution.clone()).unwrap_or_default();
+        let execution = r.request.as_ref().and_then(|q| q.workflow_execution.clone()).unwrap_or_default();
         let engine = self.engine(&execution.workflow_id)?;
         engine.refresh_workflow_tasks(&r.domain_uuid, &execution).await
     }
