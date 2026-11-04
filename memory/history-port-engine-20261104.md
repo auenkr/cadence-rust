@@ -57,3 +57,17 @@ shouldTerminateAndStart and termination details; start orchestration remains mis
 9f8fa838e adds ReapplyEvents including filtering, reset, cron and failure mapping;
 new stand-in dependency methods need adapters. DescribeWorkflowExecution and its
 response mapping helpers added next; CI pending. Do not infer service parity.
+
+## Compaction continuation checkpoint (head 62b210a92)
+
+CI https://github.com/auenkr/cadence-rust/actions/runs/41915179732 is in progress;
+no success claimed for this head. No local Cargo or Go commands ran.
+Since the older checklist, source modules now cover start/signal-with-start orchestration,
+describe workflow, reapply, failover callbacks, lifecycle, hydration notifications,
+engine interface/factory ordering, handler workflow/admin/shard routes, replication
+fanout/budget, and generic gRPC/Thrift wrappers.
+
+Still incomplete: concrete wire conversion/dispatch adapters, runtime dependency
+adapters, and exhaustive line-by-line behavior audit. TODO(link) declarations are
+not evidence of implemented behavior in the dependent package. Previous table is
+a historical checkpoint and must be replaced with the final audited mapping.
