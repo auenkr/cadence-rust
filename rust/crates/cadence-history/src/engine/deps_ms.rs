@@ -49,6 +49,12 @@ pub trait MutableState: Send + Sync {
     fn retry_activity(&self, info: &ActivityInfo, reason: &str, details: &[u8], options: Option<&FailureOptions>) -> HResult<bool>;
     fn update_activity_progress(&self, info: &ActivityInfo, request: &RecordActivityTaskHeartbeatRequest);
     fn add_workflow_execution_cancel_requested_event(&self, cause: &str, request: &HistoryRequestCancelWorkflowExecutionRequest) -> HResult<()>;
+    fn get_last_write_version(&self) -> HResult<i64>;
+    fn is_resource_duplicated(&self, dedup_resource_id: &str) -> bool;
+    fn get_pending_activity_infos(&self) -> Vec<ActivityInfo>;
+    fn get_pending_child_execution_infos(&self) -> Vec<PendingChildInfo>;
+    fn get_pending_decision(&self) -> Option<crate::mutable_state::DecisionInfo>;
+    async fn get_completion_event(&self) -> HResult<cadence_api::service_types::HistoryEvent>;
     fn terminate_workflow(&self, first_event_id: i64, reason: &str, details: &[u8], identity: &str) -> HResult<()>;
 }
 #[async_trait]
@@ -61,3 +67,15 @@ pub trait ExecutionContext: Send + Sync {
 
 #[derive(Debug, Clone, Default)]
 pub struct ChildExecutionInfo { pub started_id: i64, pub started_workflow_id: String }
+
+/// `persistence.ChildExecutionInfo` (fields read by DescribeWorkflowExecution).
+#[derive(Debug, Clone, Default)]
+pub struct PendingChildInfo {
+    pub domain_id: String,
+    pub domain_name: String,
+    pub started_workflow_id: String,
+    pub started_run_id: String,
+    pub workflow_type_name: String,
+    pub initiated_id: i64,
+    pub parent_close_policy: Option<cadence_api::enums::ParentClosePolicy>,
+}

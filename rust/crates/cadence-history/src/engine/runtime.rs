@@ -20,7 +20,7 @@ pub enum QueueAction { Reset, GetState }
 #[async_trait]
 pub trait QueueProcessor: Send + Sync {
     async fn handle_action(&self, cluster: &str, action: QueueAction) -> HResult<Vec<String>>;
-    fn notify_new_task(&self, cluster: &str, tasks: &[Task]);
+    fn notify_new_task(&self, cluster: &str, info: &super::notify_tasks::NotifyTaskInfo);
 }
 #[derive(Clone, Debug)]
 pub enum Task {
@@ -36,6 +36,8 @@ impl Task {
 #[async_trait]
 pub trait ReplicationHydrator: Send + Sync {
     async fn hydrate(&self, task: Task) -> HResult<Option<ReplicationTask>>;
+    /// `replication.NewImmediateTaskHydrator(...).Hydrate`
+    async fn hydrate_immediate(&self, input: ImmediateHydration) -> HResult<Option<ReplicationTask>>;
 }
 #[async_trait]
 pub trait ReplicationAckManager: Send + Sync {
@@ -102,6 +104,29 @@ pub struct HistoryEngine {
     pub current_execution_reader: Arc<dyn CurrentExecutionReader>,
     pub history_event_notifier: Arc<dyn HistoryEventNotifier>,
     pub task_refresher: Arc<dyn MutableStateTaskRefresher>,
+    pub events_reapplier: Arc<dyn EventsReapplier>,
+    pub replication_task_store: Arc<dyn ReplicationTaskStore>,
+}
+
+/// Inputs of `replication.NewImmediateTaskHydrator`.
+pub struct ImmediateHydration {
+    pub is_running: bool,
+    pub version_histories: Option<VersionHistories>,
+    pub activities: HashMap<i64, ActivityInfo>,
+    pub history: Option<super::notify_tasks::PersistedBlobRef>,
+    pub new_run_history: Option<super::notify_tasks::PersistedBlobRef>,
+    pub info: ReplicationTaskInfo,
+    pub branch_token: Vec<u8>,
+    pub new_run_branch_token: Vec<u8>,
+}
+/// `ndc.EventsReapplier`
+#[async_trait]
+pub trait EventsReapplier: Send + Sync {
+    async fn reapply_events(&self, state: MutableStateRef, events: &[cadence_api::service_types::HistoryEvent], run_id: &str) -> HResult<Vec<cadence_api::service_types::HistoryEvent>>;
+}
+/// `replication.TaskStore`
+pub trait ReplicationTaskStore: Send + Sync {
+    fn put(&self, task: cadence_api::types::ReplicationTask);
 }
 
 #[async_trait]

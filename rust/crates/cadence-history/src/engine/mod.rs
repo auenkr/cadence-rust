@@ -16,3 +16,8 @@ pub mod poll_mutable_state;
 pub mod record_child_execution_completed;
 pub mod reset_workflow_execution;
 pub mod query_workflow;
+pub mod decision_task;
+pub mod refresh_workflow_tasks;
+pub mod notify_tasks;
+pub mod reapply_events;
+pub mod describe_workflow_execution;
