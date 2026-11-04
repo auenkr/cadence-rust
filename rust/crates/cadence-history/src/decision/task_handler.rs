@@ -233,3 +233,31 @@ impl<O: Operations> TaskHandler<O> {
         }
     }
 }
+
+/// Go retryCronContinueAsNew's attribute propagation. The parent domain accompanies
+/// the AddContinueAsNewEvent call rather than being a decision attribute.
+pub fn retry_cron_continue_as_new_attributes(
+    start: &cadence_api::service_types::WorkflowExecutionStartedEventAttributes,
+    seconds: i32,
+    initiator: cadence_api::enums::ContinueAsNewInitiator,
+    reason: Option<String>,
+    details: Vec<u8>,
+    completion_result: Vec<u8>,
+) -> cadence_api::tasks::ContinueAsNewWorkflowExecutionDecisionAttributes {
+    cadence_api::tasks::ContinueAsNewWorkflowExecutionDecisionAttributes {
+        workflow_type: start.workflow_type.clone(), task_list: start.task_list.clone(),
+        retry_policy: start.retry_policy.clone(), input: start.input.clone(),
+        execution_start_to_close_timeout_seconds: start.execution_start_to_close_timeout_seconds,
+        task_start_to_close_timeout_seconds: start.task_start_to_close_timeout_seconds,
+        cron_schedule: start.cron_schedule.clone(), backoff_start_interval_in_seconds: Some(seconds),
+        initiator: Some(initiator), failure_reason: reason, failure_details: details,
+        last_completion_result: completion_result, header: start.header.clone(), memo: start.memo.clone(),
+        search_attributes: start.search_attributes.clone(), jitter_start_seconds: start.jitter_start_seconds,
+        cron_overlap_policy: start.cron_overlap_policy,
+    }
+}
+pub fn acquire_wait_timeout_seconds(supplied: Option<i32>, configured: std::time::Duration, built_in: std::time::Duration, mut warn: impl FnMut()) -> i32 {
+    if let Some(seconds) = supplied.filter(|s| *s > 0) { return seconds; }
+    let timeout = if configured < std::time::Duration::from_secs(1) { warn(); built_in } else { configured };
+    timeout.as_secs().min(i32::MAX as u64) as i32
+}

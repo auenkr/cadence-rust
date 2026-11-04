@@ -46,6 +46,9 @@ pub trait WorkflowResetBackend: Send + Sync {
         request_id: &str,
         additional_events: &[HistoryEvent],
         skip_signal_reapply: bool,
+        base_branch_token: &[u8],
+        base_rebuild_next_event_id: i64,
+        base_next_event_id: i64,
         current: &CurrentWorkflowInfo,
     ) -> Result<Self::Workflow, ResetError>;
     fn persist(
@@ -121,14 +124,11 @@ impl<B: WorkflowResetBackend> WorkflowResetter<B> {
             reset_request_id,
             additional_reapply_events,
             skip_signal_reapply,
+            base_branch_token,
+            base_rebuild_last_event_id + 1,
+            base_next_event_id,
             &current_info,
         )?;
-        let _ = (
-            base_next_event_id,
-            current_info.next_event_id,
-            current_info.run_id.as_str(),
-            current_info.branch_token.as_slice(),
-        );
         self.backend.persist(current, prepared, current_terminated)
     }
 }

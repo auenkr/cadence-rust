@@ -96,3 +96,27 @@ pub trait ResetTermination {
 pub fn terminate_workflow(state: &mut impl ResetTermination, reason: &str) -> Result<(), ResetError> {
     state.terminate_workflow(state.next_event_id(), reason, &[], "history-service")
 }
+
+pub struct RebuildRequest<'a> {
+    pub domain_id: &'a str, pub workflow_id: &'a str, pub base_run_id: &'a str,
+    pub base_branch_token: &'a [u8], pub last_event_id: i64, pub last_event_version: i64,
+    pub reset_run_id: &'a str, pub reset_request_id: &'a str,
+}
+pub trait ResetRebuilder: ResetHistory {
+    type Context;
+    type MutableState;
+    type Workflow;
+    fn new_context(&self, domain_id: &str, workflow_id: &str, run_id: &str) -> Self::Context;
+    /// Rebuild at the shard clock's current time; invoke branch callback lazily.
+    fn rebuild(&self, request: &RebuildRequest<'_>, branch: &mut dyn FnMut() -> Result<Vec<u8>, ResetError>) -> Result<(Self::MutableState, i64), ResetError>;
+    fn set_history_size(&self, context: &mut Self::Context, size: i64);
+    /// NewWorkflow with NoopReleaseFn, shard cluster metadata and logger.
+    fn new_workflow(&self, context: Self::Context, state: Self::MutableState) -> Self::Workflow;
+}
+pub fn replay_reset_workflow<R: ResetRebuilder>(r: &R, request: &RebuildRequest<'_>) -> Result<R::Workflow, ResetError> {
+    let mut context = r.new_context(request.domain_id, request.workflow_id, request.reset_run_id);
+    let mut branch = || fork_and_generate_branch_token(r, request.domain_id, request.workflow_id, request.base_branch_token, request.last_event_id + 1, request.reset_run_id);
+    let (state, size) = r.rebuild(request, &mut branch)?;
+    r.set_history_size(&mut context, size);
+    Ok(r.new_workflow(context, state))
+}

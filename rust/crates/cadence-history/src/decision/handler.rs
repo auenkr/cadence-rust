@@ -178,3 +178,53 @@ pub fn handle_decision_task_completed<S: CompletionState>(state: &mut S, request
 }
 pub fn get_decision_info_attempt(info: Option<&DecisionInfo>) -> i64 { info.map_or(0, |i| i.attempt) }
 pub fn get_decision_info_started_id(info: Option<&DecisionInfo>) -> i64 { info.map_or(0, |i| i.started_id) }
+
+#[derive(Default)]
+pub struct StartedResponse {
+    pub workflow_type: Option<cadence_api::types::WorkflowType>,
+    pub previous_started_event_id: Option<i64>,
+    pub scheduled_event_id: i64, pub started_event_id: i64, pub sticky_execution_enabled: bool,
+    pub next_event_id: i64, pub attempt: i64,
+    pub workflow_execution_task_list: cadence_api::types::TaskList,
+    pub scheduled_timestamp: i64, pub started_timestamp: i64,
+    pub transient_events: Option<(cadence_api::service_types::HistoryEvent, cadence_api::service_types::HistoryEvent)>,
+    pub branch_token: Vec<u8>, pub queries: HashMap<String, cadence_api::tasks::WorkflowQuery>, pub history_size: i64,
+}
+pub trait StartedResponseState {
+    fn workflow_type(&self) -> Option<cadence_api::types::WorkflowType>;
+    fn last_processed_event(&self) -> i64;
+    fn sticky_task_list(&self) -> &str;
+    fn next_event_id(&self) -> i64;
+    fn task_list(&self) -> &str;
+    fn create_transient_decision_events(&self, decision: &DecisionInfo, identity: &str) -> (cadence_api::service_types::HistoryEvent, cadence_api::service_types::HistoryEvent);
+    fn current_branch_token(&self) -> Result<Vec<u8>, DecisionError>;
+    fn query_registry(&self) -> &Registry;
+    fn history_size(&self) -> i64;
+}
+pub fn create_record_decision_task_started_response(state: &impl StartedResponseState, decision: &DecisionInfo, identity: &str) -> Result<StartedResponse, DecisionError> {
+    let previous = state.last_processed_event();
+    let transient_events = if decision.attempt > 0 { Some(state.create_transient_decision_events(decision, identity)) } else { None };
+    let branch_token = state.current_branch_token()?;
+    let registry = state.query_registry();
+    let queries = registry.get_buffered_ids().into_iter().filter_map(|id| registry.get_query_input(&id).ok().map(|input| (id, input))).collect();
+    Ok(StartedResponse {
+        workflow_type: state.workflow_type(), previous_started_event_id: (previous != -23).then_some(previous),
+        scheduled_event_id: decision.schedule_id, started_event_id: decision.started_id,
+        sticky_execution_enabled: !state.sticky_task_list().is_empty(), next_event_id: state.next_event_id(), attempt: decision.attempt,
+        workflow_execution_task_list: cadence_api::types::TaskList { name: state.task_list().into(), kind: Some(cadence_api::enums::TaskListKind::Normal), base_name: String::new() },
+        scheduled_timestamp: decision.scheduled_timestamp, started_timestamp: decision.started_timestamp,
+        transient_events, branch_token, queries, history_size: state.history_size(),
+    })
+}
+pub trait ActiveDomainLookup {
+    type Domain;
+    fn active_cluster_by_workflow(&self, domain: &str, workflow: &str, run: &str) -> Result<String, DecisionError>;
+    fn domain_by_id(&self, id: &str) -> Result<Self::Domain, DecisionError>;
+    fn current_cluster(&self) -> &str;
+    fn domain_not_active_error(&self, domain: &Self::Domain, current: &str, active: &str) -> DecisionError;
+}
+pub fn get_active_domain_by_workflow<L: ActiveDomainLookup>(lookup: &L, domain: &str, workflow: &str, run: &str) -> Result<L::Domain, DecisionError> {
+    let active = lookup.active_cluster_by_workflow(domain, workflow, run)?;
+    let entry = lookup.domain_by_id(domain)?;
+    if active == lookup.current_cluster() { Ok(entry) } else { Err(lookup.domain_not_active_error(&entry, lookup.current_cluster(), &active)) }
+}
