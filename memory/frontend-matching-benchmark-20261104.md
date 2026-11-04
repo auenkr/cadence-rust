@@ -89,3 +89,22 @@ Next: collect smoke terminal artifacts, resolve any runtime problems, dispatch
 the corrected-source repeated comparison, inspect every pair's correctness,
 identity/config/resource windows and cleanup, then retain and present real
 results. No speedup or service resource improvement is claimed yet.
+
+## First measured workflow comparison retained
+
+Run 41762497645 finished successfully at source
+`2e7e5f56d65ccdc2c23afa070c9b6486e4ee73fb`. All 30 SDK runs passed
+(5 pairs × 3 concurrency levels × 2 arms; 100 measured workflows each).
+The current comparer independently validated its raw workflow outputs and
+reproduced medians. Go/Rust workflows per second were 25.19/17.72 at concurrency
+1, 67.99/50.72 at 16 and 62.68/51.71 at 64. These are descriptive measurements
+on that runner, with identical uncapped service defaults in both arms.
+Older estimated CPU and incorrectly labeled memory samples are excluded from
+the reproduced reports (`resources.status=not_collected`). New explicitly
+capped runs and corrected resources must be reported separately.
+
+Full note: `memory/frontend-matching-benchmark-initial-results-41762497645.md`.
+Compact raw outputs/configs/hashes/command evidence and reproduced reports:
+`memory/evidence/frontend-matching-benchmark-initial-41762497645/`.
+Corrected integrated smoke 41764102198 is still building the release Rust image
+as last observed; no corrected resource result is accepted yet.

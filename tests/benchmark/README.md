@@ -90,7 +90,10 @@ as if they were controlled measurements. Long low-CPU soaks of prebuilt binaries
 run locally in tmux `cadence-rust`, through `work-safe`, nice/ionice and resource
 guards specified by AGENTS.md.
 
-No benchmark measurements have been recorded yet.
+The initial five-pair run completed successfully; see
+[`memory/frontend-matching-benchmark-initial-results-41762497645.md`](../../memory/frontend-matching-benchmark-initial-results-41762497645.md).
+Its uncapped service configuration differs from the newer explicitly capped
+runner, so those runs must stay separate. Older resource estimates are excluded.
 
 ## Resource collection and comparison tools
 
@@ -175,4 +178,6 @@ memory bytes. Markdown summarizes the same results. These are combined
 Frontend+Matching SDK workflow measurements, never isolated service RPC
 throughput. The driver is closed-loop: latency excludes client queue time and
 includes SDK retry time. No benchmark numbers are checked in until they come
-from real, reproducible Go and Rust deployments.
+from real, reproducible Go and Rust deployments. Initial actual outputs and
+reproduced reports are retained under
+`memory/evidence/frontend-matching-benchmark-initial-41762497645/`.
