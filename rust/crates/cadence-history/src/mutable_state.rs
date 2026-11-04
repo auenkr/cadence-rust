@@ -312,7 +312,7 @@ impl MutableStateBuilder {
         original_scheduled_timestamp: i64,
         normal_task_list: String,
     ) -> Result<DecisionInfo, MutableStateError> {
-        if self.pending_decision().is_some() {
+        if self.decision_info.as_ref().is_some_and(|d| d.schedule_id != 0) {
             let d = self.decision_snapshot();
             return Err(MutableStateError::InvalidDecisionState { action: "schedule", schedule_id: d.schedule_id, started_id: d.started_id });
         }
@@ -722,6 +722,22 @@ mod tests {
         assert_eq!(info.version, 7);
         assert_eq!(info.original_schedule_timestamp, 80);
         assert_eq!(s.decision_snapshot(), info);
+    }
+
+    #[test]
+    fn heartbeat_scheduling_keeps_failed_decisions_transient_and_flushes_buffers_first() {
+        let mut s = MutableStateBuilder::default();
+        s.execution_info["task_list"] = "normal".into();
+        s.execution_info["decision_timeout"] = 9.into();
+        s.execution_info["decision_attempt"] = 2.into();
+        s.buffered_events.push(HistoryEvent { event_type: Some(EventType::WorkflowExecutionSignaled), ..Default::default() });
+        let info = s.add_decision_task_scheduled_event_as_heartbeat(false, 50, 25, "normal".into()).unwrap();
+        assert_eq!(s.history[0].event_id, 1);
+        assert_eq!(s.history[0].event_type, Some(EventType::WorkflowExecutionSignaled));
+        assert_eq!(info.schedule_id, 2);
+        assert_eq!(info.attempt, 0);
+        assert_eq!(info.original_schedule_timestamp, 25);
+        assert_eq!(s.history[1].event_type, Some(EventType::DecisionTaskScheduled));
     }
 
     #[test]
