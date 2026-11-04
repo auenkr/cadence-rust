@@ -35,6 +35,8 @@ pub enum HistoryError {
     #[error(transparent)]
     Cadence(Box<CadenceError>),
     #[error(transparent)]
+    InternalDataInconsistency(#[from] cadence_api::errors::InternalDataInconsistencyError),
+    #[error(transparent)]
     EventAlreadyStarted(#[from] EventAlreadyStartedError),
     /// `workflow.ErrStaleState`
     #[error("cache mutable state could potentially be stale")]

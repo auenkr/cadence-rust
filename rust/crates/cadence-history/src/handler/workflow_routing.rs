@@ -76,7 +76,8 @@ impl HistoryHandler {
         self.check_rate().map_err(fail)?;
         let execution = request.execution.clone().unwrap_or_default();
         let workflow = execution.workflow_id;
-        let run = execution.run_id;
+        // Preserve the Go handler's workflow-ID value in the run-ID metric tag.
+        let run = workflow.clone();
         let fail = |error| self.error("GetMutableState", domain, &workflow, &run, error);
         let engine = self
             .resources
@@ -360,7 +361,8 @@ impl HistoryHandler {
             .and_then(|r| r.workflow_execution)
             .unwrap_or_default();
         let workflow = execution.workflow_id;
-        let run = execution.run_id;
+        // Preserve the Go handler's workflow-ID value in the run-ID metric tag.
+        let run = workflow.clone();
         let fail = |error| self.error("RefreshWorkflowTasks", domain, &workflow, &run, error);
         let engine = self
             .resources

@@ -145,7 +145,10 @@ impl HistoryEngine {
         let histories = state
             .version_histories
             .as_ref()
-            .ok_or(HistoryError::MissingVersionHistories)?;
+            .ok_or_else(|| {
+                tracing::warn!("version histories do not exist");
+                HistoryError::from(cadence_api::errors::InternalDataInconsistencyError::new("version histories do not exist"))
+            })?;
         let history = histories.current_history().map_err(|err| HistoryError::Other(format!("unable to get version history while looking up response for mutable state: {err}")))?.clone();
         Ok((state, history))
     }

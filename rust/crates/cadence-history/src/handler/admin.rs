@@ -14,7 +14,10 @@ use std::sync::Arc;
 /// TODO(link): host resources, failover coordinator and rate-limit RPC mapper.
 #[async_trait]
 pub trait AdminResources: Send + Sync {
-    fn host_description(&self) -> DescribeHistoryHostResponse;
+    fn domain_cache_size(&self) -> (i64, i64);
+    fn shard_controller_status(&self) -> i32;
+    fn number_of_shards(&self) -> usize;
+    fn host_address(&self) -> String;
     fn shard_ids(&self) -> Vec<i32>;
     fn remove_engine_for_shard(&self, shard: i32);
     async fn complete_history_task(
@@ -51,7 +54,20 @@ impl HistoryHandler {
         _request: Option<&DescribeHistoryHostRequest>,
     ) -> HResult<DescribeHistoryHostResponse> {
         self.wait_started().await;
-        Ok(self.admin.host_description())
+        let (by_id, by_name) = self.admin.domain_cache_size();
+        let status = match self.admin.shard_controller_status() {
+            0 => "initialized", 1 => "started", 2 => "stopped", _ => "",
+        };
+        Ok(DescribeHistoryHostResponse {
+            number_of_shards: self.admin.number_of_shards() as i32,
+            shard_ids: self.admin.shard_ids(),
+            domain_cache: Some(DomainCacheInfo {
+                num_of_items_in_cache_by_id: by_id,
+                num_of_items_in_cache_by_name: by_name,
+            }),
+            shard_controller_status: status.into(),
+            address: self.admin.host_address(),
+        })
     }
     pub async fn close_shard(&self, request: Option<&CloseShardRequest>) -> HResult<()> {
         self.admin
