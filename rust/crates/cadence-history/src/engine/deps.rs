@@ -249,6 +249,7 @@ pub struct ActivityInfo {
     pub has_retry_policy: bool,
     pub version: i64,
     pub started_identity: String,
+    pub task_list: String,
 }
 
 /// `cache.DomainCacheEntry` info (TODO(link): common/cache).
