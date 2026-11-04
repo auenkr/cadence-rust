@@ -142,6 +142,7 @@ pub struct ProcessorImpl {
     domain_mode: StringPropertyFnWithDomainFilter,
     enabled: BoolPropertyFn,
     host_limiter: HostLimiter,
+    #[allow(dead_code)]
     time_source: Arc<dyn TimeSource>,
     metrics_client: Arc<dyn MetricsClient>,
     logger: Logger,

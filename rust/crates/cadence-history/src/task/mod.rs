@@ -1,3 +1,4 @@
+#![allow(clippy::unnecessary_min_or_max)]
 //! History task processing, ported from go/service/history/task.
 pub mod constants;
 pub mod deps;

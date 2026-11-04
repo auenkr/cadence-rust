@@ -484,18 +484,13 @@ impl TaskImpl {
     /// Body of Go `HandleErr` without the deferred attempt bookkeeping.
     fn handle_err_inner(&self, err_opt: &Option<TaskError>) -> Option<TaskError> {
         let logger = self.logger.helper();
-        let mut err = match err_opt {
-            None => return None,
-            Some(e) => e.clone(),
-        };
+        let mut err = err_opt.clone()?;
 
         log_event(&self.event_logger, "Handling task processing error", vec![detail(&err)]);
 
         let scope = self.scope();
 
-        if matches!(err, TaskError::EntityNotExists(_)) {
-            return None;
-        } else if matches!(err, TaskError::WorkflowExecutionAlreadyCompleted(_)) {
+        if matches!(err, TaskError::EntityNotExists(_) | TaskError::WorkflowExecutionAlreadyCompleted(_)) {
             return None;
         }
 

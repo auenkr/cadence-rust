@@ -175,6 +175,7 @@ impl RedispatcherImpl {
         }
 
         for priority in priorities {
+            #[allow(clippy::while_let_loop)]
             loop {
                 let Some(pq) = st.pq_map.get_mut(&priority) else { break };
                 if pq.is_empty()
