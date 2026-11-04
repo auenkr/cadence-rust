@@ -153,13 +153,15 @@ impl Collection {
             .unwrap_or_else(|| default.clone())
     }
 
-    pub fn prop<T: FromDynamic>(&self, key: &str, default: T) -> Prop<T> {
+    pub fn prop<T: FromDynamic>(&self, key: &str, default: impl Into<T>) -> Prop<T> {
         let (c, k) = (self.client.clone(), key.to_string());
+        let default: T = default.into();
         Arc::new(move || Self::lookup(&c, &k, &Filters::default(), &default))
     }
 
-    pub fn prop_domain<T: FromDynamic>(&self, key: &str, default: T) -> PropDomain<T> {
+    pub fn prop_domain<T: FromDynamic>(&self, key: &str, default: impl Into<T>) -> PropDomain<T> {
         let (c, k) = (self.client.clone(), key.to_string());
+        let default: T = default.into();
         Arc::new(move |domain: &str| {
             let f = Filters {
                 domain_name: Some(domain.to_string()),
@@ -169,8 +171,9 @@ impl Collection {
         })
     }
 
-    pub fn prop_domain_id<T: FromDynamic>(&self, key: &str, default: T) -> PropDomain<T> {
+    pub fn prop_domain_id<T: FromDynamic>(&self, key: &str, default: impl Into<T>) -> PropDomain<T> {
         let (c, k) = (self.client.clone(), key.to_string());
+        let default: T = default.into();
         Arc::new(move |domain_id: &str| {
             let f = Filters {
                 domain_id: Some(domain_id.to_string()),
@@ -180,8 +183,9 @@ impl Collection {
         })
     }
 
-    pub fn prop_shard<T: FromDynamic>(&self, key: &str, default: T) -> PropShard<T> {
+    pub fn prop_shard<T: FromDynamic>(&self, key: &str, default: impl Into<T>) -> PropShard<T> {
         let (c, k) = (self.client.clone(), key.to_string());
+        let default: T = default.into();
         Arc::new(move |shard_id: i32| {
             let f = Filters {
                 shard_id: Some(shard_id as i64),
@@ -194,9 +198,10 @@ impl Collection {
     pub fn prop_domain_task_list<T: FromDynamic>(
         &self,
         key: &str,
-        default: T,
+        default: impl Into<T>,
     ) -> PropDomainTaskList<T> {
         let (c, k) = (self.client.clone(), key.to_string());
+        let default: T = default.into();
         Arc::new(move |domain: &str, task_list: &str| {
             let f = Filters {
                 domain_name: Some(domain.to_string()),
@@ -210,9 +215,10 @@ impl Collection {
     pub fn prop_domain_id_workflow_id<T: FromDynamic>(
         &self,
         key: &str,
-        default: T,
+        default: impl Into<T>,
     ) -> PropDomainIDWorkflowID<T> {
         let (c, k) = (self.client.clone(), key.to_string());
+        let default: T = default.into();
         Arc::new(move |domain_id: &str, workflow_id: &str| {
             let f = Filters {
                 domain_id: Some(domain_id.to_string()),

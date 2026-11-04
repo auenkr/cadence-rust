@@ -436,7 +436,7 @@ impl Config {
             shard_sync_min_interval: dc.prop::<Duration>("history.shardSyncMinInterval", Duration::from_nanos((60_000_000_000 * 5) as u64)),
             shard_sync_timer_jitter_coefficient: dc.prop::<f64>("history.transferProcessorMaxPollIntervalJitterCoefficient", 0.15),
             long_poll_expiration_interval: dc.prop_domain::<Duration>("history.longPollExpirationInterval", Duration::from_nanos((1_000_000_000 * 20) as u64)),
-            event_encoding_type: dc.prop_domain::<String>("history.defaultEventEncoding", string(constants.EncodingTypeThriftRW)),
+            event_encoding_type: dc.prop_domain::<String>("history.defaultEventEncoding", "thriftrw"),
             enable_parent_close_policy: dc.prop_domain::<bool>("history.enableParentClosePolicy", true),
             num_parent_close_policy_system_workflows: dc.prop::<i64>("history.numParentClosePolicySystemWorkflows", 10i64),
             enable_parent_close_policy_worker: dc.prop::<bool>("system.enableParentClosePolicyWorker", true),
