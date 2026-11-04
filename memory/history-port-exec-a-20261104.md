@@ -58,6 +58,11 @@ workflow repairer, mocks excluded) were not ported in this progress slice.
   The failure was private enum imports (`EventType`, `ParentClosePolicy`) and
   one wrong timer attribute field shorthand. These are corrected in the next
   commit; rerun the requested-crate workflow against that head.
+- CI against `03073a2c973ff5549ee0d658fed04dcc1d3ce8b0` compiled, then failed
+  Clippy on one long child-start signature and a clone of a `Copy` event type:
+  https://github.com/auenkr/cadence-rust/actions/runs/41882590713
+  The method now has a narrow `too_many_arguments` allowance matching the Go
+  argument shape, and the unnecessary clone is removed.
 
 This note must be updated with the final head SHA, run URL/conclusion, and a
 complete parity checklist before the work is considered done.

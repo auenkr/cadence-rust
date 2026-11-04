@@ -86,6 +86,7 @@ impl MutableStateBuilder {
         Ok(info)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn add_child_workflow_execution_started_event(
         &mut self, initiated_event_id: i64, domain: impl Into<String>, execution: WorkflowExecution,
         workflow_type: Option<WorkflowType>, header: Option<cadence_api::types::Header>, timestamp_unix_nanos: i64, version: i64,

@@ -28,7 +28,7 @@ impl MutableStateBuilder {
     /// methods also clear sticky state, persist the event batch ID, and enqueue
     /// close tasks; task generation is exposed separately to history runtime.
     pub fn replicate_workflow_close_event(&mut self, first_event_id: i64, event: &HistoryEvent) -> Option<WorkflowCloseStatus> {
-        let status = match event.event_type.clone()? {
+        let status = match event.event_type? {
             EventType::WorkflowExecutionCompleted => WorkflowCloseStatus::Completed,
             EventType::WorkflowExecutionFailed => WorkflowCloseStatus::Failed,
             EventType::WorkflowExecutionCanceled => WorkflowCloseStatus::Canceled,
