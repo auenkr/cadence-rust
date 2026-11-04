@@ -9,6 +9,15 @@ use crate::execution::workflow::TransactionPolicy;
 
 type OptWorkflow = Option<Box<dyn NdcWorkflow>>;
 
+/// Reborrow with a shortened trait-object lifetime (plain `as_deref_mut` keeps `'static`,
+/// which is invariant behind `&mut`).
+fn opt_mut(w: &mut OptWorkflow) -> Option<&mut dyn NdcWorkflow> {
+    match w {
+        Some(b) => Some(b.as_mut()),
+        None => None,
+    }
+}
+
 /// Go `transactionManagerForExistingWorkflowImpl`.
 pub struct TransactionManagerForExistingWorkflow<'a> {
     pub transaction_manager: &'a dyn NdcTransactionManager,
@@ -284,29 +293,29 @@ impl<'a> TransactionManagerForExistingWorkflow<'a> {
     ) -> NdcResult<()> {
         let outcome = guarded(|| match policy {
             NdcTransactionPolicy::UpdateAsCurrent => {
-                self.update_as_current(now, target_workflow.as_mut(), new_workflow.as_deref_mut())
+                self.update_as_current(now, target_workflow.as_mut(), opt_mut(&mut new_workflow))
             }
             NdcTransactionPolicy::UpdateAsZombie => self.update_as_zombie(
                 now,
                 &mut current_workflow,
                 target_workflow.as_mut(),
-                new_workflow.as_deref_mut(),
+                opt_mut(&mut new_workflow),
             ),
             NdcTransactionPolicy::SuppressCurrentAndUpdateAsCurrent => self
                 .suppress_current_and_update_as_current(
                     now,
-                    current_workflow.as_deref_mut().expect("current required"),
+                    opt_mut(&mut current_workflow).expect("current required"),
                     target_workflow.as_mut(),
-                    new_workflow.as_deref_mut(),
+                    opt_mut(&mut new_workflow),
                 ),
             NdcTransactionPolicy::ConflictResolveAsCurrent => {
-                self.conflict_resolve_as_current(now, target_workflow.as_mut(), new_workflow.as_deref_mut())
+                self.conflict_resolve_as_current(now, target_workflow.as_mut(), opt_mut(&mut new_workflow))
             }
             NdcTransactionPolicy::ConflictResolveAsZombie => self.conflict_resolve_as_zombie(
                 now,
                 &mut current_workflow,
                 target_workflow.as_mut(),
-                new_workflow.as_deref_mut(),
+                opt_mut(&mut new_workflow),
             ),
             other => Err(NdcError::internal(format!(
                 "nDCTransactionManager: encounter unknown transaction type: {other:?}"
