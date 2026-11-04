@@ -1726,9 +1726,7 @@ pub async fn get_cross_cluster_tasks(
     Json(req): Json<cadence_api::admin::GetCrossClusterTasksRequest>,
 ) -> Response {
     if req.target_cluster.is_empty() {
-        return bad_request(BadRequestError::new(
-            "Cluster name is not set.",
-        ));
+        return bad_request(BadRequestError::new("Cluster name is not set."));
     }
     if state.history_admin_channel.is_none() {
         return ok_json(cadence_api::admin::GetCrossClusterTasksResponse::default());
@@ -1745,9 +1743,7 @@ pub async fn respond_cross_cluster_tasks_completed(
     Json(req): Json<cadence_api::admin::RespondCrossClusterTasksCompletedRequest>,
 ) -> Response {
     if req.target_cluster.is_empty() {
-        return bad_request(BadRequestError::new(
-            "Cluster name is not set.",
-        ));
+        return bad_request(BadRequestError::new("Cluster name is not set."));
     }
     if state.history_admin_channel.is_none() {
         return ok_json(cadence_api::admin::RespondCrossClusterTasksCompletedResponse::default());
