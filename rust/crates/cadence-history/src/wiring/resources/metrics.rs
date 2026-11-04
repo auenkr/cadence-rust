@@ -292,8 +292,10 @@ impl crate::engine::runtime::EngineMetrics for MetricsClientImpl {
 
 /// `domain.MetricsScopeCache`: domain-tagged scopes cached per (domainID, scope).
 #[derive(Default)]
+type ScopeMap = Mutex<HashMap<(String, &'static str), Arc<dyn task::MetricsScope>>>;
+
 pub struct DomainMetricsScopeCacheImpl {
-    scopes: Mutex<HashMap<(String, &'static str), Arc<dyn task::MetricsScope>>>,
+    scopes: ScopeMap,
 }
 
 impl task::DomainMetricsScopeCache for DomainMetricsScopeCacheImpl {
@@ -308,7 +310,7 @@ impl task::DomainMetricsScopeCache for DomainMetricsScopeCacheImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::task::deps::{MetricsClient, MetricsScope};
+    use crate::task::deps::MetricsClient;
 
     #[test]
     fn counters_and_timers_are_recorded() {
