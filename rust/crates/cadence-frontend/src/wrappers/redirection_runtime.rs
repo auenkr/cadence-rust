@@ -261,9 +261,13 @@ mod body_consistency_tests {
     #[test]
     fn strong_from_body() {
         let f = |v: serde_json::Value| v;
-        assert!(body_requests_strong(&f(json!({"queryConsistencyLevel":"STRONG"}))));
+        assert!(body_requests_strong(&f(
+            json!({"queryConsistencyLevel":"STRONG"})
+        )));
         assert!(body_requests_strong(&f(json!({"queryConsistencyLevel":1}))));
-        assert!(!body_requests_strong(&f(json!({"queryConsistencyLevel":"EVENTUAL"}))));
+        assert!(!body_requests_strong(&f(
+            json!({"queryConsistencyLevel":"EVENTUAL"})
+        )));
         assert!(!body_requests_strong(&f(json!({}))));
     }
 }
