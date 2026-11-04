@@ -290,10 +290,10 @@ impl crate::engine::runtime::EngineMetrics for MetricsClientImpl {
     }
 }
 
-/// `domain.MetricsScopeCache`: domain-tagged scopes cached per (domainID, scope).
-#[derive(Default)]
 type ScopeMap = Mutex<HashMap<(String, &'static str), Arc<dyn task::MetricsScope>>>;
 
+/// `domain.MetricsScopeCache`: domain-tagged scopes cached per (domainID, scope).
+#[derive(Default)]
 pub struct DomainMetricsScopeCacheImpl {
     scopes: ScopeMap,
 }
