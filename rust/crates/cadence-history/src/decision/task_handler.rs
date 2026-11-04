@@ -12,10 +12,15 @@ impl From<DecisionError> for OperationError {
     fn from(e: DecisionError) -> Self { Self { kind: ErrorKind::BadRequest, message: e.message } }
 }
 #[derive(Debug, Clone, Default)]
-pub struct Activity { pub schedule_id: i64, pub started_id: i64, pub cancel_event_id: i64 }
+pub struct Activity { pub schedule_id: i64, pub started_id: i64, pub cancel_event_id: i64, pub activity_id: String, pub scheduled_time_unix_nanos: i64, pub started_time_unix_nanos: i64 }
+#[derive(Debug,Clone,Default)]
+pub struct WorkflowIdentity { pub domain_id:String,pub workflow_id:String,pub workflow_type:String,pub run_id:String }
+pub trait LocalDispatch { fn set_task_token(&mut self, token:Vec<u8>); fn set_timestamps(&mut self, scheduled:i64, scheduled_this_attempt:i64, started:i64); }
+
 /// All methods represent one dependency call, rather than a whole decision handler.
 pub trait Operations {
-    type Dispatch;
+    type Dispatch: LocalDispatch;
+    fn workflow_identity(&self) -> WorkflowIdentity;
     fn count_decision(&mut self, kind: DecisionType);
     fn has_buffered_events(&self) -> bool;
     fn workflow_running(&self) -> bool;
@@ -27,8 +32,15 @@ pub trait Operations {
     fn validate(&mut self, decision: &mut Decision) -> Result<()>;
     fn resolve_target_domain(&mut self, name: &str) -> Result<()>;
     fn schedule_activity(&mut self, completed_id: i64, decision: &Decision) -> Result<(Activity, Option<Self::Dispatch>)>;
-    fn start_local_activity(&mut self, activity: &Activity, request_id: &str, identity: &str) -> Result<()>;
-    fn populate_dispatch_token_and_timestamps(&mut self, activity: &Activity, decision: &Decision, dispatch: &mut Self::Dispatch) -> Result<()>;
+    fn start_local_activity(&mut self, activity: &mut Activity, request_id: &str, identity: &str) -> Result<()>;
+    fn populate_dispatch_token_and_timestamps(&mut self, activity: &Activity, decision: &Decision, dispatch: &mut Self::Dispatch) -> Result<()> {
+        let workflow = self.workflow_identity();
+        let activity_type = decision.schedule_activity_task_decision_attributes.as_ref().and_then(|a|a.activity_type.as_ref()).map_or("",|a|a.name.as_str());
+        let token = cadence_api::tasktoken::TaskToken { domain_id:workflow.domain_id,workflow_id:workflow.workflow_id,workflow_type:workflow.workflow_type,run_id:workflow.run_id,schedule_id:activity.schedule_id,schedule_attempt:0,activity_id:activity.activity_id.clone(),activity_type:activity_type.into() };
+        dispatch.set_task_token(cadence_api::tasktoken::JsonTaskTokenSerializer::serialize(&token).map_err(|_|OperationError{kind:ErrorKind::BadRequest,message:"error serializing task token".into()})?);
+        dispatch.set_timestamps(activity.scheduled_time_unix_nanos,activity.scheduled_time_unix_nanos,activity.started_time_unix_nanos);
+        Ok(())
+    }
     fn request_cancel_activity(&mut self, completed_id: i64, id: &str, identity: &str) -> Result<Activity>;
     fn cancel_activity(&mut self, activity: &Activity, details: &[u8], identity: &str) -> Result<()>;
     fn request_cancel_activity_failed(&mut self, completed_id: i64, id: &str, cause: &str) -> Result<()>;
@@ -41,7 +53,8 @@ pub trait Operations {
     fn cron_backoff_seconds(&mut self) -> Result<Option<i32>>;
     fn retry_backoff_seconds(&self, reason: &str) -> Option<i32>;
     fn retry_cron_continue_as_new(&mut self, completed_id: i64, seconds: i32, retry: bool, reason: Option<&str>, details: &[u8], completion_result: Option<&[u8]>) -> Result<()>;
-    fn continue_as_new(&mut self, completed_id: i64, decision: &Decision) -> Result<()>;
+    fn active_cluster_selection_policy(&self) -> Option<super::checker::ActiveClusterSelectionPolicy>;
+    fn continue_as_new(&mut self, completed_id: i64, decision: &Decision, policy: Option<&super::checker::ActiveClusterSelectionPolicy>) -> Result<()>;
     fn record_marker(&mut self, completed_id: i64, decision: &Decision) -> Result<()>;
     fn initiate_cancel_external(&mut self, completed_id: i64, request_id: &str, decision: &Decision) -> Result<()>;
     fn initiate_signal_external(&mut self, completed_id: i64, request_id: &str, decision: &Decision) -> Result<()>;
@@ -64,11 +77,12 @@ pub struct TaskHandler<O: Operations> {
     pub fail_message: Option<String>,
     pub activity_not_started_cancelled: bool,
     pub stop_processing: bool,
+    pub continue_as_new_selection_policy: Option<super::checker::ActiveClusterSelectionPolicy>,
 }
 impl<O: Operations> TaskHandler<O> {
     pub fn new(operations: O, identity: String, completed_id: i64) -> Self {
         let buffered = operations.has_buffered_events();
-        Self { operations, identity, completed_id, has_unhandled_events_before_decisions: buffered, fail_decision: false, fail_decision_cause: None, fail_message: None, activity_not_started_cancelled: false, stop_processing: false }
+        Self { operations, identity, completed_id, has_unhandled_events_before_decisions: buffered, fail_decision: false, fail_decision_cause: None, fail_message: None, activity_not_started_cancelled: false, stop_processing: false, continue_as_new_selection_policy: None }
     }
     pub fn handler_fail_decision(&mut self, cause: &'static str, message: impl Into<String>) {
         self.fail_decision = true; self.fail_decision_cause = Some(cause); self.fail_message = Some(message.into()); self.stop_processing = true;
@@ -153,8 +167,8 @@ impl<O: Operations> TaskHandler<O> {
         if closes && !self.operations.workflow_running() { self.operations.multiple_completion(kind); return Ok(None); }
         match kind {
             D::ScheduleActivityTask => match self.operations.schedule_activity(self.completed_id, decision) {
-                Ok((activity, Some(mut dispatch))) => {
-                    self.operations.start_local_activity(&activity, &uuid::Uuid::new_v4().to_string(), &self.identity)?;
+                Ok((mut activity, Some(mut dispatch))) => {
+                    self.operations.start_local_activity(&mut activity, &uuid::Uuid::new_v4().to_string(), &self.identity)?;
                     self.operations.populate_dispatch_token_and_timestamps(&activity, decision, &mut dispatch).map_err(|_| OperationError { kind: ErrorKind::BadRequest, message: "error serializing task token".into() })?;
                     return Ok(Some(dispatch));
                 },
@@ -189,7 +203,7 @@ impl<O: Operations> TaskHandler<O> {
             },
             D::FailWorkflowExecution => { let a = decision.fail_workflow_execution_decision_attributes.as_ref().unwrap(); self.handle_workflow_failure(a.reason.as_deref(), &a.details)?; },
             D::CancelWorkflowExecution => self.operations.cancel_workflow(self.completed_id, &decision.cancel_workflow_execution_decision_attributes.as_ref().unwrap().details)?,
-            D::ContinueAsNewWorkflowExecution => { if self.operations.cancel_requested() { self.operations.cancel_workflow(self.completed_id, &[])?; } else { self.operations.continue_as_new(self.completed_id, decision)?; } },
+            D::ContinueAsNewWorkflowExecution => { if self.operations.cancel_requested() { self.operations.cancel_workflow(self.completed_id, &[])?; } else { let policy = self.continue_as_new_selection_policy.clone().or_else(||self.operations.active_cluster_selection_policy()); self.operations.continue_as_new(self.completed_id, decision, policy.as_ref())?; } },
             D::RecordMarker => self.operations.record_marker(self.completed_id, decision)?,
             D::RequestCancelExternalWorkflowExecution => self.operations.initiate_cancel_external(self.completed_id, &uuid::Uuid::new_v4().to_string(), decision)?,
             D::SignalExternalWorkflowExecution => self.operations.initiate_signal_external(self.completed_id, &uuid::Uuid::new_v4().to_string(), decision)?,
@@ -269,6 +283,7 @@ pub fn acquire_wait_timeout_seconds(supplied: Option<i32>, configured: std::time
 pub enum PortDecision {
     Decision(Decision),
     AcquireSemaphore(Option<AcquireSemaphoreDecisionAttributes>),
+    ContinueAsNew(super::checker::ContinueAsNewPortAttributes),
 }
 impl<O: Operations> TaskHandler<O> {
     pub fn handle_port_decisions(&mut self, context: &[u8], decisions: &mut [PortDecision], max_semaphore_name: usize) -> Result<Vec<O::Dispatch>> {
@@ -278,6 +293,15 @@ impl<O: Operations> TaskHandler<O> {
             let result = match decision {
                 PortDecision::Decision(decision) => self.handle_decision_with_result(decision)?,
                 PortDecision::AcquireSemaphore(attributes) => { self.handle_decision_acquire_semaphore(attributes.as_ref(), max_semaphore_name)?; None },
+                PortDecision::ContinueAsNew(attributes) => {
+                    super::checker::inherit_active_cluster_selection_policy(attributes, &self.operations.active_cluster_selection_policy());
+                    self.continue_as_new_selection_policy = attributes.active_cluster_selection_policy.clone();
+                    let mut decision = Decision { decision_type:Some(DecisionType::ContinueAsNewWorkflowExecution),continue_as_new_workflow_execution_decision_attributes:Some(attributes.attributes.clone()),..Decision::default() };
+                    let result = self.handle_decision_with_result(&mut decision);
+                    self.continue_as_new_selection_policy = None;
+                    attributes.attributes = decision.continue_as_new_workflow_execution_decision_attributes.unwrap();
+                    result?
+                },
             };
             if self.stop_processing { return Ok(Vec::new()); }
             if let Some(result) = result { results.push(result); }

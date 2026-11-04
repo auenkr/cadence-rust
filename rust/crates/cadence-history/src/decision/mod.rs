@@ -4,7 +4,6 @@ pub mod task_handler;
 pub mod handler;
 pub mod checker;
 use cadence_api::enums::DecisionType;
-use std::time::Duration;
 pub use checker::AttrValidator as AttributeValidator;
 pub use handler::RpcHandler as Handler;
 pub use task_handler::TaskHandler as DecisionTaskHandler;
@@ -66,9 +65,6 @@ pub fn check_blob_size(blob_size: usize, limits: WorkflowSizeLimits) -> SizeActi
     } else {
         SizeAction::Continue
     }
-}
-pub fn acquire_wait_timeout_seconds(timeout: Duration) -> i64 {
-    timeout.as_secs().min(i64::MAX as u64) as i64
 }
 pub fn convert_search_attributes_to_byte_array(
     fields: &std::collections::BTreeMap<String, Vec<u8>>,
@@ -687,7 +683,7 @@ pub fn fail_workflow_semaphore_not_found_details(name:&str,domain_name:&str)->St
 pub trait WorkflowSizeMutableState{fn next_event_id(&self)->i64;fn history_size(&self)->i64;fn add_fail_workflow_event(&mut self,completed_event_id:i64,reason:&str,details:&[u8])->Result<(),DecisionError>;}
 pub trait WorkflowSizeObserver{fn record_blob_size(&self,_decision_type:DecisionType,_size:usize){}fn misconfigured_blob_limits(&self){}fn warn_blob_limit(&self,_decision_type:DecisionType,_size:usize){}fn error_blob_limit(&self,_decision_type:DecisionType,_size:usize){}fn record_history_size(&self,_size:i64){}fn record_history_count(&self,_count:i64){}fn warn_history_limit(&self,_size:i64,_count:i64){}fn error_history_limit(&self,_size:i64,_count:i64){}}
 pub fn fail_workflow_size_exceeds_limit(state:&mut impl WorkflowSizeMutableState,observer:&impl WorkflowSizeObserver,limits:WorkflowSizeLimits,completed_event_id:i64)->Result<bool,DecisionError>{let history_count=state.next_event_id()-1;let history_size=state.history_size();observer.record_history_size(history_size);observer.record_history_count(history_count);if history_size>limits.history_size_error as i64||history_count>limits.history_count_error as i64{observer.error_history_limit(history_size,history_count);state.add_fail_workflow_event(completed_event_id,FAILURE_REASON_HISTORY_SIZE_EXCEEDS_LIMIT,b"Workflow history size / count exceeds limit.")?;return Ok(true)}if history_size>limits.history_size_warn as i64||history_count>limits.history_count_warn as i64{observer.warn_history_limit(history_size,history_count)}Ok(false)}
-pub fn fail_workflow_if_blob_size_exceeds_limit(state:&mut impl WorkflowSizeMutableState,blob_size:usize,limits:WorkflowSizeLimits,completed_event_id:i64,message:&str)->Result<bool,DecisionError>{if limits.blob_size_error>0&&blob_size>limits.blob_size_error{state.add_fail_workflow_event(completed_event_id,FAILURE_REASON_DECISION_BLOB_SIZE_EXCEEDS_LIMIT,message.as_bytes())?;return Ok(true)}Ok(false)}
+pub fn fail_workflow_if_blob_size_exceeds_limit(state:&mut impl WorkflowSizeMutableState,blob_size:usize,limits:WorkflowSizeLimits,completed_event_id:i64,message:&str)->Result<bool,DecisionError>{if blob_size>limits.blob_size_error{state.add_fail_workflow_event(completed_event_id,FAILURE_REASON_DECISION_BLOB_SIZE_EXCEEDS_LIMIT,message.as_bytes())?;return Ok(true)}Ok(false)}
 
 // Go time.Time JSON parsing requires RFC3339 with an explicit zone.
 fn valid_rfc3339(s: &str) -> bool {
