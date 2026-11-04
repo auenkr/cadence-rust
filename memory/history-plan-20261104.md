@@ -59,3 +59,14 @@ failover 575, query 372, workflowcache 320.
   then SQL slice 1-4 (memory/history-h1-sql-impl-guide.md), decision add-events (finish h3a3-decision-x), activity,
   timer/child/signal/cancel, builders/caches, H4-H7.
 - Worker lesson: simple workers need explicit per-function step lists (see h3a3-decision-x brief style).
+
+## STRATEGY CHANGE 2026-11-04 (user): full line-by-line port first, test at the end
+Port all of go/service/history (~75k lines) to compilable Rust package by package; no per-slice integration testing.
+Hard workers (Claude Sonnet 5.5 low / Codex 6.1 sol low), max 3 parallel. CI = clippy/compile green only until port complete; then gates (H7).
+Work units (each a worker, own branch history-port-<unit>, own Rust module dir under rust/crates/cadence-history/src/<pkg>/):
+ U1 execution (14k; mutable_state_builder*, history_builder, state_builder, workflow ctx, checksum, retry/cron) -- continues luna branches decision-y/activity
+ U2 task (8.3k) + taskdlq(0.7k)  U3 queue (5.7k)  U4 queuev2 (5.7k)  U5 engine/engineimpl (5.3k) + engine + workflow + query + reset
+ U6 ndc (4k) + events + workflowcache  U7 replication (3.2k) + failover  U8 shard (3.2k, partly done) + config + resource + constants + lookup
+ U9 decision (3.1k)  U10 handler (2.4k) + wrappers (grpc/thrift/ratelimited) + main wiring
+ Plus persistence: history_store/execution store slices 2-4 + cassandra (separate worker after s1d).
+In flight (Luna, let finish): history-h1-sql-s1d, history-h3a3-decision-y, history-h3a4-activity.
