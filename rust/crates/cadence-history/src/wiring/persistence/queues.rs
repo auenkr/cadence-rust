@@ -191,7 +191,7 @@ impl v2::ExecutionManager for SqlExecutionManager {
         let (min, max) = v2_bounds(&req.inclusive_min_task_key, &req.exclusive_max_task_key);
         let q = query(
             req.shard_id.unwrap_or(self.shard_id),
-            category,
+            category.clone(),
             min,
             max,
             req.page_size as i64,
@@ -201,7 +201,7 @@ impl v2::ExecutionManager for SqlExecutionManager {
         let tasks = page
             .tasks
             .iter()
-            .map(|t| SqlHistoryTask::decode(category, t).map(|t| Arc::new(t) as v2::PTask))
+            .map(|t| SqlHistoryTask::decode(category.clone(), t).map(|t| Arc::new(t) as v2::PTask))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(v2::GetHistoryTasksResponse {
             tasks,
@@ -282,7 +282,7 @@ impl q::ShardContext for SqlQueueShardContext {
         let category = v1_category(req.task_category);
         let q = query(
             req.shard_id,
-            category,
+            category.clone(),
             (req.inclusive_min_task_key.scheduled_time.unix_nano(), req.inclusive_min_task_key.task_id),
             (req.exclusive_max_task_key.scheduled_time.unix_nano(), req.exclusive_max_task_key.task_id),
             req.page_size,
@@ -296,7 +296,7 @@ impl q::ShardContext for SqlQueueShardContext {
         let tasks = page
             .tasks
             .iter()
-            .map(|t| SqlHistoryTask::decode(category, t).map(|t| Arc::new(t) as Arc<dyn q::PersistenceTask>))
+            .map(|t| SqlHistoryTask::decode(category.clone(), t).map(|t| Arc::new(t) as Arc<dyn q::PersistenceTask>))
             .collect::<Result<Vec<_>, _>>()
             .map_err(q::QueueError::Other)?;
         Ok(q::GetHistoryTasksResponse { tasks, next_page_token: page.next_page_token })
