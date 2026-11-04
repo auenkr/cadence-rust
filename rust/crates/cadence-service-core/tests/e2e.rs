@@ -1652,7 +1652,7 @@ async fn admin_reapply_replication_dlq_and_cross_cluster() {
         json!({
             "domain": "e2e-domain",
             "workflowExecution": {"workflowId": "e2e-wf", "runId": run_id},
-            "events": {"Data": "bnVsbA=="},
+            "events": {"EncodingType": "JSON", "Data": "W10="},
         }),
     )
     .await;

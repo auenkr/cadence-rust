@@ -1207,8 +1207,16 @@ pub async fn reapply_events(
         Err(error) => return entity_not_exists(error),
     };
     // Single-branch store: the blob is a JSON array of history events.
-    let events: Vec<cadence_api::service_types::HistoryEvent> =
-        serde_json::from_slice(&blob.data).unwrap_or_default();
+    let events = match decode_reapply_events(blob) {
+        Ok(events) => events,
+        Err(message) => {
+            return error_response(
+                "InternalServiceError",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                message,
+            )
+        }
+    };
     let signals: Vec<_> = events
         .into_iter()
         .filter(|e| e.event_type == Some(cadence_api::enums::EventType::WorkflowExecutionSignaled))
@@ -1221,6 +1229,24 @@ pub async fn reapply_events(
             StatusCode::BAD_REQUEST,
             error.message,
         ),
+    }
+}
+
+/// Go history `ReapplyEvents` deserializes the batch by blob encoding and
+/// returns the error (no silent empty fallback); nil encoding is ThriftRW (0).
+fn decode_reapply_events(
+    blob: &cadence_api::types::DataBlob,
+) -> Result<Vec<cadence_api::service_types::HistoryEvent>, String> {
+    match blob.encoding_type {
+        Some(cadence_api::enums::EncodingType::JSON) => {
+            serde_json::from_slice(&blob.data).map_err(|e| e.to_string())
+        }
+        None | Some(cadence_api::enums::EncodingType::ThriftRW) => {
+            let mut blob = blob.clone();
+            blob.encoding_type = Some(cadence_api::enums::EncodingType::ThriftRW);
+            cadence_thrift::history_blob::decode(&blob).map_err(|e| e.to_string())
+        }
+        Some(other) => Err(format!("unknown encoding type: {other:?}")),
     }
 }
 
@@ -2478,6 +2504,34 @@ pub async fn update_domain_async_workflow_configuration(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reapply_blob_decoding_follows_encoding_and_propagates_errors() {
+        use cadence_api::enums::EncodingType;
+        use cadence_api::types::DataBlob;
+        let json_blob = DataBlob {
+            encoding_type: Some(EncodingType::JSON),
+            data: b"[]".to_vec(),
+        };
+        assert!(decode_reapply_events(&json_blob).unwrap().is_empty());
+        let bad = DataBlob {
+            encoding_type: Some(EncodingType::JSON),
+            data: b"not json".to_vec(),
+        };
+        assert!(decode_reapply_events(&bad).is_err());
+        let thrift = cadence_thrift::history_blob::encode(Vec::new());
+        assert!(decode_reapply_events(&thrift).unwrap().is_empty());
+        let none = DataBlob {
+            encoding_type: None,
+            data: thrift.data.clone(),
+        };
+        assert!(decode_reapply_events(&none).unwrap().is_empty());
+        let garbage = DataBlob {
+            encoding_type: None,
+            data: b"xx".to_vec(),
+        };
+        assert!(decode_reapply_events(&garbage).is_err());
+    }
+
     #[test]
     fn history_membership_uses_go_rune_keys_including_replacement_for_invalid_runes() {
         struct HistoryMembers;

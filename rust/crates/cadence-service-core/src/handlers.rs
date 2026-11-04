@@ -570,6 +570,48 @@ async fn reject_frontend_during_shutdown(
 // Domains
 // ---------------------------------------------------------------------------
 
+/// Go `domain/handler.go` RegisterDomain: apply the cluster archival
+/// registration policy (defaults + URI validation) to the requested archival
+/// status/URI pairs. No-op when the cluster has no policy installed.
+pub fn apply_archival_registration_policy(
+    history_status: &mut Option<cadence_api::enums::ArchivalStatus>,
+    history_uri: &mut String,
+    visibility_status: &mut Option<cadence_api::enums::ArchivalStatus>,
+    visibility_uri: &mut String,
+) -> Result<(), String> {
+    use cadence_api::enums::ArchivalStatus;
+    use cadence_common::archival_state::ArchivalKind;
+    let Some(policy) = cadence_common::archival_state::domain_archival_policy() else {
+        return Ok(());
+    };
+    let flag = |on: bool| {
+        Some(if on {
+            ArchivalStatus::Enabled
+        } else {
+            ArchivalStatus::Disabled
+        })
+    };
+    let h = policy
+        .register(
+            ArchivalKind::History,
+            history_status.map(|s| s == ArchivalStatus::Enabled),
+            history_uri,
+        )
+        .map_err(|e| e.message().to_owned())?;
+    let v = policy
+        .register(
+            ArchivalKind::Visibility,
+            visibility_status.map(|s| s == ArchivalStatus::Enabled),
+            visibility_uri,
+        )
+        .map_err(|e| e.message().to_owned())?;
+    *history_status = flag(h.enabled);
+    *history_uri = h.uri;
+    *visibility_status = flag(v.enabled);
+    *visibility_uri = v.uri;
+    Ok(())
+}
+
 /// Mirrors Go `ValidateRegisterDomainRequest` core checks + `CreateDomain`.
 async fn register_domain(
     State(state): State<Arc<AppState>>,
@@ -603,6 +645,15 @@ async fn register_domain(
         data: req.data.clone(),
         uuid: uuid::Uuid::now_v7().to_string(),
     };
+    let mut req = req;
+    if let Err(message) = apply_archival_registration_policy(
+        &mut req.history_archival_status,
+        &mut req.history_archival_uri,
+        &mut req.visibility_archival_status,
+        &mut req.visibility_archival_uri,
+    ) {
+        return bad_request(BadRequestError::new(message));
+    }
     let configuration = cadence_api::types::DomainConfiguration {
         workflow_execution_retention_period_in_days: req
             .workflow_execution_retention_period_in_days,
