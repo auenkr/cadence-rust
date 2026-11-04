@@ -357,9 +357,7 @@ pub fn auto_config_hint_in(v: p::AutoConfigHint) -> t::AutoConfigHint {
     }
 }
 /// Go `proto.ToActiveClusterSelectionPolicy`.
-pub fn selection_policy_in(
-    v: p::ActiveClusterSelectionPolicy,
-) -> t::ActiveClusterSelectionPolicy {
+pub fn selection_policy_in(v: p::ActiveClusterSelectionPolicy) -> t::ActiveClusterSelectionPolicy {
     t::ActiveClusterSelectionPolicy {
         cluster_attribute: v.cluster_attribute.map(|a| t::ClusterAttribute {
             scope: a.scope,
@@ -368,9 +366,7 @@ pub fn selection_policy_in(
     }
 }
 /// Go `proto.FromActiveClusterSelectionPolicy`.
-pub fn selection_policy_out(
-    v: t::ActiveClusterSelectionPolicy,
-) -> p::ActiveClusterSelectionPolicy {
+pub fn selection_policy_out(v: t::ActiveClusterSelectionPolicy) -> p::ActiveClusterSelectionPolicy {
     p::ActiveClusterSelectionPolicy {
         cluster_attribute: v.cluster_attribute.map(|a| p::ClusterAttribute {
             scope: a.scope,

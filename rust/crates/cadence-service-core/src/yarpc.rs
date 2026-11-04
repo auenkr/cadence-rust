@@ -208,7 +208,9 @@ async fn handle_delete_domain(
             uuid: None,
         })
         .map_err(|e| AppError::entity_not_exists(e.message))?;
-    if current.domain_info.as_ref().and_then(|info| info.status) != Some(cadence_api::enums::DomainStatus::Deprecated) {
+    if current.domain_info.as_ref().and_then(|info| info.status)
+        != Some(cadence_api::enums::DomainStatus::Deprecated)
+    {
         return Err(AppError::bad_request(
             "Domain is not in a deprecated state.".to_string(),
         ));
@@ -219,8 +221,8 @@ async fn handle_delete_domain(
         ..Default::default()
     };
     let has_executions = if let Some(api) = &state.workflow_api {
-        let value = serde_json::to_value(&list_request)
-            .map_err(|e| AppError::internal(e.to_string()))?;
+        let value =
+            serde_json::to_value(&list_request).map_err(|e| AppError::internal(e.to_string()))?;
         let out = api
             .call("ListWorkflowExecutions", value, ctx.clone())
             .await

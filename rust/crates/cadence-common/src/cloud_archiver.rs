@@ -154,15 +154,11 @@ impl CloudBackends {
     }
 
     pub fn s3_store(&self) -> Option<Result<Arc<dyn ObjectStore>, ArchiverError>> {
-        self.s3
-            .clone()
-            .map(|r| r.map_err(ArchiverError::Other))
+        self.s3.clone().map(|r| r.map_err(ArchiverError::Other))
     }
 
     pub fn gcs_store(&self) -> Option<Result<Arc<dyn ObjectStore>, ArchiverError>> {
-        self.gcs
-            .clone()
-            .map(|r| r.map_err(ArchiverError::Other))
+        self.gcs.clone().map(|r| r.map_err(ArchiverError::Other))
     }
 }
 
@@ -219,10 +215,7 @@ fn only_eq(op: &str, name: &str, backend: &str) -> Result<(), String> {
     }
 }
 
-fn set_precision(
-    slot: &mut Option<String>,
-    val: String,
-) -> Result<(), String> {
+fn set_precision(slot: &mut Option<String>, val: String) -> Result<(), String> {
     if slot.as_ref().is_some_and(|c| *c != val) {
         return Err("only one expression is allowed for SearchPrecision".to_owned());
     }
@@ -235,10 +228,7 @@ fn set_precision(
 }
 
 fn validate_get_request(r: &GetHistoryRequest) -> bool {
-    !(r.domain_id.is_empty()
-        || r.workflow_id.is_empty()
-        || r.run_id.is_empty()
-        || r.page_size == 0)
+    !(r.domain_id.is_empty() || r.workflow_id.is_empty() || r.run_id.is_empty() || r.page_size == 0)
 }
 
 fn validate_query_request(r: &QueryVisibilityRequest) -> bool {
@@ -370,7 +360,15 @@ pub fn s3_visibility_prefix(
     secondary: &str,
 ) -> String {
     trim_left_slash(
-        [path, domain, "visibility", primary_key, primary_value, secondary].join("/"),
+        [
+            path,
+            domain,
+            "visibility",
+            primary_key,
+            primary_value,
+            secondary,
+        ]
+        .join("/"),
     )
 }
 
@@ -384,7 +382,12 @@ pub fn s3_validate_uri(
     let bucket = s3_bucket(uri, region).map_err(ArchiverError::Other)?;
     match store.head_bucket(&bucket) {
         Ok(()) => Ok(()),
-        Err(e) if matches!(e.kind, StoreErrorKind::NotFound | StoreErrorKind::NoSuchBucket) => {
+        Err(e)
+            if matches!(
+                e.kind,
+                StoreErrorKind::NotFound | StoreErrorKind::NoSuchBucket
+            ) =>
+        {
             Err(ArchiverError::Other(ERR_BUCKET_NOT_EXISTS.to_owned()))
         }
         Err(e) => Err(ArchiverError::Other(e.message)),
@@ -394,7 +397,9 @@ pub fn s3_validate_uri(
 fn s3_download(store: &dyn ObjectStore, bucket: &str, key: &str) -> Result<Vec<u8>, ArchiverError> {
     store.get_object(bucket, key).map_err(|e| match e.kind {
         StoreErrorKind::NoSuchBucket => ArchiverError::BadRequest(ERR_BUCKET_NOT_EXISTS.to_owned()),
-        StoreErrorKind::NoSuchKey => ArchiverError::EntityNotExists(ERR_HISTORY_NOT_EXIST.to_owned()),
+        StoreErrorKind::NoSuchKey => {
+            ArchiverError::EntityNotExists(ERR_HISTORY_NOT_EXIST.to_owned())
+        }
         _ => ArchiverError::Internal(e.message),
     })
 }
@@ -416,12 +421,19 @@ fn s3_highest_version(
 ) -> Result<i64, ArchiverError> {
     let prefix = format!(
         "{}/",
-        s3_history_key_prefix(path, &request.domain_id, &request.workflow_id, &request.run_id)
+        s3_history_key_prefix(
+            path,
+            &request.domain_id,
+            &request.workflow_id,
+            &request.run_id
+        )
     );
     let page = store
         .list(bucket, &prefix, Some("/"), None, None)
         .map_err(|e| match e.kind {
-            StoreErrorKind::NoSuchBucket => ArchiverError::BadRequest(ERR_BUCKET_NOT_EXISTS.to_owned()),
+            StoreErrorKind::NoSuchBucket => {
+                ArchiverError::BadRequest(ERR_BUCKET_NOT_EXISTS.to_owned())
+            }
             _ => ArchiverError::BadRequest(e.message),
         })?;
     let mut highest: Option<i64> = None;
@@ -562,13 +574,17 @@ fn s3_parse_query(query: &str) -> Result<S3Query, String> {
         return Err("WorkflowID or WorkflowTypeName is required in query".to_owned());
     }
     if q.workflow_id.is_some() && q.workflow_type_name.is_some() {
-        return Err("only one of WorkflowID or WorkflowTypeName can be specified in a query".to_owned());
+        return Err(
+            "only one of WorkflowID or WorkflowTypeName can be specified in a query".to_owned(),
+        );
     }
     if q.close_time.is_some() && q.start_time.is_some() {
         return Err("only one of StartTime or CloseTime can be specified in a query".to_owned());
     }
     if (q.close_time.is_some() || q.start_time.is_some()) && q.precision.is_none() {
-        return Err("SearchPrecision is required when searching for a StartTime or CloseTime".to_owned());
+        return Err(
+            "SearchPrecision is required when searching for a StartTime or CloseTime".to_owned(),
+        );
     }
     if q.close_time.is_none() && q.start_time.is_none() && q.precision.is_some() {
         return Err("SearchPrecision requires a StartTime or CloseTime".to_owned());
@@ -666,7 +682,10 @@ pub fn gcs_soft_validate_uri(uri: &ArchiverUri) -> Result<(), ArchiverError> {
 pub fn gcs_validate_uri(store: &dyn ObjectStore, uri: &ArchiverUri) -> Result<(), ArchiverError> {
     gcs_soft_validate_uri(uri)?;
     store.head_bucket(&uri.host).map_err(|e| {
-        if matches!(e.kind, StoreErrorKind::NoSuchBucket | StoreErrorKind::NotFound) {
+        if matches!(
+            e.kind,
+            StoreErrorKind::NoSuchBucket | StoreErrorKind::NotFound
+        ) {
             ArchiverError::Other(GCS_ERR_BUCKET_NOT_EXIST.to_owned())
         } else {
             ArchiverError::Other(e.message)
@@ -700,7 +719,13 @@ fn gcs_history_prefix(domain: &str, workflow: &str, run: &str) -> String {
     )
 }
 
-fn gcs_history_filename(domain: &str, workflow: &str, run: &str, version: i64, part: i64) -> String {
+fn gcs_history_filename(
+    domain: &str,
+    workflow: &str,
+    run: &str,
+    version: i64,
+    part: i64,
+) -> String {
     format!(
         "{}_{version}_{part}.history",
         gcs_history_prefix(domain, workflow, run)
@@ -745,9 +770,7 @@ fn gcs_highest_version(
         uri,
         &gcs_history_prefix(&request.domain_id, &request.workflow_id, &request.run_id),
     );
-    let names = store
-        .list_all(&uri.host, &prefix)
-        .map_err(|e| e.message)?;
+    let names = store.list_all(&uri.host, &prefix).map_err(|e| e.message)?;
     let mut best: Option<(i64, i64, i64)> = None;
     for name in names {
         let Some((version, part)) = gcs_extract_version(base_name(&name)) else {
@@ -988,7 +1011,10 @@ pub fn gcs_query_visibility(
     let mut response = QueryVisibilityResponse::default();
     for file in files {
         let data = store
-            .get_object(&uri.host, &gcs_object(uri, &format!("{domain}/{}", base_name(&file))))
+            .get_object(
+                &uri.host,
+                &gcs_object(uri, &format!("{domain}/{}", base_name(&file))),
+            )
             .map_err(|e| ArchiverError::Internal(e.message))?;
         response.records.push(decode_record(&data)?);
     }
@@ -1065,7 +1091,9 @@ mod tests {
     }
 
     fn blob(events: usize, last: bool) -> Vec<u8> {
-        let evs: Vec<Value> = (0..events).map(|i| serde_json::json!({"eventId": i})).collect();
+        let evs: Vec<Value> = (0..events)
+            .map(|i| serde_json::json!({"eventId": i}))
+            .collect();
         serde_json::to_vec(&serde_json::json!({
             "header": {"is_last": last},
             "body": [{"events": evs}],
@@ -1086,7 +1114,10 @@ mod tests {
     #[test]
     fn s3_uri_validation_matches_go() {
         let u = |s: &str| parse_uri(s).unwrap();
-        assert_eq!(s3_soft_validate_uri(&u("s3:///p")).unwrap_err(), "no bucket specified");
+        assert_eq!(
+            s3_soft_validate_uri(&u("s3:///p")).unwrap_err(),
+            "no bucket specified"
+        );
         assert!(s3_soft_validate_uri(&u("s3://bkt/p")).is_ok());
         assert_eq!(
             s3_soft_validate_uri(&u("gs://bkt/p")).unwrap_err(),
@@ -1112,7 +1143,9 @@ mod tests {
         };
         assert!(s3_validate_uri(&fake, "us-east-1", &u("s3://bkt/p")).is_ok());
         assert_eq!(
-            s3_validate_uri(&fake, "us-east-1", &u("s3://other/p")).unwrap_err().message(),
+            s3_validate_uri(&fake, "us-east-1", &u("s3://other/p"))
+                .unwrap_err()
+                .message(),
             ERR_BUCKET_NOT_EXISTS
         );
     }
@@ -1129,8 +1162,10 @@ mod tests {
                 blob(2, false),
             );
         }
-        fake.objects
-            .insert(s3_history_key("/arch", "dom", "wf", "run", 5, 1), blob(3, true));
+        fake.objects.insert(
+            s3_history_key("/arch", "dom", "wf", "run", 5, 1),
+            blob(3, true),
+        );
         let uri = parse_uri("s3://bkt/arch").unwrap();
         let first = s3_get_history(&fake, "us-east-1", &uri, &req(2)).unwrap();
         assert_eq!(first.history_batches.len(), 1);
@@ -1138,13 +1173,22 @@ mod tests {
         let mut r = req(2);
         r.next_page_token = first.next_page_token;
         let second = s3_get_history(&fake, "us-east-1", &uri, &r).unwrap();
-        assert_eq!(second.history_batches[0]["events"].as_array().unwrap().len(), 3);
+        assert_eq!(
+            second.history_batches[0]["events"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
         assert!(second.next_page_token.is_empty());
         // pinned older version
         let mut r = req(100);
         r.close_failover_version = Some(1);
         let err = s3_get_history(&fake, "us-east-1", &uri, &r).unwrap_err();
-        assert_eq!(err, ArchiverError::EntityNotExists(ERR_HISTORY_NOT_EXIST.into()));
+        assert_eq!(
+            err,
+            ArchiverError::EntityNotExists(ERR_HISTORY_NOT_EXIST.into())
+        );
         // missing history
         let mut r = req(100);
         r.run_id = "nope".into();
@@ -1170,11 +1214,16 @@ mod tests {
     #[test]
     fn s3_query_parser_rules() {
         let ok = |q: &str| s3_parse_query(q).unwrap();
-        let q = ok("WorkflowID = 'a' and CloseTime = '2020-01-02T03:04:05Z' and SearchPrecision = 'Hour'");
+        let q = ok(
+            "WorkflowID = 'a' and CloseTime = '2020-01-02T03:04:05Z' and SearchPrecision = 'Hour'",
+        );
         assert_eq!(q.workflow_id.as_deref(), Some("a"));
         assert_eq!(q.close_time, Some(1_577_934_245_000_000_000));
         let err = |q: &str| s3_parse_query(q).unwrap_err();
-        assert_eq!(err("CloseTime = 5"), "WorkflowID or WorkflowTypeName is required in query");
+        assert_eq!(
+            err("CloseTime = 5"),
+            "WorkflowID or WorkflowTypeName is required in query"
+        );
         assert_eq!(
             err("WorkflowID = 'a' and WorkflowTypeName = 'b'"),
             "only one of WorkflowID or WorkflowTypeName can be specified in a query"
@@ -1191,14 +1240,23 @@ mod tests {
             err("WorkflowID > 'a'"),
             "only operator = is supported for WorkflowID with Amazon S3"
         );
-        assert_eq!(err("WorkflowID = 'a' and WorkflowID = 'b'"), "can not query WorkflowID multiple times");
+        assert_eq!(
+            err("WorkflowID = 'a' and WorkflowID = 'b'"),
+            "can not query WorkflowID multiple times"
+        );
         assert_eq!(err("Foo = 'a'"), "unknown filter name: Foo");
         assert_eq!(
             err("WorkflowID = 'a' and SearchPrecision = 'Week'"),
             "invalid value for SearchPrecision: Week"
         );
-        assert_eq!(precision_time(1_577_934_245_000_000_000, "Day"), "2020-01-02T");
-        assert_eq!(precision_time(1_577_934_245_000_000_000, "Minute"), "2020-01-02T03:04");
+        assert_eq!(
+            precision_time(1_577_934_245_000_000_000, "Day"),
+            "2020-01-02T"
+        );
+        assert_eq!(
+            precision_time(1_577_934_245_000_000_000, "Minute"),
+            "2020-01-02T03:04"
+        );
     }
 
     fn vis_record(wf: &str, run: &str, close: i64) -> Vec<u8> {
@@ -1237,14 +1295,27 @@ mod tests {
         assert_eq!(second.records[0].run_id, "r3");
         assert!(second.next_page_token.is_empty());
         r.next_page_token.clear();
-        r.query = "WorkflowID = 'wf' and CloseTime = '2020-01-02T03:04:05Z' and SearchPrecision = 'Day'".into();
-        assert_eq!(s3_query_visibility(&fake, "r", &uri, &r).unwrap().records.len(), 2);
+        r.query =
+            "WorkflowID = 'wf' and CloseTime = '2020-01-02T03:04:05Z' and SearchPrecision = 'Day'"
+                .into();
+        assert_eq!(
+            s3_query_visibility(&fake, "r", &uri, &r)
+                .unwrap()
+                .records
+                .len(),
+            2
+        );
         r.query = "WorkflowID = 'other'".into();
-        assert!(s3_query_visibility(&fake, "r", &uri, &r).unwrap().records.is_empty());
+        assert!(s3_query_visibility(&fake, "r", &uri, &r)
+            .unwrap()
+            .records
+            .is_empty());
         r.query = "WorkflowID > 'x'".into();
         assert_eq!(
             s3_query_visibility(&fake, "r", &uri, &r).unwrap_err(),
-            ArchiverError::BadRequest("only operator = is supported for WorkflowID with Amazon S3".into())
+            ArchiverError::BadRequest(
+                "only operator = is supported for WorkflowID with Amazon S3".into()
+            )
         );
     }
 
@@ -1269,7 +1340,14 @@ mod tests {
         let first = gcs_get_history(&fake, &uri, &req(4)).unwrap();
         assert_eq!(first.history_batches.len(), 2);
         let token: GcsHistoryToken = serde_json::from_slice(&first.next_page_token).unwrap();
-        assert_eq!((token.close_failover_version, token.current_part, token.highest_part), (3, 1, 1));
+        assert_eq!(
+            (
+                token.close_failover_version,
+                token.current_part,
+                token.highest_part
+            ),
+            (3, 1, 1)
+        );
         let mut r = req(4);
         r.next_page_token = first.next_page_token;
         let second = gcs_get_history(&fake, &uri, &r).unwrap();
@@ -1306,7 +1384,8 @@ mod tests {
                 gcs_hash(wf),
                 gcs_hash(run)
             );
-            fake.objects.insert(gcs_object(&uri, &file), vis_record(wf, run, 10));
+            fake.objects
+                .insert(gcs_object(&uri, &file), vis_record(wf, run, 10));
         }
         let mut r = QueryVisibilityRequest {
             domain_id: "dom".into(),
@@ -1320,8 +1399,13 @@ mod tests {
         let resp = gcs_query_visibility(&fake, &uri, &r).unwrap();
         assert_eq!(resp.records.len(), 1);
         assert!(resp.next_page_token.is_empty());
-        r.query = "CloseTime = 5 and SearchPrecision = 'Day' and WorkflowID = 'a' and WorkflowID = 'b'".into();
-        assert!(gcs_query_visibility(&fake, &uri, &r).unwrap().records.is_empty());
+        r.query =
+            "CloseTime = 5 and SearchPrecision = 'Day' and WorkflowID = 'a' and WorkflowID = 'b'"
+                .into();
+        assert!(gcs_query_visibility(&fake, &uri, &r)
+            .unwrap()
+            .records
+            .is_empty());
         r.query = "WorkflowID = 'wf1'".into();
         assert_eq!(
             gcs_query_visibility(&fake, &uri, &r).unwrap_err(),
@@ -1351,15 +1435,21 @@ mod tests {
         };
         assert!(gcs_validate_uri(&fake, &parse_uri("gs://bkt/a").unwrap()).is_ok());
         assert_eq!(
-            gcs_validate_uri(&fake, &parse_uri("s3://bkt/a").unwrap()).unwrap_err().message(),
+            gcs_validate_uri(&fake, &parse_uri("s3://bkt/a").unwrap())
+                .unwrap_err()
+                .message(),
             ERR_URI_SCHEME_MISMATCH
         );
         assert_eq!(
-            gcs_validate_uri(&fake, &parse_uri("gs://bkt").unwrap()).unwrap_err().message(),
+            gcs_validate_uri(&fake, &parse_uri("gs://bkt").unwrap())
+                .unwrap_err()
+                .message(),
             ERR_INVALID_URI
         );
         assert_eq!(
-            gcs_validate_uri(&fake, &parse_uri("gs://zzz/a").unwrap()).unwrap_err().message(),
+            gcs_validate_uri(&fake, &parse_uri("gs://zzz/a").unwrap())
+                .unwrap_err()
+                .message(),
             GCS_ERR_BUCKET_NOT_EXIST
         );
     }

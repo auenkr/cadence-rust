@@ -425,14 +425,17 @@ pub async fn reapply_events(
                 workflow_id: execution.workflow_id,
                 run_id: execution.run_id,
             }),
-            events: request.events.as_ref().map(|blob| cadence_proto::api::DataBlob {
-                encoding_type: match blob.encoding_type {
-                    Some(cadence_api::enums::EncodingType::ThriftRW) => 1,
-                    Some(cadence_api::enums::EncodingType::JSON) => 2,
-                    _ => 0,
-                },
-                data: blob.data.clone(),
-            }),
+            events: request
+                .events
+                .as_ref()
+                .map(|blob| cadence_proto::api::DataBlob {
+                    encoding_type: match blob.encoding_type {
+                        Some(cadence_api::enums::EncodingType::ThriftRW) => 1,
+                        Some(cadence_api::enums::EncodingType::JSON) => 2,
+                        _ => 0,
+                    },
+                    data: blob.data.clone(),
+                }),
         }))
         .await
         .map_err(internal)?;

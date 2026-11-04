@@ -1356,8 +1356,7 @@ impl InMemoryDomainStore {
     #[must_use]
     /// Pending-active (graceful failover in progress) global domains.
     pub fn pending_active_list(&self) -> Vec<PendingActiveDomain> {
-        self
-            .list()
+        self.list()
             .domains
             .into_iter()
             .filter_map(|d| {
@@ -3009,7 +3008,8 @@ mod go_sql_frontend_manager_tests {
             .unwrap();
         let persistence = std::sync::Arc::new(
             crate::matching_domain_metadata::MatchingDomainMetadataStore::from_connection(
-                connection, "cluster-a",
+                connection,
+                "cluster-a",
             ),
         );
         let manager = PersistedFrontendDomainManager::new(
@@ -3024,7 +3024,9 @@ mod go_sql_frontend_manager_tests {
                 Some("missing"),
                 None
             ),
-            Err(crate::matching_domain_metadata::DomainReadError::NotFound(_))
+            Err(crate::matching_domain_metadata::DomainReadError::NotFound(
+                _
+            ))
         ));
     }
 
@@ -3140,10 +3142,7 @@ mod failover_notification_version_tests {
         }
     }
 
-    fn manager_with_global_domain() -> (
-        PersistedFrontendDomainManager,
-        Arc<Store>,
-    ) {
+    fn manager_with_global_domain() -> (PersistedFrontendDomainManager, Arc<Store>) {
         let connection = rusqlite::Connection::open_in_memory().unwrap();
         connection
             .execute_batch(

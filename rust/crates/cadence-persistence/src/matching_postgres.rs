@@ -1315,7 +1315,8 @@ impl crate::history_reader::HistoryNodeStore for PostgresTaskStore {
         domain_id: [u8; 16],
         workflow_id: &str,
         run_id: [u8; 16],
-    ) -> std::result::Result<Option<(Vec<u8>, String)>, crate::history_reader::HistoryReadError> {
+    ) -> std::result::Result<Option<(Vec<u8>, String)>, crate::history_reader::HistoryReadError>
+    {
         use crate::history_reader::HistoryReadError;
         let index = database_index(shard_id.max(0) as usize, self.use_multiple_databases);
         let mut client = self.pools[index]

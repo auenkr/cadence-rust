@@ -1085,8 +1085,9 @@ impl a::admin_api_server::AdminApi for Admin {
             shard_ids: r.shard_ids,
             target_cluster: r.target_cluster,
         };
-        let out: cadence_api::admin::GetCrossClusterTasksResponse =
-            self.call("/api/v1/admin/cross-cluster/tasks", &input).await?;
+        let out: cadence_api::admin::GetCrossClusterTasksResponse = self
+            .call("/api/v1/admin/cross-cluster/tasks", &input)
+            .await?;
         Ok(Response::new(a::GetCrossClusterTasksResponse {
             tasks_by_shard: xc::tasks_by_shard_out(out.tasks_by_shard)?,
             failed_cause_by_shard: xc::failed_causes_out(out.failed_cause_by_shard),
@@ -1114,9 +1115,11 @@ impl a::admin_api_server::AdminApi for Admin {
         let out: cadence_api::admin::RespondCrossClusterTasksCompletedResponse = self
             .call("/api/v1/admin/cross-cluster/tasks-completed", &input)
             .await?;
-        Ok(Response::new(a::RespondCrossClusterTasksCompletedResponse {
-            tasks: xc::task_requests_out(out.tasks)?,
-        }))
+        Ok(Response::new(
+            a::RespondCrossClusterTasksCompletedResponse {
+                tasks: xc::task_requests_out(out.tasks)?,
+            },
+        ))
     }
 }
 
@@ -1178,8 +1181,15 @@ mod fix_fe_admin_tests {
 
     #[test]
     fn data_blob_preserves_encoding() {
-        for (enc, wire) in [(Some(EncodingType::ThriftRW), 1), (Some(EncodingType::JSON), 2), (None, 0)] {
-            let out = data_blob_out(cadence_api::types::DataBlob { encoding_type: enc, data: vec![7] });
+        for (enc, wire) in [
+            (Some(EncodingType::ThriftRW), 1),
+            (Some(EncodingType::JSON), 2),
+            (None, 0),
+        ] {
+            let out = data_blob_out(cadence_api::types::DataBlob {
+                encoding_type: enc,
+                data: vec![7],
+            });
             assert_eq!(out.encoding_type, wire);
             assert_eq!(out.data, vec![7]);
             let back = data_blob_in(Some(out)).unwrap();
@@ -1196,13 +1206,27 @@ mod fix_fe_admin_tests {
                 run_id: "r".into(),
             }),
             remote_cluster: "c".into(),
-            start_event: Some(a::VersionHistoryItem { event_id: 3, version: 11 }),
-            end_event: Some(a::VersionHistoryItem { event_id: 9, version: 12 }),
+            start_event: Some(a::VersionHistoryItem {
+                event_id: 3,
+                version: 11,
+            }),
+            end_event: Some(a::VersionHistoryItem {
+                event_id: 9,
+                version: 12,
+            }),
         });
         assert_eq!(
-            (input.start_event_id, input.start_version, input.end_event_id, input.end_version),
+            (
+                input.start_event_id,
+                input.start_version,
+                input.end_event_id,
+                input.end_version
+            ),
             (Some(3), Some(11), Some(9), Some(12))
         );
-        assert_eq!((input.workflow_id.as_str(), input.run_id.as_str()), ("w", "r"));
+        assert_eq!(
+            (input.workflow_id.as_str(), input.run_id.as_str()),
+            ("w", "r")
+        );
     }
 }

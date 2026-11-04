@@ -533,7 +533,13 @@ async fn handle_call(
         bail!("Unknown Cadence procedure");
     }
     let definition = cadence_thrift::service::find_method(procedure)
-        .filter(|definition| if history { definition.service == "HistoryService" || definition.service == "Meta" } else { accepts_thrift_service(definition.service, matching.is_some()) })
+        .filter(|definition| {
+            if history {
+                definition.service == "HistoryService" || definition.service == "Meta"
+            } else {
+                accepts_thrift_service(definition.service, matching.is_some())
+            }
+        })
         .ok_or_else(|| anyhow!("Unknown Cadence procedure"))?;
     let method = definition.method;
     let mut headers = Cursor::new(&call.args[1]);
@@ -559,9 +565,7 @@ async fn handle_call(
             }
             None => {
                 if definition.service == "HistoryService" {
-                    return Err(format!(
-                        "HistoryService::{method} is not implemented yet"
-                    ));
+                    return Err(format!("HistoryService::{method} is not implemented yet"));
                 }
                 let caller_headers = call
                     .headers
@@ -624,7 +628,10 @@ fn accepts_thrift_service(service: &str, has_matching_handler: bool) -> bool {
         || if has_matching_handler {
             service == "MatchingService"
         } else {
-            matches!(service, "WorkflowService" | "AdminService" | "HistoryService")
+            matches!(
+                service,
+                "WorkflowService" | "AdminService" | "HistoryService"
+            )
         }
 }
 
@@ -724,7 +731,9 @@ pub async fn serve(addr: std::net::SocketAddr, state: AppState) -> Result<()> {
 /// The shared dispatcher retains the Go-compatible Thrift method decoding and
 /// returns the same explicit unimplemented error until an engine method exists.
 pub async fn serve_history(addr: std::net::SocketAddr, state: AppState) -> Result<()> {
-    let listener = TcpListener::bind(addr).await.context("bind History TChannel")?;
+    let listener = TcpListener::bind(addr)
+        .await
+        .context("bind History TChannel")?;
     serve_history_listener(listener, state).await
 }
 pub async fn serve_history_listener(listener: TcpListener, state: AppState) -> Result<()> {

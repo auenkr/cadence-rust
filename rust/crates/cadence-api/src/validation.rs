@@ -145,9 +145,11 @@ fn uuid_canonical_ok(b: &[u8], hex: impl Fn(u8) -> bool) -> bool {
     if b.len() < 36 || b[8] != b'-' || b[13] != b'-' || b[18] != b'-' || b[23] != b'-' {
         return false;
     }
-    [0usize, 2, 4, 6, 9, 11, 14, 16, 19, 21, 24, 26, 28, 30, 32, 34]
-        .iter()
-        .all(|&i| hex(b[i]) && hex(b[i + 1]))
+    [
+        0usize, 2, 4, 6, 9, 11, 14, 16, 19, 21, 24, 26, 28, 30, 32, 34,
+    ]
+    .iter()
+    .all(|&i| hex(b[i]) && hex(b[i + 1]))
 }
 
 #[cfg(test)]

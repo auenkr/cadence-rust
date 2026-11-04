@@ -102,22 +102,30 @@ mod tests {
         let mut validation = Validation::new(Algorithm::RS256);
         validation.insecure_disable_signature_validation();
         validation.set_required_spec_claims(&["exp", "iat"]);
-        let claims = decode::<serde_json::Value>(&token, &DecodingKey::from_secret(b""), &validation)
-            .unwrap()
-            .claims;
+        let claims =
+            decode::<serde_json::Value>(&token, &DecodingKey::from_secret(b""), &validation)
+                .unwrap()
+                .claims;
         assert_eq!(claims["iss"], "internal-jwt");
         assert_eq!(claims["Admin"], true);
         assert_eq!(claims["TTL"], 600);
-        assert_eq!(claims["exp"].as_i64().unwrap() - claims["iat"].as_i64().unwrap(), 600);
+        assert_eq!(
+            claims["exp"].as_i64().unwrap() - claims["iat"].as_i64().unwrap(),
+            600
+        );
     }
 
     #[test]
     fn missing_key_file_and_bad_pem_are_errors() {
         let error = AdminJwtProvider::from_private_key_file("/nonexistent/key.pem").unwrap_err();
         assert_eq!(error, "invalid private key path /nonexistent/key.pem");
-        assert!(AdminJwtProvider::from_pem(b"garbage".to_vec()).token().is_err());
+        assert!(AdminJwtProvider::from_pem(b"garbage".to_vec())
+            .token()
+            .is_err());
         assert_eq!(
-            AdminJwtProvider::invalid("boom".into()).token().unwrap_err(),
+            AdminJwtProvider::invalid("boom".into())
+                .token()
+                .unwrap_err(),
             "boom"
         );
     }

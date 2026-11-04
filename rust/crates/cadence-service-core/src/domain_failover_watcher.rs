@@ -110,7 +110,8 @@ pub fn spawn(
     tokio::spawn(async move {
         loop {
             let (base, coefficient) = interval();
-            let wait = cadence_common::jitter::jit_duration(&mut rand::thread_rng(), base, coefficient);
+            let wait =
+                cadence_common::jitter::jit_duration(&mut rand::thread_rng(), base, coefficient);
             tokio::select! {
                 changed = shutdown.changed() => {
                     if changed.is_err() || *shutdown.borrow() { return; }
@@ -127,7 +128,10 @@ pub fn spawn(
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_nanos() as i64)
                 .unwrap_or_default();
-            let _ = tokio::task::spawn_blocking(move || run_pass(m.as_ref(), &c, s.as_ref(), now, f.as_ref())).await;
+            let _ = tokio::task::spawn_blocking(move || {
+                run_pass(m.as_ref(), &c, s.as_ref(), now, f.as_ref())
+            })
+            .await;
         }
     });
 }
@@ -144,13 +148,7 @@ mod tests {
             ..Default::default()
         };
         store
-            .create_with_version(
-                info,
-                Default::default(),
-                Default::default(),
-                true,
-                1,
-            )
+            .create_with_version(info, Default::default(), Default::default(), true, 1)
             .expect("create");
         let mut r = store.record_by_name(name).expect("record");
         r.failover_end_time = Some(end);

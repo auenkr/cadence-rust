@@ -227,10 +227,10 @@ macro_rules! op {
 }
 
 fn codec(method: &str) -> Option<Codec> {
+    use cadence_api::schedule as sc;
     use cadence_api::service_types as st;
     use cadence_api::tasks as tk;
     use cadence_api::types as ty;
-    use cadence_api::schedule as sc;
     Some(match method {
         "CreateSchedule" => op!(sc::CreateScheduleRequest, sc::CreateScheduleResponse),
         "DescribeSchedule" => op!(sc::DescribeScheduleRequest, sc::DescribeScheduleResponse),

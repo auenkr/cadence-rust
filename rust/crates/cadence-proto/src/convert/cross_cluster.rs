@@ -154,7 +154,9 @@ fn completion_event_in(v: p::HistoryEvent) -> Result<st::HistoryEvent, Status> {
 
 // --- request attributes --------------------------------------------------
 
-fn apply_attrs_in(v: pa::ApplyParentClosePolicyAttributes) -> Result<a::ApplyParentClosePolicyAttributes, Status> {
+fn apply_attrs_in(
+    v: pa::ApplyParentClosePolicyAttributes,
+) -> Result<a::ApplyParentClosePolicyAttributes, Status> {
     Ok(a::ApplyParentClosePolicyAttributes {
         child_domain_id: v.child_domain_id,
         child_workflow_id: v.child_workflow_id,
@@ -171,7 +173,9 @@ fn apply_attrs_out(v: a::ApplyParentClosePolicyAttributes) -> pa::ApplyParentClo
     }
 }
 
-pub fn task_request_in(v: pa::CrossClusterTaskRequest) -> Result<a::CrossClusterTaskRequest, Status> {
+pub fn task_request_in(
+    v: pa::CrossClusterTaskRequest,
+) -> Result<a::CrossClusterTaskRequest, Status> {
     let mut out = a::CrossClusterTaskRequest {
         task_info: v
             .task_info
@@ -211,28 +215,30 @@ pub fn task_request_in(v: pa::CrossClusterTaskRequest) -> Result<a::CrossCluster
         }
         Some(ReqAttr::CancelExecutionAttributes(x)) => {
             let (target_workflow_id, target_run_id) = exec(x.target_workflow_execution);
-            out.cancel_execution_attributes = Some(a::CrossClusterCancelExecutionRequestAttributes {
-                target_domain_id: x.target_domain_id,
-                target_workflow_id,
-                target_run_id,
-                request_id: x.request_id,
-                initiated_event_id: x.initiated_event_id,
-                child_workflow_only: x.child_workflow_only,
-            });
+            out.cancel_execution_attributes =
+                Some(a::CrossClusterCancelExecutionRequestAttributes {
+                    target_domain_id: x.target_domain_id,
+                    target_workflow_id,
+                    target_run_id,
+                    request_id: x.request_id,
+                    initiated_event_id: x.initiated_event_id,
+                    child_workflow_only: x.child_workflow_only,
+                });
         }
         Some(ReqAttr::SignalExecutionAttributes(x)) => {
             let (target_workflow_id, target_run_id) = exec(x.target_workflow_execution);
-            out.signal_execution_attributes = Some(a::CrossClusterSignalExecutionRequestAttributes {
-                target_domain_id: x.target_domain_id,
-                target_workflow_id,
-                target_run_id,
-                request_id: x.request_id,
-                initiated_event_id: x.initiated_event_id,
-                child_workflow_only: x.child_workflow_only,
-                signal_name: x.signal_name,
-                signal_input: x.signal_input.map(|p| p.data),
-                control: (!x.control.is_empty()).then_some(x.control),
-            });
+            out.signal_execution_attributes =
+                Some(a::CrossClusterSignalExecutionRequestAttributes {
+                    target_domain_id: x.target_domain_id,
+                    target_workflow_id,
+                    target_run_id,
+                    request_id: x.request_id,
+                    initiated_event_id: x.initiated_event_id,
+                    child_workflow_only: x.child_workflow_only,
+                    signal_name: x.signal_name,
+                    signal_input: x.signal_input.map(|p| p.data),
+                    control: (!x.control.is_empty()).then_some(x.control),
+                });
         }
         Some(ReqAttr::RecordChildWorkflowExecutionCompleteRequestAttributes(x)) => {
             let (target_workflow_id, target_run_id) = exec(x.target_workflow_execution);
@@ -274,7 +280,9 @@ pub fn task_request_in(v: pa::CrossClusterTaskRequest) -> Result<a::CrossCluster
     Ok(out)
 }
 
-pub fn task_request_out(v: a::CrossClusterTaskRequest) -> Result<pa::CrossClusterTaskRequest, Status> {
+pub fn task_request_out(
+    v: a::CrossClusterTaskRequest,
+) -> Result<pa::CrossClusterTaskRequest, Status> {
     let attributes = if let Some(x) = v.start_child_execution_attributes {
         Some(ReqAttr::StartChildExecutionAttributes(
             pa::CrossClusterStartChildExecutionRequestAttributes {
@@ -312,14 +320,16 @@ pub fn task_request_out(v: a::CrossClusterTaskRequest) -> Result<pa::CrossCluste
             },
         ))
     } else if let Some(x) = v.record_child_workflow_execution_complete_attributes {
-        Some(ReqAttr::RecordChildWorkflowExecutionCompleteRequestAttributes(
-            pa::CrossClusterRecordChildWorkflowExecutionCompleteRequestAttributes {
-                target_domain_id: x.target_domain_id,
-                target_workflow_execution: exec_out(x.target_workflow_id, x.target_run_id),
-                initiated_event_id: x.initiated_event_id,
-                completion_event: x.completion_event.map(event).transpose()?,
-            },
-        ))
+        Some(
+            ReqAttr::RecordChildWorkflowExecutionCompleteRequestAttributes(
+                pa::CrossClusterRecordChildWorkflowExecutionCompleteRequestAttributes {
+                    target_domain_id: x.target_domain_id,
+                    target_workflow_execution: exec_out(x.target_workflow_id, x.target_run_id),
+                    initiated_event_id: x.initiated_event_id,
+                    completion_event: x.completion_event.map(event).transpose()?,
+                },
+            ),
+        )
     } else {
         v.apply_parent_close_policy_attributes.map(|x| {
             ReqAttr::ApplyParentClosePolicyRequestAttributes(
@@ -352,22 +362,34 @@ pub fn task_request_out(v: a::CrossClusterTaskRequest) -> Result<pa::CrossCluste
     })
 }
 
-pub fn task_requests_in(v: Option<pa::CrossClusterTaskRequests>) -> Result<Vec<a::CrossClusterTaskRequest>, Status> {
-    v.map_or_else(|| Ok(Vec::new()), |r| r.task_requests.into_iter().map(task_request_in).collect())
+pub fn task_requests_in(
+    v: Option<pa::CrossClusterTaskRequests>,
+) -> Result<Vec<a::CrossClusterTaskRequest>, Status> {
+    v.map_or_else(
+        || Ok(Vec::new()),
+        |r| r.task_requests.into_iter().map(task_request_in).collect(),
+    )
 }
 
-pub fn task_requests_out(v: Vec<a::CrossClusterTaskRequest>) -> Result<Option<pa::CrossClusterTaskRequests>, Status> {
+pub fn task_requests_out(
+    v: Vec<a::CrossClusterTaskRequest>,
+) -> Result<Option<pa::CrossClusterTaskRequests>, Status> {
     if v.is_empty() {
         return Ok(None);
     }
     Ok(Some(pa::CrossClusterTaskRequests {
-        task_requests: v.into_iter().map(task_request_out).collect::<Result<_, _>>()?,
+        task_requests: v
+            .into_iter()
+            .map(task_request_out)
+            .collect::<Result<_, _>>()?,
     }))
 }
 
 // --- responses -----------------------------------------------------------
 
-pub fn task_response_in(v: pa::CrossClusterTaskResponse) -> Result<a::CrossClusterTaskResponse, Status> {
+pub fn task_response_in(
+    v: pa::CrossClusterTaskResponse,
+) -> Result<a::CrossClusterTaskResponse, Status> {
     let mut out = a::CrossClusterTaskResponse {
         task_id: v.task_id,
         task_type: task_type_in(v.task_type)?,
@@ -419,10 +441,11 @@ pub fn task_response_out(v: a::CrossClusterTaskResponse) -> pa::CrossClusterTask
         Some(RespAttr::CancelExecutionAttributes(Default::default()))
     } else if v.signal_execution_attributes.is_some() {
         Some(RespAttr::SignalExecutionAttributes(Default::default()))
-    } else if v.record_child_workflow_execution_complete_attributes.is_some() {
-        Some(RespAttr::RecordChildWorkflowExecutionCompleteRequestAttributes(
-            Default::default(),
-        ))
+    } else if v
+        .record_child_workflow_execution_complete_attributes
+        .is_some()
+    {
+        Some(RespAttr::RecordChildWorkflowExecutionCompleteRequestAttributes(Default::default()))
     } else {
         v.apply_parent_close_policy_attributes.map(|x| {
             RespAttr::ApplyParentClosePolicyResponseAttributes(
@@ -464,14 +487,19 @@ pub fn tasks_by_shard_out(
             Ok((
                 k,
                 pa::CrossClusterTaskRequests {
-                    task_requests: r.into_iter().map(task_request_out).collect::<Result<_, _>>()?,
+                    task_requests: r
+                        .into_iter()
+                        .map(task_request_out)
+                        .collect::<Result<_, _>>()?,
                 },
             ))
         })
         .collect()
 }
 
-pub fn failed_causes_in(v: HashMap<i32, i32>) -> Result<HashMap<i32, e::GetTaskFailedCause>, Status> {
+pub fn failed_causes_in(
+    v: HashMap<i32, i32>,
+) -> Result<HashMap<i32, e::GetTaskFailedCause>, Status> {
     let mut out = HashMap::new();
     for (k, c) in v {
         // Go drops INVALID (nil) causes from the map.
@@ -525,28 +553,32 @@ mod tests {
             },
             a::CrossClusterTaskRequest {
                 task_info: Some(info.clone()),
-                signal_execution_attributes: Some(a::CrossClusterSignalExecutionRequestAttributes {
-                    target_domain_id: "td".into(),
-                    target_workflow_id: "tw".into(),
-                    target_run_id: "tr".into(),
-                    signal_name: "s".into(),
-                    signal_input: Some(b"i".to_vec()),
-                    control: Some(b"c".to_vec()),
-                    child_workflow_only: true,
-                    ..Default::default()
-                }),
+                signal_execution_attributes: Some(
+                    a::CrossClusterSignalExecutionRequestAttributes {
+                        target_domain_id: "td".into(),
+                        target_workflow_id: "tw".into(),
+                        target_run_id: "tr".into(),
+                        signal_name: "s".into(),
+                        signal_input: Some(b"i".to_vec()),
+                        control: Some(b"c".to_vec()),
+                        child_workflow_only: true,
+                        ..Default::default()
+                    },
+                ),
                 ..Default::default()
             },
             a::CrossClusterTaskRequest {
                 task_info: Some(info.clone()),
-                cancel_execution_attributes: Some(a::CrossClusterCancelExecutionRequestAttributes {
-                    target_domain_id: "td".into(),
-                    target_workflow_id: "tw".into(),
-                    target_run_id: "tr".into(),
-                    request_id: "q".into(),
-                    initiated_event_id: 2,
-                    child_workflow_only: false,
-                }),
+                cancel_execution_attributes: Some(
+                    a::CrossClusterCancelExecutionRequestAttributes {
+                        target_domain_id: "td".into(),
+                        target_workflow_id: "tw".into(),
+                        target_run_id: "tr".into(),
+                        request_id: "q".into(),
+                        initiated_event_id: 2,
+                        child_workflow_only: false,
+                    },
+                ),
                 ..Default::default()
             },
             a::CrossClusterTaskRequest {
@@ -608,7 +640,10 @@ mod tests {
             assert_eq!(task_request_in(proto).unwrap(), r);
         }
         let map = HashMap::from([(5, requests())]);
-        assert_eq!(tasks_by_shard_in(tasks_by_shard_out(map.clone()).unwrap()).unwrap(), map);
+        assert_eq!(
+            tasks_by_shard_in(tasks_by_shard_out(map.clone()).unwrap()).unwrap(),
+            map
+        );
     }
 
     #[test]
@@ -666,7 +701,10 @@ mod tests {
         });
         assert_eq!((proto.task_type, proto.failed_cause), (1, 1));
         let causes = failed_causes_in(HashMap::from([(1, 3), (2, 0)])).unwrap();
-        assert_eq!(causes, HashMap::from([(1, e::GetTaskFailedCause::ShardOwnershipLost)]));
+        assert_eq!(
+            causes,
+            HashMap::from([(1, e::GetTaskFailedCause::ShardOwnershipLost)])
+        );
         assert_eq!(failed_causes_out(causes), HashMap::from([(1, 3)]));
     }
 

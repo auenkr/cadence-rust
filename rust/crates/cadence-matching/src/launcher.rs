@@ -1298,18 +1298,31 @@ async fn run_with_lifecycle(
                 println!("Cadence internal history gRPC listening on {history_addr}");
             }
             let history_tchannel_addr = std::net::SocketAddr::from((
-                if history_rpc.is_some_and(|r| r.bind_on_local_host) { [127, 0, 0, 1] } else { [0, 0, 0, 0] },
-                history_rpc.map(|r| r.port).filter(|p| *p > 0).unwrap_or(7934),
+                if history_rpc.is_some_and(|r| r.bind_on_local_host) {
+                    [127, 0, 0, 1]
+                } else {
+                    [0, 0, 0, 0]
+                },
+                history_rpc
+                    .map(|r| r.port)
+                    .filter(|p| *p > 0)
+                    .unwrap_or(7934),
             ));
             let history_tchannel_listener = if run_history {
                 Some(tokio::net::TcpListener::bind(history_tchannel_addr).await?)
-            } else { None };
+            } else {
+                None
+            };
             if let Some(listener) = history_tchannel_listener {
                 let history_tchannel_addr = listener.local_addr()?;
-                println!("Cadence internal history Thrift/TChannel listening on {history_tchannel_addr}");
+                println!(
+                    "Cadence internal history Thrift/TChannel listening on {history_tchannel_addr}"
+                );
                 let history_state = state.clone();
                 tokio::spawn(async move {
-                    if let Err(error) = crate::tchannel::serve_history_listener(listener, history_state).await {
+                    if let Err(error) =
+                        crate::tchannel::serve_history_listener(listener, history_state).await
+                    {
                         tracing::error!(%error, "History TChannel listener stopped");
                     }
                 });

@@ -2180,7 +2180,9 @@ async fn delete_domain_rejects_domain_with_executions() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(body.to_string().contains("Domain still have workflow execution history."));
+    assert!(body
+        .to_string()
+        .contains("Domain still have workflow execution history."));
 }
 
 #[tokio::test]

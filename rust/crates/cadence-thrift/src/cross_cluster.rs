@@ -34,7 +34,9 @@ fn get_i16(s: &Struct, id: i16) -> Result<i16> {
     match s.get(id) {
         None => Ok(0),
         Some(Value::I16(v)) => Ok(*v),
-        Some(v) => Err(Error::Invalid(format!("field {id}: expected i16, got {v:?}"))),
+        Some(v) => Err(Error::Invalid(format!(
+            "field {id}: expected i16, got {v:?}"
+        ))),
     }
 }
 fn str_or_empty(s: &Struct, id: i16) -> Result<String> {
@@ -455,7 +457,9 @@ impl FromThrift for GetCrossClusterTasksResponse {
         let mut out = Self::default();
         if let Some(value) = s.get(10) {
             let Value::Map(entries) = value else {
-                return Err(Error::Invalid(format!("field 10: expected map, got {value:?}")));
+                return Err(Error::Invalid(format!(
+                    "field 10: expected map, got {value:?}"
+                )));
             };
             for (k, v) in entries {
                 let Value::I32(shard) = k else {
@@ -476,7 +480,9 @@ impl FromThrift for GetCrossClusterTasksResponse {
         }
         if let Some(value) = s.get(20) {
             let Value::Map(entries) = value else {
-                return Err(Error::Invalid(format!("field 20: expected map, got {value:?}")));
+                return Err(Error::Invalid(format!(
+                    "field 20: expected map, got {value:?}"
+                )));
             };
             let mut causes = HashMap::new();
             for (k, v) in entries {

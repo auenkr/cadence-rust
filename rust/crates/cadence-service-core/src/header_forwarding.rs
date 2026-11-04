@@ -132,7 +132,9 @@ pub fn forward_for_current_call(
     INBOUND_HEADERS
         .try_with(|inbound| {
             let outbound: HashMap<String, String> = existing.iter().cloned().collect();
-            forwarded_headers(rules, inbound, &outbound).into_iter().collect()
+            forwarded_headers(rules, inbound, &outbound)
+                .into_iter()
+                .collect()
         })
         .unwrap_or_default()
 }

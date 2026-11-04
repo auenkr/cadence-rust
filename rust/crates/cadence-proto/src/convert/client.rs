@@ -47,7 +47,9 @@ pub fn start_request_out(v: t::StartWorkflowExecutionRequest) -> p::StartWorkflo
         jitter_start: secs(v.jitter_start_seconds),
         first_run_at: v.first_run_at_timestamp.map(ns),
         cron_overlap_policy: v.cron_overlap_policy.map_or(0, |x| x as i32 + 1),
-        active_cluster_selection_policy: v.active_cluster_selection_policy.map(selection_policy_out),
+        active_cluster_selection_policy: v
+            .active_cluster_selection_policy
+            .map(selection_policy_out),
     }
 }
 
@@ -123,7 +125,9 @@ pub fn signal_with_start_request_out(
             jitter_start: secs(v.jitter_start_seconds),
             first_run_at: v.first_run_at_timestamp.map(ns),
             cron_overlap_policy: v.cron_overlap_policy.map_or(0, |x| x as i32 + 1),
-            active_cluster_selection_policy: v.active_cluster_selection_policy.map(selection_policy_out),
+            active_cluster_selection_policy: v
+                .active_cluster_selection_policy
+                .map(selection_policy_out),
         }),
         signal_name: v.signal_name,
         signal_input: payload(v.signal_input),
@@ -187,7 +191,9 @@ pub fn refresh_request_out(v: t::RefreshWorkflowTasksRequest) -> p::RefreshWorkf
     }
 }
 
-pub fn reset_sticky_request_out(v: st::ResetStickyTaskListRequest) -> p::ResetStickyTaskListRequest {
+pub fn reset_sticky_request_out(
+    v: st::ResetStickyTaskListRequest,
+) -> p::ResetStickyTaskListRequest {
     p::ResetStickyTaskListRequest {
         domain: v.domain,
         workflow_execution: v.execution.map(execution_out),
@@ -228,7 +234,10 @@ pub fn query_response_in(v: p::QueryWorkflowResponse) -> Result<tk::QueryWorkflo
             .query_rejected
             .map(|q| {
                 Ok::<_, Status>(cadence_api::errors::QueryRejected {
-                    close_status: enum_in(q.close_status, e::WorkflowExecutionCloseStatus::from_i32)?,
+                    close_status: enum_in(
+                        q.close_status,
+                        e::WorkflowExecutionCloseStatus::from_i32,
+                    )?,
                 })
             })
             .transpose()?,
@@ -540,7 +549,9 @@ pub fn describe_response_in(
     })
 }
 
-pub fn partitions_request_out(v: tk::ListTaskListPartitionsRequest) -> p::ListTaskListPartitionsRequest {
+pub fn partitions_request_out(
+    v: tk::ListTaskListPartitionsRequest,
+) -> p::ListTaskListPartitionsRequest {
     p::ListTaskListPartitionsRequest {
         domain: v.domain,
         task_list: v.task_list.map(task_list_out),
@@ -555,8 +566,16 @@ pub fn partitions_response_in(
         owner_host_name: m.owner_host_name,
     };
     Ok(tk::ListTaskListPartitionsResponse {
-        activity_task_list_partitions: v.activity_task_list_partitions.into_iter().map(meta).collect(),
-        decision_task_list_partitions: v.decision_task_list_partitions.into_iter().map(meta).collect(),
+        activity_task_list_partitions: v
+            .activity_task_list_partitions
+            .into_iter()
+            .map(meta)
+            .collect(),
+        decision_task_list_partitions: v
+            .decision_task_list_partitions
+            .into_iter()
+            .map(meta)
+            .collect(),
     })
 }
 
@@ -579,8 +598,11 @@ fn query_out(v: tk::WorkflowQuery) -> p::WorkflowQuery {
 pub fn poll_decision_response_in(
     v: p::PollForDecisionTaskResponse,
 ) -> Result<tk::PollForDecisionTaskResponse, Status> {
-    let queries: std::collections::HashMap<String, tk::WorkflowQuery> =
-        v.queries.into_iter().map(|(k, q)| (k, query_in(q))).collect();
+    let queries: std::collections::HashMap<String, tk::WorkflowQuery> = v
+        .queries
+        .into_iter()
+        .map(|(k, q)| (k, query_in(q)))
+        .collect();
     Ok(tk::PollForDecisionTaskResponse {
         task_token: v.task_token,
         workflow_execution: v.workflow_execution.map(execution),
@@ -597,7 +619,11 @@ pub fn poll_decision_response_in(
         workflow_execution_task_list: v.workflow_execution_task_list.map(task_list).transpose()?,
         query: v.query.map(query_in),
         query_id: None,
-        queries: if queries.is_empty() { None } else { Some(queries) },
+        queries: if queries.is_empty() {
+            None
+        } else {
+            Some(queries)
+        },
         total_history_bytes: v.total_history_bytes,
         auto_config_hint: v.auto_config_hint.map(auto_config_hint_in),
     })
@@ -726,7 +752,10 @@ pub fn respond_activity_completed_request_out(
 }
 
 fn by_id(workflow_id: String, run_id: String) -> Option<p::WorkflowExecution> {
-    Some(p::WorkflowExecution { workflow_id, run_id })
+    Some(p::WorkflowExecution {
+        workflow_id,
+        run_id,
+    })
 }
 
 pub fn respond_activity_completed_by_id_request_out(
@@ -862,12 +891,19 @@ pub fn create_schedule_request_out(v: sc::CreateScheduleRequest) -> p::CreateSch
     }
 }
 
-pub fn create_schedule_response_in(v: p::CreateScheduleResponse) -> Result<sc::CreateScheduleResponse, Status> {
-    Ok(sc::CreateScheduleResponse { schedule_id: v.schedule_id })
+pub fn create_schedule_response_in(
+    v: p::CreateScheduleResponse,
+) -> Result<sc::CreateScheduleResponse, Status> {
+    Ok(sc::CreateScheduleResponse {
+        schedule_id: v.schedule_id,
+    })
 }
 
 pub fn describe_schedule_request_out(v: sc::DescribeScheduleRequest) -> p::DescribeScheduleRequest {
-    p::DescribeScheduleRequest { domain: v.domain, schedule_id: v.schedule_id }
+    p::DescribeScheduleRequest {
+        domain: v.domain,
+        schedule_id: v.schedule_id,
+    }
 }
 
 pub fn describe_schedule_response_in(
@@ -913,7 +949,10 @@ pub fn list_schedules_response_in(
 }
 
 pub fn delete_schedule_request_out(v: sc::DeleteScheduleRequest) -> p::DeleteScheduleRequest {
-    p::DeleteScheduleRequest { domain: v.domain, schedule_id: v.schedule_id }
+    p::DeleteScheduleRequest {
+        domain: v.domain,
+        schedule_id: v.schedule_id,
+    }
 }
 
 pub fn pause_schedule_request_out(v: sc::PauseScheduleRequest) -> p::PauseScheduleRequest {
@@ -995,9 +1034,7 @@ mod tests {
         assert_eq!(out.query_reject_condition, 1);
         let back = query_response_in(p::QueryWorkflowResponse {
             query_result: payload(b"ans".to_vec()),
-            query_rejected: Some(p::QueryRejected {
-                close_status: 2,
-            }),
+            query_rejected: Some(p::QueryRejected { close_status: 2 }),
         })
         .unwrap();
         assert_eq!(back.query_result, b"ans");
@@ -1064,9 +1101,11 @@ mod tests {
         });
         assert!(matches!(
             out.filters,
-            Some(p::list_closed_workflow_executions_request::Filters::StatusFilter(
-                p::StatusFilter { status: 2 }
-            ))
+            Some(
+                p::list_closed_workflow_executions_request::Filters::StatusFilter(
+                    p::StatusFilter { status: 2 }
+                )
+            )
         ));
         let open = list_open_request_out(st::ListOpenWorkflowExecutionsRequest {
             domain: "d".into(),
@@ -1163,10 +1202,14 @@ mod tests {
             next_event_id: 9,
             scheduled_timestamp: Some(1_500_000_000),
             started_timestamp: Some(2_500_000_000),
-            query: Some(tk::WorkflowQuery { query_type: "q".into(), query_args: vec![7] }),
+            query: Some(tk::WorkflowQuery {
+                query_type: "q".into(),
+                query_args: vec![7],
+            }),
             ..Default::default()
         };
-        let back = poll_decision_response_in(poll_decision_response_out(src.clone()).unwrap()).unwrap();
+        let back =
+            poll_decision_response_in(poll_decision_response_out(src.clone()).unwrap()).unwrap();
         assert_eq!(back.task_token, src.task_token);
         assert_eq!(back.scheduled_timestamp, src.scheduled_timestamp);
         assert_eq!(back.started_timestamp, src.started_timestamp);
@@ -1176,15 +1219,16 @@ mod tests {
 
     #[test]
     fn activity_requests_out() {
-        let failed = respond_activity_failed_by_id_request_out(tk::RespondActivityTaskFailedByIDRequest {
-            domain: "d".into(),
-            workflow_id: "w".into(),
-            run_id: "r".into(),
-            activity_id: "a".into(),
-            reason: Some("boom".into()),
-            details: vec![1],
-            ..Default::default()
-        });
+        let failed =
+            respond_activity_failed_by_id_request_out(tk::RespondActivityTaskFailedByIDRequest {
+                domain: "d".into(),
+                workflow_id: "w".into(),
+                run_id: "r".into(),
+                activity_id: "a".into(),
+                reason: Some("boom".into()),
+                details: vec![1],
+                ..Default::default()
+            });
         assert_eq!(failed.workflow_execution.unwrap().run_id, "r");
         assert_eq!(failed.failure.unwrap().reason, "boom");
         let hb = heartbeat_request_out(tk::RecordActivityTaskHeartbeatRequest {
@@ -1200,7 +1244,10 @@ mod tests {
         let out = respond_decision_completed_request_out(tk::RespondDecisionTaskCompletedRequest {
             task_token: vec![1],
             sticky_attributes: Some(t::StickyExecutionAttributes {
-                worker_task_list: Some(t::TaskList { name: "s".into(), ..Default::default() }),
+                worker_task_list: Some(t::TaskList {
+                    name: "s".into(),
+                    ..Default::default()
+                }),
                 schedule_to_start_timeout_seconds: Some(5),
             }),
             ..Default::default()
@@ -1213,10 +1260,17 @@ mod tests {
 
     #[test]
     fn schedule_describe_round_trip() {
-        let spec = sc::ScheduleSpec { cron_expression: "* * * * *".into(), start_time_nano: Some(5_000_000_001), ..Default::default() };
+        let spec = sc::ScheduleSpec {
+            cron_expression: "* * * * *".into(),
+            start_time_nano: Some(5_000_000_001),
+            ..Default::default()
+        };
         let proto = p::DescribeScheduleResponse {
             spec: Some(schedule_spec_out(spec.clone())),
-            state: Some(schedule_state_out(sc::ScheduleState { paused: true, pause_info: None })),
+            state: Some(schedule_state_out(sc::ScheduleState {
+                paused: true,
+                pause_info: None,
+            })),
             ..Default::default()
         };
         let back = describe_schedule_response_in(proto).unwrap();

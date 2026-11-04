@@ -9,8 +9,8 @@
 
 pub mod archival_state;
 pub mod archiver;
-pub mod cloud_archiver;
 pub mod backoff;
+pub mod cloud_archiver;
 pub mod cluster;
 pub mod cron;
 pub mod duration;

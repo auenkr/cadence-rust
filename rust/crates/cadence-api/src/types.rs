@@ -435,15 +435,27 @@ pub struct ResetPoints {
 /// shared.thrift `ResetPointInfo`; times are Unix nanoseconds like Go.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResetPointInfo {
-    #[serde(rename = "binaryChecksum", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "binaryChecksum",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub binary_checksum: String,
     #[serde(rename = "runId", default, skip_serializing_if = "String::is_empty")]
     pub run_id: String,
     #[serde(rename = "firstDecisionCompletedId", default)]
     pub first_decision_completed_id: i64,
-    #[serde(rename = "createdTimeNano", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "createdTimeNano",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub created_time_nano: Option<i64>,
-    #[serde(rename = "expiringTimeNano", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "expiringTimeNano",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub expiring_time_nano: Option<i64>,
     #[serde(rename = "resettable", default)]
     pub resettable: bool,

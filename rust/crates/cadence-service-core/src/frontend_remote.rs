@@ -94,9 +94,9 @@ impl RemoteFrontendClient {
         if !enable {
             return self;
         }
-        self.with_authorization_provider(crate::outbound_auth::AdminJwtProvider::from_private_key_file(
-            private_key,
-        ))
+        self.with_authorization_provider(
+            crate::outbound_auth::AdminJwtProvider::from_private_key_file(private_key),
+        )
     }
 
     /// Go `authOutboundMiddleware.Call`: fetch a token per request.
@@ -135,12 +135,20 @@ impl RemoteFrontendClient {
             .await?
             .clone();
         let token = self.authorization_token()?;
-        let mut existing: Vec<(String, String)> = ["rpc-service", "rpc-caller", "rpc-encoding", AUTOFORWARDING_CLUSTER_HEADER]
-            .iter()
-            .map(|k| ((*k).to_owned(), String::new()))
-            .collect();
+        let mut existing: Vec<(String, String)> = [
+            "rpc-service",
+            "rpc-caller",
+            "rpc-encoding",
+            AUTOFORWARDING_CLUSTER_HEADER,
+        ]
+        .iter()
+        .map(|k| ((*k).to_owned(), String::new()))
+        .collect();
         if token.is_some() {
-            existing.push((crate::outbound_auth::AUTHORIZATION_HEADER.to_owned(), String::new()));
+            existing.push((
+                crate::outbound_auth::AUTHORIZATION_HEADER.to_owned(),
+                String::new(),
+            ));
         }
         let extra = self.forwarded(&existing);
         crate::frontend_remote_grpc::call(
@@ -224,11 +232,16 @@ mod tests {
             )
             .with_authorization_provider_if(true, "/nonexistent/key.pem");
             let err = client
-                .call("SignalWorkflowExecution", serde_json::json!({}), Duration::from_secs(1))
+                .call(
+                    "SignalWorkflowExecution",
+                    serde_json::json!({}),
+                    Duration::from_secs(1),
+                )
                 .await
                 .unwrap_err();
             assert!(
-                err.to_string().contains("invalid private key path /nonexistent/key.pem"),
+                err.to_string()
+                    .contains("invalid private key path /nonexistent/key.pem"),
                 "{transport}: {err}"
             );
         }
@@ -247,7 +260,13 @@ mod tests {
                 None,
             )
         };
-        assert_eq!(base().with_authorization_provider_if(false, "").authorization_token().unwrap(), None);
+        assert_eq!(
+            base()
+                .with_authorization_provider_if(false, "")
+                .authorization_token()
+                .unwrap(),
+            None
+        );
         let pem = include_str!("../../cadence-frontend/testdata/test_private.pem");
         let token = base()
             .with_authorization_provider(Ok(crate::outbound_auth::AdminJwtProvider::from_pem(
@@ -271,7 +290,11 @@ mod tests {
             None,
         );
         let err = client
-            .call("SignalWorkflowExecution", serde_json::json!({}), Duration::from_secs(1))
+            .call(
+                "SignalWorkflowExecution",
+                serde_json::json!({}),
+                Duration::from_secs(1),
+            )
             .await
             .unwrap_err();
         assert!(err.to_string().contains("not supported"));
@@ -289,7 +312,11 @@ mod tests {
             None,
         );
         let err = client
-            .call("GetTaskListsByDomain", serde_json::json!({}), Duration::from_secs(1))
+            .call(
+                "GetTaskListsByDomain",
+                serde_json::json!({}),
+                Duration::from_secs(1),
+            )
             .await
             .unwrap_err();
         assert!(err.to_string().contains("gRPC remote Frontend"));
@@ -307,7 +334,11 @@ mod tests {
             None,
         );
         let err = client
-            .call("SignalWorkflowExecution", serde_json::json!({}), Duration::from_secs(2))
+            .call(
+                "SignalWorkflowExecution",
+                serde_json::json!({}),
+                Duration::from_secs(2),
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, CadenceError::Internal(_)), "{err:?}");
@@ -339,8 +370,16 @@ mod tests {
     #[tokio::test]
     async fn forwards_inbound_headers_per_rules_without_overwriting() {
         use crate::header_forwarding::{default_dynamic_rules, INBOUND_HEADERS};
-        let c = RemoteFrontendClient::new("b".into(), "x".into(), "s".into(), "tchannel".into(), "c".into(), "a".into(), None)
-            .with_header_rules(std::sync::Arc::new(default_dynamic_rules()));
+        let c = RemoteFrontendClient::new(
+            "b".into(),
+            "x".into(),
+            "s".into(),
+            "tchannel".into(),
+            "c".into(),
+            "a".into(),
+            None,
+        )
+        .with_header_rules(std::sync::Arc::new(default_dynamic_rules()));
         let inbound: std::collections::HashMap<String, String> = [
             ("x-trace", "1"),
             ("grpc-timeout", "5"),
@@ -350,7 +389,9 @@ mod tests {
         .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
         .collect();
         let existing = vec![(AUTOFORWARDING_CLUSTER_HEADER.to_owned(), "a".to_owned())];
-        let got = INBOUND_HEADERS.scope(inbound, async { c.forwarded(&existing) }).await;
+        let got = INBOUND_HEADERS
+            .scope(inbound, async { c.forwarded(&existing) })
+            .await;
         assert_eq!(got, vec![("x-trace".to_owned(), "1".to_owned())]);
         assert!(c.forwarded(&existing).is_empty());
     }
