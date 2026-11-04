@@ -184,3 +184,86 @@ impl HistoryBuilder {
         self.add_event(HistoryEvent { event_type: Some(cadence_api::enums::EventType::ChildWorkflowExecutionTimedOut), child_workflow_execution_timed_out_event_attributes: Some(attributes), ..Default::default() })
     }
 }
+
+// Go-signature builders (history_builder.go): each takes the Go parameters and
+// fills the attributes exactly as the Go constructor does.
+use cadence_api::{enums::{DecisionTaskTimedOutCause, TimeoutType}, tasks as t, types::{FailureOptions, TaskList}};
+
+impl HistoryBuilder {
+    /// Go `AddDecisionTaskScheduledEvent`.
+    pub fn add_decision_task_scheduled(&mut self, task_list: &str, start_to_close_timeout_seconds: i32, attempt: i64) -> HistoryEvent {
+        self.add_decision_task_scheduled_event(t::DecisionTaskScheduledEventAttributes {
+            task_list: Some(TaskList { name: task_list.to_string(), ..Default::default() }),
+            start_to_close_timeout_seconds: Some(start_to_close_timeout_seconds),
+            attempt,
+        })
+    }
+    /// Go `AddDecisionTaskStartedEvent`.
+    pub fn add_decision_task_started(&mut self, schedule_event_id: i64, request_id: &str, identity: &str) -> HistoryEvent {
+        self.add_decision_task_started_event(t::DecisionTaskStartedEventAttributes { scheduled_event_id: schedule_event_id, identity: identity.to_string(), request_id: request_id.to_string() })
+    }
+    /// Go `AddDecisionTaskCompletedEvent`.
+    pub fn add_decision_task_completed(&mut self, schedule_event_id: i64, started_event_id: i64, request: &t::RespondDecisionTaskCompletedRequest) -> HistoryEvent {
+        self.add_decision_task_completed_event(t::DecisionTaskCompletedEventAttributes {
+            execution_context: request.execution_context.clone(),
+            scheduled_event_id: schedule_event_id,
+            started_event_id,
+            identity: request.identity.clone(),
+            binary_checksum: request.binary_checksum.clone(),
+        })
+    }
+    /// Go `AddDecisionTaskTimedOutEvent`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_decision_task_timed_out(&mut self, schedule_event_id: i64, started_event_id: i64, timeout_type: TimeoutType, base_run_id: &str, new_run_id: &str, fork_event_version: i64, reason: &str, cause: DecisionTaskTimedOutCause, reset_request_id: &str) -> HistoryEvent {
+        self.add_decision_task_timed_out_event(t::DecisionTaskTimedOutEventAttributes {
+            scheduled_event_id: schedule_event_id,
+            started_event_id,
+            timeout_type: Some(timeout_type),
+            base_run_id: base_run_id.to_string(),
+            new_run_id: new_run_id.to_string(),
+            fork_event_version,
+            reason: reason.to_string(),
+            cause: Some(cause),
+            request_id: reset_request_id.to_string(),
+        })
+    }
+    /// Go `AddDecisionTaskFailedEvent`.
+    pub fn add_decision_task_failed(&mut self, attr: t::DecisionTaskFailedEventAttributes) -> HistoryEvent { self.add_decision_task_failed_event(attr) }
+    /// Go `AddActivityTaskCompletedEvent`.
+    pub fn add_activity_task_completed(&mut self, schedule_event_id: i64, started_event_id: i64, request: &t::RespondActivityTaskCompletedRequest) -> HistoryEvent {
+        self.add_activity_task_completed_event(t::ActivityTaskCompletedEventAttributes { result: request.result.clone(), scheduled_event_id: schedule_event_id, started_event_id, identity: request.identity.clone() })
+    }
+    /// Go `AddActivityTaskFailedEvent`; Reason defaults to an empty string pointer.
+    pub fn add_activity_task_failed(&mut self, schedule_event_id: i64, started_event_id: i64, request: &t::RespondActivityTaskFailedRequest) -> HistoryEvent {
+        self.add_activity_task_failed_event(t::ActivityTaskFailedEventAttributes {
+            reason: Some(request.reason.clone().unwrap_or_default()),
+            details: request.details.clone(),
+            scheduled_event_id: schedule_event_id,
+            started_event_id,
+            identity: request.identity.clone(),
+            failure_options: None::<FailureOptions>,
+        })
+    }
+    /// Go `AddCompletedWorkflowEvent`.
+    pub fn add_completed_workflow(&mut self, decision_completed_event_id: i64, attributes: &t::CompleteWorkflowExecutionDecisionAttributes) -> HistoryEvent {
+        self.add_workflow_execution_completed_event(t::WorkflowExecutionCompletedEventAttributes { result: attributes.result.clone(), decision_task_completed_event_id: decision_completed_event_id })
+    }
+    /// Go `AddFailWorkflowEvent`.
+    pub fn add_fail_workflow(&mut self, decision_completed_event_id: i64, attributes: &t::FailWorkflowExecutionDecisionAttributes) -> HistoryEvent {
+        self.add_workflow_execution_failed_event(t::WorkflowExecutionFailedEventAttributes { reason: Some(attributes.reason.clone().unwrap_or_default()), details: attributes.details.clone(), decision_task_completed_event_id: decision_completed_event_id })
+    }
+    /// Go `AddTimeoutWorkflowEvent`.
+    pub fn add_timeout_workflow(&mut self) -> HistoryEvent {
+        self.add_workflow_execution_timed_out_event(t::WorkflowExecutionTimedOutEventAttributes { timeout_type: Some(TimeoutType::StartToClose) })
+    }
+    /// Go `AddWorkflowExecutionTerminatedEvent`.
+    pub fn add_workflow_execution_terminated(&mut self, reason: &str, details: Vec<u8>, identity: &str) -> HistoryEvent {
+        self.add_workflow_execution_terminated_event(WorkflowExecutionTerminatedEventAttributes { reason: reason.to_string(), details, identity: identity.to_string() })
+    }
+    /// Go `AddTimerStartedEvent`.
+    pub fn add_timer_started(&mut self, decision_completed_event_id: i64, request: &t::StartTimerDecisionAttributes) -> HistoryEvent {
+        self.add_timer_started_event(t::TimerStartedEventAttributes { timer_id: request.timer_id.clone(), start_to_fire_timeout_seconds: request.start_to_fire_timeout_seconds, decision_task_completed_event_id: decision_completed_event_id })
+    }
+    /// Go `GetHistory`.
+    pub fn get_history(&self) -> Vec<HistoryEvent> { self.events.clone() }
+}
