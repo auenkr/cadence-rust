@@ -339,7 +339,9 @@ mod tests {
     fn all_go_sqlblobs_golden_fixtures_decode_and_reencode_byte_for_byte() {
         fn decode_hex(hex: &str) -> Vec<u8> {
             assert_eq!(hex.len() % 2, 0, "fixture hex must have full bytes");
-            hex.as_bytes().chunks_exact(2).map(|pair| {
+            let (pairs, remainder) = hex.as_bytes().as_chunks::<2>();
+            assert!(remainder.is_empty(), "fixture hex must have full bytes");
+            pairs.iter().map(|pair| {
                 let digit = |byte: u8| match byte {
                     b'0'..=b'9' => byte - b'0', b'a'..=b'f' => byte - b'a' + 10,
                     _ => panic!("invalid fixture hex byte {byte}"),
