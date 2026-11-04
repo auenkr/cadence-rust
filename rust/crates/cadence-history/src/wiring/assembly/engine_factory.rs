@@ -11,7 +11,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use cadence_api::{admin::*, types::*};
+use crate::engine::types::{
+    HistoryRespondDecisionTaskCompletedRequest, HistoryRespondDecisionTaskCompletedResponse,
+    HistoryRespondDecisionTaskFailedRequest, RecordDecisionTaskStartedRequest,
+    RecordDecisionTaskStartedResponse, ScheduleDecisionTaskRequest,
+};
 
 use crate::engine::deps::{
     ExecutionCache, ExecutionContextRef, HResult, HistoryError, HistoryTaskCategory, ReleaseFunc,
