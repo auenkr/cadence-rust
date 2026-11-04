@@ -279,4 +279,6 @@ pub struct NotifyTaskInfo {
     pub execution_info: Option<WorkflowExecutionInfo>,
     pub tasks: Vec<Arc<dyn PersistenceTask>>,
     pub persistence_error: bool,
+    /// Go `ClusterCurrentTimes`
+    pub cluster_current_times: std::collections::HashMap<String, Time>,
 }

@@ -4,6 +4,7 @@
 //! * `taskInitializer` and the rate limiter are injected (task/ and quotas are ported elsewhere);
 //! * Go's timers (`time.AfterFunc`) are tokio tasks; `select { case ch <- x: default: }` is `try_send`;
 //! * the test hooks `updateAckLevelFn` / `splitProcessingQueueCollectionFn` are not ported (test-only).
+//!
 //! `newTimerQueueProcessorOptions` lives in `processor_options_factory.rs`.
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
