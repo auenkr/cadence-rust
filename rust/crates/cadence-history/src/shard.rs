@@ -70,6 +70,16 @@ impl ShardController {
         cadence_common::membership::Ring::new(members.iter().cloned()).lookup(&shard_id.to_string()).map(|h| h.identity().to_owned())
     }
 
+    /// Return the address Go places in `ShardOwnershipLostError.Owner`.
+    /// Cadence clients resolve this named TChannel address to the peer's gRPC
+    /// address when gRPC is enabled, so returning the membership identity here
+    /// breaks redirects for multi-address hosts.
+    pub fn desired_owner_address(shard_id: u32, members: &[cadence_common::membership::Host]) -> Option<String> {
+        cadence_common::membership::Ring::new(members.iter().cloned())
+            .lookup(&shard_id.to_string())
+            .map(|host| host.address.clone())
+    }
+
     pub fn acquire(&self, shard_id: u32, members: &[cadence_common::membership::Host]) -> Result<Option<ShardInfo>, ShardError> {
         if shard_id >= self.num_history_shards { return Err(ShardError::Store(format!("shard id {shard_id} exceeds shard count {}", self.num_history_shards))); }
         let Some(owner) = Self::desired_owner(shard_id, members) else { return Ok(None); };
@@ -84,8 +94,9 @@ impl ShardController {
     }
 
     pub fn check_ownership(&self, shard_id: u32, members: &[cadence_common::membership::Host]) -> Result<(), ShardError> {
-        let owner = Self::desired_owner(shard_id, members).unwrap_or_default();
-        if owner != self.host || !self.open.lock().map_err(|e| ShardError::Store(e.to_string()))?.contains(&shard_id) {
+        let identity = Self::desired_owner(shard_id, members).unwrap_or_default();
+        if identity != self.host || !self.open.lock().map_err(|e| ShardError::Store(e.to_string()))?.contains(&shard_id) {
+            let owner = Self::desired_owner_address(shard_id, members).unwrap_or_default();
             return Err(ShardError::ShardOwnershipLost { shard_id, owner });
         }
         Ok(())
@@ -119,5 +130,18 @@ mod tests {
         assert!(a.owned_shards().is_empty());
         let second=b.acquire(id,&next_ring).unwrap().unwrap();
         assert!(second.range_id>first.range_id);
+    }
+
+    #[test]
+    fn ownership_lost_redirect_contains_go_named_tchannel_address() {
+        let members = vec![Host {
+            address: "history-b:7934".into(),
+            identity: "history-b".into(),
+            grpc_address: "history-b:7834".into(),
+        }];
+        let id = 7;
+        let controller = ShardController::new(100, "history-a", Arc::new(InMemoryShardStore::default()));
+        let err = controller.check_ownership(id, &members).unwrap_err();
+        assert_eq!(err, ShardError::ShardOwnershipLost { shard_id: id, owner: "history-b:7934".into() });
     }
 }
