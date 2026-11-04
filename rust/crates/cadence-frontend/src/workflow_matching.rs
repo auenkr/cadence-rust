@@ -1058,7 +1058,7 @@ mod decision_time_precision_tests {
         assert_eq!(task.scheduled_timestamp, Some(scheduled));
         assert_eq!(task.started_timestamp, Some(started));
 
-        let history = with_times(10, (120, scheduled), (130, started));
+        let history = with_times(999, (120, scheduled), (130, started));
         let exec = ty::WorkflowExecution {
             workflow_id: "wf".into(),
             run_id: "run".into(),
