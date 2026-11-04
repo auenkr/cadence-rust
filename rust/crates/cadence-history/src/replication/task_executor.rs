@@ -230,8 +230,8 @@ impl TaskExecutorImpl {
         let request = ReplicateEventsV2Request {
             domain_uuid: attr.domain_id.clone(),
             workflow_execution: WorkflowExecution {
-                workflow_id: attr.workflow_id.clone(),
-                run_id: attr.run_id.clone(),
+                workflow_id: attr.workflow_id.clone().unwrap_or_default(),
+                run_id: attr.run_id.clone().unwrap_or_default(),
             },
             version_history_items: attr.version_history_items.clone(),
             events: attr.events.clone(),

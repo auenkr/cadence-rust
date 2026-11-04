@@ -51,6 +51,8 @@ pub struct ActivityInfo {
     pub last_failure_reason: String,
     pub last_failure_details: Vec<u8>,
     pub last_retry_interval_seconds: i32,
+    #[serde(default)]
+    pub last_worker_identity: String,
 }
 
 impl MutableStateBuilder {

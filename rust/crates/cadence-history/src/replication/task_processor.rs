@@ -695,12 +695,12 @@ impl TaskProcessorImpl {
         {
             return;
         }
-        tokio::time::sleep(jit_duration(
+        let jittered = jit_duration(
             &mut rand::thread_rng(),
             wait,
             self.config.replication_task_processor_start_wait_jitter_coefficient(shard_id),
-        ))
-        .await;
+        );
+        tokio::time::sleep(jittered).await;
     }
 }
 
