@@ -1888,13 +1888,15 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
         if name.is_empty() {
             return Ok(false);
         }
-        match self.persistence.get_domain(Some(name), None) {
+        match self.persistence.get_domain_typed(Some(name), None) {
             Ok(metadata) => {
                 self.cache.insert_matching_metadata_if_missing(&metadata);
                 Ok(true)
             }
-            Err(message) if message.contains("does not exist") => Ok(false),
-            Err(message) => Err(FrontendDomainError::Persistence(message)),
+            Err(crate::matching_domain_metadata::DomainReadError::NotFound(_)) => Ok(false),
+            Err(crate::matching_domain_metadata::DomainReadError::Other(message)) => {
+                Err(FrontendDomainError::Persistence(message))
+            }
         }
     }
 
@@ -3016,6 +3018,14 @@ mod go_sql_frontend_manager_tests {
             std::sync::Arc::new(|| "thriftrw_snappy".to_string()),
         );
         assert!(!manager.exists_for_register("missing").unwrap());
+        assert!(matches!(
+            crate::matching_domain_metadata::DomainMetadataPersistence::get_domain_typed(
+                &*manager.persistence,
+                Some("missing"),
+                None
+            ),
+            Err(crate::matching_domain_metadata::DomainReadError::NotFound(_))
+        ));
     }
 
     #[test]

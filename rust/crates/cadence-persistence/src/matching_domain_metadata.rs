@@ -182,6 +182,22 @@ pub trait GoSqlDomainPersistence: Send + Sync {
 /// Frontend's Go-compatible domain mutation boundary. The manager reads the
 /// current metadata version before staging cache changes and supplies it to
 /// update so SQL backends can preserve the original compare-and-set fence.
+/// Typed result of a domain read: `NotFound` mirrors Go's EntityNotExistsError.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DomainReadError {
+    NotFound(String),
+    Other(String),
+}
+
+impl From<MatchingDomainMetadataError> for DomainReadError {
+    fn from(error: MatchingDomainMetadataError) -> Self {
+        match error {
+            MatchingDomainMetadataError::NotFound(_) => Self::NotFound(error.to_string()),
+            other => Self::Other(other.to_string()),
+        }
+    }
+}
+
 pub trait DomainMetadataPersistence: std::fmt::Debug + Send + Sync {
     fn metadata_version(&self) -> Result<i64, String>;
 
@@ -194,6 +210,16 @@ pub trait DomainMetadataPersistence: std::fmt::Debug + Send + Sync {
         _id: Option<&str>,
     ) -> Result<MatchingDomainMetadata, String> {
         Err("domain reads are unavailable for this persistence backend".into())
+    }
+
+    /// Typed variant of `get_domain`: distinguishes Go's
+    /// `*types.EntityNotExistsError` from other persistence failures.
+    fn get_domain_typed(
+        &self,
+        name: Option<&str>,
+        id: Option<&str>,
+    ) -> Result<MatchingDomainMetadata, DomainReadError> {
+        self.get_domain(name, id).map_err(DomainReadError::Other)
     }
 
     /// List Go-compatible domain rows for paginated Frontend reads.
@@ -1646,6 +1672,14 @@ impl crate::matching_domain_metadata::DomainMetadataPersistence for MatchingDoma
         id: Option<&str>,
     ) -> Result<MatchingDomainMetadata, String> {
         MatchingDomainMetadataStore::get_domain(self, name, id).map_err(|error| error.to_string())
+    }
+
+    fn get_domain_typed(
+        &self,
+        name: Option<&str>,
+        id: Option<&str>,
+    ) -> Result<MatchingDomainMetadata, DomainReadError> {
+        MatchingDomainMetadataStore::get_domain(self, name, id).map_err(Into::into)
     }
 
     fn list_domains(

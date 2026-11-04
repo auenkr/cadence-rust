@@ -930,6 +930,14 @@ impl crate::matching_domain_metadata::DomainMetadataPersistence for PostgresDoma
         PostgresDomainMetadataStore::get_domain(self, name, id).map_err(|error| error.to_string())
     }
 
+    fn get_domain_typed(
+        &self,
+        name: Option<&str>,
+        id: Option<&str>,
+    ) -> Result<MatchingDomainMetadata, crate::matching_domain_metadata::DomainReadError> {
+        PostgresDomainMetadataStore::get_domain(self, name, id).map_err(Into::into)
+    }
+
     fn list_domains(
         &self,
         page_size: usize,
