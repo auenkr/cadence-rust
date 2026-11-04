@@ -256,3 +256,9 @@ Applied its formatting patch only within owned directories. Query audit adds
 Go counter and timer/histogram dependency hooks, including buffered-query
 invalid states, timeouts and sticky/non-sticky dispatch. Validation pending.
 No local Cargo/Go validation performed; no integration or runtime parity claimed.
+
+YARPC status identity is now retained by HistoryError::TransportStatus; the
+handler records deadline-exceeded timeout plus failure counters, and sticky
+query dispatch recognizes status code 4 as a fallback condition. Confirmed
+code 4 against cached upstream yarpcerrors/codes.go. Concrete adapters must
+preserve this status rather than flattening it into Other.

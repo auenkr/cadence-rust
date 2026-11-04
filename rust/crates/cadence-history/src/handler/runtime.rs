@@ -171,6 +171,13 @@ impl HistoryHandler {
             HistoryError::DeadlineExceeded | HistoryError::Canceled => {
                 "CadenceErrContextTimeoutCounter"
             }
+            HistoryError::TransportStatus { code, .. } => {
+                // YARPC uses the canonical gRPC code numbers (DeadlineExceeded = 4).
+                if *code == 4 {
+                    self.metrics.error_counter(operation, "CadenceErrContextTimeoutCounter");
+                }
+                "CadenceFailures"
+            }
             HistoryError::EventAlreadyStarted(_) => "CadenceErrEventAlreadyStartedCounter",
             HistoryError::Cadence(error) => match &**error {
                 CadenceError::ShardOwnershipLost(_) => "CadenceErrShardOwnershipLostCounter",

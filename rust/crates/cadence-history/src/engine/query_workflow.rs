@@ -252,7 +252,7 @@ impl HistoryEngine {
                         response: Some(response),
                     })
                 }
-                Ok(Err(HistoryError::StickyWorkerUnavailable | HistoryError::DeadlineExceeded))
+                Ok(Err(HistoryError::StickyWorkerUnavailable | HistoryError::DeadlineExceeded | HistoryError::TransportStatus { code: 4, .. }))
                 | Err(_) => {}
                 Ok(Err(err)) => {
                     tracing::error!(error = %err, "query directly though matching on sticky failed, will not attempt query on non-sticky");
@@ -260,6 +260,7 @@ impl HistoryEngine {
                 }
             }
             if response.is_workflow_running {
+                tracing::info!(domain = %req.domain, "query direct through matching failed on sticky, clearing sticky before attempting on non-sticky");
                 let reset = HistoryResetStickyTaskListRequest {
                     domain_uuid: domain_id.into(),
                     execution: req.execution.clone(),
@@ -281,6 +282,7 @@ impl HistoryEngine {
             }
         }
         if deadline.is_some_and(|d| d <= Instant::now()) {
+            tracing::info!(domain = %req.domain, "query context timed out before query on non-sticky task list could be attempted");
             self.metrics.query_counter(&req.domain, "DirectQueryDispatchTimeoutBeforeNonStickyCount");
             return Err(HistoryError::DeadlineExceeded);
         }
@@ -297,7 +299,13 @@ impl HistoryEngine {
             None => call.await,
         };
         drop(non_sticky_timer);
-        let response = response?;
+        let response = response.inspect_err(|err| {
+            if err.to_string().contains("unknown queryType") {
+                tracing::info!(error = %err, domain = %req.domain, "user calls for unsupported query type");
+            } else {
+                tracing::error!(error = %err, domain = %req.domain, "query directly though matching on non-sticky failed");
+            }
+        })?;
         self.metrics.query_counter(&req.domain, "DirectQueryDispatchNonStickySuccessCount");
         Ok(HistoryQueryWorkflowResponse {
             response: Some(response),

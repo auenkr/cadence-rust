@@ -90,6 +90,9 @@ pub enum HistoryError {
     StickyWorkerUnavailable,
     #[error("version histories do not exist")]
     MissingVersionHistories,
+    /// TODO(link): preserve yarpcerrors.Status identity from transport adapters.
+    #[error("{message}")]
+    TransportStatus { code: i32, message: String },
     /// Anything else (Go `errors.New` / `fmt.Errorf`).
     #[error("{0}")]
     Other(String),
