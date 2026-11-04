@@ -1,5 +1,6 @@
 //! History service bootstrap and shard ownership primitives.
 
+pub mod common;
 pub mod config;
 pub mod config_collection;
 pub mod constants;
