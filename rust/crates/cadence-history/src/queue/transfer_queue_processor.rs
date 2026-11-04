@@ -339,9 +339,9 @@ impl Daemon for TransferQueueProcessor {
         }
 
         tracing::info!("Starting transfer queue processor");
-        self.active_queue_processor.start();
+        self.active_queue_processor.clone().start();
         for p in self.standby_queue_processors.values() {
-            p.start();
+            p.clone().start();
         }
 
         let t = self.clone();
@@ -514,7 +514,7 @@ impl TransferQueueProcessor {
         // They are stopped when the transfer queue instance is stopped; there is no mechanism to
         // re-start ongoing failover queue processors in the new shard owner.
         self.failover_queue_processors.lock().unwrap().push(failover_queue_processor.clone());
-        failover_queue_processor.start();
+        failover_queue_processor.clone().start();
     }
 }
 
