@@ -67,3 +67,7 @@ pub mod matching_domain_metadata;
 pub mod matching_domain_mysql;
 pub mod matching_domain_postgres;
 pub mod matching_retry;
+
+pub mod history_sql_backend;
+pub mod sql_history_store;
+pub mod history_tree_token;
