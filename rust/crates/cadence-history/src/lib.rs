@@ -2,6 +2,7 @@
 
 pub mod config;
 pub mod mutable_state;
+pub mod mutable_state_activity;
 pub mod shard;
 
 pub const SERVICE_NAME: &str = "history";
