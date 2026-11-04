@@ -143,3 +143,12 @@ This smoke predates collector ended_at_utc and final deployment identity
 evidence; it establishes runtime viability, not full evidence acceptance.
 CI-generated driver formatting was applied locally as a patch without
 running Go. Dispatch the full comparison from the resulting final head.
+
+## Full corrected comparison dispatched
+
+Run https://github.com/auenkr/cadence-rust/actions/runs/41767896292
+from exact head `316c28e4a2638e55cd52603a307fb6d7ffd09bd7`.
+Settings: 1000 measured workflows, 100 warmup, five alternating repetitions,
+concurrency 1/16/64, payload1024. Standard public ubuntu-latest, 90-minute
+job limit, explicit resource caps, strict artifact verification. Status at
+dispatch: in progress. No final performance/resource claims accepted yet.
