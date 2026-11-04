@@ -790,6 +790,7 @@ mod tests {
     #[test]
     fn add_decision_task_started_emits_event_and_updates_decision_info() {
         let mut s = MutableStateBuilder::default();
+        s.execution_info["task_list"] = "normal".into();
         let (_, d) = s.add_decision_scheduled(3, "normal".into(), 20, 0, 10, 10);
         let (event, info) = s.add_decision_task_started_event(
             d.schedule_id, "request".into(),
