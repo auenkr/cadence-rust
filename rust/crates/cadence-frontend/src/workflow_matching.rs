@@ -523,6 +523,41 @@ impl ProductionBackend {
         Ok(Struct { fields })
     }
 
+    /// Go `MatchingClient.CancelOutstandingPoll`: routed to the same owner as
+    /// the original poll (by task-list name).
+    pub(crate) async fn cancel_outstanding_poll(
+        &self,
+        request: &serde_json::Value,
+    ) -> Result<(), CadenceError> {
+        let task_list: Option<ty::TaskList> = typed(request, "taskList")?;
+        let name = task_list
+            .as_ref()
+            .map_or("", |t| t.name.as_str())
+            .to_owned();
+        let mut fields = vec![(10, domain_uuid(request, "domainUUID")?)];
+        if let Some(kind) = request
+            .get("taskListType")
+            .and_then(serde_json::Value::as_i64)
+        {
+            fields.push((20, Value::I32(kind as i32)));
+        }
+        if let Some(task_list) = &task_list {
+            fields.push((30, Value::Struct(task_list.to_thrift())));
+        }
+        let poller = str_field(request, "pollerID");
+        if !poller.is_empty() {
+            fields.push((40, Value::Bytes(poller.into_bytes())));
+        }
+        self.matching_for(
+            &name,
+            "CancelOutstandingPoll",
+            Struct { fields },
+            Duration::from_secs(30),
+        )
+        .await
+        .map(|_| ())
+    }
+
     pub(crate) async fn poll_decision(
         &self,
         request: &serde_json::Value,

@@ -459,7 +459,8 @@ impl ProductionBackend {
         match operation {
             Op::StartWorkflowExecution => {
                 let start: ty::StartWorkflowExecutionRequest = typed(&request, "startRequest")?;
-                let extras = start_extras(&start)?;
+                let mut extras = start_extras(&start)?;
+                extras.extend(partition_config_field(&request, 62));
                 let envelope = env(start.to_thrift(), extras)?;
                 self.history_typed::<ty::StartWorkflowExecutionResponse>(
                     "StartWorkflowExecution",
@@ -470,7 +471,7 @@ impl ProductionBackend {
             Op::SignalWithStartWorkflowExecution => {
                 let inner: st::SignalWithStartWorkflowExecutionRequest =
                     typed(&request, "signalWithStartRequest")?;
-                let envelope = env(inner.to_thrift(), vec![])?;
+                let envelope = env(inner.to_thrift(), partition_config_field(&request, 30))?;
                 self.history_typed::<ty::StartWorkflowExecutionResponse>(
                     "SignalWithStartWorkflowExecution",
                     envelope,
@@ -607,6 +608,16 @@ impl ProductionBackend {
             other => Err(crate::handler_workflow::unimplemented_operation(other.name()).into()),
         }
     }
+}
+
+/// History envelope `partitionConfig` (map<string,string>) when present.
+fn partition_config_field(request: &serde_json::Value, id: i16) -> Vec<(i16, Value)> {
+    let config: Option<std::collections::HashMap<String, String>> = request
+        .get("partitionConfig")
+        .and_then(|v| serde_json::from_value(v.clone()).ok());
+    let mut fields = cadence_thrift::value::Fields::new();
+    fields.omap_str_str(id, &config);
+    fields.fields
 }
 
 /// Go `common.CreateHistoryStartWorkflowRequest`: first-decision backoff and
@@ -785,7 +796,11 @@ impl cadence_service_core::workflow_api::WorkflowApi for HandlerApi {
     ) -> cadence_service_core::workflow_api::ApiFuture<'a> {
         Box::pin(async move {
             let header = |name: &str| ctx.headers.get(name).cloned().unwrap_or_default();
+            let (isolation_group, partition_config) =
+                crate::production_hooks::context_from_headers(&ctx.headers)?;
             let caller = crate::handler_workflow::CallerMetadata {
+                isolation_group,
+                partition_config,
                 client_impl: header("cadence-client-implementation"),
                 feature_version: header("cadence-client-feature-version"),
                 deadline: ctx.deadline,
@@ -1391,12 +1406,59 @@ pub fn build_workflow_api(
         metadata,
         remote_rules,
     );
+    let canceller_backend = backend.clone();
+    let isolation_state = {
+        let overlay = ctx.state.admin.dynamic_config.clone();
+        let manager = ctx.state.domain_manager.clone();
+        let domains = ctx.state.domains.clone();
+        crate::production_hooks::DomainIsolationState::new(
+            std::sync::Arc::new(move |domain: &str| {
+                overlay.lock().is_ok_and(|o| {
+                    cadence_persistence::dynamic_config::boolean(
+                        o.property_values("system.enableTasklistIsolation"),
+                        Some(domain),
+                        false,
+                    )
+                })
+            }),
+            std::sync::Arc::new(move |domain: &str| {
+                manager
+                    .describe(&cadence_api::service_types::DescribeDomainRequest {
+                        name: Some(domain.to_owned()),
+                        ..Default::default()
+                    })
+                    .map(|d| d.configuration.and_then(|c| c.isolation_groups))
+                    .map_err(|e| e.to_string())
+            }),
+            std::sync::Arc::new(move || domains.global_isolation_groups()),
+        )
+    };
     let forwarding_backend = crate::wrappers::redirection_runtime::ForwardingBackend::new(
         backend,
         metadata.current_cluster_name.clone(),
         remotes.clone(),
     );
     let shared_metrics_sink = frontend_metrics_sink(&ctx.config);
+    let bad_binary_admission = {
+        let manager = ctx.state.domain_manager.clone();
+        crate::production_hooks::BadBinaryAdmission::new(
+            std::sync::Arc::new(move |domain: &str| {
+                let described =
+                    manager.describe(&cadence_api::service_types::DescribeDomainRequest {
+                        name: Some(domain.to_owned()),
+                        ..Default::default()
+                    })?;
+                Ok(described
+                    .configuration
+                    .and_then(|c| c.bad_binaries)
+                    .and_then(|b| b.binaries)
+                    .map(|b| b.into_keys().collect()))
+            }),
+            std::sync::Arc::new(crate::wrappers::metrics_sink::SinkMetrics::new(
+                shared_metrics_sink.clone(),
+            )),
+        )
+    };
     let dynamic_overlay = ctx.state.admin.dynamic_config.clone();
     let validator = crate::request_validator::RequestValidator {
         config: crate::request_validator::ValidationConfig {
@@ -1415,6 +1477,14 @@ pub fn build_workflow_api(
         ctx.config.async_workflow_queues.clone(),
     )
     .with_domain_lookup(lookup)
+    .with_poll_admission(std::sync::Arc::new(bad_binary_admission))
+    .with_isolation_group_state(std::sync::Arc::new(isolation_state.clone()))
+    .with_poll_isolation_waiter(std::sync::Arc::new(isolation_state))
+    .with_outstanding_poll_canceller(std::sync::Arc::new(
+        crate::production_hooks::ProductionPollCanceller {
+            backend: canceller_backend,
+        },
+    ))
     .with_blob_size_policy(std::sync::Arc::new(DynamicBlobSizePolicy(
         dynamic_overlay.clone(),
     )))

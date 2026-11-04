@@ -22,6 +22,7 @@ pub enum Counter {
     ServiceUnavailable,
     AuthorizationFailed,
     Unauthorized,
+    BadBinary,
 }
 
 impl Counter {
@@ -44,6 +45,7 @@ impl Counter {
             Self::ServiceUnavailable => "cadence_errors_service_unavailable",
             Self::AuthorizationFailed => "cadence_errors_authorize_failed",
             Self::Unauthorized => "cadence_errors_unauthorized",
+            Self::BadBinary => "cadence_errors_bad_binary",
         }
     }
 }
