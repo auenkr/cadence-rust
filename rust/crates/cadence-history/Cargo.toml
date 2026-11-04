@@ -18,4 +18,3 @@ cadence-common = { path = "../cadence-common" }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 thiserror = "2"
-anyhow = "1"
