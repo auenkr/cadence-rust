@@ -315,7 +315,6 @@ pub fn decision_task(
                 )
             })
             .collect(),
-        ..Default::default()
     })
 }
 pub fn activity_task(
@@ -341,7 +340,6 @@ pub fn activity_task(
         workflow_domain: v.workflow_domain,
         header: v.header.map(header),
         auto_config_hint: v.auto_config_hint.map(auto_config_hint_out),
-        ..Default::default()
     }
 }
 /// Go `proto.FromAutoConfigHint`.
@@ -505,7 +503,6 @@ fn info_with_time(
         partition_config: v.partition_config.unwrap_or_default(),
         execution_status: v.execution_status.map_or(0, |s| s as i32 + 1),
         scheduled_execution_time: v.scheduled_execution_time.map(time),
-        ..Default::default()
     }
 }
 pub fn describe(v: st::DescribeWorkflowExecutionResponse) -> p::DescribeWorkflowExecutionResponse {
@@ -544,7 +541,6 @@ pub fn describe(v: st::DescribeWorkflowExecutionResponse) -> p::DescribeWorkflow
                 ),
                 last_worker_identity: a.last_worker_identity,
                 started_worker_identity: a.started_worker_identity,
-                ..Default::default()
             })
             .collect(),
         pending_children: v

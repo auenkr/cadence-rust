@@ -629,7 +629,6 @@ pub fn poll_decision_response_out(
             .collect(),
         total_history_bytes: v.total_history_bytes,
         auto_config_hint: v.auto_config_hint.map(auto_config_hint_out),
-        ..Default::default()
     })
 }
 
