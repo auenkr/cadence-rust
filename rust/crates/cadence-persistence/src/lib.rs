@@ -71,3 +71,7 @@ pub mod matching_retry;
 pub mod history_sql_backend;
 pub mod sql_history_store;
 pub mod history_tree_token;
+
+pub mod history_task_sql;
+
+pub mod sql_workflow_store;

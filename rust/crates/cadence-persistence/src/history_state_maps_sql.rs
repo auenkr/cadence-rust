@@ -175,7 +175,7 @@ impl PostgresWorkflowStateMaps {
     pub fn upsert(&self, entry: &WorkflowStateMapEntry) -> Result<(), PersistenceError> {
         if !key_is_valid(entry.map, &entry.key) { return Err(invalid_key(entry.map)); }
         let query = workflow_state_map_statement(Dialect::Postgres, entry.map, WorkflowMapOperation::Upsert, 0);
-        let heartbeat_updated_at = if entry.map == WorkflowStateMap::Activity { Some(heartbeat_time(entry.last_heartbeat_updated_time_unix_nanos)?) } else { None };
+        let heartbeat_updated_at = if entry.map == WorkflowStateMap::Activity { Some(heartbeat_time(entry.last_heartbeat_updated_time_unix_nanos)?.naive_utc()) } else { None };
         let domain = &entry.domain_id[..];
         let run = &entry.run_id[..];
         let mut params: Vec<&(dyn ToSql + Sync)> = vec![&entry.shard_id, &domain, &entry.workflow_id, &run];
@@ -197,7 +197,7 @@ impl PostgresWorkflowStateMaps {
         let rows = client.query(&query, &[&shard_id, &&domain_id[..], &workflow_id, &&run_id[..]]).map_err(internal)?;
         rows.into_iter().map(|row| {
             let key = if map == WorkflowStateMap::Timer { WorkflowStateMapKey::String(row.get(0)) } else { WorkflowStateMapKey::Integer(row.get(0)) };
-            let (details, updated) = if map == WorkflowStateMap::Activity { (row.get(3), heartbeat_unix_nanos(row.get(4))?) } else { (Vec::new(), 0) };
+            let (details, updated) = if map == WorkflowStateMap::Activity { (row.get(3), heartbeat_unix_nanos(row.get::<_, chrono::NaiveDateTime>(4).and_utc())?) } else { (Vec::new(), 0) };
             Ok(WorkflowStateMapEntry { shard_id, domain_id: *domain_id, workflow_id: workflow_id.to_owned(), run_id: *run_id, map, key,
                 value: DataBlob { data: row.get(1), encoding: row.get(2) }, last_heartbeat_details: details, last_heartbeat_updated_time_unix_nanos: updated })
         }).collect()
@@ -227,7 +227,7 @@ impl PostgresWorkflowStateMaps {
     pub fn upsert_tx(client: &mut impl postgres::GenericClient, entry: &WorkflowStateMapEntry) -> Result<(), PersistenceError> {
         if !key_is_valid(entry.map, &entry.key) { return Err(invalid_key(entry.map)); }
         let query = workflow_state_map_statement(Dialect::Postgres, entry.map, WorkflowMapOperation::Upsert, 0);
-        let heartbeat_updated_at = if entry.map == WorkflowStateMap::Activity { Some(heartbeat_time(entry.last_heartbeat_updated_time_unix_nanos)?) } else { None };
+        let heartbeat_updated_at = if entry.map == WorkflowStateMap::Activity { Some(heartbeat_time(entry.last_heartbeat_updated_time_unix_nanos)?.naive_utc()) } else { None };
         let domain = &entry.domain_id[..];
         let run = &entry.run_id[..];
         let mut params: Vec<&(dyn ToSql + Sync)> = vec![&entry.shard_id, &domain, &entry.workflow_id, &run];
@@ -247,7 +247,7 @@ impl PostgresWorkflowStateMaps {
         let rows = client.query(&query, &[&shard_id, &&domain_id[..], &workflow_id, &&run_id[..]]).map_err(internal)?;
         rows.into_iter().map(|row| {
             let key = if map == WorkflowStateMap::Timer { WorkflowStateMapKey::String(row.get(0)) } else { WorkflowStateMapKey::Integer(row.get(0)) };
-            let (details, updated) = if map == WorkflowStateMap::Activity { (row.get(3), heartbeat_unix_nanos(row.get(4))?) } else { (Vec::new(), 0) };
+            let (details, updated) = if map == WorkflowStateMap::Activity { (row.get(3), heartbeat_unix_nanos(row.get::<_, chrono::NaiveDateTime>(4).and_utc())?) } else { (Vec::new(), 0) };
             Ok(WorkflowStateMapEntry { shard_id, domain_id: *domain_id, workflow_id: workflow_id.to_owned(), run_id: *run_id, map, key,
                 value: DataBlob { data: row.get(1), encoding: row.get(2) }, last_heartbeat_details: details, last_heartbeat_updated_time_unix_nanos: updated })
         }).collect()
