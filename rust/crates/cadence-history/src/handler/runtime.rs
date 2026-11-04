@@ -4,6 +4,10 @@ use async_trait::async_trait;
 use cadence_api::{CadenceError, tasktoken::TaskToken};
 use crate::engine::deps::{HResult, HistoryError};
 use super::Handler;
+#[async_trait]
+pub trait RoutedEngine: Handler {
+    async fn reapply_history_events(&self, domain: &str, workflow: &str, run: &str, events: Vec<cadence_api::service_types::HistoryEvent>) -> HResult<()>;
+}
 
 pub trait RequestProfile: Send {}
 pub trait HandlerMetrics: Send + Sync {
@@ -16,9 +20,10 @@ pub trait HandlerMetrics: Send + Sync {
 pub trait HandlerResources: super::lifecycle::HandlerComponentFactory + Send + Sync {
     fn prepare_controller_to_stop(&self);
     fn allow(&self) -> bool;
-    fn engine_for_workflow(&self, workflow_id: &str) -> HResult<Arc<dyn Handler>>;
-    fn engine_for_shard(&self, shard_id: i32) -> HResult<Arc<dyn Handler>>;
+    fn engine_for_workflow(&self, workflow_id: &str) -> HResult<Arc<dyn RoutedEngine>>;
+    fn engine_for_shard(&self, shard_id: i32) -> HResult<Arc<dyn RoutedEngine>>;
     fn deserialize_token(&self, data: &[u8]) -> HResult<TaskToken>;
+    fn deserialize_thriftrw_history(&self, data: &[u8]) -> HResult<Vec<cadence_api::service_types::HistoryEvent>>;
     fn shard_ownership_lost(&self, persistence_message: &str) -> HistoryError;
 }
 pub struct HistoryHandler {

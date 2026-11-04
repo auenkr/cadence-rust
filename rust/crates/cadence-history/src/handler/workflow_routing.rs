@@ -79,18 +79,17 @@ impl HistoryHandler {
     }
     pub async fn reapply_events(&self, request: Option<&crate::engine::types::HistoryReapplyEventsRequest>) -> HResult<()> {
         self.wait_started().await;
-        let _profile = self.metrics.start_request_profile("ReapplyEvents");
-        self.check_shutdown()?;
+        let _profile = self.metrics.start_request_profile("ReapplyEvents"); self.check_shutdown()?;
         let request = request.cloned().unwrap_or_default();
-        let domain = &request.domain_uuid;
-        let fail = |error| self.error("ReapplyEvents", domain, "", "", error);
-        let execution = request.request.clone().and_then(|r| r.workflow_execution).unwrap_or_default();
-        let workflow = execution.workflow_id; let run = execution.run_id;
-        let fail = |error| self.error("ReapplyEvents", domain, &workflow, &run, error);
-        let engine = self.resources.engine_for_workflow(&workflow).map_err(&fail)?;
-        let result = engine.reapply_events(Some(&request)).await;
-        result.map_err(fail)
+        let inner = request.request.clone().unwrap_or_default();
+        let execution = inner.workflow_execution.clone().unwrap_or_default();
+        let fail = |error| self.error("ReapplyEvents", &request.domain_uuid, &execution.workflow_id, &execution.run_id, error);
+        let engine = self.resources.engine_for_workflow(&execution.workflow_id).map_err(&fail)?;
+        // Go forces ThriftRW encoding regardless of the caller's encoding field.
+        let history = self.resources.deserialize_thriftrw_history(&inner.events.unwrap_or_default().data).map_err(&fail)?;
+        engine.reapply_history_events(&request.domain_uuid, &execution.workflow_id, &execution.run_id, history).await.map_err(fail)
     }
+
     pub async fn record_activity_task_heartbeat(&self, request: Option<&crate::engine::types::HistoryRecordActivityTaskHeartbeatRequest>) -> HResult<cadence_api::tasks::RecordActivityTaskHeartbeatResponse> {
         self.wait_started().await;
         let _profile = self.metrics.start_request_profile("RecordActivityTaskHeartbeat");
