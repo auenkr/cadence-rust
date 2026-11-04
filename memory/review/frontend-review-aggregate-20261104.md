@@ -13,3 +13,9 @@ Withdrawn: O15 (Go also casts to int32), O32 (production normalizes), O34 (valid
 | Production hooks | C4, C5, C6 | 9a228e934 | memory/evidence/fix-fe-hooks-20261104.md |
 
 Known residuals: no direct unit test for O30 durable failover path or C10; O33 not-found detection matches error text; decision-task times carried in ms internally (sub-ms precision loss).
+
+## Final master validation (code 9a228e934, gates on 2df01d2c4 = same code + memory)
+- rust-ci: https://github.com/auenkr/cadence-rust/actions/runs/41755932262 success
+- MySQL + Kafka + two_cluster: https://github.com/auenkr/cadence-rust/actions/runs/41757107078 success
+- Postgres + ES: https://github.com/auenkr/cadence-rust/actions/runs/41758156998 success
+- Cassandra + S3: https://github.com/auenkr/cadence-rust/actions/runs/41759092644 success
