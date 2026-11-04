@@ -41,7 +41,8 @@ impl<R:HistoryEventReader> EventCache<R>{pub fn new(reader:Arc<R>,max_count:usiz
  if size_based && weight>configured_max{return}
  c.lru.retain(|k|k!=&key);c.events.insert(key.clone(),CachedEvent{event,inserted:Instant::now(),weight});c.lru.push_back(key);
  let max_size=if configured_max==0{1<<30}else{configured_max};
- loop{let full=if size_based{c.events.values().map(|e|e.weight).sum::<u64>()>max_size}else{c.events.len()>self.max_count};if !full&&c.events.len()<=1<<25{break}if let Some(oldest)=c.lru.pop_front(){c.events.remove(&oldest);}else{break}}
+ loop{let full=if size_based{c.events.values().map(|e|e.weight).sum::<u64>()>max_size}else{c.events.len()>self.max_count};if !full&&c.events.len()<=1<<25{break}
+if let Some(oldest)=c.lru.pop_front(){c.events.remove(&oldest);}else{break}}
  }
 
 }
@@ -56,7 +57,8 @@ type Subscribers=HashMap<WorkflowIdentifier,HashMap<String,mpsc::Sender<Arc<Noti
 pub struct Notifier{observer:Arc<dyn NotificationObserver>,status:AtomicI32,stop_signal:tokio::sync::Notify,subscribers:Mutex<Subscribers>,events_tx:mpsc::Sender<Arc<Notification>>,events_rx:tokio::sync::Mutex<mpsc::Receiver<Arc<Notification>>>}
 impl Notifier{pub const EVENTS_CHAN_SIZE:usize=1000;pub fn new()->Arc<Self>{Self::new_with_observer(Arc::new(NoopNotificationObserver))} pub fn new_with_observer(observer:Arc<dyn NotificationObserver>)->Arc<Self>{let(tx,rx)=mpsc::channel(Self::EVENTS_CHAN_SIZE);Arc::new(Self{observer,status:AtomicI32::new(0),stop_signal:tokio::sync::Notify::new(),subscribers:Mutex::new(HashMap::new()),events_tx:tx,events_rx:tokio::sync::Mutex::new(rx)})}
  pub fn watch_history_event(&self,id:WorkflowIdentifier)->Result<(String,mpsc::Receiver<Arc<Notification>>),EventCacheError>{let subscriber_id=Uuid::new_v4().to_string();let(tx,rx)=mpsc::channel(1);let mut all=self.subscribers.lock().unwrap();let subscribers=all.entry(id).or_default();if subscribers.contains_key(&subscriber_id){return Err(EventCacheError("Unable to watch on workflow execution.".into()))}subscribers.insert(subscriber_id.clone(),tx);Ok((subscriber_id,rx))}
- pub fn unwatch_history_event(&self,id:&WorkflowIdentifier,subscriber_id:&str)->Result<(),EventCacheError>{let mut all=self.subscribers.lock().unwrap();let Some(subs)=all.get_mut(id) else{return Ok(())};if subs.remove(subscriber_id).is_none(){return Err(EventCacheError("Unable to unwatch on workflow execution.".into()))}if subs.is_empty(){all.remove(id);}Ok(())}
+ pub fn unwatch_history_event(&self,id:&WorkflowIdentifier,subscriber_id:&str)->Result<(),EventCacheError>{let mut all=self.subscribers.lock().unwrap();let Some(subs)=all.get_mut(id) else{return Ok(())};if subs.remove(subscriber_id).is_none(){return Err(EventCacheError("Unable to unwatch on workflow execution.".into()))}
+if subs.is_empty(){all.remove(id);}Ok(())}
  pub fn dispatch_history_event_notification(&self,event:Arc<Notification>){let started=Instant::now();if let Some(subs)=self.subscribers.lock().unwrap().get(&event.id){for tx in subs.values(){let _=tx.try_send(event.clone());}}self.observer.fanout_latency(started.elapsed());}
  pub fn enqueue_history_event_notification(&self,mut event:Notification){event.timestamp_unix_millis=self.observer.now_unix_millis();if self.events_tx.try_send(Arc::new(event)).is_err(){self.observer.fail_delivery();}}
  pub fn notify_new_history_event(&self,event:Notification){self.enqueue_history_event_notification(event);}

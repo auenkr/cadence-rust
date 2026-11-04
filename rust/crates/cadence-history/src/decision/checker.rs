@@ -1,5 +1,6 @@
 //! Domain-aware validation from checker.go, with configuration/cache dependency seams.
 use super::*;
+use super::task_handler::PortDecision;
 use cadence_api::enums::DecisionType;
 /// TODO(link): implement using history Config and DomainCache. Each callback is one dependency operation.
 pub trait ValidationContext: DomainReplicationLookup {
