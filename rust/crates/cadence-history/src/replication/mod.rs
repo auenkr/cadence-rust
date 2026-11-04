@@ -4,6 +4,7 @@
 //! ported in parallel (shard context, engine, execution cache, persistence
 //! managers, ndc history resender, client bean, metrics) are expressed as small
 //! traits in [`deps`].
+#![allow(clippy::result_large_err)]
 pub mod deps;
 pub mod dlq_handler;
 pub mod dynamic_task_batch_sizer;

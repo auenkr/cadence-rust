@@ -35,6 +35,7 @@ impl LinearIterator {
         steps[step_count - 1] = max;
         Self { cur: (steps.len() - 1) / 2, steps }
     }
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> i32 {
         if self.cur < self.steps.len() - 1 {
             self.cur += 1;

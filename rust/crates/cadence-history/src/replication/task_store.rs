@@ -291,7 +291,7 @@ impl TaskStore {
                 Err(AckCacheError::Full) => {
                     self.metrics.inc_counter(SCOPE, "cache_full", &tags);
                     let mut last = self.last_log_time.lock().unwrap();
-                    if last.map_or(true, |t| t.elapsed() > Duration::from_secs(60)) {
+                    if last.is_none_or(|t| t.elapsed() > Duration::from_secs(60)) {
                         tracing::warn!(shard_id = self.shard_id, "Replication cache is full");
                         *last = Some(Instant::now());
                     }
