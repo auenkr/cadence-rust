@@ -123,8 +123,7 @@ fn i64_field(value: i64) -> Value { Value::I64(value) }
 
 /// Convert the History task contract to Go `sqlblobs.TransferTaskInfo`.
 pub fn transfer_task_to_struct(task: &TransferTask) -> Result<Struct> {
-    let mut value = Struct::default();
-    value.fields = vec![
+    let value = Struct { fields: vec![
         (10, Value::Bytes(uuid_to_bytes(&task.domain_id, "domainID")?)),
         (12, string_field(&task.workflow_id)),
         (14, Value::Bytes(uuid_to_bytes(&task.run_id, "runID")?)),
@@ -140,7 +139,7 @@ pub fn transfer_task_to_struct(task: &TransferTask) -> Result<Struct> {
         (34, Value::Set(task.target_domain_ids.iter().map(|id| uuid_to_bytes(id, "targetDomainIDs").map(Value::Bytes)).collect::<Result<Vec<_>>>()?)),
         (36, string_field(&task.original_task_list)),
         (38, Value::I32(task.original_task_list_kind)),
-    ];
+    ] };
     Ok(value)
 }
 
@@ -312,7 +311,7 @@ mod tests {
     use crate::history_contract::{HistoryTreeInfo, ReplicationTask};
 
     // Go sqlblobs.TaskInfo emits these exact field bytes for scheduleID=7.
-    const TASK_INFO_SCHEDULE_ID_7: &[u8] = &[8, 0, 13, 0, 0, 0, 0, 0, 0, 0, 7, 0];
+    const TASK_INFO_SCHEDULE_ID_7: &[u8] = &[10, 0, 13, 0, 0, 0, 0, 0, 0, 0, 7, 0];
 
     #[test]
     fn raw_thriftrw_golden_round_trip() {
@@ -321,6 +320,19 @@ mod tests {
         let encoded = Encoding::ThriftRW.encode(&value).unwrap();
         assert_eq!(encoded, TASK_INFO_SCHEDULE_ID_7);
         assert_eq!(Encoding::ThriftRW.decode(&encoded).unwrap(), value);
+    }
+
+    #[test]
+    fn history_branch_range_matches_go_thriftrw_golden() {
+        let range = HistoryBranchRange { branch_id: "branch".into(), begin_node_id: 4, end_node_id: 9 };
+        let expected = [
+            11, 0, 10, 0, 0, 0, 6, b'b', b'r', b'a', b'n', b'c', b'h',
+            10, 0, 20, 0, 0, 0, 0, 0, 0, 0, 4,
+            10, 0, 30, 0, 0, 0, 0, 0, 0, 0, 9, 0,
+        ];
+        let encoded = Encoding::ThriftRW.encode(&history_branch_range_to_struct(&range)).unwrap();
+        assert_eq!(encoded, expected);
+        assert_eq!(history_branch_range_from_struct(&Encoding::ThriftRW.decode(&expected).unwrap()).unwrap(), range);
     }
 
     #[test]
