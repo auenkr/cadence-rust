@@ -491,7 +491,9 @@ impl ProductionBackend {
                     .as_ref()
                     .and_then(|d| d.domain_name(domain_id).ok().flatten()),
             )
-            .map_or(HISTORY_MAX_PAGE_SIZE, |(p, name)| p.maximum_page_size(&name));
+            .map_or(HISTORY_MAX_PAGE_SIZE, |(p, name)| {
+                p.maximum_page_size(&name)
+            });
         if size <= 0 {
             HISTORY_MAX_PAGE_SIZE
         } else {
