@@ -62,7 +62,7 @@ impl HistoryEngine {
             let (batches, next) = self.history_reader.paginate_history(FIRST_EVENT_ID, request.decision_finish_event_id + 1, branch, &token, 100, domain).await?;
             for batch in batches {
                 found_batch = true; events = batch;
-                if events.last().is_some_and(|e| e.id >= request.decision_finish_event_id) {
+                if events.last().is_some_and(|e| e.event_id >= request.decision_finish_event_id) {
                     return check_reset_event_type(&events, request.decision_finish_event_id);
                 }
             }
@@ -74,7 +74,7 @@ impl HistoryEngine {
 }
 pub fn check_reset_event_type(events: &[HistoryEvent], reset_id: i64) -> HResult<()> {
     for event in events {
-        if event.id == reset_id {
+        if event.event_id == reset_id {
             return match event.event_type {
                 Some(EventType::DecisionTaskStarted | EventType::DecisionTaskTimedOut | EventType::DecisionTaskFailed | EventType::DecisionTaskCompleted) => Ok(()),
                 _ => Err(HistoryError::bad_request(format!("reset event must be of type DecisionTaskStarted, DecisionTaskTimedOut, DecisionTaskFailed, or DecisionTaskCompleted. Attempting to reset on event type: {}", event.event_type.map(|t| t.to_string()).unwrap_or_default()))),
