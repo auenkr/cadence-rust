@@ -14,6 +14,7 @@
 //! * `MutableStateProvider` reads the persisted snapshot directly (no execution
 //!   cache lock, so the release fn is a no-op).
 //! * `ReplicationMessagesSizeFn` uses the JSON length, not the protobuf size.
+#![allow(clippy::result_large_err)]
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Duration;

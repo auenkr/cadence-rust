@@ -8,6 +8,7 @@
 //! Deviation: Go's `currentExecutionCheck` invariant (fixCurrentExecution) is
 //! not ported; an `EntityNotExists` from the local replicate call is returned
 //! as-is (Go returns it too when the invariant is nil or reports a problem).
+#![allow(clippy::result_large_err)]
 use std::sync::Arc;
 use std::time::Duration;
 

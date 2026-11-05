@@ -1,8 +1,9 @@
 //! Assembly helpers for the replication package (go/service/history/replication).
 //!
 //! Real adapters: `ThriftPayloadSerializer`, `ReplicationShardAdapter`,
-//! `build_task_ack_manager`.
+//! `LocalReplicationEngine`.
 //!
+#![allow(clippy::result_large_err)]
 //! `LocalReplicationEngine` delegates `SyncShardStatus`, `SyncActivity` and
 //! `ReplicateEventsV2` to the shard's `HistoryEngine` through the engine slot
 //! of `ShardBuildCtx`. The replication builders live in `replication_builders.rs`
