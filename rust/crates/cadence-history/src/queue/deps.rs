@@ -84,6 +84,10 @@ pub trait Task: Send + Sync {
     fn ack(&self);
     fn nack(&self);
     fn set_initial_submit_time(&self, t: Time);
+    /// Lets adapters recover the concrete task (Go type assertion); `None` for plain test tasks.
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        None
+    }
 }
 
 pub type TaskRef = Arc<dyn Task>;
