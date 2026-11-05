@@ -19,6 +19,8 @@ use crate::engine::types::{
 
 use crate::engine::deps::{DomainCache, HResult, HistoryError, HistoryTaskCategory, TimeSource, WorkflowExecution};
 use crate::wiring::assembly::engine_cache::{EngineCore, EngineExecutionCache, EngineWorkflowUpdater};
+use crate::wiring::assembly::engine_decision::EngineDecisionHandler;
+use crate::wiring::assembly::engine_state::StateParams;
 use crate::engine::runtime::*;
 use crate::events::{Notification, Notifier, WorkflowIdentifier};
 use crate::shard_context::ShardContext;
@@ -160,8 +162,34 @@ pub fn build_engine(
             let cfg = env.config.clone();
             Arc::new(move |domain: &str| (cfg.sticky_ttl)(domain).as_nanos() as i64)
         },
+        current_cluster: env.cluster.metadata().current_cluster_name.clone(),
+        history_v2: env.persistence.history_v2.clone(),
+        state_params: {
+            let cfg = env.config.clone();
+            let domains = env.domain_cache.clone();
+            let history_nodes = env.persistence.history_nodes.clone();
+            let shard_id = shard.shard_id();
+            Arc::new(move |domain_id: &str| {
+                let mut p = StateParams {
+                    history_nodes: Some(history_nodes.clone()),
+                    shard_id,
+                    ..StateParams::default()
+                };
+                if let Ok(entry) = crate::task::deps::DomainCache::get_domain_by_id(&*domains, domain_id) {
+                    p.retention_days = entry.retention_days;
+                    p.failover_version = entry.failover_version;
+                    let name = entry.info.name.clone();
+                    p.normal_decision_s2s_timeout_nanos =
+                        (cfg.normal_decision_schedule_to_start_timeout)(&name).as_nanos() as i64;
+                    p.normal_decision_s2s_max_attempts = (cfg.normal_decision_schedule_to_start_max_attempts)(&name);
+                    p.deletion_jitter_range = (cfg.workflow_deletion_jitter_range)(&name);
+                }
+                p
+            })
+        },
     });
     let cache = EngineExecutionCache::new(core.clone());
+    let decision_handler = Arc::new(EngineDecisionHandler::new(cache.clone(), core.clone()));
     Arc::new(HistoryEngine {
         current_cluster_name: env.cluster.metadata().current_cluster_name.clone(),
         domain_cache: env.domain_cache.clone(),
@@ -174,7 +202,7 @@ pub fn build_engine(
         replication_ack_manager: replication.ack_manager,
         replication_hydrator: replication.hydrator,
         replicator: replication.replicator,
-        decision_handler: Arc::new(UnwiredDecisionHandler),
+        decision_handler,
         shard_clock: Arc::new(ShardClockAdapter(shard.clone())),
         metrics: env.metrics.clone(),
         config: env.config_adapter.clone(),

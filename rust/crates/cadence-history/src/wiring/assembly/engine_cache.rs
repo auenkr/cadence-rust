@@ -6,15 +6,17 @@
 //! `workflow/util.go` (`Load`, `UpdateWithActionFunc`,
 //! `UpdateCurrentWithActionFunc`, `updateHelper`).
 //!
-//! Not ported (explicit errors): persisting a modified mutable state
-//! (`UpdateWorkflowExecutionAsActive` / `UpdateWorkflowExecutionTasks` close
-//! transaction) and `AddDecisionTaskScheduledEvent`. See memory "Unit D5".
+//! Persisting a modified mutable state (`UpdateWorkflowExecutionAsActive` /
+//! `UpdateWorkflowExecutionTasks`) closes the transaction (`engine_close`),
+//! appends the history batch, allocates task ids and writes the mutation.
+//! Replication tasks and new-run (continue-as-new / reset) writes are not ported.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use cadence_persistence::history_contract::GoExecutionStore;
+use cadence_persistence::history_contract::{self as pc, GoExecutionStore, GoHistoryV2Store};
+use cadence_persistence::sqlblobs::{timer_task_to_struct, transfer_task_to_struct, Encoding};
 use tokio::sync::OwnedMutexGuard;
 
 use crate::engine::deps::{
@@ -22,9 +24,9 @@ use crate::engine::deps::{
     MutableStateRef, ReleaseFunc, TimeSource, WorkflowExecution,
 };
 use crate::engine::runtime::{UpdateAction, UpdateFn, WorkflowUpdater};
-use crate::shard_context::ShardContext;
-use crate::wiring::assembly::engine_state::EngineMutableState;
-use crate::wiring::persistence::engine_ndc::to_history_error;
+use crate::shard_context::{ShardContext, ShardContextError};
+use crate::wiring::assembly::engine_state::{EngineMutableState, StateParams};
+use crate::wiring::persistence::engine_ndc::{to_history_error, SqlHistoryManager};
 
 /// Go `workflow.ConditionalRetryCount`.
 const CONDITIONAL_RETRY_COUNT: usize = 5;
@@ -37,6 +39,24 @@ pub struct EngineCore {
     pub clock: Arc<dyn TimeSource>,
     /// `config.StickyTTL(domainName)` in nanoseconds.
     pub sticky_ttl_nanos: Arc<dyn Fn(&str) -> i64 + Send + Sync>,
+    /// Current cluster name (timer id allocation cursor).
+    pub current_cluster: String,
+    /// History branch store (`AppendHistoryNodes`).
+    pub history_v2: Arc<dyn GoHistoryV2Store>,
+    /// Per-domain task generation parameters (retention, failover version, config).
+    pub state_params: Arc<dyn Fn(&str) -> StateParams + Send + Sync>,
+}
+
+fn shard_err(e: ShardContextError) -> HistoryError {
+    match e {
+        ShardContextError::ShardOwnershipLost(m) => HistoryError::PersistenceShardOwnershipLost(m),
+        other => HistoryError::internal(other.to_string()),
+    }
+}
+
+fn task_blob(data: Result<Vec<u8>, impl std::fmt::Display>) -> HResult<pc::DataBlob> {
+    data.map(|data| pc::DataBlob { encoding: "thriftrw".to_string(), data })
+        .map_err(|e| HistoryError::internal(format!("encode task: {e}")))
 }
 
 /// Go `execution.contextImpl` (read side).
@@ -87,22 +107,126 @@ impl EngineExecutionContext {
             (*domain).clone(),
             ttl,
             Arc::new(move || clock.now()),
-        )?);
+        )?
+        .with_params((core.state_params)(&self.domain_id)));
         *self.state.lock().unwrap() = Some(state.clone());
         Ok(state)
     }
 
-    /// Go `UpdateWorkflowExecutionAsActive`. Only the no-op case (nothing was
-    /// modified in memory) is supported; persisting a modified state needs the
-    /// close-transaction port.
-    pub async fn update_as_active(&self, _now: i64) -> HResult<()> {
+    /// Go `UpdateWorkflowExecutionAsActive`.
+    pub async fn update_as_active(&self, now: i64) -> HResult<()> {
         let state = self.load_state().await?;
-        if state.is_dirty() {
-            return Err(HistoryError::internal(
-                "UpdateWorkflowExecutionAsActive is not ported yet (close transaction over EngineMutableState)",
-            ));
+        if !state.is_dirty() {
+            return Ok(());
         }
-        Ok(())
+        self.persist(&state, now, true).await
+    }
+
+    /// Go `UpdateWorkflowExecutionTasks`.
+    async fn update_tasks(&self, now: i64) -> HResult<()> {
+        let state = self.load_state().await?;
+        if !state.is_dirty() {
+            return Ok(());
+        }
+        self.persist(&state, now, false).await
+    }
+
+    /// Close the transaction, assign task ids, append the history batch and
+    /// write the mutation (Go `updateWorkflowExecutionWithNew` without a new run).
+    async fn persist(&self, state: &Arc<EngineMutableState>, now: i64, active: bool) -> HResult<()> {
+        let core = &self.core;
+        let shard = &core.shard;
+        let mut txn = state.close_transaction(now, active)?;
+
+        // History batch.
+        let mut history_size = state.history_size();
+        let mut last_event_task_id = None;
+        if !txn.events.is_empty() {
+            let ids = shard.generate_task_ids(txn.events.len()).map_err(shard_err)?;
+            for (ev, id) in txn.events.iter_mut().zip(ids.iter()) {
+                ev.task_id = *id;
+            }
+            last_event_task_id = ids.last().copied();
+            let transaction_id = shard.generate_task_id().map_err(shard_err)?;
+            let manager = SqlHistoryManager::new(core.history_v2.clone(), shard.shard_id());
+            let blob = manager
+                .append_history_nodes(&txn.branch_token, &txn.events, transaction_id, false, "")
+                .await
+                .map_err(to_history_error)?;
+            history_size += blob.data.len() as i64;
+            txn.mutation.execution_info.history_size = history_size;
+            if let Some(id) = last_event_task_id {
+                txn.mutation.execution_info.last_event_task_id = id;
+            }
+            txn.mutation.last_write_version =
+                txn.events.last().map(|e| e.version).unwrap_or(txn.mutation.last_write_version);
+        }
+
+        // Task ids.
+        let mut max_read_level = 0i64;
+        let mut transfer_slots: Vec<(i64, i64)> = txn.transfer.iter().map(|_| (0, 0)).collect();
+        shard.allocate_transfer_ids(&mut transfer_slots, &mut max_read_level).map_err(shard_err)?;
+        let mut timer_slots: Vec<(i64, i64)> =
+            txn.timer.iter().map(|t| (0, t.visibility_timestamp_unix_nanos)).collect();
+        shard.allocate_timer_ids(&core.current_cluster, &mut timer_slots).map_err(shard_err)?;
+
+        let mut transfer_tasks = Vec::new();
+        for (t, slot) in txn.transfer.iter_mut().zip(transfer_slots.iter()) {
+            t.task_id = slot.0;
+            t.visibility_time_unix_nanos = slot.1;
+            let s = transfer_task_to_struct(t).map_err(|e| HistoryError::internal(e.to_string()))?;
+            transfer_tasks.push(pc::Task {
+                visibility_timestamp_unix_nanos: slot.1,
+                task_type: t.task_type,
+                task_id: slot.0,
+                data: task_blob(Encoding::ThriftRW.encode(&s))?,
+            });
+        }
+        let mut timer_tasks = Vec::new();
+        for (t, slot) in txn.timer.iter_mut().zip(timer_slots.iter()) {
+            t.task_id = slot.0;
+            t.visibility_timestamp_unix_nanos = slot.1;
+            let s = timer_task_to_struct(t).map_err(|e| HistoryError::internal(e.to_string()))?;
+            timer_tasks.push(pc::Task {
+                visibility_timestamp_unix_nanos: slot.1,
+                task_type: t.task_type,
+                task_id: slot.0,
+                data: task_blob(Encoding::ThriftRW.encode(&s))?,
+            });
+        }
+        if !transfer_tasks.is_empty() {
+            txn.mutation
+                .tasks_by_category
+                .insert(pc::HistoryTaskCategory { category_type: 1, category_id: 1 }, transfer_tasks);
+        }
+        if !timer_tasks.is_empty() {
+            txn.mutation
+                .tasks_by_category
+                .insert(pc::HistoryTaskCategory { category_type: 2, category_id: 2 }, timer_tasks);
+        }
+
+        let request = pc::UpdateWorkflowExecutionRequest {
+            shard_id: shard.shard_id(),
+            range_id: shard.range_id(),
+            mode: if active { pc::UpdateWorkflowMode::UpdateCurrent } else { pc::UpdateWorkflowMode::IgnoreCurrent },
+            update_workflow_mutation: txn.mutation,
+            new_workflow_snapshot: None,
+            workflow_request_mode: pc::WorkflowRequestMode::New,
+            current_timestamp_unix_nanos: now,
+        };
+        match core.executions.update_workflow_execution(request).await {
+            Ok(()) => {
+                shard.update_max_read_level(max_read_level);
+                state.finish_transaction(history_size, last_event_task_id);
+                Ok(())
+            }
+            Err(e) => {
+                if matches!(e, cadence_persistence::history_contract::PersistenceError::ShardOwnershipLost { .. }) {
+                    shard.close_shard(None);
+                }
+                Err(to_history_error(e))
+            }
+        }
     }
 }
 
@@ -117,10 +241,8 @@ impl ExecutionContext for EngineExecutionContext {
     async fn load_workflow_execution(&self) -> HResult<MutableStateRef> {
         Ok(self.load_state().await? as MutableStateRef)
     }
-    async fn update_workflow_execution_tasks(&self, _now: i64) -> HResult<()> {
-        Err(HistoryError::internal(
-            "UpdateWorkflowExecutionTasks is not ported yet (close transaction over EngineMutableState)",
-        ))
+    async fn update_workflow_execution_tasks(&self, now: i64) -> HResult<()> {
+        self.update_tasks(now).await
     }
 }
 
@@ -334,9 +456,7 @@ impl EngineWorkflowUpdater {
                 return Ok(());
             }
             if create_decision && !state.has_pending_decision() {
-                return Err(HistoryError::internal(
-                    "Failed to add decision scheduled event. (AddDecisionTaskScheduledEvent is not ported yet)",
-                ));
+                state.add_decision_task_scheduled(false)?;
             }
             match context.update_as_active(now).await {
                 Err(HistoryError::DuplicateRequest { .. }) => return Ok(()),
