@@ -56,3 +56,16 @@ Remaining stubs: UnwiredHistoryResender; replication Engine sync_activity/replic
 - Added `wiring/persistence/visibility.rs`: `SqlVisibilityWriter` (record started/closed, delete; upsert unsupported like Go SQL store).
 - CI green: https://github.com/auenkr/cadence-rust/actions/runs/41938199109 head 009cec99a (package=cadence-history).
 - Still remaining: SQL `MutableStateProvider`, replication builders (ack manager, hydrator, DLQ, fetchers/processors), real HistoryResender (`UnwiredHistoryResender` stays), real TransferQueueProcessor/queuev2 factory construction in `build_queue_processors`, timer queue processor (not ported in queue/), standby variants.
+
+## Unit D7 (branch history-assembly-d7, from d2b)
+Replaced:
+- `queue/timer_gate.rs` (Go clock.TimerGate + EventTimerGate), `queue/timer_queue_processor_base.rs` (Go timer_queue_processor_base.go), `queue/timer_queue_processor.rs` (Go timer_queue_{processor,active,standby,failover}_processor.go; `TimerQueueProcessor`, `TimerQueueDeps`). `queue::deps::ShardContext::get_current_time` and `NotifyTaskInfo::cluster_current_times` added (standby timer gates); `RealQueueShardContext` overrides get_current_time.
+- `wiring/assembly/queue_exec.rs`: DynamicRateLimiter, adapters (task::Task/Processor/Redispatcher -> queue traits, queue PersistenceTask -> task PersistenceTask), `new_history_task_factory` (Go task.NewHistoryTask), `build_transfer_queue_processor` / `build_timer_queue_processor` (active + standby, shared per-processor redispatchers).
+- `wiring/assembly/queues.rs`: `QueueDeps.exec: Option<QueueExec>`; `build_queue_processors` now constructs the transfer and timer processors when not pre-supplied. No Noop* in this path (metrics Scope from wiring/resources already implements the queue MetricsScope).
+Remaining stubs:
+- No concrete task::Processor (scheduler), task::ShardContext adapter, or real executor deps (SQL MutableStateProvider): the caller must supply `QueueExecCommon` and `CategoryExecutors`.
+- `SqlHistoryTask` carries identity fields only; executors that downcast to task-specific persistence structs need a richer row decoder.
+- queuev2 factories (`transfer_queue_factory`/`timer_queue_factory`) are not selected in `build_queue_processors`: they need queuev2 Queue -> engine QueueProcessor adapter, TaskExecutor wrapper and QueueEnv; v1 is the only built path.
+- Engine -> queue notification still passes empty `tasks` (engine Task is replication-shaped), so timer notify is wake-up only.
+- Executor `Stop()` lifecycle left to caller; queue-side filters are bridged to the sync task::Filter with block_in_place (needs multi-thread runtime).
+CI: see run URL below (filled after final green).
