@@ -68,4 +68,4 @@ Remaining stubs:
 - queuev2 factories (`transfer_queue_factory`/`timer_queue_factory`) are not selected in `build_queue_processors`: they need queuev2 Queue -> engine QueueProcessor adapter, TaskExecutor wrapper and QueueEnv; v1 is the only built path.
 - Engine -> queue notification still passes empty `tasks` (engine Task is replication-shaped), so timer notify is wake-up only.
 - Executor `Stop()` lifecycle left to caller; queue-side filters are bridged to the sync task::Filter with block_in_place (needs multi-thread runtime).
-CI: see run URL below (filled after final green).
+CI green (clippy + test, package cadence-history): https://github.com/auenkr/cadence-rust/actions/runs/41943457629 head 396b99ab9 (memory-only commit follows).
