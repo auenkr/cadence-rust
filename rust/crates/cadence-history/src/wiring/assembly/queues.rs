@@ -28,11 +28,23 @@ use crate::queue::action::Action;
 use crate::queue::deps::NotifyTaskInfo;
 use crate::queue::interface::Processor;
 
+use super::queue_exec::{build_timer_queue_processor, build_transfer_queue_processor, CategoryExecutors, QueueExecCommon};
+
 /// What the environment supplies for the queue processors of one shard.
 pub struct QueueDeps {
     /// Already-built processors for each category (transfer, timer). Building them
     /// requires the visibility writer / archival client (see module docs).
     pub processors: HashMap<HistoryTaskCategory, Arc<dyn Processor>>,
+    /// When set, the transfer / timer processors missing from `processors` are constructed
+    /// from these shared deps and executors.
+    pub exec: Option<QueueExec>,
+}
+
+/// Inputs for constructing the queue v1 processors of one shard.
+pub struct QueueExec {
+    pub common: QueueExecCommon,
+    pub transfer: CategoryExecutors,
+    pub timer: CategoryExecutors,
 }
 
 /// Adapts `queue::interface::Processor` to `engine::runtime::QueueProcessor`.
@@ -78,7 +90,17 @@ impl QueueProcessor for EngineQueueProcessor {
 
 /// `engine` side map of queue processors per task category.
 pub fn build_queue_processors(deps: QueueDeps) -> HashMap<HistoryTaskCategory, Arc<dyn QueueProcessor>> {
-    deps.processors
+    let mut processors = deps.processors;
+    if let Some(exec) = deps.exec {
+        // Go `NewTransferQueueProcessor` / `NewTimerQueueProcessor` (queue v1) constructed for real.
+        processors
+            .entry(HistoryTaskCategory::Transfer)
+            .or_insert_with(|| build_transfer_queue_processor(&exec.common, exec.transfer) as Arc<dyn Processor>);
+        processors
+            .entry(HistoryTaskCategory::Timer)
+            .or_insert_with(|| build_timer_queue_processor(&exec.common, exec.timer) as Arc<dyn Processor>);
+    }
+    processors
         .into_iter()
         .map(|(category, p)| (category, EngineQueueProcessor::new(p) as Arc<dyn QueueProcessor>))
         .collect()
