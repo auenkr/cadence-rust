@@ -6,5 +6,7 @@ pub mod env;
 pub mod failover;
 pub mod queues;
 pub mod replication;
+pub mod replication_builders;
+pub mod resender;
 pub mod shard_adapters;
 pub mod shard_factory;

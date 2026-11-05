@@ -113,6 +113,38 @@ impl AdminClient for GrpcAdminClient {
             .into_inner();
         rc::replication_tasks_in(resp.replication_tasks).map_err(ReplicationError::Other)
     }
+
+    async fn get_workflow_execution_raw_history_v2(
+        &self,
+        req: cadence_api::admin::GetWorkflowExecutionRawHistoryV2Request,
+        timeout: Duration,
+    ) -> Result<cadence_api::admin::GetWorkflowExecutionRawHistoryV2Response> {
+        fn item(id: Option<i64>, version: Option<i64>) -> Option<cadence_proto::admin::VersionHistoryItem> {
+            Some(cadence_proto::admin::VersionHistoryItem { event_id: id?, version: version? })
+        }
+        let mut c = cadence_proto::admin::admin_api_client::AdminApiClient::new(self.channel.clone());
+        let proto = cadence_proto::admin::GetWorkflowExecutionRawHistoryV2Request {
+            domain: req.domain,
+            workflow_execution: req.execution.map(|e| cadence_proto::api::WorkflowExecution {
+                workflow_id: e.workflow_id,
+                run_id: e.run_id,
+            }),
+            start_event: item(req.start_event_id, req.start_event_version),
+            end_event: item(req.end_event_id, req.end_event_version),
+            page_size: req.maximum_page_size,
+            next_page_token: req.next_page_token,
+        };
+        let resp = c
+            .get_workflow_execution_raw_history_v2(decorate(proto, &self.info, &self.caller, timeout))
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        Ok(cadence_api::admin::GetWorkflowExecutionRawHistoryV2Response {
+            next_page_token: resp.next_page_token,
+            history_batches: resp.history_batches.into_iter().filter_map(rc::data_blob).collect(),
+            version_history: resp.version_history.map(rc::version_history),
+        })
+    }
 }
 
 pub struct GrpcFrontendClient {
