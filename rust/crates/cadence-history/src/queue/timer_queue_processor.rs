@@ -428,7 +428,7 @@ impl TimerQueueProcessor {
         // This means the failover queue processor might not finish its job.
         // There is no mechanism to re-start ongoing failover queue processors in the new shard owner.
         self.failover_queue_processors.lock().unwrap().push(failover_queue_processor.clone());
-        failover_queue_processor.start();
+        TimerQueueProcessorBase::start(&failover_queue_processor);
     }
 }
 
@@ -444,9 +444,9 @@ impl Daemon for TimerQueueProcessor {
         }
 
         tracing::info!("Starting timer queue processor");
-        self.active_queue_processor.start();
+        TimerQueueProcessorBase::start(&self.active_queue_processor);
         for p in self.standby_queue_processors.values() {
-            p.start();
+            TimerQueueProcessorBase::start(p);
         }
 
         let t = self.clone();
