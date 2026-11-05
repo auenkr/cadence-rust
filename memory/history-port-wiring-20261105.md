@@ -50,3 +50,9 @@ CI green (clippy + test, package cadence-history): https://github.com/auenkr/cad
 Added rust/crates/cadence-history/src/wiring/assembly/{mod,queues,replication,failover}.rs; fixed base-branch manifest/lib.rs duplicates (cadence-proto, tonic, `pub mod wiring`).
 Real: failover coordinator + marker notifier + shard adapter (stale-marker rule), local single-host failover HistoryClient; replication ThriftPayloadSerializer, ReplicationShardAdapter (repl::ShardContext), LocalReplicationEngine (sync_shard_status); engine QueueProcessor adapter over queue::Processor.
 Remaining stubs: UnwiredHistoryResender; replication Engine sync_activity/replicate_events_v2 need injected inner engine; no SQL MutableStateProvider; no replication builders for fetchers/processors/DLQ/task_ack_manager; build of TransferQueueProcessor/queuev2 (QueueShardContext and queuev2::ShardContext adapters, executors, visibility writer, archival client) not done; no timer processor in queue/; multi-host failover marker routing; domain failover watcher not started (frontend/worker).
+
+### Unit D2b (branch history-assembly-d2b)
+- Added `wiring/assembly/shard_adapters.rs`: `RealQueueShardContext` (real ShardContext -> queue::QueueShardContext) and `RealQueueV2ShardContext` (-> queuev2::ShardContext). Lossy shard fields (failover domain ids, last queue states) are cached adapter-side.
+- Added `wiring/persistence/visibility.rs`: `SqlVisibilityWriter` (record started/closed, delete; upsert unsupported like Go SQL store).
+- CI green: https://github.com/auenkr/cadence-rust/actions/runs/41938199109 head 009cec99a (package=cadence-history).
+- Still remaining: SQL `MutableStateProvider`, replication builders (ack manager, hydrator, DLQ, fetchers/processors), real HistoryResender (`UnwiredHistoryResender` stays), real TransferQueueProcessor/queuev2 factory construction in `build_queue_processors`, timer queue processor (not ported in queue/), standby variants.
