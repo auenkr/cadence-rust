@@ -1,11 +1,11 @@
 //! group: assembly/engine_factory
 //!
 //! Fills every `HistoryEngine` field. Real implementations are used wherever one
-//! exists in the crate. The mutable-state-backed components (workflow updater,
-//! decision handler, execution cache, workflow resetter, task refresher) have no
-//! concrete implementation of the engine's local `MutableState` /
-//! `ExecutionContext` traits yet; they are explicit `Unwired*` stubs that return
-//! an internal error (never a silent no-op). See memory "Unit D1".
+//! exists in the crate. The execution cache and workflow updater are real
+//! (`engine_cache`, over `EngineMutableState`). The decision handler, workflow
+//! resetter and task refresher still need the mutable-state builder / history
+//! builder port; they are explicit `Unwired*` stubs that return an internal
+//! error (never a silent no-op). See memory "Unit D5".
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -17,10 +17,8 @@ use crate::engine::types::{
     RecordDecisionTaskStartedResponse, ScheduleDecisionTaskRequest,
 };
 
-use crate::engine::deps::{
-    ExecutionCache, ExecutionContextRef, HResult, HistoryError, HistoryTaskCategory, ReleaseFunc,
-    WorkflowExecution,
-};
+use crate::engine::deps::{DomainCache, HResult, HistoryError, HistoryTaskCategory, TimeSource, WorkflowExecution};
+use crate::wiring::assembly::engine_cache::{EngineCore, EngineExecutionCache, EngineWorkflowUpdater};
 use crate::engine::runtime::*;
 use crate::events::{Notification, Notifier, WorkflowIdentifier};
 use crate::shard_context::ShardContext;
@@ -32,21 +30,6 @@ fn unwired<T>(what: &str) -> HResult<T> {
     Err(HistoryError::internal(format!(
         "{what} is not wired: the mutable-state engine port is not linked yet"
     )))
-}
-
-pub struct UnwiredUpdater;
-#[async_trait]
-impl WorkflowUpdater for UnwiredUpdater {
-    async fn update<'a>(
-        &self,
-        _domain_id: &str,
-        _execution: &WorkflowExecution,
-        _current: bool,
-        _now: i64,
-        _action: UpdateFn<'a>,
-    ) -> HResult<()> {
-        unwired("WorkflowUpdater")
-    }
 }
 
 pub struct UnwiredDecisionHandler;
@@ -72,32 +55,6 @@ impl DecisionHandler for UnwiredDecisionHandler {
     }
     async fn handle_decision_task_scheduled(&self, _r: &ScheduleDecisionTaskRequest) -> HResult<()> {
         unwired("DecisionHandler")
-    }
-}
-
-pub struct UnwiredExecutionCache;
-#[async_trait]
-impl ExecutionCache for UnwiredExecutionCache {
-    async fn get_or_create_workflow_execution(
-        &self,
-        _domain_id: &str,
-        _execution: &WorkflowExecution,
-    ) -> HResult<(ExecutionContextRef, ReleaseFunc)> {
-        unwired("ExecutionCache")
-    }
-    async fn get_and_create_workflow_execution(
-        &self,
-        _domain_id: &str,
-        _execution: &WorkflowExecution,
-    ) -> HResult<(ExecutionContextRef, ExecutionContextRef, ReleaseFunc, bool)> {
-        unwired("ExecutionCache")
-    }
-    async fn get_or_create_current_workflow_execution(
-        &self,
-        _domain_id: &str,
-        _workflow_id: &str,
-    ) -> HResult<ReleaseFunc> {
-        unwired("ExecutionCache")
     }
 }
 
@@ -194,13 +151,24 @@ pub fn build_engine(
     queue_processors: HashMap<HistoryTaskCategory, Arc<dyn QueueProcessor>>,
     replication: ReplicationParts,
 ) -> Arc<HistoryEngine> {
+    let core = Arc::new(EngineCore {
+        shard: shard.clone(),
+        executions: env.persistence.executions.clone(),
+        domains: env.domain_cache.clone() as Arc<dyn DomainCache>,
+        clock: env.clock.clone() as Arc<dyn TimeSource>,
+        sticky_ttl_nanos: {
+            let cfg = env.config.clone();
+            Arc::new(move |domain: &str| (cfg.sticky_ttl)(domain).as_nanos() as i64)
+        },
+    });
+    let cache = EngineExecutionCache::new(core.clone());
     Arc::new(HistoryEngine {
         current_cluster_name: env.cluster.metadata().current_cluster_name.clone(),
         domain_cache: env.domain_cache.clone(),
         cluster_metadata: env.cluster.clone(),
         active_cluster_manager: Arc::new(DomainActiveClusterManager::new(env.domain_cache.clone())),
         time_source: env.clock.clone(),
-        updater: Arc::new(UnwiredUpdater),
+        updater: Arc::new(EngineWorkflowUpdater::new(cache.clone(), core)),
         queue_processors,
         replication_dlq_handler: replication.dlq_handler,
         replication_ack_manager: replication.ack_manager,
@@ -210,7 +178,7 @@ pub fn build_engine(
         shard_clock: Arc::new(ShardClockAdapter(shard.clone())),
         metrics: env.metrics.clone(),
         config: env.config_adapter.clone(),
-        execution_cache: Arc::new(UnwiredExecutionCache),
+        execution_cache: cache,
         // Go wraps the raw client with retries; the gRPC client is used for both.
         matching_client: env.query_matching.clone(),
         raw_matching_client: env.query_matching.clone(),
