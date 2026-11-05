@@ -158,6 +158,9 @@ impl q::ShardContext for RealQueueShardContext {
     fn enable_debug_mode(&self) -> bool {
         q::ShardContext::enable_debug_mode(self.tasks.as_ref())
     }
+    fn get_current_time(&self, cluster: &str) -> Time {
+        Time(self.shard.get_current_time(cluster))
+    }
     async fn get_history_tasks(&self, req: GetHistoryTasksRequest) -> Result<GetHistoryTasksResponse, QueueError> {
         if let Some(e) = self.shard.closed_error() {
             return Err(map_shard_err(e));
