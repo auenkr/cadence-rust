@@ -61,6 +61,10 @@ pub struct ConfiguredMatchingStores {
     pub history_node_store: Option<Arc<dyn cadence_persistence::history_reader::HistoryNodeStore>>,
     /// Frontend `executions_visibility` reader (SQL backends only).
     pub visibility_store: Option<Arc<dyn cadence_persistence::visibility_reader::VisibilityStore>>,
+    /// History's SQL transaction backend (MySQL/PostgreSQL only; None otherwise).
+    pub history_sql_backend: Option<cadence_persistence::history_sql_backend::SqlBackend>,
+    /// History's shard row store over the same pool (MySQL/PostgreSQL only).
+    pub history_shard_store: Option<Arc<dyn cadence_persistence::history_sql::ShardStore>>,
 }
 
 fn validate_sql_shards(sql: &crate::config::SqlConfig) -> anyhow::Result<()> {
@@ -279,6 +283,8 @@ pub fn open_configured_default_store(
             .with_all_consistency_delete(domain_all_consistency_delete),
         );
         return Ok(ConfiguredMatchingStores {
+            history_sql_backend: None,
+            history_shard_store: None,
             history_node_store: Some(Arc::new(
                 cadence_persistence::history_cassandra::CassandraHistoryNodeStore::new(driver.clone()),
             )),
@@ -322,6 +328,8 @@ pub fn open_configured_default_store(
             let domain_metadata_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence> =
                 metadata;
             Ok(ConfiguredMatchingStores {
+                history_sql_backend: None,
+                history_shard_store: None,
                 history_node_store: None,
                 visibility_store: None,
                 domain_id_parse: crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic,
@@ -407,6 +415,8 @@ pub fn open_configured_default_store(
             let domain_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::GoSqlDomainPersistence> = metadata.clone();
             let domain_metadata_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence> = metadata;
             Ok(ConfiguredMatchingStores {
+                history_sql_backend: Some(cadence_persistence::history_sql_backend::SqlBackend::mysql(&store)),
+                history_shard_store: Some(Arc::new(cadence_persistence::history_shard_sql::MySqlShardStore::from_task_store(&store))),
                 history_node_store: Some(store.clone()),
                 visibility_store: Some(visibility),
                 domain_id_parse: crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic,
@@ -499,6 +509,8 @@ pub fn open_configured_default_store(
             let domain_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::GoSqlDomainPersistence> = metadata.clone();
             let domain_metadata_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence> = metadata;
             Ok(ConfiguredMatchingStores {
+                history_sql_backend: Some(cadence_persistence::history_sql_backend::SqlBackend::postgres(&store)),
+                history_shard_store: Some(Arc::new(cadence_persistence::history_shard_sql::PostgresShardStore::from_task_store(&store))),
                 history_node_store: Some(store.clone()),
                 visibility_store: Some(visibility),
                 domain_id_parse: crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic,
