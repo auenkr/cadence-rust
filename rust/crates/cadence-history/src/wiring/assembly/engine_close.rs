@@ -20,7 +20,6 @@ use crate::wiring::assembly::engine_state::EngineMutableState;
 pub(super) struct ClosedTxn {
     pub events: Vec<HistoryEvent>,
     pub branch_token: Vec<u8>,
-    pub first_event_id: i64,
     pub mutation: pc::WorkflowMutation,
     pub transfer: Vec<pc::TransferTask>,
     pub timer: Vec<pc::TimerTask>,
@@ -142,7 +141,6 @@ impl EngineMutableState {
             ..Default::default()
         };
         Ok(ClosedTxn {
-            first_event_id: events.first().map(|e| e.event_id).unwrap_or(0),
             events,
             branch_token: self.branch_token_locked(&g),
             mutation,

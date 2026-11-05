@@ -71,3 +71,14 @@ Remaining stubs / explicit errors (not silent):
 - `auto_reset_points`/`active_cluster_selection_policy` of the engine `WorkflowExecutionInfo` are not decoded (None).
 
 CI evidence: see rust-ci run https://github.com/auenkr/cadence-rust/actions/runs/41938883186 (package=cadence-history) on head efb16e6a7, conclusion success (code identical to later memory-only head)
+
+## Unit D6 (branch history-assembly-d6, from history-assembly-d5)
+Replaced:
+- `EngineMutableState` event methods now emit history events (buffering, flush, transient activity started, activity retry) and transfer/timer tasks (`engine_events.rs`, `engine_tasks.rs`).
+- Close transaction -> `WorkflowMutation` (`engine_close.rs`); `engine_cache.rs` persists it: history append, task id allocation, `update_workflow_execution` (UpdateCurrent / IgnoreCurrent). `update_as_active`, `update_workflow_execution_tasks`, `update_helper` (schedules decision) now work.
+- `EngineDecisionHandler` (`engine_decision.rs`) replaces `UnwiredDecisionHandler`: scheduled, started (incl. transient attempt>0), failed.
+Remaining stubs/gaps:
+- `handle_decision_task_completed` (decision command processor) returns explicit internal error.
+- `UnwiredWorkflowResetter`, `UnwiredTaskRefresher` still stubs.
+- Replication tasks, new-run writes (continue-as-new/create paths), user timers, checksum, buffered reorder/dedup, active-domain check, GetStartEvent on first decision.
+CI: see run URL and head SHA appended below once green.
