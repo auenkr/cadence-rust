@@ -82,3 +82,4 @@ Remaining stubs/gaps:
 - `UnwiredWorkflowResetter`, `UnwiredTaskRefresher` still stubs.
 - Replication tasks, new-run writes (continue-as-new/create paths), user timers, checksum, buffered reorder/dedup, active-domain check, GetStartEvent on first decision.
 CI: see run URL and head SHA appended below once green.
+CI green: https://github.com/auenkr/cadence-rust/actions/runs/41944524657 (package=cadence-history, clippy + tests), head d6510a424e0d75f602abe68018433b7de548fa8a (code identical to the following memory-only commit).
