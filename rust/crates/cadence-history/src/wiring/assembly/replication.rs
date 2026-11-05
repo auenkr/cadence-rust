@@ -1,23 +1,26 @@
 //! Assembly helpers for the replication package (go/service/history/replication).
 //!
 //! Real adapters: `ThriftPayloadSerializer`, `ReplicationShardAdapter`,
-//! `build_task_ack_manager`.
+//! `LocalReplicationEngine`.
 //!
-//! Documented gaps (memory/history-port-wiring-20261105.md, Unit D2/D3):
-//! * `UnwiredHistoryResender` returns an error: the remote admin client based
-//!   `ndc.HistoryResender` is not ported to the wiring layer yet.
-//! * `LocalReplicationEngine` only implements `sync_shard_status`; `sync_activity`
-//!   and `replicate_events_v2` delegate to an injected engine (`inner`) and fail
-//!   when none is supplied.
-//! * No SQL `MutableStateProvider`; the hydrator is built deferred by the caller.
-use std::sync::Arc;
+#![allow(clippy::result_large_err)]
+//! `LocalReplicationEngine` delegates `SyncShardStatus`, `SyncActivity` and
+//! `ReplicateEventsV2` to the shard's `HistoryEngine` through the engine slot
+//! of `ShardBuildCtx`. The replication builders live in `replication_builders.rs`
+//! and the history resender in `resender.rs`.
+use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use cadence_api::errors::CadenceError;
 use cadence_api::types::{DataBlob, FailoverMarkerAttributes};
 
+use crate::engine::deps::HistoryError;
+use crate::engine::runtime::HistoryEngine;
+use crate::engine::types as et;
+
 use crate::replication::deps::{
-    ClientBean, DomainCache, Engine, ExecutionManager, HistoryResender, PayloadSerializer, ReplicationError,
+    ClientBean, DomainCache, Engine, ExecutionManager, PayloadSerializer, ReplicationError,
     Result as ReplResult, ShardContext as ReplShard, SyncActivityRequest, SyncShardStatusRequest, TimeSource,
     ReplicateEventsV2Request,
 };
@@ -33,26 +36,6 @@ impl PayloadSerializer for ThriftPayloadSerializer {
         let events = cadence_thrift::history_blob::decode(blob)
             .map_err(|e| ReplicationError::InternalDataInconsistency(e.to_string()))?;
         Ok(events.into_iter().map(|e| (e.event_id, e.version)).collect())
-    }
-}
-
-/// Placeholder for `ndc.HistoryResender` (see module docs).
-pub struct UnwiredHistoryResender;
-
-#[async_trait]
-impl HistoryResender for UnwiredHistoryResender {
-    async fn send_single_workflow_history(
-        &self,
-        _remote_cluster: &str,
-        _domain_id: &str,
-        _workflow_id: &str,
-        _run_id: &str,
-        _start_event_id: Option<i64>,
-        _start_event_version: Option<i64>,
-        _end_event_id: Option<i64>,
-        _end_event_version: Option<i64>,
-    ) -> ReplResult<()> {
-        Err(ReplicationError::Other("history resender is not wired".into()))
     }
 }
 
@@ -141,31 +124,125 @@ impl ReplShard for ReplicationShardAdapter {
     }
 }
 
-/// `engine.Engine` for the replication package: `SyncShardStatus` is local, the
-/// rest is delegated to `inner` (the real engine adapter).
+/// `engine.Engine` for the replication package over the shard's `HistoryEngine`.
 pub struct LocalReplicationEngine {
-    pub shard: Arc<ShardContext>,
-    pub inner: Option<Arc<dyn Engine>>,
+    shard: Arc<ShardContext>,
+    slot: Arc<OnceLock<Weak<HistoryEngine>>>,
+}
+
+impl LocalReplicationEngine {
+    pub fn new(shard: Arc<ShardContext>, slot: Arc<OnceLock<Weak<HistoryEngine>>>) -> Self {
+        Self { shard, slot }
+    }
+
+    fn engine(&self) -> ReplResult<Arc<HistoryEngine>> {
+        self.slot
+            .get()
+            .and_then(Weak::upgrade)
+            .ok_or_else(|| ReplicationError::Other("history engine is not ready".into()))
+    }
+}
+
+/// Engine `SyncActivityRequest` from the replication-layer attributes.
+pub fn to_engine_sync_activity(req: SyncActivityRequest) -> et::SyncActivityRequest {
+    let t = req.task;
+    et::SyncActivityRequest {
+        domain_id: t.domain_id.unwrap_or_default(),
+        workflow_id: t.workflow_id.unwrap_or_default(),
+        run_id: t.run_id.unwrap_or_default(),
+        version: t.version.unwrap_or_default(),
+        scheduled_id: t.scheduled_id.unwrap_or_default(),
+        scheduled_time: t.scheduled_time,
+        started_id: t.started_id.unwrap_or_default(),
+        started_time: t.started_time,
+        last_heartbeat_time: t.last_heartbeat_time,
+        details: t.details.unwrap_or_default(),
+        attempt: t.attempt.unwrap_or_default(),
+        last_failure_reason: t.last_failure_reason,
+        last_worker_identity: t.last_worker_identity.unwrap_or_default(),
+        last_failure_details: t.last_failure_details.unwrap_or_default(),
+        last_failure_options: t.last_failure_options,
+        version_history: t.version_history,
+    }
+}
+
+/// Engine `ReplicateEventsV2Request` from the replication-layer request.
+pub fn to_engine_replicate_events(req: ReplicateEventsV2Request) -> et::ReplicateEventsV2Request {
+    et::ReplicateEventsV2Request {
+        domain_uuid: req.domain_uuid.unwrap_or_default(),
+        workflow_execution: Some(req.workflow_execution),
+        version_history_items: req.version_history_items.unwrap_or_default(),
+        events: req.events,
+        new_run_events: req.new_run_events,
+    }
+}
+
+/// Engine errors back into the replication error union (keeps `RetryTaskV2`,
+/// `EntityNotExists`, `ServiceBusy`, ... distinguishable for the task executor).
+pub fn history_error_to_replication(e: HistoryError) -> ReplicationError {
+    match e {
+        HistoryError::Cadence(c) => match *c {
+            CadenceError::BadRequest(x) => ReplicationError::BadRequest(x.to_string()),
+            CadenceError::EntityNotExists(x) => ReplicationError::EntityNotExists(x.to_string()),
+            CadenceError::ServiceBusy(x) => ReplicationError::ServiceBusy(x.to_string()),
+            CadenceError::RetryTaskV2(x) => ReplicationError::RetryTaskV2(x),
+            CadenceError::DomainNotActive(x) => ReplicationError::DomainNotActive(x.to_string()),
+            CadenceError::WorkflowAlreadyStarted(x) => {
+                ReplicationError::WorkflowExecutionAlreadyStarted(x.to_string())
+            }
+            CadenceError::WorkflowAlreadyCompleted(x) => {
+                ReplicationError::WorkflowExecutionAlreadyCompleted(x.to_string())
+            }
+            CadenceError::LimitExceeded(x) => ReplicationError::LimitExceeded(x.to_string()),
+            CadenceError::ShardOwnershipLost(x) => ReplicationError::ShardOwnershipLost(x.to_string()),
+            other => ReplicationError::Other(other.to_string()),
+        },
+        HistoryError::MissingVersionHistories => ReplicationError::MissingVersionHistories,
+        HistoryError::PersistenceShardOwnershipLost(m) => ReplicationError::ShardOwnershipLost(m),
+        HistoryError::DeadlineExceeded => ReplicationError::DeadlineExceeded("context deadline exceeded".into()),
+        other => ReplicationError::Other(other.to_string()),
+    }
+}
+
+pub(crate) async fn with_timeout<T>(
+    timeout: Duration,
+    fut: impl std::future::Future<Output = Result<T, HistoryError>>,
+) -> ReplResult<T> {
+    match tokio::time::timeout(timeout, fut).await {
+        Ok(r) => r.map_err(history_error_to_replication),
+        Err(_) => Err(ReplicationError::DeadlineExceeded("context deadline exceeded".into())),
+    }
 }
 
 #[async_trait]
 impl Engine for LocalReplicationEngine {
-    async fn sync_shard_status(&self, req: SyncShardStatusRequest, _timeout: Duration) -> ReplResult<()> {
-        if let Some(ts) = req.timestamp {
-            self.shard.set_current_time(&req.source_cluster, ts);
+    async fn sync_shard_status(&self, req: SyncShardStatusRequest, timeout: Duration) -> ReplResult<()> {
+        match self.engine() {
+            Ok(engine) => {
+                let r = et::SyncShardStatusRequest {
+                    source_cluster: req.source_cluster,
+                    shard_id: req.shard_id,
+                    timestamp: req.timestamp,
+                };
+                with_timeout(timeout, async move { engine.sync_shard_status(&r).await }).await
+            }
+            Err(_) => {
+                // Engine not built yet: still advance the remote cluster clock.
+                if let Some(ts) = req.timestamp {
+                    self.shard.set_current_time(&req.source_cluster, ts);
+                }
+                Ok(())
+            }
         }
-        Ok(())
     }
     async fn sync_activity(&self, req: SyncActivityRequest, timeout: Duration) -> ReplResult<()> {
-        match &self.inner {
-            Some(e) => e.sync_activity(req, timeout).await,
-            None => Err(ReplicationError::Other("replication engine is not wired".into())),
-        }
+        let engine = self.engine()?;
+        let r = to_engine_sync_activity(req);
+        with_timeout(timeout, async move { engine.sync_activity(&r).await }).await
     }
     async fn replicate_events_v2(&self, req: ReplicateEventsV2Request, timeout: Duration) -> ReplResult<()> {
-        match &self.inner {
-            Some(e) => e.replicate_events_v2(req, timeout).await,
-            None => Err(ReplicationError::Other("replication engine is not wired".into())),
-        }
+        let engine = self.engine()?;
+        let r = to_engine_replicate_events(req);
+        with_timeout(timeout, async move { engine.replicate_events_v2(&r).await }).await
     }
 }

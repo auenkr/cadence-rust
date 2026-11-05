@@ -4,6 +4,7 @@
 //! the real implementations can be plugged in when those modules are merged.
 use async_trait::async_trait;
 use cadence_api::admin::{
+    GetWorkflowExecutionRawHistoryV2Request, GetWorkflowExecutionRawHistoryV2Response,
     GetDLQReplicationMessagesRequest, GetReplicationMessagesRequest, GetReplicationMessagesResponse,
     ReplicationTaskInfo,
 };
@@ -490,6 +491,14 @@ pub trait AdminClient: Send + Sync {
         &self,
         req: GetDLQReplicationMessagesRequest,
     ) -> Result<Vec<ReplicationTask>>;
+    /// `admin.Client.GetWorkflowExecutionRawHistoryV2` (used by the history resender).
+    async fn get_workflow_execution_raw_history_v2(
+        &self,
+        _req: GetWorkflowExecutionRawHistoryV2Request,
+        _timeout: Duration,
+    ) -> Result<GetWorkflowExecutionRawHistoryV2Response> {
+        Err(ReplicationError::Other("GetWorkflowExecutionRawHistoryV2 is not supported by this admin client".into()))
+    }
 }
 
 /// `frontend.Client` call used by `triggerDataInconsistencyScan`.
