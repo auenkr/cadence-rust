@@ -55,3 +55,19 @@ Replaced with real impls:
 - controller.rs `ShardRegistry`: lazy OnceCell per shard, ownership via `MembershipResolver::lookup(shard_id)` (pure `check_ownership`, ShardOwnershipLost message carries owner address; the error type has only `message`, so the thrift `owner` field is not set), `engine_for_workflow`, `engine_for_shard`, `close_shard`, `on_membership_change`, `close_all`. Does not call `ShardController::acquire` (would double-bump range).
 Remaining stubs (explicit `Unwired*` returning internal errors, in engine_factory.rs): WorkflowUpdater, DecisionHandler, ExecutionCache, WorkflowResetter, MutableStateTaskRefresher. Cause: no concrete impl of the engine-local MutableState/ExecutionContext traits (engine/deps_ms.rs) exists; crate mutable_state.rs is a separate universe. Other gaps: SqlHistoryTaskDLQManager is explicit-error on SQL; queue/queuev2 shard adapters (D2); no integration test (only 4 unit tests for ownership).
 CI: https://github.com/auenkr/cadence-rust/actions/runs/41936357375 success (cadence-history clippy+test, 80 tests) head 236c4535e0348ce844c9e6267cc1f7202a98698c.
+
+## Unit D5 (branch history-assembly-d5, from history-assembly-d1)
+
+Replaced (real, in `rust/crates/cadence-history/src/wiring/assembly/`):
+- `engine_state.rs`: `EngineMutableState` implements the engine `MutableState` over a persisted `WorkflowSnapshot` (Go `Load`): execution info, activities, child executions, signal-requested ids, version histories (thriftrw blob), current version/branch token, sticky TTL check, `QueryRegistryAdapter` (query::Registry -> engine QueryRegistry), in-memory mutators (delete_activity, signal-requested add/delete, clear_stickyness, set_workflow_state, heartbeat progress) with a dirty flag.
+- `engine_cache.rs`: `EngineExecutionContext` (load via `GoExecutionStore::get_workflow_execution`), `EngineExecutionCache` (key domain/workflow/run, per-workflow tokio lock held until `ReleaseFunc`, clear-on-error / force-clear for current-run lock, `validateWorkflowExecutionInfo` incl. current-run resolution and UUID check, `GetAndCreate` hit/miss semantics), `EngineWorkflowUpdater` (`workflow.Load`, `UpdateWithActionFunc`, `UpdateCurrentWithActionFunc`, `updateHelper` with stale-state / conflict retry x5).
+- `engine_factory.rs`: updater and execution_cache stubs replaced.
+
+Remaining stubs / explicit errors (not silent):
+- `UnwiredDecisionHandler`, `UnwiredWorkflowResetter`, `UnwiredTaskRefresher` in `engine_factory.rs`.
+- `EngineMutableState`: every history-event adding method (AddXxxEvent family, RetryActivity, TerminateWorkflow, GetStartEvent, GetActivityScheduledEvent, GetResurrectedActivities, CopyToPersistence) returns an internal "not ported" error.
+- `EngineExecutionContext::update_as_active` persists nothing: no-op when state is unmodified, error when dirty; `update_workflow_execution_tasks` errors. `AddDecisionTaskScheduledEvent` in `updateHelper` errors when a decision must be created.
+- Needs next: history builder + task generator over EngineMutableState, close-transaction producing `WorkflowMutation` with shard task ids.
+- `auto_reset_points`/`active_cluster_selection_policy` of the engine `WorkflowExecutionInfo` are not decoded (None).
+
+CI evidence: see RUN_PLACEHOLDER

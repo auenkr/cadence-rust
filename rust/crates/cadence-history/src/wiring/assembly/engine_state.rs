@@ -74,7 +74,6 @@ impl QueryRegistry for QueryRegistryAdapter {
                     result_type: r.result_type,
                     answer: r.answer.unwrap_or_default(),
                     error_message: r.error_message,
-                    ..Default::default()
                 })
             }
             TerminationType::Unblocked => QueryTermination::Unblocked,

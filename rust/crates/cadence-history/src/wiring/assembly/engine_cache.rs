@@ -251,7 +251,7 @@ impl ExecutionCache for EngineExecutionCache {
         workflow_id: &str,
     ) -> HResult<ReleaseFunc> {
         // Empty run id is the key of the "current workflow" lock; always cleared on release.
-        let execution = WorkflowExecution { workflow_id: workflow_id.to_string(), run_id: String::new(), ..Default::default() };
+        let execution = WorkflowExecution { workflow_id: workflow_id.to_string(), run_id: String::new() };
         let (_, release) = self.acquire(domain_id, &execution, true).await?;
         Ok(release)
     }
