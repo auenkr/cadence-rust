@@ -34,7 +34,7 @@ pub struct SqlHistoryTask {
 }
 
 impl SqlHistoryTask {
-    fn decode(category: &pc::HistoryTaskCategory, task: &pc::Task) -> Result<Self, String> {
+    fn decode(category: pc::HistoryTaskCategory, task: &pc::Task) -> Result<Self, String> {
         let value = sqlblobs::Encoding::parse(&task.data.encoding)
             .and_then(|e| e.decode(&task.data.data))
             .map_err(|e| e.to_string())?;

@@ -10,7 +10,7 @@ fn status(error: tonic::Status) -> String {
     error.message().to_string()
 }
 
-fn data_blob(blob: cadence_proto::api::DataBlob) -> Option<t::DataBlob> {
+pub fn data_blob(blob: cadence_proto::api::DataBlob) -> Option<t::DataBlob> {
     let encoding_type = match blob.encoding_type {
         1 => Some(e::EncodingType::ThriftRW),
         2 => Some(e::EncodingType::JSON),
@@ -22,7 +22,7 @@ fn data_blob(blob: cadence_proto::api::DataBlob) -> Option<t::DataBlob> {
     })
 }
 
-fn version_history(value: pa::VersionHistory) -> t::VersionHistory {
+pub fn version_history(value: pa::VersionHistory) -> t::VersionHistory {
     t::VersionHistory {
         branch_token: value.branch_token,
         items: value.items.into_iter().map(version_history_item).collect(),

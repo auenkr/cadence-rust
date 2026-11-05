@@ -84,6 +84,10 @@ pub trait Task: Send + Sync {
     fn ack(&self);
     fn nack(&self);
     fn set_initial_submit_time(&self, t: Time);
+    /// Lets adapters recover the concrete task (Go type assertion); `None` for plain test tasks.
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        None
+    }
 }
 
 pub type TaskRef = Arc<dyn Task>;
@@ -221,6 +225,10 @@ pub trait ShardContext: Send + Sync {
     fn range_size_bits(&self) -> u32;
     /// `GetConfig().EnableDebugMode`
     fn enable_debug_mode(&self) -> bool;
+    /// `GetCurrentTime(cluster)`: wall clock for the current cluster, replicated remote time otherwise.
+    fn get_current_time(&self, _cluster: &str) -> Time {
+        self.now()
+    }
     async fn get_history_tasks(&self, req: GetHistoryTasksRequest) -> Result<GetHistoryTasksResponse, QueueError>;
 }
 
@@ -277,4 +285,6 @@ pub struct NotifyTaskInfo {
     pub execution_info: Option<WorkflowExecutionInfo>,
     pub tasks: Vec<Arc<dyn PersistenceTask>>,
     pub persistence_error: bool,
+    /// Go `ClusterCurrentTimes` (standby timer gates).
+    pub cluster_current_times: HashMap<String, Time>,
 }

@@ -136,6 +136,10 @@ pub trait MutableStateTaskRefresher: Send + Sync {
 
 #[derive(Clone)]
 pub struct HistoryNotification {
+    /// Go `events.Notification.ID` (`WorkflowIdentifier`).
+    pub domain_id: String,
+    pub workflow_id: String,
+    pub run_id: String,
     pub last_first_event_id: i64,
     pub next_event_id: i64,
     pub previous_started_event_id: i64,
