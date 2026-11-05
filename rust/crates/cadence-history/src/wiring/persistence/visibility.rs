@@ -34,17 +34,23 @@ pub struct VisibilityWriteRow {
 }
 
 /// Go `minMySQLDateTime`.
-const MIN_MYSQL_DATETIME_NANOS: i64 = -30_610_224_000 * 1_000_000_000;
+const MIN_MYSQL_DATETIME_SECONDS: i64 = -30_610_224_000;
 /// 0001-01-01T00:00:00Z, Go's zero `time.Time`, in unix seconds.
 const GO_ZERO_SECONDS: i64 = -62_135_596_800;
+
+fn seconds_value(secs: i64) -> Result<Value, PersistenceError> {
+    chrono::DateTime::from_timestamp(secs, 0)
+        .map(|v| Value::Timestamp(v.naive_utc()))
+        .ok_or_else(|| PersistenceError::Internal("SQL timestamp out of range".into()))
+}
 
 fn time_value(dialect: Dialect, nanos: i64) -> Result<Value, PersistenceError> {
     if nanos > 0 {
         return timestamp(nanos);
     }
     match dialect {
-        Dialect::MySql => timestamp(MIN_MYSQL_DATETIME_NANOS),
-        Dialect::Postgres => timestamp(GO_ZERO_SECONDS * 1_000_000_000),
+        Dialect::MySql => seconds_value(MIN_MYSQL_DATETIME_SECONDS),
+        Dialect::Postgres => seconds_value(GO_ZERO_SECONDS),
     }
 }
 
