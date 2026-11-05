@@ -39,7 +39,7 @@ use crate::replication::task_reader::TaskReaderApi;
 use crate::replication::task_store::TaskHydratorApi;
 use crate::replication::{
     DlqHandlerImpl, DynamicTaskBatchSizerImpl, MetricsEmitterImpl, TaskAckManager, TaskExecutor, TaskExecutorImpl,
-    TaskFetcher, TaskFetchers, TaskFetchersImpl, TaskProcessorImpl, TaskStore,
+    TaskFetchers, TaskFetchersImpl, TaskProcessorImpl, TaskStore,
 };
 use crate::wiring::assembly::controller::ShardRegistry;
 use crate::wiring::assembly::env::{ReplicationFactory, ReplicationParts, ShardBuildCtx};
