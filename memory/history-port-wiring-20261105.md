@@ -70,4 +70,4 @@ Remaining stubs / explicit errors (not silent):
 - Needs next: history builder + task generator over EngineMutableState, close-transaction producing `WorkflowMutation` with shard task ids.
 - `auto_reset_points`/`active_cluster_selection_policy` of the engine `WorkflowExecutionInfo` are not decoded (None).
 
-CI evidence: see RUN_PLACEHOLDER
+CI evidence: see rust-ci run https://github.com/auenkr/cadence-rust/actions/runs/41938883186 (package=cadence-history) on head efb16e6a7, conclusion success (code identical to later memory-only head)
