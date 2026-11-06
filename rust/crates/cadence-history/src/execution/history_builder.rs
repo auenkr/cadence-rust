@@ -269,8 +269,6 @@ impl HistoryBuilder {
 }
 
 // Remaining Go-signature builders from history_builder.go.
-// GAP: RequestCancelActivityTaskFailed and Semaphore* events have no attribute
-// structs/HistoryEvent fields in cadence-api yet (API crate change needed).
 use cadence_api::{enums::{CancelExternalWorkflowExecutionFailedCause, ChildWorkflowExecutionFailedCause, ContinueAsNewInitiator, ParentClosePolicy, SignalExternalWorkflowExecutionFailedCause}, types::{Header, WorkflowExecution, WorkflowType}};
 use crate::engine::types::{HistoryRequestCancelWorkflowExecutionRequest, HistoryStartWorkflowExecutionRequest};
 
@@ -278,10 +276,14 @@ fn we(workflow_id: &str, run_id: &str) -> Option<WorkflowExecution> { Some(Workf
 
 impl HistoryBuilder {
     /// Go `AddWorkflowExecutionStartedEvent`.
-    pub fn add_workflow_execution_started(&mut self, start_request: &HistoryStartWorkflowExecutionRequest, previous_run_id: Option<&str>, first_run_id: &str, original_run_id: &str, first_scheduled_time_nano: i64) -> HistoryEvent {
+    pub fn add_workflow_execution_started(&mut self, start_request: &HistoryStartWorkflowExecutionRequest, previous_run_id: Option<&str>, previous_auto_reset_points: Option<cadence_api::types::ResetPoints>, first_run_id: &str, original_run_id: &str, first_scheduled_time_nano: i64) -> HistoryEvent {
         let request = start_request.start_request.clone().unwrap_or_default();
         let scheduled = if request.cron_schedule.is_empty() { None } else { Some(first_scheduled_time_nano) };
+        // Go carries PrevAutoResetPoints from the previous execution's AutoResetPoints.
         let mut a = WorkflowExecutionStartedEventAttributes {
+            prev_auto_reset_points: previous_auto_reset_points,
+            partition_config: if start_request.partition_config.is_empty() { None } else { Some(start_request.partition_config.clone()) },
+            active_cluster_selection_policy: request.active_cluster_selection_policy.clone(),
             workflow_type: request.workflow_type.clone(), task_list: request.task_list.clone(), header: request.header.clone(), input: request.input.clone(),
             execution_start_to_close_timeout_seconds: request.execution_start_to_close_timeout_seconds,
             task_start_to_close_timeout_seconds: request.task_start_to_close_timeout_seconds,
@@ -297,6 +299,7 @@ impl HistoryBuilder {
             jitter_start_seconds: request.jitter_start_seconds, request_id: request.request_id.clone(), ..Default::default()
         };
         if let Some(p) = &start_request.parent_execution_info {
+            a.parent_workflow_domain_id = Some(p.domain_uuid.clone());
             a.parent_workflow_domain = Some(p.domain.clone());
             a.parent_workflow_execution = p.execution.clone();
             a.parent_initiated_event_id = Some(p.initiated_id);
@@ -334,6 +337,7 @@ impl HistoryBuilder {
             decision_task_completed_event_id: decision_completed_event_id, backoff_start_interval_in_seconds: Some(a.backoff_start_interval_in_seconds.unwrap_or_default()),
             initiator: Some(initiator), failure_reason: a.failure_reason.clone(), failure_details: a.failure_details.clone(), last_completion_result: a.last_completion_result.clone(),
             memo: a.memo.clone(), search_attributes: a.search_attributes.clone(), cron_overlap_policy: a.cron_overlap_policy,
+            jitter_start_seconds: a.jitter_start_seconds, active_cluster_selection_policy: a.active_cluster_selection_policy.clone(),
         })
     }
     /// Go `AddTimerFiredEvent`.
@@ -441,5 +445,40 @@ impl HistoryBuilder {
     /// Go `AddChildWorkflowExecutionTimedOutEvent`.
     pub fn add_child_timed_out(&mut self, domain: &str, execution: Option<WorkflowExecution>, workflow_type: Option<WorkflowType>, initiated_id: i64, started_id: i64, timed_out: &t::WorkflowExecutionTimedOutEventAttributes) -> HistoryEvent {
         self.add_child_workflow_execution_timed_out_event(t::ChildWorkflowExecutionTimedOutEventAttributes { domain: domain.to_string(), timeout_type: timed_out.timeout_type, workflow_execution: execution, workflow_type, initiated_event_id: initiated_id, started_event_id: started_id })
+    }
+}
+
+impl HistoryBuilder {
+    /// Go `AddRequestCancelActivityTaskFailedEvent`.
+    pub fn add_request_cancel_activity_task_failed(&mut self, decision_completed_event_id: i64, activity_id: &str, cause: &str) -> HistoryEvent {
+        self.add_event(HistoryEvent {
+            event_type: Some(cadence_api::enums::EventType::RequestCancelActivityTaskFailed),
+            request_cancel_activity_task_failed_event_attributes: Some(cadence_api::tasks::RequestCancelActivityTaskFailedEventAttributes { activity_id: activity_id.to_string(), cause: cause.to_string(), decision_task_completed_event_id: decision_completed_event_id }),
+            ..Default::default()
+        })
+    }
+    /// Go `AddSemaphoreAcquireInitiatedEvent`.
+    pub fn add_semaphore_acquire_initiated(&mut self, decision_completed_event_id: i64, semaphore_name: &str, wait_timeout_seconds: i32) -> HistoryEvent {
+        self.add_event(HistoryEvent {
+            event_type: Some(cadence_api::enums::EventType::SemaphoreAcquireInitiated),
+            semaphore_acquire_initiated_event_attributes: Some(cadence_api::tasks::SemaphoreAcquireInitiatedEventAttributes { semaphore_name: semaphore_name.to_string(), wait_timeout_seconds: Some(wait_timeout_seconds), decision_task_completed_event_id: decision_completed_event_id }),
+            ..Default::default()
+        })
+    }
+    /// Go `AddSemaphoreAcquiredEvent`.
+    pub fn add_semaphore_acquired(&mut self, initiated_event_id: i64, token_id: i32) -> HistoryEvent {
+        self.add_event(HistoryEvent {
+            event_type: Some(cadence_api::enums::EventType::SemaphoreAcquired),
+            semaphore_acquired_event_attributes: Some(cadence_api::tasks::SemaphoreAcquiredEventAttributes { token_id, initiated_event_id }),
+            ..Default::default()
+        })
+    }
+    /// Go `AddSemaphoreReleasedEvent`.
+    pub fn add_semaphore_released(&mut self, decision_completed_event_id: i64, initiated_event_id: i64, token_id: i32) -> HistoryEvent {
+        self.add_event(HistoryEvent {
+            event_type: Some(cadence_api::enums::EventType::SemaphoreReleased),
+            semaphore_released_event_attributes: Some(cadence_api::tasks::SemaphoreReleasedEventAttributes { token_id, initiated_event_id, decision_task_completed_event_id: decision_completed_event_id }),
+            ..Default::default()
+        })
     }
 }

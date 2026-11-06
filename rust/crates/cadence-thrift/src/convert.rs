@@ -5654,8 +5654,11 @@ impl FromThrift for WorkflowExecutionStartedEventAttributes {
             partition_config: s.opt_map_str(150)?,
             request_id: s.req_string(160, "")?,
             cron_overlap_policy: s.opt_enum(170)?,
+            active_cluster_selection_policy: s.opt_struct(180)?,
+            prev_auto_reset_points: s.opt_struct(130)?,
             // No Thrift field ID: Go `common/types`-only, like the Rust struct.
             jitter_start_seconds: None,
+            parent_workflow_domain_id: None,
         })
     }
 }
@@ -5689,10 +5692,12 @@ impl ToThrift for WorkflowExecutionStartedEventAttributes {
         f.oi32(110, self.first_decision_task_backoff_seconds);
         f.ostruct(120, self.memo.as_ref());
         f.ostruct(121, self.search_attributes.as_ref());
+        f.ostruct(130, self.prev_auto_reset_points.as_ref());
         f.ostruct(140, self.header.as_ref());
         f.omap_str_str(150, &self.partition_config);
         f.sstr(160, &self.request_id);
         f.oenum(170, self.cron_overlap_policy);
+        f.ostruct(180, self.active_cluster_selection_policy.as_ref());
         f.finish()
     }
 }
@@ -5850,6 +5855,9 @@ impl FromThrift for WorkflowExecutionContinuedAsNewEventAttributes {
             memo: s.opt_struct(140)?,
             search_attributes: s.opt_struct(150)?,
             cron_overlap_policy: s.opt_enum(160)?,
+            active_cluster_selection_policy: s.opt_struct(170)?,
+            // No Thrift field ID: Go `common/types`-only.
+            jitter_start_seconds: None,
         })
     }
 }
@@ -5876,6 +5884,84 @@ impl ToThrift for WorkflowExecutionContinuedAsNewEventAttributes {
         f.ostruct(140, self.memo.as_ref());
         f.ostruct(150, self.search_attributes.as_ref());
         f.oenum(160, self.cron_overlap_policy);
+        f.ostruct(170, self.active_cluster_selection_policy.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for RequestCancelActivityTaskFailedEventAttributes {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            activity_id: s.req_string(10, "")?,
+            cause: s.req_string(20, "")?,
+            decision_task_completed_event_id: s.opt_i64(30)?.unwrap_or(0),
+        })
+    }
+}
+impl ToThrift for RequestCancelActivityTaskFailedEventAttributes {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.activity_id);
+        f.sstr(20, &self.cause);
+        f.fields
+            .push((30, Value::I64(self.decision_task_completed_event_id)));
+        f.finish()
+    }
+}
+
+impl FromThrift for SemaphoreAcquireInitiatedEventAttributes {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            semaphore_name: s.req_string(10, "")?,
+            wait_timeout_seconds: s.opt_i32(20)?,
+            decision_task_completed_event_id: s.opt_i64(30)?.unwrap_or(0),
+        })
+    }
+}
+impl ToThrift for SemaphoreAcquireInitiatedEventAttributes {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.semaphore_name);
+        f.oi32(20, self.wait_timeout_seconds);
+        f.fields
+            .push((30, Value::I64(self.decision_task_completed_event_id)));
+        f.finish()
+    }
+}
+
+impl FromThrift for SemaphoreAcquiredEventAttributes {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            token_id: s.opt_i32(10)?.unwrap_or(0),
+            initiated_event_id: s.opt_i64(20)?.unwrap_or(0),
+        })
+    }
+}
+impl ToThrift for SemaphoreAcquiredEventAttributes {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.fields.push((10, Value::I32(self.token_id)));
+        f.fields.push((20, Value::I64(self.initiated_event_id)));
+        f.finish()
+    }
+}
+
+impl FromThrift for SemaphoreReleasedEventAttributes {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            token_id: s.opt_i32(10)?.unwrap_or(0),
+            initiated_event_id: s.opt_i64(20)?.unwrap_or(0),
+            decision_task_completed_event_id: s.opt_i64(30)?.unwrap_or(0),
+        })
+    }
+}
+impl ToThrift for SemaphoreReleasedEventAttributes {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.fields.push((10, Value::I32(self.token_id)));
+        f.fields.push((20, Value::I64(self.initiated_event_id)));
+        f.fields
+            .push((30, Value::I64(self.decision_task_completed_event_id)));
         f.finish()
     }
 }
@@ -6333,6 +6419,10 @@ impl FromThrift for HistoryEvent {
             timer_started_event_attributes: s.opt_struct(180)?,
             timer_canceled_event_attributes: s.opt_struct(230)?,
             cancel_timer_failed_event_attributes: s.opt_struct(240)?,
+            request_cancel_activity_task_failed_event_attributes: s.opt_struct(210)?,
+            semaphore_acquire_initiated_event_attributes: s.opt_struct(460)?,
+            semaphore_acquired_event_attributes: s.opt_struct(470)?,
+            semaphore_released_event_attributes: s.opt_struct(480)?,
             marker_recorded_event_attributes: s.opt_struct(250)?,
             workflow_execution_continued_as_new_event_attributes: s.opt_struct(330)?,
             start_child_workflow_execution_initiated_event_attributes: s.opt_struct(340)?,
@@ -6396,7 +6486,18 @@ impl ToThrift for HistoryEvent {
         );
         f.ostruct(220, self.activity_task_canceled_event_attributes.as_ref());
         f.ostruct(230, self.timer_canceled_event_attributes.as_ref());
+        f.ostruct(
+            210,
+            self.request_cancel_activity_task_failed_event_attributes
+                .as_ref(),
+        );
         f.ostruct(240, self.cancel_timer_failed_event_attributes.as_ref());
+        f.ostruct(
+            460,
+            self.semaphore_acquire_initiated_event_attributes.as_ref(),
+        );
+        f.ostruct(470, self.semaphore_acquired_event_attributes.as_ref());
+        f.ostruct(480, self.semaphore_released_event_attributes.as_ref());
         f.ostruct(250, self.marker_recorded_event_attributes.as_ref());
         f.ostruct(
             260,

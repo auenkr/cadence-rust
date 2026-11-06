@@ -13,6 +13,7 @@ fn workflow_execution_started_event_attributes(v: p::WorkflowExecutionStartedEve
     let (r_continued_failure, d_continued_failure, _o_continued_failure) = failure_in(v.continued_failure)?;
     Ok(st::WorkflowExecutionStartedEventAttributes {
         workflow_type: v.workflow_type.map(|x| t::WorkflowType { name: x.name }),
+        parent_workflow_domain_id: parent.as_ref().map(|x| x.domain_id.clone()),
         parent_workflow_domain: parent.as_ref().map(|x| x.domain_name.clone()),
         parent_workflow_execution: parent.as_ref().and_then(|x| x.workflow_execution.clone()).map(execution),
         parent_initiated_event_id: parent.as_ref().map(|x| x.initiated_id),
@@ -40,6 +41,8 @@ fn workflow_execution_started_event_attributes(v: p::WorkflowExecutionStartedEve
         partition_config: Some(v.partition_config),
         request_id: v.request_id,
         cron_overlap_policy: enum_in(v.cron_overlap_policy, enums::CronOverlapPolicy::from_i32)?,
+        prev_auto_reset_points: v.prev_auto_reset_points.map(reset_points_in),
+        active_cluster_selection_policy: v.active_cluster_selection_policy.map(selection_policy_in),
         ..Default::default()
     })
 }
@@ -254,8 +257,29 @@ fn workflow_execution_continued_as_new_event_attributes(v: p::WorkflowExecutionC
         memo: v.memo.map(memo_in),
         search_attributes: v.search_attributes.map(search_attributes_in),
         cron_overlap_policy: enum_in(v.cron_overlap_policy, enums::CronOverlapPolicy::from_i32)?,
+        active_cluster_selection_policy: v.active_cluster_selection_policy.map(selection_policy_in),
         ..Default::default()
     })
+}
+fn request_cancel_activity_task_failed_event_attributes(v: p::RequestCancelActivityTaskFailedEventAttributes) -> Result<tasks::RequestCancelActivityTaskFailedEventAttributes, Status> {
+    Ok(tasks::RequestCancelActivityTaskFailedEventAttributes {
+        activity_id: v.activity_id,
+        cause: v.cause,
+        decision_task_completed_event_id: v.decision_task_completed_event_id,
+    })
+}
+fn semaphore_acquire_initiated_event_attributes(v: p::SemaphoreAcquireInitiatedEventAttributes) -> Result<tasks::SemaphoreAcquireInitiatedEventAttributes, Status> {
+    Ok(tasks::SemaphoreAcquireInitiatedEventAttributes {
+        semaphore_name: v.semaphore_name,
+        wait_timeout_seconds: seconds(v.wait_timeout)?,
+        decision_task_completed_event_id: v.decision_task_completed_event_id,
+    })
+}
+fn semaphore_acquired_event_attributes(v: p::SemaphoreAcquiredEventAttributes) -> Result<tasks::SemaphoreAcquiredEventAttributes, Status> {
+    Ok(tasks::SemaphoreAcquiredEventAttributes { token_id: v.token_id, initiated_event_id: v.initiated_event_id })
+}
+fn semaphore_released_event_attributes(v: p::SemaphoreReleasedEventAttributes) -> Result<tasks::SemaphoreReleasedEventAttributes, Status> {
+    Ok(tasks::SemaphoreReleasedEventAttributes { token_id: v.token_id, initiated_event_id: v.initiated_event_id, decision_task_completed_event_id: v.decision_task_completed_event_id })
 }
 fn workflow_execution_cancel_requested_event_attributes(v: p::WorkflowExecutionCancelRequestedEventAttributes) -> Result<st::WorkflowExecutionCancelRequestedEventAttributes, Status> {
     let external = v.external_execution_info;
@@ -515,6 +539,10 @@ pub fn event(v: p::HistoryEvent) -> Result<st::HistoryEvent, Status> {
         Some(p::history_event::Attributes::ChildWorkflowExecutionCanceledEventAttributes(a)) => { out.event_type = Some(enums::EventType::ChildWorkflowExecutionCanceled); out.child_workflow_execution_canceled_event_attributes = Some(child_workflow_execution_canceled_event_attributes(a)?); }
         Some(p::history_event::Attributes::ChildWorkflowExecutionTimedOutEventAttributes(a)) => { out.event_type = Some(enums::EventType::ChildWorkflowExecutionTimedOut); out.child_workflow_execution_timed_out_event_attributes = Some(child_workflow_execution_timed_out_event_attributes(a)?); }
         Some(p::history_event::Attributes::ChildWorkflowExecutionTerminatedEventAttributes(a)) => { out.event_type = Some(enums::EventType::ChildWorkflowExecutionTerminated); out.child_workflow_execution_terminated_event_attributes = Some(child_workflow_execution_terminated_event_attributes(a)?); }
+        Some(p::history_event::Attributes::RequestCancelActivityTaskFailedEventAttributes(a)) => { out.event_type = Some(enums::EventType::RequestCancelActivityTaskFailed); out.request_cancel_activity_task_failed_event_attributes = Some(request_cancel_activity_task_failed_event_attributes(a)?); }
+        Some(p::history_event::Attributes::SemaphoreAcquireInitiatedEventAttributes(a)) => { out.event_type = Some(enums::EventType::SemaphoreAcquireInitiated); out.semaphore_acquire_initiated_event_attributes = Some(semaphore_acquire_initiated_event_attributes(a)?); }
+        Some(p::history_event::Attributes::SemaphoreAcquiredEventAttributes(a)) => { out.event_type = Some(enums::EventType::SemaphoreAcquired); out.semaphore_acquired_event_attributes = Some(semaphore_acquired_event_attributes(a)?); }
+        Some(p::history_event::Attributes::SemaphoreReleasedEventAttributes(a)) => { out.event_type = Some(enums::EventType::SemaphoreReleased); out.semaphore_released_event_attributes = Some(semaphore_released_event_attributes(a)?); }
         Some(_) => return Err(Status::unimplemented("This history event type has not been ported.")),
         None => return Err(Status::internal("History event attributes are missing.")),
     }

@@ -10,7 +10,7 @@ fn workflow_execution_started_event_attributes(
     p::WorkflowExecutionStartedEventAttributes {
         workflow_type: v.workflow_type.map(|t| p::WorkflowType { name: t.name }),
         parent_execution_info: parent_info(
-            None,
+            v.parent_workflow_domain_id,
             v.parent_workflow_domain,
             v.parent_workflow_execution,
             v.parent_initiated_event_id,
@@ -48,6 +48,10 @@ fn workflow_execution_started_event_attributes(
         partition_config: v.partition_config.unwrap_or_default(),
         request_id: v.request_id,
         cron_overlap_policy: v.cron_overlap_policy.map_or(0, |e| e as i32 + 1),
+        prev_auto_reset_points: v.prev_auto_reset_points.map(reset_points_out),
+        active_cluster_selection_policy: v
+            .active_cluster_selection_policy
+            .map(selection_policy_out),
         ..Default::default()
     }
 }
@@ -287,7 +291,45 @@ fn workflow_execution_continued_as_new_event_attributes(
         memo: v.memo.map(memo),
         search_attributes: v.search_attributes.map(search_attributes),
         cron_overlap_policy: v.cron_overlap_policy.map_or(0, |e| e as i32 + 1),
+        active_cluster_selection_policy: v
+            .active_cluster_selection_policy
+            .map(selection_policy_out),
         ..Default::default()
+    }
+}
+fn request_cancel_activity_task_failed_event_attributes(
+    v: tasks::RequestCancelActivityTaskFailedEventAttributes,
+) -> p::RequestCancelActivityTaskFailedEventAttributes {
+    p::RequestCancelActivityTaskFailedEventAttributes {
+        activity_id: v.activity_id,
+        cause: v.cause,
+        decision_task_completed_event_id: v.decision_task_completed_event_id,
+    }
+}
+fn semaphore_acquire_initiated_event_attributes(
+    v: tasks::SemaphoreAcquireInitiatedEventAttributes,
+) -> p::SemaphoreAcquireInitiatedEventAttributes {
+    p::SemaphoreAcquireInitiatedEventAttributes {
+        semaphore_name: v.semaphore_name,
+        wait_timeout: v.wait_timeout_seconds.map(|s| duration(s.into())),
+        decision_task_completed_event_id: v.decision_task_completed_event_id,
+    }
+}
+fn semaphore_acquired_event_attributes(
+    v: tasks::SemaphoreAcquiredEventAttributes,
+) -> p::SemaphoreAcquiredEventAttributes {
+    p::SemaphoreAcquiredEventAttributes {
+        token_id: v.token_id,
+        initiated_event_id: v.initiated_event_id,
+    }
+}
+fn semaphore_released_event_attributes(
+    v: tasks::SemaphoreReleasedEventAttributes,
+) -> p::SemaphoreReleasedEventAttributes {
+    p::SemaphoreReleasedEventAttributes {
+        token_id: v.token_id,
+        initiated_event_id: v.initiated_event_id,
+        decision_task_completed_event_id: v.decision_task_completed_event_id,
     }
 }
 fn workflow_execution_cancel_requested_event_attributes(
@@ -550,6 +592,10 @@ pub fn event(v: st::HistoryEvent) -> Result<p::HistoryEvent, Status> {
         Some(EventType::TimerStarted) => v.timer_started_event_attributes.map(timer_started_event_attributes).map(p::history_event::Attributes::TimerStartedEventAttributes),
         Some(EventType::TimerFired) => v.timer_fired_event_attributes.map(timer_fired_event_attributes).map(p::history_event::Attributes::TimerFiredEventAttributes),
         Some(EventType::TimerCanceled) => v.timer_canceled_event_attributes.map(timer_canceled_event_attributes).map(p::history_event::Attributes::TimerCanceledEventAttributes),
+        Some(EventType::RequestCancelActivityTaskFailed) => v.request_cancel_activity_task_failed_event_attributes.map(request_cancel_activity_task_failed_event_attributes).map(p::history_event::Attributes::RequestCancelActivityTaskFailedEventAttributes),
+        Some(EventType::SemaphoreAcquireInitiated) => v.semaphore_acquire_initiated_event_attributes.map(semaphore_acquire_initiated_event_attributes).map(p::history_event::Attributes::SemaphoreAcquireInitiatedEventAttributes),
+        Some(EventType::SemaphoreAcquired) => v.semaphore_acquired_event_attributes.map(semaphore_acquired_event_attributes).map(p::history_event::Attributes::SemaphoreAcquiredEventAttributes),
+        Some(EventType::SemaphoreReleased) => v.semaphore_released_event_attributes.map(semaphore_released_event_attributes).map(p::history_event::Attributes::SemaphoreReleasedEventAttributes),
         Some(EventType::CancelTimerFailed) => v.cancel_timer_failed_event_attributes.map(cancel_timer_failed_event_attributes).map(p::history_event::Attributes::CancelTimerFailedEventAttributes),
         Some(EventType::WorkflowExecutionContinuedAsNew) => v.workflow_execution_continued_as_new_event_attributes.map(workflow_execution_continued_as_new_event_attributes).map(p::history_event::Attributes::WorkflowExecutionContinuedAsNewEventAttributes),
         Some(EventType::WorkflowExecutionCancelRequested) => v.workflow_execution_cancel_requested_event_attributes.map(workflow_execution_cancel_requested_event_attributes).map(p::history_event::Attributes::WorkflowExecutionCancelRequestedEventAttributes),
