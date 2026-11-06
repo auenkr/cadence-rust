@@ -206,7 +206,7 @@ impl Handler for HandlerImpl {
         }
         let entries = totals
             .into_iter()
-            .map(|(source_cluster, message_count)| adm::HistoryDLQCountEntry { source_cluster, message_count, ..Default::default() })
+            .map(|(source_cluster, message_count)| adm::HistoryDLQCountEntry { source_cluster, message_count })
             .collect();
         Ok(HistoryCountDLQMessagesResponse { entries })
     }
@@ -220,7 +220,7 @@ impl Handler for HandlerImpl {
         };
         let e = self.engine(&first.workflow_id).await?;
         let tasks = e.get_dlq_replication_messages(&r.task_infos).await?;
-        Ok(adm::GetDLQReplicationMessagesResponse { replication_tasks: Some(tasks), ..Default::default() })
+        Ok(adm::GetDLQReplicationMessagesResponse { replication_tasks: Some(tasks) })
     }
 
     async fn get_mutable_state(&self, request: Option<&GetMutableStateRequest>) -> HResult<GetMutableStateResponse> {
