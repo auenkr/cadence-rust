@@ -19,7 +19,7 @@ use std::time::Duration;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ServerConfig {
     /// `services.history.rpc` Thrift TChannel bind address.
     pub thrift_addr: SocketAddr,
@@ -30,6 +30,8 @@ pub struct ServerConfig {
     pub rps: f64,
     /// Time allowed for in-flight work to finish at shutdown.
     pub shutdown_grace: Duration,
+    /// Ringpop gossip handler served on the Thrift TChannel listener (`ringpop` service).
+    pub ringpop: Option<cadence_service_core::ringpop_tchannel::RingpopHandler>,
 }
 
 impl ServerConfig {
@@ -40,6 +42,7 @@ impl ServerConfig {
             max_message_size: 4 * 1024 * 1024,
             rps: 0.0,
             shutdown_grace: Duration::from_secs(10),
+            ringpop: None,
         }
     }
 }
@@ -50,6 +53,7 @@ pub struct ServerState {
     pub handler: Arc<dyn Handler>,
     pub limiter: Arc<limiter::RateLimiter>,
     pub max_message_size: usize,
+    pub ringpop: Option<cadence_service_core::ringpop_tchannel::RingpopHandler>,
 }
 
 pub struct HistoryServer;
@@ -65,13 +69,25 @@ pub struct RunningServer {
 
 impl HistoryServer {
     pub async fn start(cfg: ServerConfig, handler: Arc<dyn Handler>) -> anyhow::Result<RunningServer> {
+        let thrift = tokio::net::TcpListener::bind(cfg.thrift_addr).await?;
+        let grpc_listener = tokio::net::TcpListener::bind(cfg.grpc_addr).await?;
+        Self::start_with_listeners(cfg, handler, thrift, grpc_listener).await
+    }
+
+    /// Like [`start`](Self::start) on already-bound listeners (Ringpop needs the bound
+    /// TChannel port before it can advertise the host).
+    pub async fn start_with_listeners(
+        cfg: ServerConfig,
+        handler: Arc<dyn Handler>,
+        thrift: tokio::net::TcpListener,
+        grpc_listener: tokio::net::TcpListener,
+    ) -> anyhow::Result<RunningServer> {
         let state = ServerState {
             handler: handler.clone(),
             limiter: Arc::new(limiter::RateLimiter::new(cfg.rps)),
             max_message_size: cfg.max_message_size,
+            ringpop: cfg.ringpop.clone(),
         };
-        let thrift = tokio::net::TcpListener::bind(cfg.thrift_addr).await?;
-        let grpc_listener = tokio::net::TcpListener::bind(cfg.grpc_addr).await?;
         let thrift_addr = thrift.local_addr()?;
         let grpc_addr = grpc_listener.local_addr()?;
         let (stop, rx) = watch::channel(false);
@@ -86,6 +102,12 @@ impl RunningServer {
     /// Graceful shutdown: handler.prepare_to_stop, stop listeners, handler.stop.
     pub async fn shutdown(self) {
         let _ = self.handler.prepare_to_stop(self.grace).await;
+        self.stop_now().await;
+    }
+
+    /// Stop listeners and the handler without the `prepare_to_stop` drain (the caller
+    /// already ran it, as Go `Service.Stop` does).
+    pub async fn stop_now(self) {
         let _ = self.stop.send(true);
         for t in self.tasks {
             let _ = tokio::time::timeout(self.grace, t).await;
