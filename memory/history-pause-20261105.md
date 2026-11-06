@@ -21,3 +21,8 @@ History is INCOMPLETE. Assembly and substantial policy/module ports exist; concr
 
 ## Resume
 Read this checkpoint, history-port-audit-20261105.md, individual gap notes and actual branch ancestry before scheduling narrow slices. All Cargo/Go validation stays on GitHub Actions. No native goal object exists in this harness; pause is recorded here and enforced by stopping work.
+
+## Update 2026-11-06
+- Merged history-gap-execctx3 (b1ce3c03a, CI 42218036353 green): history_builder Add* audit, state_builder apply_events per Go. Remaining: state_rebuilder, workflow_repairer, integrity, cache, context, events cache/notifier (blocked on Go-shaped MutableState); Semaphore/RequestCancelActivityTaskFailed API types missing.
+- Merged history-gap-misc (e820fc717, CI 42218039455 green): ported DynamicRateLimiter + quotas.Collection (removed the only unimplemented!). Notes in memory/history-gap-misc-20261106.md.
+- Master now 7ede814ce; merge CI pending. Other 2026-11-06 workers (timerq3, engine3, handler2, decision3) not merged.
