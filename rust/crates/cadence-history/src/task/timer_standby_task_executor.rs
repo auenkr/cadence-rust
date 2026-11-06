@@ -23,7 +23,10 @@ pub trait TimerStandbyDependencies:Send+Sync {
  fn resend_delay(&self)->Duration;
  fn discard_delay(&self)->Duration;
  fn delete_history_event_context_timeout(&self)->Duration;
- async fn write_to_dlq(&self,task:&dyn PersistenceTask,info:HistoryResendInfo)->Result<()>;
+ /// Go: dlqWriter (TaskDLQWriter).
+ fn dlq_writer(&self)->Arc<dyn super::standby_task_util::TaskDLQWriter>;
+ /// Go: config.HistoryTaskDLQMode.
+ fn history_task_dlq_mode(&self)->StringPropertyFnWithDomainFilter;
  async fn send_single_workflow_history(&self,cluster:&str,task:&dyn PersistenceTask,last_event_id:i64,last_event_version:i64)->Result<()>;
 }
 pub struct TimerStandbyTaskExecutor {pub base:TimerTaskExecutorBase,pub cluster_name:String,pub dependencies:Arc<dyn TimerStandbyDependencies>}
@@ -49,7 +52,11 @@ impl TimerStandbyTaskExecutor {
   let Some(info)=info else{return Ok(());};
   let now=match self.get_current_time(task).await {Ok(now)=>now,Err(e)=>{self.base.logger.error("getStandbyPostActionFn error getting current time, fallback to standbyTaskPostActionNoOp",&[tag::error(&e)]);return Err(TaskError::Redispatch("post action is historyResendInfo".into()));}};
   if now.before(task.get_visibility_timestamp().add(self.dependencies.resend_delay())){return Err(TaskError::Redispatch("post action is historyResendInfo".into()));}
-  if now.before(task.get_visibility_timestamp().add(self.dependencies.discard_delay())){self.fetch_history_from_remote(task,Some(info)).await}else{self.dependencies.write_to_dlq(task,info).await}
+  if now.before(task.get_visibility_timestamp().add(self.dependencies.discard_delay())){self.fetch_history_from_remote(task,Some(info)).await}else{
+   let discard=super::standby_task_util::standby_task_post_action_write_to_dlq(self.dependencies.dlq_writer(),self.base.shard.clone(),self.dependencies.history_task_dlq_mode());
+   let post:super::standby_task_util::PostActionInfo=Some(Arc::new(info));
+   discard(task,post,&self.base.logger).await
+  }
  }
  async fn action(&self,task:&dyn PersistenceTask,w:&dyn StandbyTimerWorkflow,action:Action)->Result<Option<HistoryResendInfo>> {
   match action {
