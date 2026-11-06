@@ -21,3 +21,4 @@ pub mod transfer_queue_processor;
 pub mod timer_gate;
 pub mod timer_queue_processor_base;
 pub mod timer_queue_processor;
+pub mod factory;
