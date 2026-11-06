@@ -221,7 +221,7 @@ pub fn create_history_start_request(
         Duration::ZERO
     };
     let built = cadence_api::history_request::create_history_start_workflow_request(&start_request, now_nanos, jitter)
-        .map_err(|e| HistoryError::bad_request(e))?;
+        .map_err(HistoryError::bad_request)?;
     Ok(HistoryStartWorkflowExecutionRequest {
         domain_uuid: domain_id.to_string(),
         start_request: Some(start_request),
