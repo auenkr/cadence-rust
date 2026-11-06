@@ -16,4 +16,4 @@ Remaining gaps:
 - ConfigStore / OpenFeature dynamic config unsupported (FileBased/Nop only).
 - grpc / thrift wrapper audit not completed in this pass.
 
-CI evidence: see below (filled after run).
+CI evidence: https://github.com/auenkr/cadence-rust/actions/runs/42224042797 head 8624466868d1fc487050e2ebf914c5dd6928e1dd conclusion success (clippy + tests, package cadence-history).
