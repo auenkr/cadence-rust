@@ -455,6 +455,7 @@ impl MutableState for EngineMutableState {
                 started_run_id: String::from_utf8_lossy(&c.started_run_id).to_string(),
                 workflow_type_name: c.workflow_type_name.clone(),
                 initiated_id: *id,
+                parent_close_policy: None,
             })
             .collect()
     }
