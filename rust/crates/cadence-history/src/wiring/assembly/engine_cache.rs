@@ -47,14 +47,14 @@ pub struct EngineCore {
     pub state_params: Arc<dyn Fn(&str) -> StateParams + Send + Sync>,
 }
 
-fn shard_err(e: ShardContextError) -> HistoryError {
+pub(super) fn shard_err(e: ShardContextError) -> HistoryError {
     match e {
         ShardContextError::ShardOwnershipLost(m) => HistoryError::PersistenceShardOwnershipLost(m),
         other => HistoryError::internal(other.to_string()),
     }
 }
 
-fn task_blob(data: Result<Vec<u8>, impl std::fmt::Display>) -> HResult<pc::DataBlob> {
+pub(super) fn task_blob(data: Result<Vec<u8>, impl std::fmt::Display>) -> HResult<pc::DataBlob> {
     data.map(|data| pc::DataBlob { encoding: "thriftrw".to_string(), data })
         .map_err(|e| HistoryError::internal(format!("encode task: {e}")))
 }
@@ -75,6 +75,11 @@ impl EngineExecutionContext {
             core,
             state: Mutex::new(None),
         })
+    }
+
+    /// Installs a freshly created state (after the create-workflow write).
+    pub(super) fn set_state(&self, state: Arc<EngineMutableState>) {
+        *self.state.lock().unwrap() = Some(state);
     }
 
     /// Go `Context.Clear`.
@@ -249,6 +254,9 @@ impl EngineExecutionContext {
 
 #[async_trait]
 impl ExecutionContext for EngineExecutionContext {
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
     fn get_execution(&self) -> WorkflowExecution {
         self.execution.clone()
     }
