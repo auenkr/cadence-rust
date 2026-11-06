@@ -85,7 +85,6 @@ fn continue_as_new_workflow_execution_decision_attributes(v:tasks::ContinueAsNew
         jitter_start: v.jitter_start_seconds.map(|s|duration(s.into())),
         cron_overlap_policy: v.cron_overlap_policy.map_or(0,|e|e as i32+1),
         active_cluster_selection_policy: v.active_cluster_selection_policy.map(selection_policy_out),
-        ..Default::default()
     }
 }
 fn start_child_workflow_execution_decision_attributes(v:tasks::StartChildWorkflowExecutionDecisionAttributes) -> p::StartChildWorkflowExecutionDecisionAttributes {
