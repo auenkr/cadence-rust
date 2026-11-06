@@ -15,6 +15,7 @@ impl From<DecisionError> for OperationError {
             DecisionErrorKind::Internal => ErrorKind::Internal,
             DecisionErrorKind::EntityNotExists => ErrorKind::NotFound,
             DecisionErrorKind::EventAlreadyStarted => ErrorKind::EventAlreadyStarted,
+            DecisionErrorKind::AlreadyCompleted | DecisionErrorKind::Other => ErrorKind::Other,
         };
         Self { kind, message: e.message }
     }

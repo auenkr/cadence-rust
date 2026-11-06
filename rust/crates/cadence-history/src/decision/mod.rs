@@ -25,6 +25,10 @@ pub enum DecisionErrorKind {
     Internal,
     EntityNotExists,
     EventAlreadyStarted,
+    /// Go `types.WorkflowExecutionAlreadyCompletedError`.
+    AlreadyCompleted,
+    /// Go plain `errors.New(...)` values (e.g. ErrStaleState, ErrMaxAttemptsExceeded).
+    Other,
 }
 impl DecisionError {
     /// Go `&types.BadRequestError{Message: m}`.
@@ -36,6 +40,12 @@ impl DecisionError {
     }
     pub fn entity_not_exists(m: impl Into<String>) -> Self {
         Self { kind: DecisionErrorKind::EntityNotExists, message: m.into() }
+    }
+    pub fn already_completed(m: impl Into<String>) -> Self {
+        Self { kind: DecisionErrorKind::AlreadyCompleted, message: m.into() }
+    }
+    pub fn other(m: impl Into<String>) -> Self {
+        Self { kind: DecisionErrorKind::Other, message: m.into() }
     }
     pub fn event_already_started(m: impl Into<String>) -> Self {
         Self { kind: DecisionErrorKind::EventAlreadyStarted, message: m.into() }
