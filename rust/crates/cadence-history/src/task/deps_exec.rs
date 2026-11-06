@@ -106,10 +106,115 @@ pub trait LimiterCollection: Send + Sync {
     fn for_key(&self, key: &str) -> Arc<dyn Limiter>;
 }
 
+fn unix_nanos() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as i64)
+        .unwrap_or(0)
+}
+
+/// Go `quotas.DynamicRateLimiter` (ttl 5s, minBurst 1).
+struct DynamicRateLimiter {
+    rps: Box<dyn Fn() -> f64 + Send + Sync>,
+    rl: std::sync::Mutex<cadence_common::rate_limiter::RateLimiter>,
+    last_update: std::sync::atomic::AtomicI64,
+}
+
+const DYNAMIC_LIMITER_TTL_NANOS: i64 = 5_000_000_000;
+const DYNAMIC_LIMITER_MIN_BURST: i64 = 1;
+
+fn limit_and_burst(rps: f64) -> (f64, i64) {
+    let burst = (rps.ceil() as i64).max(DYNAMIC_LIMITER_MIN_BURST);
+    // 0 rps zeroes the burst to immediately cut off new permits.
+    (rps, if rps == 0.0 { 0 } else { burst })
+}
+
+impl DynamicRateLimiter {
+    fn new(rps: Box<dyn Fn() -> f64 + Send + Sync>) -> Self {
+        let (l, b) = limit_and_burst(rps());
+        Self {
+            rps,
+            rl: std::sync::Mutex::new(cadence_common::rate_limiter::RateLimiter::new(l, b)),
+            last_update: std::sync::atomic::AtomicI64::new(unix_nanos()),
+        }
+    }
+
+    fn maybe_refresh(&self) {
+        use std::sync::atomic::Ordering;
+        let now = unix_nanos();
+        let last = self.last_update.load(Ordering::SeqCst);
+        if now > last + DYNAMIC_LIMITER_TTL_NANOS - 1
+            && self
+                .last_update
+                .compare_exchange(last, now, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+        {
+            let (l, b) = limit_and_burst((self.rps)());
+            self.rl.lock().unwrap().set_limit_and_burst(l, b);
+        }
+    }
+}
+
+#[async_trait]
+impl Limiter for DynamicRateLimiter {
+    fn allow(&self) -> bool {
+        self.maybe_refresh();
+        self.rl.lock().unwrap().allow(unix_nanos())
+    }
+
+    async fn wait(&self, ctx: &tokio_util::sync::CancellationToken) -> Result<()> {
+        self.maybe_refresh();
+        if ctx.is_cancelled() {
+            return Err(TaskError::Other("context canceled".into()));
+        }
+        let reservation = {
+            let now = unix_nanos();
+            self.rl
+                .lock()
+                .unwrap()
+                .reserve_wait(now, None)
+                .map_err(|e| TaskError::Other(format!("rate: Wait: {e:?}")))?
+        };
+        let delay = reservation.delay_nanos();
+        if delay > 0 {
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_nanos(delay as u64)) => {}
+                _ = ctx.cancelled() => {
+                    self.rl.lock().unwrap().cancel(&reservation);
+                    return Err(TaskError::Other("context canceled".into()));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Go `quotas.Collection`: lazily creates one limiter per key.
+struct SimpleCollection {
+    rps: Arc<dyn Fn(&str) -> i64 + Send + Sync>,
+    limiters: std::sync::Mutex<std::collections::HashMap<String, Arc<dyn Limiter>>>,
+}
+
+impl LimiterCollection for SimpleCollection {
+    fn for_key(&self, key: &str) -> Arc<dyn Limiter> {
+        let mut m = self.limiters.lock().unwrap();
+        if let Some(l) = m.get(key) {
+            return l.clone();
+        }
+        let rps = self.rps.clone();
+        let k = key.to_string();
+        let l: Arc<dyn Limiter> = Arc::new(DynamicRateLimiter::new(Box::new(move || rps(&k) as f64)));
+        m.insert(key.to_string(), l.clone());
+        l
+    }
+}
+
 /// Go `quotas.NewCollection(dynamicquotas.NewSimpleDynamicRateLimiterFactory(rps))`.
-/// TODO(link): construct from cadence_common::rate_limiter once the dynamic limiter factory is exposed.
 pub fn new_simple_dynamic_collection(
-    _rps: Arc<dyn Fn(&str) -> i64 + Send + Sync>,
+    rps: Arc<dyn Fn(&str) -> i64 + Send + Sync>,
 ) -> Arc<dyn LimiterCollection> {
-    unimplemented!("TODO(link): quotas::Collection")
+    Arc::new(SimpleCollection {
+        rps,
+        limiters: std::sync::Mutex::new(std::collections::HashMap::new()),
+    })
 }
