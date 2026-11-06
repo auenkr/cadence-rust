@@ -221,8 +221,6 @@ pub struct GetHistoryTasksResponse {
 pub trait ShardContext: Send + Sync {
     fn get_shard_id(&self) -> i32;
     fn now(&self) -> Time;
-    /// `GetCurrentTime(cluster)`
-    fn get_current_time(&self, cluster: &str) -> Time;
     /// `GetConfig().RangeSizeBits`
     fn range_size_bits(&self) -> u32;
     /// `GetConfig().EnableDebugMode`
