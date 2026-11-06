@@ -275,7 +275,7 @@ impl Handler for HandlerImpl {
         let inner = r.request.as_ref().ok_or_else(|| HistoryError::internal("nil request"))?;
         let wf = wf_id(&inner.workflow_execution);
         let run = inner.workflow_execution.as_ref().map(|w| w.run_id.clone()).unwrap_or_default();
-        let e = self.prep(true, &r.domain_uuid, wf).await?;
+        let _e = self.prep(true, &r.domain_uuid, wf).await?;
         let events = inner.events.as_ref().map(|b| b.data.clone()).unwrap_or_default();
         let _ = (run, events);
         Err(gap("ReapplyEvents (DataBlob deserialisation of events)"))
@@ -305,7 +305,7 @@ impl Handler for HandlerImpl {
     async fn refresh_workflow_tasks(&self, request: Option<&HistoryRefreshWorkflowTasksRequest>) -> HResult<()> {
         let r = nil(request)?;
         let inner = r.request.as_ref().ok_or_else(|| HistoryError::internal("nil request"))?;
-        let exec = inner.execution.clone().unwrap_or_default();
+        let exec = inner.workflow_execution.clone().unwrap_or_default();
         self.prep(true, &r.domain_uuid, &exec.workflow_id).await?.refresh_workflow_tasks(&r.domain_uuid, &exec).await
     }
 

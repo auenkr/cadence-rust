@@ -23,7 +23,7 @@ use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 
 use crate::engine::deps::{HResult, HistoryError, HistoryTaskCategory};
-use crate::engine::runtime::{QueueAction, QueueProcessor, Task};
+use crate::engine::runtime::{QueueAction, QueueProcessor};
 use crate::queue::action::Action;
 use crate::queue::deps::NotifyTaskInfo;
 use crate::queue::interface::Processor;
@@ -83,7 +83,7 @@ impl QueueProcessor for EngineQueueProcessor {
         }
     }
 
-    fn notify_new_task(&self, cluster: &str, _tasks: &[Task]) {
+    fn notify_new_task(&self, cluster: &str, _info: &crate::engine::notify_tasks::NotifyTaskInfo) {
         self.inner.notify_new_task(cluster, &NotifyTaskInfo::default());
     }
 }
