@@ -412,7 +412,6 @@ impl TypedMutableState {
             return Ok(());
         }
         let mut new_committed = std::mem::take(&mut self.history_events);
-        let mut new_buffered = Vec::new();
         let mut candidates = std::mem::take(&mut self.buffered_events);
         candidates.extend(std::mem::take(&mut self.update_buffered_events));
 
@@ -440,7 +439,7 @@ impl TypedMutableState {
         if self.has_buffered_events_in_db {
             self.clear_buffered_events = true;
         }
-        self.buffered_events = new_buffered.drain(..).collect();
+        self.buffered_events = Vec::new();
         Ok(())
     }
 
