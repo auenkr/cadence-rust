@@ -86,6 +86,18 @@ impl QueueProcessor for EngineQueueProcessor {
     fn notify_new_task(&self, cluster: &str, _tasks: &[Task]) {
         self.inner.notify_new_task(cluster, &NotifyTaskInfo::default());
     }
+
+    async fn failover_domain(&self, domain_ids: &std::collections::HashSet<String>) {
+        self.inner.failover_domain(domain_ids.clone()).await;
+    }
+
+    async fn lock_task_processing(&self) {
+        self.inner.lock_task_processing().await;
+    }
+
+    fn unlock_task_processing(&self) {
+        self.inner.unlock_task_processing();
+    }
 }
 
 /// `engine` side map of queue processors per task category.

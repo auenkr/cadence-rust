@@ -283,6 +283,8 @@ pub fn apply_workflow_id_reuse_policy_helper(
                 prev_run_id,
             ));
         }
+        #[allow(unreachable_patterns)]
+        _ => return Err(HistoryError::internal("Failed to process start workflow reuse policy.")),
     }
     Ok(())
 }

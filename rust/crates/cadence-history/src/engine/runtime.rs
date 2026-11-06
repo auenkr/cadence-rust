@@ -21,6 +21,12 @@ pub enum QueueAction { Reset, GetState }
 pub trait QueueProcessor: Send + Sync {
     async fn handle_action(&self, cluster: &str, action: QueueAction) -> HResult<Vec<String>>;
     fn notify_new_task(&self, cluster: &str, info: &super::notify_tasks::NotifyTaskInfo);
+    /// `FailoverDomain`
+    async fn failover_domain(&self, domain_ids: &std::collections::HashSet<String>);
+    /// `LockTaskProcessing`
+    async fn lock_task_processing(&self);
+    /// `UnlockTaskProcessing`
+    fn unlock_task_processing(&self);
 }
 #[derive(Clone, Debug)]
 pub enum Task {
@@ -107,6 +113,7 @@ pub struct HistoryEngine {
     pub events_reapplier: Arc<dyn EventsReapplier>,
     pub replication_task_store: Arc<dyn ReplicationTaskStore>,
     pub start_host: Arc<dyn super::start_workflow_execution::WorkflowStartHost>,
+    pub failover_host: Arc<dyn super::register_domain_failover_callback::DomainFailoverHost>,
 }
 
 /// Inputs of `replication.NewImmediateTaskHydrator`.
