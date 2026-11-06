@@ -219,5 +219,27 @@ pub fn build_engine(
         )),
         history_event_notifier: Arc::new(NotifierAdapter::new(Notifier::new())),
         task_refresher: Arc::new(UnwiredTaskRefresher),
+        events_reapplier: Arc::new(UnwiredEventsReapplier),
+        replication_task_store: Arc::new(NoopReplicationTaskStore),
     })
+}
+
+struct UnwiredEventsReapplier;
+
+#[async_trait::async_trait]
+impl crate::engine::runtime::EventsReapplier for UnwiredEventsReapplier {
+    async fn reapply_events(
+        &self,
+        _state: crate::engine::deps::MutableStateRef,
+        _events: &[cadence_api::service_types::HistoryEvent],
+        _run_id: &str,
+    ) -> HResult<Vec<cadence_api::service_types::HistoryEvent>> {
+        Err(HistoryError::internal("ndc events reapplier is not wired"))
+    }
+}
+
+struct NoopReplicationTaskStore;
+
+impl crate::engine::runtime::ReplicationTaskStore for NoopReplicationTaskStore {
+    fn put(&self, _task: cadence_api::types::ReplicationTask) {}
 }

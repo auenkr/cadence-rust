@@ -217,6 +217,9 @@ impl ReplicationHydrator for EngineHydrator {
             .await
             .map_err(replication_error_to_history_error)
     }
+    async fn hydrate_immediate(&self, _input: crate::engine::runtime::ImmediateHydration) -> HResult<Option<ReplicationTask>> {
+        Err(HistoryError::internal("immediate replication hydration not wired (see memory/history-gap-handler-20261105.md)"))
+    }
 }
 
 /// Placeholder for the NDC `Replicator` (see module docs).

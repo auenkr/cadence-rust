@@ -137,6 +137,14 @@ pub(super) fn engine_activity(schedule_id: i64, a: &pc::ActivityInfo, details: V
         version: a.version,
         started_identity: a.started_identity.clone(),
         task_list: a.task_list.clone(),
+        last_heart_beat_updated_time: 0,
+        expiration_time: a.retry_expiration_time_unix_nanos,
+        maximum_attempts: a.retry_maximum_attempts,
+        last_failure_reason: a.retry_last_failure_reason.clone(),
+        last_failure_details: a.retry_last_failure_details.clone(),
+        last_failure_category: None,
+        last_retry_interval_seconds: a.retry_last_retry_interval_seconds,
+        last_worker_identity: a.retry_last_worker_identity.clone(),
     }
 }
 
@@ -305,6 +313,16 @@ impl EngineMutableState {
             client_impl: i.client_impl.clone(),
             sticky_schedule_to_start_timeout: (i.sticky_schedule_to_start_timeout_nanos / 1_000_000_000) as i32,
             auto_reset_points,
+            workflow_timeout: (i.workflow_timeout_nanos / 1_000_000_000) as i32,
+            decision_start_to_close_timeout: (i.decision_start_to_close_timeout_nanos / 1_000_000_000) as i32,
+            task_list_kind: None,
+            memo: Some(i.memo.iter().map(|(k, v)| (k.clone(), v.clone())).collect()),
+            search_attributes: Some(i.search_attributes.iter().map(|(k, v)| (k.clone(), v.clone())).collect()),
+            partition_config: Some(i.partition_config.iter().map(|(k, v)| (k.clone(), v.clone())).collect()),
+            cron_overlap_policy: None,
+            last_updated_timestamp: i.last_updated_time_unix_nanos,
+            parent_domain_id: i.parent_domain_id.clone(),
+            initiated_id: i.initiated_id,
         };
         let mut activities = BTreeMap::new();
         let mut pc_acts = BTreeMap::new();
@@ -415,6 +433,54 @@ impl EngineMutableState {
 
 #[async_trait]
 impl MutableState for EngineMutableState {
+    fn get_last_write_version(&self) -> HResult<i64> {
+        Ok(self.inner.lock().unwrap().pc_exec.last_write_version)
+    }
+    fn is_resource_duplicated(&self, _dedup_resource_id: &str) -> bool {
+        false
+    }
+    fn get_pending_activity_infos(&self) -> Vec<ActivityInfo> {
+        self.inner.lock().unwrap().activities.values().cloned().collect()
+    }
+    fn get_pending_child_execution_infos(&self) -> Vec<crate::engine::deps_ms::PendingChildInfo> {
+        self.inner
+            .lock()
+            .unwrap()
+            .pc_children
+            .iter()
+            .map(|(id, c)| crate::engine::deps_ms::PendingChildInfo {
+                domain_id: c.domain_id.clone(),
+                domain_name: c.domain_name.clone(),
+                started_workflow_id: c.started_workflow_id.clone(),
+                started_run_id: String::from_utf8_lossy(&c.started_run_id).to_string(),
+                workflow_type_name: c.workflow_type_name.clone(),
+                initiated_id: *id,
+                parent_close_policy: None,
+            })
+            .collect()
+    }
+    fn get_pending_decision(&self) -> Option<crate::mutable_state::DecisionInfo> {
+        let g = self.inner.lock().unwrap();
+        let e = &g.pc_exec;
+        if e.decision_schedule_id == EMPTY_EVENT_ID {
+            return None;
+        }
+        Some(crate::mutable_state::DecisionInfo {
+            schedule_id: e.decision_schedule_id,
+            started_id: e.decision_started_id,
+            version: e.decision_version,
+            request_id: e.decision_request_id.clone(),
+            task_list: e.task_list.clone(),
+            start_to_close_timeout_seconds: (e.decision_timeout_nanos / 1_000_000_000) as i32,
+            started_timestamp: e.decision_started_time_unix_nanos,
+            attempt: e.decision_attempt,
+            schedule_timestamp: e.decision_scheduled_time_unix_nanos,
+            original_schedule_timestamp: e.decision_original_scheduled_time_unix_nanos,
+        })
+    }
+    async fn get_completion_event(&self) -> HResult<cadence_api::service_types::HistoryEvent> {
+        Err(HistoryError::internal("get_completion_event: completion event blob decoding not wired"))
+    }
     fn is_workflow_execution_running(&self) -> bool {
         self.inner.lock().unwrap().exec.is_running()
     }
