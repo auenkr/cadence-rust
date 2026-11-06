@@ -11,3 +11,6 @@ Explicit dependency gaps (return an internal error naming the gap, not silent st
 - DescribeHistoryHost returns shard ids only (no domain cache stats / controller status).
 - Not yet done: `lookup`, `service.go` port, real `main.rs` startup, grpc/thrift wrapper audit.
 - Enum fields from persistence ints (parent_close_policy, task_list_kind, cron_overlap_policy, last_failure_category) are mapped to None in engine_state.rs (conversion not wired).
+
+## CI evidence
+- rust-ci package=cadence-history, head b3d6de0fe: SUCCESS https://github.com/auenkr/cadence-rust/actions/runs/42220933092
