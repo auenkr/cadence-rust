@@ -205,11 +205,11 @@ impl Service {
 mod tests {
     use super::*;
 
-    #[tokio::test(start_paused = true)]
+    #[tokio::test]
     async fn sleep_with_min_duration_returns_remainder() {
-        let left = sleep_with_min_duration(Duration::from_millis(400), Duration::from_secs(1)).await;
-        assert_eq!(left, Duration::from_millis(600));
-        let left = sleep_with_min_duration(Duration::from_secs(2), Duration::from_secs(1)).await;
+        let left = sleep_with_min_duration(Duration::from_millis(10), Duration::from_millis(50)).await;
+        assert_eq!(left, Duration::from_millis(40));
+        let left = sleep_with_min_duration(Duration::from_millis(20), Duration::from_millis(10)).await;
         assert_eq!(left, Duration::ZERO);
     }
 

@@ -264,7 +264,6 @@ pub async fn run(bin_name: &'static str) -> anyhow::Result<()> {
         .start(thrift_listener, grpc_listener, Some(provider.handler()), max_message_size)
         .await?;
 
-    let mut feed = None;
     let start_result = tokio::select! {
         r = provider.start() => r.map_err(|e| anyhow::anyhow!("starting History Ringpop membership: {e}")),
         s = shutdown_signal() => { s?; Err(anyhow::anyhow!("shutdown requested during History Ringpop bootstrap")) }
@@ -274,14 +273,14 @@ pub async fn run(bin_name: &'static str) -> anyhow::Result<()> {
         let _ = provider.stop().await;
         return Err(e);
     }
-    match spawn_membership_feed(env.membership.clone(), provider.clone(), HISTORY_RINGPOP_SERVICE.to_string()).await {
-        Ok(handle) => feed = Some(handle),
+    let feed = match spawn_membership_feed(env.membership.clone(), provider.clone(), HISTORY_RINGPOP_SERVICE.to_string()).await {
+        Ok(handle) => handle,
         Err(e) => {
             service.stop().await;
             let _ = provider.stop().await;
             anyhow::bail!("subscribing to History Ringpop membership: {e}");
         }
-    }
+    };
     // Close shards whose ownership moved on every ring change (Go controller subscription).
     let ownership_task = {
         let registry = registry.clone();
@@ -307,9 +306,7 @@ pub async fn run(bin_name: &'static str) -> anyhow::Result<()> {
     }
     service.stop().await;
     ownership_task.abort();
-    if let Some(feed) = feed {
-        feed.abort();
-    }
+    feed.abort();
     replication.stop_fetchers();
     provider.stop().await.map_err(|e| anyhow::anyhow!("stopping History Ringpop membership: {e}"))?;
     Ok(())
