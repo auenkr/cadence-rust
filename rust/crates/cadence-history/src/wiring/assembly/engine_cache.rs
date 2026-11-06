@@ -68,7 +68,7 @@ pub struct EngineExecutionContext {
 }
 
 impl EngineExecutionContext {
-    fn new(core: Arc<EngineCore>, domain_id: &str, execution: &WorkflowExecution) -> Arc<Self> {
+    pub(super) fn new(core: Arc<EngineCore>, domain_id: &str, execution: &WorkflowExecution) -> Arc<Self> {
         Arc::new(Self {
             domain_id: domain_id.to_string(),
             execution: execution.clone(),
@@ -119,7 +119,18 @@ impl EngineExecutionContext {
         if !state.is_dirty() {
             return Ok(());
         }
-        self.persist(&state, now, true).await
+        self.persist(&state, now, true, None).await
+    }
+
+    /// Go `UpdateWorkflowExecutionWithNewAsActive`: persists this (terminated)
+    /// run together with the snapshot of the new run.
+    pub(super) async fn update_with_new_as_active(
+        &self,
+        now: i64,
+        new_snapshot: pc::WorkflowSnapshot,
+    ) -> HResult<()> {
+        let state = self.load_state().await?;
+        self.persist(&state, now, true, Some(new_snapshot)).await
     }
 
     /// Go `UpdateWorkflowExecutionTasks`.
@@ -128,12 +139,18 @@ impl EngineExecutionContext {
         if !state.is_dirty() {
             return Ok(());
         }
-        self.persist(&state, now, false).await
+        self.persist(&state, now, false, None).await
     }
 
     /// Close the transaction, assign task ids, append the history batch and
     /// write the mutation (Go `updateWorkflowExecutionWithNew` without a new run).
-    async fn persist(&self, state: &Arc<EngineMutableState>, now: i64, active: bool) -> HResult<()> {
+    async fn persist(
+        &self,
+        state: &Arc<EngineMutableState>,
+        now: i64,
+        active: bool,
+        new_snapshot: Option<pc::WorkflowSnapshot>,
+    ) -> HResult<()> {
         let core = &self.core;
         let shard = &core.shard;
         let mut txn = state.close_transaction(now, active)?;
@@ -210,7 +227,7 @@ impl EngineExecutionContext {
             range_id: shard.range_id(),
             mode: if active { pc::UpdateWorkflowMode::UpdateCurrent } else { pc::UpdateWorkflowMode::IgnoreCurrent },
             update_workflow_mutation: txn.mutation,
-            new_workflow_snapshot: None,
+            new_workflow_snapshot: new_snapshot,
             workflow_request_mode: pc::WorkflowRequestMode::New,
             current_timestamp_unix_nanos: now,
         };
@@ -243,6 +260,12 @@ impl ExecutionContext for EngineExecutionContext {
     }
     async fn update_workflow_execution_tasks(&self, now: i64) -> HResult<()> {
         self.update_tasks(now).await
+    }
+    async fn update_workflow_execution_as_active(&self, now: i64) -> HResult<()> {
+        self.update_as_active(now).await
+    }
+    fn clear(&self) {
+        EngineExecutionContext::clear(self)
     }
 }
 
