@@ -6,6 +6,7 @@ pub mod engine_close;
 pub mod engine_decision;
 pub mod engine_events;
 pub mod engine_factory;
+pub mod engine_start;
 pub mod engine_state;
 pub mod engine_tasks;
 pub mod env;

@@ -62,6 +62,10 @@ pub trait MutableState: Send + Sync {
     fn add_first_decision_task_scheduled(&self, start_event: &cadence_api::service_types::HistoryEvent) -> HResult<()>;
     /// `AddDecisionTaskScheduledEvent(bypassTaskGeneration)`
     fn add_decision_task_scheduled_event(&self, bypass_task_generation: bool) -> HResult<()>;
+    /// Downcast hook for the assembly adapters (default: not downcastable).
+    fn as_any_arc(self: std::sync::Arc<Self>) -> Option<std::sync::Arc<dyn std::any::Any + Send + Sync>> {
+        None
+    }
 }
 #[async_trait]
 pub trait ExecutionContext: Send + Sync {
@@ -73,6 +77,10 @@ pub trait ExecutionContext: Send + Sync {
     async fn update_workflow_execution_as_active(&self, now: i64) -> HResult<()>;
     /// `Clear` (drops the cached mutable state)
     fn clear(&self);
+    /// Downcast hook for the assembly adapters (default: not downcastable).
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        None
+    }
 }
 
 #[derive(Debug, Clone, Default)]

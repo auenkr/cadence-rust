@@ -433,6 +433,22 @@ impl EngineMutableState {
 
 #[async_trait]
 impl MutableState for EngineMutableState {
+    fn add_workflow_execution_started_event(
+        &self,
+        execution: &WorkflowExecution,
+        request: &HistoryStartWorkflowExecutionRequest,
+    ) -> HResult<cadence_api::service_types::HistoryEvent> {
+        self.start_event(execution, request)
+    }
+    fn add_first_decision_task_scheduled(&self, start_event: &cadence_api::service_types::HistoryEvent) -> HResult<()> {
+        self.first_decision(start_event)
+    }
+    fn add_decision_task_scheduled_event(&self, bypass_task_generation: bool) -> HResult<()> {
+        self.add_decision_task_scheduled(bypass_task_generation)
+    }
+    fn as_any_arc(self: Arc<Self>) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        Some(self)
+    }
     fn get_last_write_version(&self) -> HResult<i64> {
         Ok(self.inner.lock().unwrap().pc_exec.last_write_version)
     }
