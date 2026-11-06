@@ -6,7 +6,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::sync::{mpsc, Notify};
+use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 pub const NOTIFICATION_CHAN_BUFFER_SIZE: usize = 1000;
 pub const RECEIVE_CHAN_BUFFER_SIZE: usize = 1000;
@@ -73,7 +74,8 @@ pub struct CoordinatorImpl {
     notification_rx: Mutex<Option<mpsc::Receiver<NotificationRequest>>>,
     receive_tx: mpsc::Sender<ReceiveRequest>,
     receive_rx: Mutex<Option<mpsc::Receiver<ReceiveRequest>>>,
-    shutdown: Notify,
+    /// Go `shutdownChan` (closed on Stop; wakes every loop, including busy ones).
+    shutdown: CancellationToken,
     recorder: tokio::sync::Mutex<HashMap<String, FailoverRecord>>,
     p: NewCoordinatorParams,
 }
@@ -91,7 +93,7 @@ impl CoordinatorImpl {
             notification_rx: Mutex::new(Some(nrx)),
             receive_tx: rtx,
             receive_rx: Mutex::new(Some(rrx)),
-            shutdown: Notify::new(),
+            shutdown: CancellationToken::new(),
             recorder: tokio::sync::Mutex::new(HashMap::new()),
             p,
         })
@@ -106,7 +108,7 @@ impl CoordinatorImpl {
         ticker.tick().await; // Go's ticker first fires after one interval.
         loop {
             tokio::select! {
-                _ = self.shutdown.notified() => return,
+                _ = self.shutdown.cancelled() => return,
                 _ = ticker.tick() => self.cleanup_invalid_markers().await,
                 Some(request) = rx.recv() => self.handle_failover_markers(request).await,
             }
@@ -128,7 +130,7 @@ impl CoordinatorImpl {
         let mut request_by_marker: HashMap<(Option<String>, Option<i64>), ReceiveRequest> = HashMap::new();
         loop {
             tokio::select! {
-                _ = self.shutdown.notified() => return,
+                _ = self.shutdown.cancelled() => return,
                 Some(req) = rx.recv() => {
                     // duplicated shard IDs are fine; the receiver de-dups (handle_failover_markers).
                     aggregate_notification_requests(&req, &mut request_by_marker);
@@ -303,9 +305,7 @@ impl Coordinator for CoordinatorImpl {
             return;
         }
         // close(shutdownChan) wakes both loops.
-        self.shutdown.notify_waiters();
-        self.shutdown.notify_one();
-        self.shutdown.notify_one();
+        self.shutdown.cancel();
         tracing::info!("Coordinator state changed: stopped");
     }
 
