@@ -106,6 +106,7 @@ pub struct HistoryEngine {
     pub task_refresher: Arc<dyn MutableStateTaskRefresher>,
     pub events_reapplier: Arc<dyn EventsReapplier>,
     pub replication_task_store: Arc<dyn ReplicationTaskStore>,
+    pub start_host: Arc<dyn super::start_workflow_execution::WorkflowStartHost>,
 }
 
 /// Inputs of `replication.NewImmediateTaskHydrator`.
