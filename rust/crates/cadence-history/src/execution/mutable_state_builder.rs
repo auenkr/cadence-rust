@@ -156,6 +156,9 @@ impl TypedMutableState {
                 last_processed_event: EMPTY_EVENT_ID,
                 last_first_event_id: EMPTY_EVENT_ID,
                 state: WORKFLOW_STATE_CREATED,
+                decision_schedule_id: EMPTY_EVENT_ID,
+                decision_started_id: EMPTY_EVENT_ID,
+                decision_version: EMPTY_VERSION,
                 ..WorkflowExecutionInfo::default()
             },
             ..Self::default()
