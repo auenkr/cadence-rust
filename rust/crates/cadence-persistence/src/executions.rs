@@ -4141,6 +4141,8 @@ impl InMemoryExecutionStore {
                         memo: attrs.memo.clone(),
                         search_attributes: attrs.search_attributes.clone(),
                         cron_overlap_policy: attrs.cron_overlap_policy,
+                        jitter_start_seconds: None,
+                        active_cluster_selection_policy: None,
                     },
                 ),
                 ..Default::default()

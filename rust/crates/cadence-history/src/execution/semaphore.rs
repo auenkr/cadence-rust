@@ -29,7 +29,7 @@ pub trait SemaphoreExecution {
     fn missing_semaphore_info(&self) -> Self::Error;
     fn log_missing_hold(&mut self, initiated_id: i64);
 }
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct SemaphoreState {
     pub pending: BTreeMap<i64, SemaphoreInfo>,
     pub updates: BTreeMap<i64, SemaphoreInfo>,
