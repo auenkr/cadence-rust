@@ -10,6 +10,10 @@ pub enum StateBuilderError {
     #[error(transparent)] Timer(#[from] TimerError),
     #[error(transparent)] Activity(#[from] crate::mutable_state_activity::ActivityTransitionError),
     #[error(transparent)] Child(#[from] ChildWorkflowError),
+    #[error("encounter history size being zero")] HistorySizeZero,
+    #[error("version histories are missing")] MissingVersionHistories,
+    #[error("invalid version history item")] VersionHistoryItem,
+    #[error("Unknown event type")] UnknownEventType,
     #[error("unsupported or malformed replicated event {event_type:?} ({event_id})")]
     InvalidEvent { event_type: Option<EventType>, event_id: i64 },
 }
@@ -19,8 +23,23 @@ pub struct StateBuilder { pub mutable_state: MutableStateBuilder }
 
 impl StateBuilder {
     pub fn new(mutable_state: MutableStateBuilder) -> Self { Self { mutable_state } }
+    /// Go `ApplyEvents`: replicates a batch onto mutable state.
     pub fn apply_events(&mut self, events: &[HistoryEvent]) -> Result<(), StateBuilderError> {
+        // Go: errMessageHistorySizeZero
+        let (Some(first_event), Some(last_event)) = (events.first(), events.last()) else {
+            return Err(StateBuilderError::HistorySizeZero);
+        };
+        // need to clear the stickiness since workflow turned to passive
+        self.mutable_state.execution_info["sticky_task_list"] = String::new().into();
+        self.mutable_state.execution_info["sticky_schedule_to_start_timeout_seconds"] = 0.into();
         for event in events {
+            // Go: UpdateCurrentVersion(event.Version, true) + version history AddOrUpdateItem
+            let histories = self.mutable_state.version_histories.as_mut().ok_or(StateBuilderError::MissingVersionHistories)?;
+            let idx = histories.current_version_history_index as usize;
+            let history = histories.histories.get_mut(idx).ok_or(StateBuilderError::MissingVersionHistories)?;
+            add_or_update_version_item(&mut history.items, event.event_id, event.version)?;
+            self.mutable_state.execution_info["current_version"] = event.version.into();
+            self.mutable_state.execution_info["last_event_task_id"] = event.task_id.into();
             self.mutable_state.replicate_event(event.clone())?;
             match event.event_type.as_ref() {
                 Some(EventType::WorkflowExecutionStarted) => { self.mutable_state.replicate_workflow_execution_started_event(event); }
@@ -65,9 +84,34 @@ impl StateBuilder {
                 Some(EventType::MarkerRecorded) => { self.mutable_state.replicate_marker_recorded_event(event); }
                 Some(EventType::UpsertWorkflowSearchAttributes) => { self.mutable_state.replicate_upsert_workflow_search_attributes_event(event); }
                 Some(EventType::WorkflowExecutionCompleted | EventType::WorkflowExecutionFailed | EventType::WorkflowExecutionTimedOut | EventType::WorkflowExecutionCanceled | EventType::WorkflowExecutionTerminated | EventType::WorkflowExecutionContinuedAsNew) => { self.mutable_state.replicate_workflow_close_event(event.event_id, event); }
-                _ => {}
+                // Go: no mutable state action is needed
+                Some(EventType::RequestCancelActivityTaskFailed | EventType::CancelTimerFailed) => {}
+                // GAP: Semaphore* replication needs cadence-api attribute types (missing); see memory.
+                Some(EventType::SemaphoreAcquireInitiated | EventType::SemaphoreAcquired | EventType::SemaphoreReleased) => {}
+                // Go: BadRequestError "Unknown event type"
+                _ => return Err(StateBuilderError::UnknownEventType),
             }
         }
+        self.mutable_state.execution_info["last_first_event_id"] = first_event.event_id.into();
+        self.mutable_state.execution_info["next_event_id"] = (last_event.event_id + 1).into();
         Ok(())
     }
+}
+
+/// Go `VersionHistory.AddOrUpdateItem`.
+fn add_or_update_version_item(items: &mut Vec<cadence_api::types::VersionHistoryItem>, event_id: i64, version: i64) -> Result<(), StateBuilderError> {
+    let item = cadence_api::types::VersionHistoryItem { event_id, version };
+    match items.last_mut() {
+        None => items.push(item),
+        Some(last) if last.version > version => return Err(StateBuilderError::VersionHistoryItem),
+        Some(last) if last.version == version => {
+            if event_id < last.event_id { return Err(StateBuilderError::VersionHistoryItem); }
+            last.event_id = event_id;
+        }
+        Some(last) => {
+            if event_id <= last.event_id { return Err(StateBuilderError::VersionHistoryItem); }
+            items.push(item);
+        }
+    }
+    Ok(())
 }
