@@ -4969,6 +4969,7 @@ impl FromThrift for ContinueAsNewWorkflowExecutionDecisionAttributes {
             search_attributes: s.opt_struct(150)?,
             jitter_start_seconds: s.opt_i32(160)?,
             cron_overlap_policy: s.opt_enum(170)?,
+            active_cluster_selection_policy: s.opt_struct(180)?,
         })
     }
 }
@@ -4993,6 +4994,25 @@ impl ToThrift for ContinueAsNewWorkflowExecutionDecisionAttributes {
         f.ostruct(150, self.search_attributes.as_ref());
         f.oi32(160, self.jitter_start_seconds);
         f.oenum(170, self.cron_overlap_policy);
+        f.ostruct(180, self.active_cluster_selection_policy.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for AcquireSemaphoreDecisionAttributes {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            semaphore_name: s.req_string(10, "")?,
+            wait_timeout_seconds: s.opt_i32(20)?,
+        })
+    }
+}
+
+impl ToThrift for AcquireSemaphoreDecisionAttributes {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.semaphore_name);
+        f.oi32(20, self.wait_timeout_seconds);
         f.finish()
     }
 }
@@ -5126,6 +5146,7 @@ impl FromThrift for Decision {
             start_child_workflow_execution_decision_attributes: s.opt_struct(100)?,
             signal_external_workflow_execution_decision_attributes: s.opt_struct(110)?,
             upsert_workflow_search_attributes_decision_attributes: s.opt_struct(120)?,
+            acquire_semaphore_decision_attributes: s.opt_struct(130)?,
         })
     }
 }
@@ -5181,6 +5202,7 @@ impl ToThrift for Decision {
             self.upsert_workflow_search_attributes_decision_attributes
                 .as_ref(),
         );
+        f.ostruct(130, self.acquire_semaphore_decision_attributes.as_ref());
         f.finish()
     }
 }

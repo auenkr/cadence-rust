@@ -89,9 +89,6 @@ fn cancel_workflow_execution_decision_attributes(
 fn continue_as_new_workflow_execution_decision_attributes(
     v: p::ContinueAsNewWorkflowExecutionDecisionAttributes,
 ) -> Result<tasks::ContinueAsNewWorkflowExecutionDecisionAttributes, Status> {
-    if v.active_cluster_selection_policy.is_some() {
-        return Err(Status::unimplemented("ContinueAsNewWorkflowExecutionDecisionAttributes.active_cluster_selection_policy has not been ported."));
-    }
     Ok(tasks::ContinueAsNewWorkflowExecutionDecisionAttributes {
         workflow_type: v.workflow_type.map(|t| t::WorkflowType { name: t.name }),
         task_list: v.task_list.map(task_list).transpose()?,
@@ -125,6 +122,7 @@ fn continue_as_new_workflow_execution_decision_attributes(
         }),
         jitter_start_seconds: seconds(v.jitter_start)?,
         cron_overlap_policy: enum_in(v.cron_overlap_policy, e::CronOverlapPolicy::from_i32)?,
+        active_cluster_selection_policy: v.active_cluster_selection_policy.map(selection_policy_in),
     })
 }
 fn start_child_workflow_execution_decision_attributes(
@@ -280,6 +278,14 @@ pub fn decision(v: p::Decision) -> Result<tasks::Decision, Status> {
             result.decision_type = Some(e::DecisionType::RequestCancelExternalWorkflowExecution);
             result.request_cancel_external_workflow_execution_decision_attributes =
                 Some(request_cancel_external_workflow_execution_decision_attributes(v)?);
+        }
+        p::decision::Attributes::AcquireSemaphoreDecisionAttributes(v) => {
+            result.decision_type = Some(e::DecisionType::AcquireSemaphore);
+            result.acquire_semaphore_decision_attributes =
+                Some(tasks::AcquireSemaphoreDecisionAttributes {
+                    semaphore_name: v.semaphore_name,
+                    wait_timeout_seconds: seconds(v.wait_timeout)?,
+                });
         }
         _ => {
             return Err(Status::unimplemented(
