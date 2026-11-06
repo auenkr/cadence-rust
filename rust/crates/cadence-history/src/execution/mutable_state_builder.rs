@@ -20,10 +20,14 @@ use super::child_workflow::ChildExecutionInfo;
 use super::signal::SignalInfo;
 use super::timer::TimerInfo;
 use crate::mutable_state_activity::ActivityInfo;
-use crate::mutable_state_builder_ext::{
-    WORKFLOW_STATE_COMPLETED, WORKFLOW_STATE_CORRUPTED, WORKFLOW_STATE_CREATED,
-    WORKFLOW_STATE_RUNNING, WORKFLOW_STATE_VOID, WORKFLOW_STATE_ZOMBIE,
-};
+use crate::mutable_state_builder_ext as ext;
+
+const WORKFLOW_STATE_CREATED: i32 = ext::WORKFLOW_STATE_CREATED as i32;
+const WORKFLOW_STATE_RUNNING: i32 = ext::WORKFLOW_STATE_RUNNING as i32;
+const WORKFLOW_STATE_COMPLETED: i32 = ext::WORKFLOW_STATE_COMPLETED as i32;
+const WORKFLOW_STATE_ZOMBIE: i32 = ext::WORKFLOW_STATE_ZOMBIE as i32;
+const WORKFLOW_STATE_VOID: i32 = ext::WORKFLOW_STATE_VOID as i32;
+const WORKFLOW_STATE_CORRUPTED: i32 = ext::WORKFLOW_STATE_CORRUPTED as i32;
 
 pub const FIRST_EVENT_ID: i64 = 1;
 pub const EMPTY_EVENT_ID: i64 = -23;
