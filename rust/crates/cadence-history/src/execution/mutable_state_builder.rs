@@ -611,15 +611,14 @@ impl TypedMutableState {
     }
 
     pub fn delete_user_timer(&mut self, timer_id: &str) -> Result<()> {
-        match self.pending_timer_info_ids.remove(timer_id) {
-            Some(info) => {
-                self.pending_timer_event_id_to_id.remove(&info.started_id);
-                self.delete_timer_infos.insert(timer_id.to_string());
-                self.update_timer_infos.remove(timer_id);
-                Ok(())
-            }
-            None => internal(format!("unable to find timer ID: {timer_id} in mutable state")),
+        // Go DeleteUserTimer: a missing timer is logged as a data
+        // inconsistency, never returned as an error.
+        if let Some(info) = self.pending_timer_info_ids.remove(timer_id) {
+            self.pending_timer_event_id_to_id.remove(&info.started_id);
         }
+        self.update_timer_infos.remove(timer_id);
+        self.delete_timer_infos.insert(timer_id.to_string());
+        Ok(())
     }
 
     pub fn update_child_execution(&mut self, info: ChildExecutionInfo) {
