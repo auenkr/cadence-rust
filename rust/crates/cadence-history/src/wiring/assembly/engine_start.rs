@@ -23,11 +23,9 @@ use cadence_persistence::matching_domain_metadata::MatchingDomainMetadata;
 use cadence_persistence::sqlblobs::{timer_task_to_struct, transfer_task_to_struct, Encoding};
 
 use crate::engine::deps::{
-    CreateWorkflowMode, CreateWorkflowRequestMode, DomainCache, DomainCacheEntry, ExecutionContext,
-    ExecutionContextRef, HResult, HistoryError, MutableStateRef, TimeSource, EMPTY_EVENT_ID,
-    WORKFLOW_STATE_CREATED,
+    CreateWorkflowMode, CreateWorkflowRequestMode, DomainCacheEntry, ExecutionContextRef, HResult, HistoryError,
+    MutableStateRef, EMPTY_EVENT_ID, WORKFLOW_STATE_CREATED,
 };
-use crate::engine::deps_ms::MutableState;
 use crate::engine::notify_tasks::PersistedBlobRef;
 use crate::engine::register_domain_failover_callback::{
     DomainChangedFn, DomainFailoverHost, DomainLockFn, FailoverDlqPartition, FailoverDomainEntry,
@@ -113,7 +111,7 @@ impl EngineMutableState {
             execution_start_to_close_timeout_seconds: start.execution_start_to_close_timeout_seconds,
             task_start_to_close_timeout_seconds: start.task_start_to_close_timeout_seconds,
             initiator: request.continue_as_new_initiator,
-            continued_failure_reason: request.continued_failure_reason.clone(),
+            continued_failure_reason: request.continued_failure_reason.clone().unwrap_or_default(),
             continued_failure_details: request.continued_failure_details.clone(),
             last_completion_result: request.last_completion_result.clone(),
             original_execution_run_id: run_id.clone(),
@@ -254,7 +252,7 @@ impl EngineMutableState {
         let backoff_type = match attrs.initiator {
             None | Some(ContinueAsNewInitiator::CronSchedule) => BACKOFF_TYPE_CRON,
             Some(ContinueAsNewInitiator::RetryPolicy) => BACKOFF_TYPE_RETRY,
-            Some(ContinueAsNewInitiator::Decider) => {
+            Some(_) => {
                 return Err(HistoryError::internal("encounter continue as new iterator & first decision delay not 0"))
             }
         };
