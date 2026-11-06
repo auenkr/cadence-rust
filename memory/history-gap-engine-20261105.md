@@ -22,3 +22,13 @@ CI run (cadence-history clippy+test, green): https://github.com/auenkr/cadence-r
 | replace TODO(link) facades in engine/deps.rs, types.rs with real types | - | TODO |
 
 Note: new trait methods on MutableState (get_last_write_version, is_resource_duplicated, get_pending_*, get_completion_event) have no implementor yet; the real execution MutableStateBuilder must implement them.
+
+## gap-engine3 (2026-11-06): start_workflow_execution + register_domain_failover_callback
+- Ported from Go engineimpl: `engine/start_workflow_execution.rs` (start, signal_with_start, reuse policy, terminate-and-start, create-failure cleanup) and `engine/register_domain_failover_callback.rs`.
+- Real Go logic lives in the compiled engine tree; environment access goes through host traits `WorkflowStartHost` and `DomainFailoverHost` (fields `start_host`, `failover_host` on `HistoryEngine`).
+- CI: https://github.com/auenkr/cadence-rust/actions/runs/42221532971 head 9c28133faa9f30f016184e8736e28344c7e20bc6 conclusion success (rust-ci.yml, package=cadence-history, branch history-gap-engine3).
+- Remaining gaps (UNVERIFIED, assembly/resources/persistence trees are not compiled):
+  - No implementors yet for `WorkflowStartHost`, `DomainFailoverHost`; `build_engine` (wiring/assembly/engine_factory.rs) does not set the new fields.
+  - `EngineMutableState` lacks add_workflow_execution_started_event / add_first_decision_task_scheduled / add_decision_task_scheduled_event; `EngineExecutionContext` lacks update_workflow_execution_as_active / clear.
+  - queues.rs `notify_new_task` signature staleness; domain_cache.rs engine_entry should set failover_end_time.
+  - Remaining history_engine.go methods and TODO(link) facades in deps.rs/runtime.rs/types.rs/deps_ms.rs not yet replaced.
