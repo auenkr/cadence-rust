@@ -543,7 +543,6 @@ pub fn event(v: p::HistoryEvent) -> Result<st::HistoryEvent, Status> {
         Some(p::history_event::Attributes::SemaphoreAcquireInitiatedEventAttributes(a)) => { out.event_type = Some(enums::EventType::SemaphoreAcquireInitiated); out.semaphore_acquire_initiated_event_attributes = Some(semaphore_acquire_initiated_event_attributes(a)?); }
         Some(p::history_event::Attributes::SemaphoreAcquiredEventAttributes(a)) => { out.event_type = Some(enums::EventType::SemaphoreAcquired); out.semaphore_acquired_event_attributes = Some(semaphore_acquired_event_attributes(a)?); }
         Some(p::history_event::Attributes::SemaphoreReleasedEventAttributes(a)) => { out.event_type = Some(enums::EventType::SemaphoreReleased); out.semaphore_released_event_attributes = Some(semaphore_released_event_attributes(a)?); }
-        Some(_) => return Err(Status::unimplemented("This history event type has not been ported.")),
         None => return Err(Status::internal("History event attributes are missing.")),
     }
     Ok(out)

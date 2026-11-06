@@ -52,7 +52,6 @@ fn workflow_execution_started_event_attributes(
         active_cluster_selection_policy: v
             .active_cluster_selection_policy
             .map(selection_policy_out),
-        ..Default::default()
     }
 }
 fn workflow_execution_completed_event_attributes(
@@ -294,7 +293,6 @@ fn workflow_execution_continued_as_new_event_attributes(
         active_cluster_selection_policy: v
             .active_cluster_selection_policy
             .map(selection_policy_out),
-        ..Default::default()
     }
 }
 fn request_cancel_activity_task_failed_event_attributes(
