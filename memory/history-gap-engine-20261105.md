@@ -32,3 +32,9 @@ Note: new trait methods on MutableState (get_last_write_version, is_resource_dup
   - `EngineMutableState` lacks add_workflow_execution_started_event / add_first_decision_task_scheduled / add_decision_task_scheduled_event; `EngineExecutionContext` lacks update_workflow_execution_as_active / clear.
   - queues.rs `notify_new_task` signature staleness; domain_cache.rs engine_entry should set failover_end_time.
   - Remaining history_engine.go methods and TODO(link) facades in deps.rs/runtime.rs/types.rs/deps_ms.rs not yet replaced.
+
+## gap-engine4 (branch history-gap-engine4)
+- Added EngineMutableState started-event/first-decision/decision-scheduled, ExecutionContext as_active/clear, queue notify conversion.
+- New wiring/assembly/engine_start.rs: EngineStartHost (WorkflowStartHost) and EngineFailoverHost (DomainFailoverHost), wired in build_engine.
+- CI cadence-history: https://github.com/auenkr/cadence-rust/actions/runs/42226144095 head a1bf430119027afc5a7a97be6e38ff8e6ae4a614 conclusion success.
+- Remaining gaps: visibility writes, orphan history branch cleanup, workflow request dedup rows, ReplicateFailoverMarkers/DLQ failover (no-ops); history_engine.go NewEngine/Start/Stop and remaining TODO(link) facades in deps.rs/runtime.rs/types.rs not yet replaced.
