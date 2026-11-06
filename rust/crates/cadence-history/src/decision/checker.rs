@@ -13,6 +13,8 @@ pub trait ValidationContext: DomainReplicationLookup {
     fn search_policy(&self, domain: &str) -> Result<SearchAttributePolicy, DecisionError>;
     fn validate_cron(&self, schedule: &str) -> Result<(), DecisionError>;
     fn id_length_observation(&self, field: &str, domain: &str, value: &str);
+    /// Go `domainCache.GetDomainName(executionInfo.DomainID)`.
+    fn domain_name_by_id(&self, domain_id: &str) -> Result<String, DecisionError>;
 }
 fn length(context: &impl ValidationContext, field: &str, domain: &str, value: &str, message: &str) -> Result<(), DecisionError> {
     context.id_length_observation(field, domain, value);
@@ -35,6 +37,7 @@ pub fn validate(context: &impl ValidationContext, decision: &mut Decision, domai
             length(context, "ActivityID", &a.domain, &a.activity_id, "ActivityID exceeds length limit.")?;
             length(context, "ActivityType", &a.domain, &ty.name, "ActivityType exceeds length limit.")?;
             length(context, "Domain", &a.domain, &a.domain, "Domain exceeds length limit.")?;
+            let heartbeat_supplied = a.heartbeat_timeout_seconds.is_some();
             let mut timeouts = ActivityTimeouts { schedule_to_close_seconds: a.schedule_to_close_timeout_seconds.unwrap_or(0), schedule_to_start_seconds: a.schedule_to_start_timeout_seconds.unwrap_or(0), start_to_close_seconds: a.start_to_close_timeout_seconds.unwrap_or(0), heartbeat_seconds: a.heartbeat_timeout_seconds.unwrap_or(0) };
             normalize_activity_timeouts(&mut timeouts, defaults.workflow_timeout_seconds)?;
             if let Some(p) = &a.retry_policy {
@@ -44,7 +47,7 @@ pub fn validate(context: &impl ValidationContext, decision: &mut Decision, domai
             a.schedule_to_close_timeout_seconds = Some(timeouts.schedule_to_close_seconds);
             a.schedule_to_start_timeout_seconds = Some(timeouts.schedule_to_start_seconds);
             a.start_to_close_timeout_seconds = Some(timeouts.start_to_close_seconds);
-            a.heartbeat_timeout_seconds = Some(timeouts.heartbeat_seconds);
+            if heartbeat_supplied || timeouts.heartbeat_seconds != 0 { a.heartbeat_timeout_seconds = Some(timeouts.heartbeat_seconds); }
             Ok(())
         },
         D::StartTimer => {
@@ -53,9 +56,18 @@ pub fn validate(context: &impl ValidationContext, decision: &mut Decision, domai
             length(context, "TimerID", domain_name, &a.timer_id, "TimerId exceeds length limit.")?;
             validate_timer_timeout(&a.timer_id, a.start_to_fire_timeout_seconds.unwrap_or(0), context.max_length("TimerID", domain_name))
         },
-        D::RequestCancelActivityTask => validate_activity_cancel_attributes(decision.request_cancel_activity_task_decision_attributes.as_ref(), context.max_length("ActivityID", domain_name)),
-        D::CancelTimer => validate_timer_cancel_attributes(decision.cancel_timer_decision_attributes.as_ref(), context.max_length("TimerID", domain_name)),
-        D::RecordMarker => validate_record_marker_attributes(decision.record_marker_decision_attributes.as_ref(), context.max_length("MarkerName", domain_name)),
+        D::RequestCancelActivityTask => {
+            if let Some(a) = decision.request_cancel_activity_task_decision_attributes.as_ref().filter(|a| !a.activity_id.is_empty()) { context.id_length_observation("ActivityID", domain_name, &a.activity_id); }
+            validate_activity_cancel_attributes(decision.request_cancel_activity_task_decision_attributes.as_ref(), context.max_length("ActivityID", domain_name))
+        },
+        D::CancelTimer => {
+            if let Some(a) = decision.cancel_timer_decision_attributes.as_ref().filter(|a| !a.timer_id.is_empty()) { context.id_length_observation("TimerID", domain_name, &a.timer_id); }
+            validate_timer_cancel_attributes(decision.cancel_timer_decision_attributes.as_ref(), context.max_length("TimerID", domain_name))
+        },
+        D::RecordMarker => {
+            if let Some(a) = decision.record_marker_decision_attributes.as_ref().filter(|a| !a.marker_name.is_empty()) { context.id_length_observation("MarkerName", domain_name, &a.marker_name); }
+            validate_record_marker_attributes(decision.record_marker_decision_attributes.as_ref(), context.max_length("MarkerName", domain_name))
+        },
         D::CompleteWorkflowExecution => validate_complete_workflow_execution_attributes(decision.complete_workflow_execution_decision_attributes.as_ref()),
         D::FailWorkflowExecution => validate_fail_workflow_execution_attributes(decision.fail_workflow_execution_decision_attributes.as_ref()),
         D::CancelWorkflowExecution => validate_cancel_workflow_execution_attributes(decision.cancel_workflow_execution_decision_attributes.as_ref()),
@@ -73,16 +85,30 @@ pub fn validate(context: &impl ValidationContext, decision: &mut Decision, domai
             if a.workflow_id.is_empty() { return Err(DecisionError::new("Required field WorkflowID is not set on decision.")); }
             if a.workflow_type.as_ref().is_none_or(|t| t.name.is_empty()) { return Err(DecisionError::new("Required field WorkflowType is not set on decision.")); }
             length(context, "Domain", &a.domain, &a.domain, "Domain exceeds length limit.")?;
+            context.id_length_observation("WorkflowID", &a.domain, &a.workflow_id);
+            if let Some(t) = a.workflow_type.as_ref() { context.id_length_observation("WorkflowType", &a.domain, &t.name); }
             let max_id = context.max_length("WorkflowID", &a.domain);
             let max_type = context.max_length("WorkflowType", &a.domain);
             let max_task_list = context.max_length("TaskList", &a.domain);
             validate_start_child_execution_attributes(Some(a), &defaults, max_id, max_type, max_task_list, context.reserved_task_list_prefix(), |s| context.validate_cron(s))
         },
         D::ContinueAsNewWorkflowExecution => {
-            let policy = context.search_policy(domain_name)?;
-            validate_continue_as_new_workflow_execution_attributes(decision.continue_as_new_workflow_execution_decision_attributes.as_mut(), &defaults, context.max_length("WorkflowType", domain_name), context.max_length("TaskList", domain_name), context.reserved_task_list_prefix(), &policy)
+            let max_type = context.max_length("WorkflowType", domain_name);
+            let max_task_list = context.max_length("TaskList", domain_name);
+            let observe_type = |name: &str| context.id_length_observation("WorkflowType", domain_name, name);
+            if let Some(a) = decision.continue_as_new_workflow_execution_decision_attributes.as_ref() {
+                observe_type(a.workflow_type.as_ref().map_or(defaults.workflow_type_name.as_str(), |t| if t.name.is_empty() { defaults.workflow_type_name.as_str() } else { t.name.as_str() }));
+            }
+            validate_continue_as_new_workflow_execution_attributes(
+                decision.continue_as_new_workflow_execution_decision_attributes.as_mut(), &defaults, max_type, max_task_list, context.reserved_task_list_prefix(),
+                || context.domain_name_by_id(context.source_domain_id()),
+                |name| context.search_policy(name))
         },
         D::UpsertWorkflowSearchAttributes => validate_upsert_workflow_search_attributes(decision.upsert_workflow_search_attributes_decision_attributes.as_ref(), &context.search_policy(domain_name)?),
+        D::AcquireSemaphore => {
+            if let Some(a) = decision.acquire_semaphore_decision_attributes.as_ref().filter(|a| !a.semaphore_name.is_empty()) { context.id_length_observation("SemaphoreName", domain_name, &a.semaphore_name); }
+            validate_acquire_semaphore_attributes(decision.acquire_semaphore_decision_attributes.as_ref(), context.max_length("SemaphoreName", domain_name))
+        },
         _ => Err(DecisionError::new("Unknown decision type")),
     }
 }
@@ -108,18 +134,4 @@ impl<S: WorkflowSizeMutableState, O: WorkflowSizeObserver> WorkflowSizeChecker<'
         self.mutable_state.add_fail_workflow_event(self.completed_id, FAILURE_REASON_DECISION_BLOB_SIZE_EXCEEDS_LIMIT, message.as_bytes())?;
         Ok(true)
     }
-}
-
-/// TODO(link): shared Cadence API types currently omit this Go field.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ClusterAttribute { pub scope: String, pub name: String }
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ActiveClusterSelectionPolicy { pub cluster_attribute: Option<ClusterAttribute> }
-#[derive(Debug, Clone, Default)]
-pub struct ContinueAsNewPortAttributes {
-    pub attributes: cadence_api::tasks::ContinueAsNewWorkflowExecutionDecisionAttributes,
-    pub active_cluster_selection_policy: Option<ActiveClusterSelectionPolicy>,
-}
-pub fn inherit_active_cluster_selection_policy(attributes: &mut ContinueAsNewPortAttributes, previous: &Option<ActiveClusterSelectionPolicy>) {
-    if attributes.active_cluster_selection_policy.is_none() { attributes.active_cluster_selection_policy.clone_from(previous); }
 }

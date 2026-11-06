@@ -1,15 +1,24 @@
 //! Go task_handler.go control flow over primitive mutable-state operations.
 //! TODO(link): bind Operations to execution::MutableState after that package lands.
-use super::{DecisionError, AcquireSemaphoreDecisionAttributes};
+use super::{DecisionError, DecisionErrorKind, AcquireSemaphoreDecisionAttributes};
 use cadence_api::{enums::{DecisionType, ParentClosePolicy}, tasks::Decision};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ErrorKind { BadRequest, Internal, NotFound, Other }
+pub enum ErrorKind { BadRequest, Internal, NotFound, EventAlreadyStarted, Other }
 #[derive(Debug, Clone)]
 pub struct OperationError { pub kind: ErrorKind, pub message: String }
 pub type Result<T> = std::result::Result<T, OperationError>;
 impl From<DecisionError> for OperationError {
-    fn from(e: DecisionError) -> Self { Self { kind: ErrorKind::BadRequest, message: e.message } }
+    fn from(e: DecisionError) -> Self {
+        let kind = match e.kind {
+            DecisionErrorKind::BadRequest => ErrorKind::BadRequest,
+            DecisionErrorKind::Internal => ErrorKind::Internal,
+            DecisionErrorKind::EntityNotExists => ErrorKind::NotFound,
+            DecisionErrorKind::EventAlreadyStarted => ErrorKind::EventAlreadyStarted,
+            DecisionErrorKind::AlreadyCompleted | DecisionErrorKind::Other => ErrorKind::Other,
+        };
+        Self { kind, message: e.message }
+    }
 }
 #[derive(Debug, Clone, Default)]
 pub struct Activity { pub schedule_id: i64, pub started_id: i64, pub cancel_event_id: i64, pub activity_id: String, pub scheduled_time_unix_nanos: i64, pub started_time_unix_nanos: i64 }
@@ -52,9 +61,17 @@ pub trait Operations {
     fn cancel_workflow(&mut self, completed_id: i64, details: &[u8]) -> Result<()>;
     fn cron_backoff_seconds(&mut self) -> Result<Option<i32>>;
     fn retry_backoff_seconds(&self, reason: &str) -> Option<i32>;
+    /// Go retryCronContinueAsNew: the implementation loads the start event, builds the attributes
+    /// with `retry_cron_continue_as_new_attributes` and passes `attr.GetParentWorkflowDomain()`.
     fn retry_cron_continue_as_new(&mut self, completed_id: i64, seconds: i32, retry: bool, reason: Option<&str>, details: &[u8], completion_result: Option<&[u8]>) -> Result<()>;
-    fn active_cluster_selection_policy(&self) -> Option<super::checker::ActiveClusterSelectionPolicy>;
-    fn continue_as_new(&mut self, completed_id: i64, decision: &Decision, policy: Option<&super::checker::ActiveClusterSelectionPolicy>) -> Result<()>;
+    /// Go `GetStartEvent(ctx)` then `startAttributes.LastCompletionResult` (cron-after-failure path).
+    fn start_last_completion_result(&mut self) -> Result<Vec<u8>>;
+    /// Go: empty unless `HasParentExecution()`, then `domainCache.GetDomainName(executionInfo.ParentDomainID)`.
+    fn parent_domain_name(&mut self) -> Result<String>;
+    /// Go `domainCache.GetDomainName(executionInfo.DomainID)` used by upsert-search-attributes.
+    fn execution_domain_name(&mut self) -> Result<String>;
+    fn continue_as_new(&mut self, completed_id: i64, decision: &Decision, parent_domain_name: &str) -> Result<()>;
+    fn max_semaphore_name_length(&self) -> usize;
     fn record_marker(&mut self, completed_id: i64, decision: &Decision) -> Result<()>;
     fn initiate_cancel_external(&mut self, completed_id: i64, request_id: &str, decision: &Decision) -> Result<()>;
     fn initiate_signal_external(&mut self, completed_id: i64, request_id: &str, decision: &Decision) -> Result<()>;
@@ -77,12 +94,11 @@ pub struct TaskHandler<O: Operations> {
     pub fail_message: Option<String>,
     pub activity_not_started_cancelled: bool,
     pub stop_processing: bool,
-    pub continue_as_new_selection_policy: Option<super::checker::ActiveClusterSelectionPolicy>,
 }
 impl<O: Operations> TaskHandler<O> {
     pub fn new(operations: O, identity: String, completed_id: i64) -> Self {
         let buffered = operations.has_buffered_events();
-        Self { operations, identity, completed_id, has_unhandled_events_before_decisions: buffered, fail_decision: false, fail_decision_cause: None, fail_message: None, activity_not_started_cancelled: false, stop_processing: false, continue_as_new_selection_policy: None }
+        Self { operations, identity, completed_id, has_unhandled_events_before_decisions: buffered, fail_decision: false, fail_decision_cause: None, fail_message: None, activity_not_started_cancelled: false, stop_processing: false }
     }
     pub fn handler_fail_decision(&mut self, cause: &'static str, message: impl Into<String>) {
         self.fail_decision = true; self.fail_decision_cause = Some(cause); self.fail_message = Some(message.into()); self.stop_processing = true;
@@ -119,6 +135,11 @@ impl<O: Operations> TaskHandler<O> {
     pub fn handle_decision_with_result(&mut self, decision: &mut Decision) -> Result<Option<O::Dispatch>> {
         use DecisionType as D;
         let kind = decision.decision_type.unwrap_or(D::ScheduleActivityTask);
+        if kind == D::AcquireSemaphore {
+            let max_name = self.operations.max_semaphore_name_length();
+            self.handle_decision_acquire_semaphore(decision.acquire_semaphore_decision_attributes.as_ref(), max_name)?;
+            return Ok(None);
+        }
         self.operations.count_decision(kind);
         let (domain, error_prefix) = match kind {
             D::ScheduleActivityTask => (decision.schedule_activity_task_decision_attributes.as_ref().map(|a| a.domain.as_str()), "Unable to schedule activity across domain "),
@@ -151,6 +172,9 @@ impl<O: Operations> TaskHandler<O> {
             D::UpsertWorkflowSearchAttributes => "BAD_SEARCH_ATTRIBUTES",
             _ => return Err(OperationError { kind: ErrorKind::BadRequest, message: format!("Unknown decision type: {kind}") }),
         };
+        if kind == D::UpsertWorkflowSearchAttributes && self.operations.execution_domain_name().is_err() {
+            return Err(OperationError { kind: ErrorKind::Internal, message: format!("Unable to get domain for domainID: {}.", self.operations.workflow_identity().domain_id) });
+        }
         if !self.validate_decision_attr(decision, cause)? { return Ok(None); }
         let blob = match kind {
             D::ScheduleActivityTask => decision.schedule_activity_task_decision_attributes.as_ref().map(|a| (a.input.clone(), "ScheduleActivityTaskDecisionAttributes.Input exceeds size limit.")),
@@ -203,7 +227,7 @@ impl<O: Operations> TaskHandler<O> {
             },
             D::FailWorkflowExecution => { let a = decision.fail_workflow_execution_decision_attributes.as_ref().unwrap(); self.handle_workflow_failure(a.reason.as_deref(), &a.details)?; },
             D::CancelWorkflowExecution => self.operations.cancel_workflow(self.completed_id, &decision.cancel_workflow_execution_decision_attributes.as_ref().unwrap().details)?,
-            D::ContinueAsNewWorkflowExecution => { if self.operations.cancel_requested() { self.operations.cancel_workflow(self.completed_id, &[])?; } else { let policy = self.continue_as_new_selection_policy.clone().or_else(||self.operations.active_cluster_selection_policy()); self.operations.continue_as_new(self.completed_id, decision, policy.as_ref())?; } },
+            D::ContinueAsNewWorkflowExecution => { if self.operations.cancel_requested() { self.operations.cancel_workflow(self.completed_id, &[])?; } else { let parent_domain_name = self.operations.parent_domain_name()?; self.operations.continue_as_new(self.completed_id, decision, &parent_domain_name)?; } },
             D::RecordMarker => self.operations.record_marker(self.completed_id, decision)?,
             D::RequestCancelExternalWorkflowExecution => self.operations.initiate_cancel_external(self.completed_id, &uuid::Uuid::new_v4().to_string(), decision)?,
             D::SignalExternalWorkflowExecution => self.operations.initiate_signal_external(self.completed_id, &uuid::Uuid::new_v4().to_string(), decision)?,
@@ -226,7 +250,10 @@ impl<O: Operations> TaskHandler<O> {
         let (backoff, is_retry) = if retry.is_some() { (retry, true) } else { (self.cron_backoff()?, false) };
         match backoff {
             None => self.operations.fail_workflow(self.completed_id, reason.unwrap_or_default(), details),
-            Some(seconds) => self.operations.retry_cron_continue_as_new(self.completed_id, seconds, is_retry, reason, details, None),
+            Some(seconds) => {
+                let last_completion_result = self.operations.start_last_completion_result()?;
+                self.operations.retry_cron_continue_as_new(self.completed_id, seconds, is_retry, reason, details, Some(&last_completion_result))
+            },
         }
     }
     pub fn handle_decision_acquire_semaphore(&mut self, attr: Option<&AcquireSemaphoreDecisionAttributes>, max_name: usize) -> Result<()> {
@@ -259,6 +286,7 @@ pub fn retry_cron_continue_as_new_attributes(
     reason: Option<String>,
     details: Vec<u8>,
     completion_result: Vec<u8>,
+    active_cluster_selection_policy: Option<cadence_api::types::ActiveClusterSelectionPolicy>,
 ) -> cadence_api::tasks::ContinueAsNewWorkflowExecutionDecisionAttributes {
     cadence_api::tasks::ContinueAsNewWorkflowExecutionDecisionAttributes {
         workflow_type: start.workflow_type.clone(), task_list: start.task_list.clone(),
@@ -270,44 +298,11 @@ pub fn retry_cron_continue_as_new_attributes(
         last_completion_result: completion_result, header: start.header.clone(), memo: start.memo.clone(),
         search_attributes: start.search_attributes.clone(), jitter_start_seconds: start.jitter_start_seconds,
         cron_overlap_policy: start.cron_overlap_policy,
+        active_cluster_selection_policy,
     }
 }
 pub fn acquire_wait_timeout_seconds(supplied: Option<i32>, configured: std::time::Duration, built_in: std::time::Duration, mut warn: impl FnMut()) -> i32 {
     if let Some(seconds) = supplied.filter(|s| *s > 0) { return seconds; }
     let timeout = if configured < std::time::Duration::from_secs(1) { warn(); built_in } else { configured };
     timeout.as_secs().min(i32::MAX as u64) as i32
-}
-
-/// TODO(link): cadence-api has not yet exposed semaphore decision attributes.
-/// Keep them lossless in this package until the shared wire type is extended.
-#[allow(clippy::large_enum_variant)]
-pub enum PortDecision {
-    Decision(Decision),
-    AcquireSemaphore(Option<AcquireSemaphoreDecisionAttributes>),
-    ContinueAsNew(super::checker::ContinueAsNewPortAttributes),
-}
-impl<O: Operations> TaskHandler<O> {
-    pub fn handle_port_decisions(&mut self, context: &[u8], decisions: &mut [PortDecision], max_semaphore_name: usize) -> Result<Vec<O::Dispatch>> {
-        if self.operations.check_workflow_size()? { return Ok(Vec::new()); }
-        let mut results = Vec::new();
-        for decision in decisions {
-            let result = match decision {
-                PortDecision::Decision(decision) => self.handle_decision_with_result(decision)?,
-                PortDecision::AcquireSemaphore(attributes) => { self.handle_decision_acquire_semaphore(attributes.as_ref(), max_semaphore_name)?; None },
-                PortDecision::ContinueAsNew(attributes) => {
-                    super::checker::inherit_active_cluster_selection_policy(attributes, &self.operations.active_cluster_selection_policy());
-                    self.continue_as_new_selection_policy = attributes.active_cluster_selection_policy.clone();
-                    let mut decision = Decision { decision_type:Some(DecisionType::ContinueAsNewWorkflowExecution),continue_as_new_workflow_execution_decision_attributes:Some(attributes.attributes.clone()),..Decision::default() };
-                    let result = self.handle_decision_with_result(&mut decision);
-                    self.continue_as_new_selection_policy = None;
-                    attributes.attributes = decision.continue_as_new_workflow_execution_decision_attributes.unwrap();
-                    result?
-                },
-            };
-            if self.stop_processing { return Ok(Vec::new()); }
-            if let Some(result) = result { results.push(result); }
-        }
-        self.operations.set_execution_context(context);
-        Ok(results)
-    }
 }

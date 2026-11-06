@@ -84,7 +84,7 @@ fn continue_as_new_workflow_execution_decision_attributes(v:tasks::ContinueAsNew
         search_attributes: v.search_attributes.map(search_attributes),
         jitter_start: v.jitter_start_seconds.map(|s|duration(s.into())),
         cron_overlap_policy: v.cron_overlap_policy.map_or(0,|e|e as i32+1),
-        ..Default::default()
+        active_cluster_selection_policy: v.active_cluster_selection_policy.map(selection_policy_out),
     }
 }
 fn start_child_workflow_execution_decision_attributes(v:tasks::StartChildWorkflowExecutionDecisionAttributes) -> p::StartChildWorkflowExecutionDecisionAttributes {
@@ -138,6 +138,7 @@ pub fn decision_out(v: tasks::Decision) -> Result<p::Decision, Status> {
         Some(DecisionType::StartChildWorkflowExecution) => v.start_child_workflow_execution_decision_attributes.map(start_child_workflow_execution_decision_attributes).map(p::decision::Attributes::StartChildWorkflowExecutionDecisionAttributes),
         Some(DecisionType::SignalExternalWorkflowExecution) => v.signal_external_workflow_execution_decision_attributes.map(signal_external_workflow_execution_decision_attributes).map(p::decision::Attributes::SignalExternalWorkflowExecutionDecisionAttributes),
         Some(DecisionType::UpsertWorkflowSearchAttributes) => v.upsert_workflow_search_attributes_decision_attributes.map(upsert_workflow_search_attributes_decision_attributes).map(p::decision::Attributes::UpsertWorkflowSearchAttributesDecisionAttributes),
+        Some(DecisionType::AcquireSemaphore) => v.acquire_semaphore_decision_attributes.map(|a| p::AcquireSemaphoreDecisionAttributes { semaphore_name: a.semaphore_name, wait_timeout: a.wait_timeout_seconds.map(|s| duration(s.into())) }).map(p::decision::Attributes::AcquireSemaphoreDecisionAttributes),
         _ => return Err(Status::unimplemented("This decision type has not been ported.")),
     }.ok_or_else(|| Status::internal("Decision attributes are missing."))?;
     Ok(p::Decision { attributes: Some(attributes) })

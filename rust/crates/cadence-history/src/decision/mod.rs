@@ -15,11 +15,40 @@ pub const FAILURE_REASON_DECISION_BLOB_SIZE_EXCEEDS_LIMIT: &str = "DECISION_BLOB
 pub const FAILURE_REASON_SEMAPHORE_NOT_FOUND: &str = "SEMAPHORE_NOT_FOUND";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecisionError {
+    pub kind: DecisionErrorKind,
     pub message: String,
 }
+/// Go typed errors returned by the decision package (`types.BadRequestError`, ...).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecisionErrorKind {
+    BadRequest,
+    Internal,
+    EntityNotExists,
+    EventAlreadyStarted,
+    /// Go `types.WorkflowExecutionAlreadyCompletedError`.
+    AlreadyCompleted,
+    /// Go plain `errors.New(...)` values (e.g. ErrStaleState, ErrMaxAttemptsExceeded).
+    Other,
+}
 impl DecisionError {
+    /// Go `&types.BadRequestError{Message: m}`.
     pub fn new(m: impl Into<String>) -> Self {
-        Self { message: m.into() }
+        Self { kind: DecisionErrorKind::BadRequest, message: m.into() }
+    }
+    pub fn internal(m: impl Into<String>) -> Self {
+        Self { kind: DecisionErrorKind::Internal, message: m.into() }
+    }
+    pub fn entity_not_exists(m: impl Into<String>) -> Self {
+        Self { kind: DecisionErrorKind::EntityNotExists, message: m.into() }
+    }
+    pub fn already_completed(m: impl Into<String>) -> Self {
+        Self { kind: DecisionErrorKind::AlreadyCompleted, message: m.into() }
+    }
+    pub fn other(m: impl Into<String>) -> Self {
+        Self { kind: DecisionErrorKind::Other, message: m.into() }
+    }
+    pub fn event_already_started(m: impl Into<String>) -> Self {
+        Self { kind: DecisionErrorKind::EventAlreadyStarted, message: m.into() }
     }
 }
 impl std::fmt::Display for DecisionError {
@@ -426,13 +455,12 @@ pub fn validate_timer_cancel_attributes(
     let a = a.ok_or_else(|| {
         DecisionError::new("CancelTimerDecisionAttributes is not set on decision.")
     })?;
-    validate_timer_timeout(&a.timer_id, 1, max_id_length).map_err(|e| {
-        if e.message.contains("StartToFireTimeoutSeconds") {
-            DecisionError::new("TimerId is not set on decision.")
-        } else {
-            DecisionError::new(e.message)
-        }
-    })?;
+    if a.timer_id.is_empty() {
+        return Err(DecisionError::new("TimerId is not set on decision."));
+    }
+    if a.timer_id.len() > max_id_length {
+        return Err(DecisionError::new("TimerId exceeds length limit."));
+    }
     Ok(())
 }
 pub fn validate_record_marker_attributes(
@@ -552,6 +580,8 @@ pub struct ParentDecisionDefaults {
     pub task_list_kind: Option<cadence_api::enums::TaskListKind>,
     pub workflow_timeout_seconds: i32,
     pub decision_timeout_seconds: i32,
+    /// Previous run's `executionInfo.ActiveClusterSelectionPolicy` (ContinueAsNew inheritance).
+    pub active_cluster_selection_policy: Option<cadence_api::types::ActiveClusterSelectionPolicy>,
 }
 #[allow(clippy::too_many_arguments)]
 pub fn validate_start_child_execution_attributes(
@@ -571,9 +601,6 @@ pub fn validate_start_child_execution_attributes(
             "Required field WorkflowID is not set on decision.",
         ));
     }
-    if a.workflow_id.len() > max_workflow_id {
-        return Err(DecisionError::new("WorkflowId exceeds length limit."));
-    }
     let workflow_type = a
         .workflow_type
         .as_ref()
@@ -582,6 +609,9 @@ pub fn validate_start_child_execution_attributes(
         return Err(DecisionError::new(
             "Required field WorkflowType is not set on decision.",
         ));
+    }
+    if a.workflow_id.len() > max_workflow_id {
+        return Err(DecisionError::new("WorkflowId exceeds length limit."));
     }
     if workflow_type.name.len() > max_workflow_type {
         return Err(DecisionError::new("WorkflowType exceeds length limit."));
@@ -622,7 +652,8 @@ pub fn validate_continue_as_new_workflow_execution_attributes(
     max_workflow_type: usize,
     max_task_list: usize,
     reserved_task_list_prefix: &str,
-    search_policy: &SearchAttributePolicy,
+    domain_name: impl FnOnce() -> Result<String, DecisionError>,
+    search_policy: impl FnOnce(&str) -> Result<SearchAttributePolicy, DecisionError>,
 ) -> Result<(), DecisionError> {
     let a = a.ok_or_else(|| {
         DecisionError::new(
@@ -661,19 +692,25 @@ pub fn validate_continue_as_new_workflow_execution_attributes(
     if a.task_start_to_close_timeout_seconds.unwrap_or(0) <= 0 {
         a.task_start_to_close_timeout_seconds = Some(defaults.decision_timeout_seconds)
     }
+    // Go: inherit the previous run's policy when the decision has none.
+    if a.active_cluster_selection_policy.is_none() {
+        a.active_cluster_selection_policy.clone_from(&defaults.active_cluster_selection_policy);
+    }
     if a.backoff_start_interval_in_seconds.unwrap_or(0) < 0 {
         return Err(DecisionError::new("BackoffStartInterval is less than 0."));
     }
+    // Go resolves the domain name from executionInfo.DomainID before validating search attributes.
+    let domain_name = domain_name()?;
     if let Some(sa) = a.search_attributes.as_ref().filter(|sa| sa.indexed_fields.as_ref().is_some_and(|f| !f.is_empty())) {
         let attrs = cadence_api::tasks::UpsertWorkflowSearchAttributesDecisionAttributes {
             search_attributes: Some(sa.clone()),
         };
-        validate_upsert_workflow_search_attributes(Some(&attrs), search_policy)?
+        validate_upsert_workflow_search_attributes(Some(&attrs), &search_policy(&domain_name)?)?
     }
     Ok(())
 }
 
-#[derive(Debug,Clone,Default,PartialEq,Eq)]pub struct AcquireSemaphoreDecisionAttributes{pub semaphore_name:String,pub permits:i64,pub wait_timeout_seconds:Option<i32>}
+pub use cadence_api::tasks::AcquireSemaphoreDecisionAttributes;
 pub fn validate_acquire_semaphore_attributes(a:Option<&AcquireSemaphoreDecisionAttributes>,max_name_length:usize)->Result<(),DecisionError>{let a=a.ok_or_else(||DecisionError::new("AcquireSemaphoreDecisionAttributes is not set on decision."))?;if a.semaphore_name.is_empty(){return Err(DecisionError::new("SemaphoreName is not set on decision."))}
 if a.semaphore_name.len()>max_name_length{return Err(DecisionError::new("SemaphoreName exceeds length limit."))}
 if a.wait_timeout_seconds.unwrap_or(0)<0{return Err(DecisionError::new(format!("Invalid WaitTimeoutSeconds: {}",a.wait_timeout_seconds.unwrap())))}Ok(())}

@@ -253,6 +253,25 @@ pub struct Decision {
     )]
     pub request_cancel_external_workflow_execution_decision_attributes:
         Option<RequestCancelExternalWorkflowExecutionDecisionAttributes>,
+    #[serde(
+        rename = "acquireSemaphoreDecisionAttributes",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub acquire_semaphore_decision_attributes: Option<AcquireSemaphoreDecisionAttributes>,
+}
+
+/// shared.thrift `AcquireSemaphoreDecisionAttributes`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AcquireSemaphoreDecisionAttributes {
+    #[serde(rename = "semaphoreName", default, skip_serializing_if = "String::is_empty")]
+    pub semaphore_name: String,
+    #[serde(
+        rename = "waitTimeoutSeconds",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub wait_timeout_seconds: Option<i32>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1248,6 +1267,12 @@ pub struct ContinueAsNewWorkflowExecutionDecisionAttributes {
         skip_serializing_if = "Option::is_none"
     )]
     pub cron_overlap_policy: Option<CronOverlapPolicy>,
+    #[serde(
+        rename = "activeClusterSelectionPolicy",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub active_cluster_selection_policy: Option<crate::types::ActiveClusterSelectionPolicy>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
