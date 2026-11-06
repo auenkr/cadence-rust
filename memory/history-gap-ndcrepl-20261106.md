@@ -24,15 +24,15 @@ Only omissions: debug-level logs; `rebuild` clones version history.
 | Go file | Rust file | Status |
 |---|---|---|
 | task_processor.go (all 15 funcs: processorLoop, cleanupReplicationTaskLoop, cleanupAckedReplicationTasks, processResponse, syncShardStatusLoop, handleSyncShardStatus, processSingleTask, processTaskOnce, putReplicationTaskToDLQ, generateDLQRequest, triggerDataInconsistencyScan, isTransientRetryableError, shouldRetryDLQ, updateFailureMetric, taskProcessingStartWait, isShuttingDown) | task_processor.rs | identical |
-| dlq_handler.go | dlq_handler.rs | pending audit |
-| dynamic_task_batch_sizer.go | dynamic_task_batch_sizer.rs | pending audit |
-| metrics_emitter.go | metrics_emitter.rs | pending audit |
-| task_ack_manager.go | task_ack_manager.rs | pending audit |
-| task_executor.go | task_executor.rs | pending audit |
-| task_fetcher.go | task_fetcher.rs | pending audit |
-| task_hydrator.go | task_hydrator.rs | pending audit |
-| task_reader.go | task_reader.rs | pending audit |
-| task_store.go | task_store.rs | pending audit |
+| dlq_handler.go | dlq_handler.rs | identical |
+| dynamic_task_batch_sizer.go | dynamic_task_batch_sizer.rs | identical |
+| metrics_emitter.go | metrics_emitter.rs | identical |
+| task_ack_manager.go | task_ack_manager.rs | identical |
+| task_executor.go | task_executor.rs | differs -> fixed: history-v2 exponential histogram used metric name `cadence_latency` instead of `cadence_latency_histogram`; resend latency timers now span resend + retry like Go's deferred stopwatches |
+| task_fetcher.go | task_fetcher.rs | identical |
+| task_hydrator.go | task_hydrator.rs | identical |
+| task_reader.go | task_reader.rs | identical |
+| task_store.go | task_store.rs | differs -> fixed: Get dropped the `CacheLatency` timer (only the exponential histogram was emitted); now both |
 
 ## failover/
 | Go func | Status |
@@ -46,7 +46,8 @@ Only omissions: debug-level logs; `rebuild` clones version history.
 | Go func | Status |
 |---|---|
 | NewProcessor, NewShardMaxReadLevelFn, NewProcessorFromShard, Start, Stop, processLoop, sweepInterval, runSweep, processPendingFailovers, ProcessShard, domainName, ProcessPartition, FailoverPartitions, processAckLevels, processAckLevel, advanceAckLevel, Partition.key | identical |
-| host_limiter.go, interface.go, constants.go | pending audit (small) |
+| host_limiter.go | identical |
+| interface.go, constants.go | type/const definitions only, not diffed line by line |
 
 ## workflowcache/
 | Go func | Status |

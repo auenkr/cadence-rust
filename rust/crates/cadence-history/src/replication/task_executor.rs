@@ -140,7 +140,34 @@ impl TaskExecutorImpl {
         self.metrics
             .inc_counter(REREPLICATION_BY_ACTIVITY_SCOPE, "cadence_client_requests", &[]);
         let start = Instant::now();
-        let resend = self.resend(&retry_err).await;
+        // Go stops these (deferred) stopwatches when the function returns, so
+        // they cover the resend and the final retry.
+        let result = async {
+            match self.resend(&retry_err).await {
+                Ok(()) => {}
+                Err(ReplicationError::SkipTask) => {
+                    tracing::error!(
+                        domain_id = %retry_err.domain_id,
+                        workflow_id = %retry_err.workflow_id,
+                        run_id = %retry_err.run_id,
+                        "skip replication sync activity task"
+                    );
+                    return Ok(());
+                }
+                Err(resend_err) => {
+                    tracing::error!(
+                        domain_id = %retry_err.domain_id,
+                        workflow_id = %retry_err.workflow_id,
+                        run_id = %retry_err.run_id,
+                        error = %resend_err,
+                        "error resend history for sync activity"
+                    );
+                    return Err(err);
+                }
+            }
+            self.sync_activity_action(local, &request).await
+        }
+        .await;
         self.metrics.record_timer(
             REREPLICATION_BY_ACTIVITY_SCOPE,
             "cadence_client_latency",
@@ -153,29 +180,7 @@ impl TaskExecutorImpl {
             &[],
             start.elapsed(),
         );
-        match resend {
-            Ok(()) => {}
-            Err(ReplicationError::SkipTask) => {
-                tracing::error!(
-                    domain_id = %retry_err.domain_id,
-                    workflow_id = %retry_err.workflow_id,
-                    run_id = %retry_err.run_id,
-                    "skip replication sync activity task"
-                );
-                return Ok(());
-            }
-            Err(resend_err) => {
-                tracing::error!(
-                    domain_id = %retry_err.domain_id,
-                    workflow_id = %retry_err.workflow_id,
-                    run_id = %retry_err.run_id,
-                    error = %resend_err,
-                    "error resend history for sync activity"
-                );
-                return Err(err);
-            }
-        }
-        self.sync_activity_action(local, &request).await
+        result
     }
 
     async fn resend(&self, retry_err: &RetryTaskV2Error) -> Result<()> {
@@ -215,7 +220,7 @@ impl TaskExecutorImpl {
         );
         self.metrics.exponential_histogram(
             HISTORY_REPLICATION_V2_TASK_SCOPE,
-            "cadence_latency",
+            "cadence_latency_histogram",
             &[],
             start.elapsed(),
         );
@@ -250,7 +255,36 @@ impl TaskExecutorImpl {
         self.metrics
             .inc_counter(REREPLICATION_BY_HISTORY_SCOPE, "cadence_client_requests", &[]);
         let start = Instant::now();
-        let resend = self.resend(&retry_err).await;
+        let result = async {
+            match self.resend(&retry_err).await {
+                Ok(()) => {}
+                Err(ReplicationError::SkipTask) => {
+                    tracing::error!(
+                        domain_id = %retry_err.domain_id,
+                        workflow_id = %retry_err.workflow_id,
+                        run_id = %retry_err.run_id,
+                        "skip replication history task"
+                    );
+                    return Ok(());
+                }
+                Err(resend_err) => {
+                    tracing::error!(
+                        domain_id = %retry_err.domain_id,
+                        workflow_id = %retry_err.workflow_id,
+                        run_id = %retry_err.run_id,
+                        first_event_id = ?retry_err.start_event_id,
+                        first_event_version = ?retry_err.start_event_version,
+                        last_event_id = ?retry_err.end_event_id,
+                        last_event_version = ?retry_err.end_event_version,
+                        error = %resend_err,
+                        "error resend history for history event v2"
+                    );
+                    return Err(err);
+                }
+            }
+            self.history_replication_action(local, &request).await
+        }
+        .await;
         self.metrics.record_timer(
             REREPLICATION_BY_HISTORY_SCOPE,
             "cadence_client_latency",
@@ -263,33 +297,7 @@ impl TaskExecutorImpl {
             &[],
             start.elapsed(),
         );
-        match resend {
-            Ok(()) => {}
-            Err(ReplicationError::SkipTask) => {
-                tracing::error!(
-                    domain_id = %retry_err.domain_id,
-                    workflow_id = %retry_err.workflow_id,
-                    run_id = %retry_err.run_id,
-                    "skip replication history task"
-                );
-                return Ok(());
-            }
-            Err(resend_err) => {
-                tracing::error!(
-                    domain_id = %retry_err.domain_id,
-                    workflow_id = %retry_err.workflow_id,
-                    run_id = %retry_err.run_id,
-                    first_event_id = ?retry_err.start_event_id,
-                    first_event_version = ?retry_err.start_event_version,
-                    last_event_id = ?retry_err.end_event_id,
-                    last_event_version = ?retry_err.end_event_version,
-                    error = %resend_err,
-                    "error resend history for history event v2"
-                );
-                return Err(err);
-            }
-        }
-        self.history_replication_action(local, &request).await
+        result
     }
 
     /// `handleFailoverReplicationTask`.

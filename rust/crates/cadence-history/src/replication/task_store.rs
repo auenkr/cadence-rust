@@ -228,6 +228,7 @@ impl TaskStore {
         let start = self.time_source.now_nanos();
         let result = self.get_inner(cluster, cache, info, &tags).await;
         let elapsed = (self.time_source.now_nanos() - start).max(0) as u64;
+        self.metrics.record_timer(SCOPE, "cache_latency", &tags, Duration::from_nanos(elapsed));
         self.metrics.exponential_histogram(SCOPE, "exponential_cache_latency", &tags, Duration::from_nanos(elapsed));
         result
     }
