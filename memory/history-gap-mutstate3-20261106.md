@@ -17,3 +17,6 @@ Remaining gaps (not yet ported, honest list):
 - cadence-api lacks Semaphore event attributes and RequestCancelActivityTaskFailed attributes.
 - Started-id patching only covers activity completions; child-workflow patching and attempt in the duplicate key are simplified.
 - Consumers (state_rebuilder, repairer, integrity, cache/context) not migrated yet.
+
+## CI evidence
+- Run https://github.com/auenkr/cadence-rust/actions/runs/42225247372 (clippy + workspace tests), head ba8a07403e6e497d458cc8c14a7d20035828b373, conclusion: success.
