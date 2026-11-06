@@ -38,7 +38,10 @@ pub trait TransferStandbyDependencies:Send+Sync {
  fn discard_delay(&self)->Duration;
  fn advanced_visibility_writing_enabled(&self)->bool;
  async fn send_single_workflow_history(&self,cluster:&str,task:&dyn PersistenceTask,id:i64,version:i64)->Result<()>;
- async fn write_to_dlq(&self,task:&dyn PersistenceTask,info:HistoryResendInfo)->Result<()>;
+ /// Go: dlqWriter (TaskDLQWriter).
+ fn dlq_writer(&self)->Arc<dyn super::standby_task_util::TaskDLQWriter>;
+ /// Go: config.HistoryTaskDLQMode.
+ fn history_task_dlq_mode(&self)->StringPropertyFnWithDomainFilter;
 }
 pub struct TransferStandbyTaskExecutor {pub base:TransferTaskExecutorBase,pub cluster_name:String,pub dependencies:Arc<dyn TransferStandbyDependencies>}
 pub fn new_transfer_standby_task_executor(base:TransferTaskExecutorBase,cluster_name:String,dependencies:Arc<dyn TransferStandbyDependencies>)->Arc<dyn Executor>{Arc::new(TransferStandbyTaskExecutor {base,cluster_name,dependencies})}
@@ -46,18 +49,27 @@ enum Action {Activity,Decision,Close,Cancel,Signal,Child,Start,Upsert}
 enum PostAction {Activity(PushMatchingInfo),Decision(PushMatchingInfo),Resend(HistoryResendInfo)}
 impl TransferStandbyTaskExecutor {
  async fn remote_cluster_name(&self,task:&dyn PersistenceTask)->Result<String>{if self.dependencies.enable_transfer_queue_v2(self.base.shard.get_shard_id()){super::standby_task_util::get_remote_cluster_name(&self.base.shard.get_cluster_metadata().get_current_cluster_name(),self.base.shard.get_active_cluster_manager().as_ref(),task).await}else{Ok(self.cluster_name.clone())}}
- pub async fn get_current_time(&self,task:&dyn PersistenceTask)->Result<Time>{let name=tokio::time::timeout(Duration::from_secs(1),self.remote_cluster_name(task)).await.map_err(|_|TaskError::ContextDeadlineExceeded)??;Ok(self.dependencies.current_time(&name))}
+ /// Go: getCurrentTime (always the standby cluster's time, no remote lookup).
+ pub fn get_current_time(&self,_task:&dyn PersistenceTask)->Result<Time>{Ok(self.dependencies.current_time(&self.cluster_name))}
  async fn process_transfer(&self,task:&dyn PersistenceTask,event_id:i64,closed:bool,action:Action)->Result<()> {
+  // Go builds getStandbyPostActionFn (and reads the clock) before loading the workflow.
+  let now=self.get_current_time(task);
+  if let Err(e)=&now{self.base.logger.error("getStandbyPostActionFn error getting current time, fallback to standbyTaskPostActionNoOp",&[tag::error(e)]);}
   let Some(w)=self.dependencies.load_workflow(task,event_id).await.map_err(|e|if e==TaskError::ContextDeadlineExceeded{TaskError::WorkflowBusy}else{e})? else{return Ok(());};
   let result=if !w.running()&&!closed {Ok(None)}else{self.action(task,w.as_ref(),action).await};
-  let info=match result{Ok(info)=>info,Err(e)=>{w.release(Some(e.clone()));return Err(e);}};w.release(None);
+  // Go: redispatch errors release with nil error.
+  let info=match result{Ok(info)=>info,Err(e)=>{w.release(if matches!(e,TaskError::Redispatch(_)){None}else{Some(e.clone())});return Err(e);}};w.release(None);
   let Some(info)=info else{return Ok(());};
-  let now=match self.get_current_time(task).await{Ok(now)=>now,Err(_)=>return Err(TaskError::Redispatch("post action is pending transfer".into()))};
+  let now=match now{Ok(now)=>now,Err(_)=>return Err(TaskError::Redispatch("post action is pending transfer".into()))};
   if now.before(task.get_visibility_timestamp().add(self.dependencies.resend_delay())){return Err(TaskError::Redispatch("post action is pending transfer".into()));}
   match info {
    PostAction::Activity(info)=>self.push_activity(task,Some(info)).await,
    PostAction::Decision(info)=>self.push_decision(task,Some(info)).await,
-   PostAction::Resend(info)=>if now.before(task.get_visibility_timestamp().add(self.dependencies.discard_delay())){self.fetch_history_from_remote(task,Some(info)).await}else{self.dependencies.write_to_dlq(task,info).await},
+   PostAction::Resend(info)=>if now.before(task.get_visibility_timestamp().add(self.dependencies.discard_delay())){self.fetch_history_from_remote(task,Some(info)).await}else{
+    let discard=super::standby_task_util::standby_task_post_action_write_to_dlq(self.dependencies.dlq_writer(),self.base.shard.clone(),self.dependencies.history_task_dlq_mode());
+    let post:super::standby_task_util::PostActionInfo=Some(Arc::new(info));
+    discard(task,post,&self.base.logger).await
+   },
   }
  }
  async fn action(&self,task:&dyn PersistenceTask,w:&dyn TransferWorkflow,action:Action)->Result<Option<PostAction>> {
