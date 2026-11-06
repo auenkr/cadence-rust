@@ -78,6 +78,9 @@ pub enum HistoryError {
     StickyWorkerUnavailable,
     #[error("version histories do not exist")]
     MissingVersionHistories,
+    /// `activecluster.ClusterAttributeNotFoundError`
+    #[error("{0}")]
+    ClusterAttributeNotFound(String),
     /// Anything else (Go `errors.New` / `fmt.Errorf`).
     #[error("{0}")]
     Other(String),

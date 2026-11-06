@@ -56,6 +56,12 @@ pub trait MutableState: Send + Sync {
     fn get_pending_decision(&self) -> Option<crate::mutable_state::DecisionInfo>;
     async fn get_completion_event(&self) -> HResult<cadence_api::service_types::HistoryEvent>;
     fn terminate_workflow(&self, first_event_id: i64, reason: &str, details: &[u8], identity: &str) -> HResult<()>;
+    /// `AddWorkflowExecutionStartedEvent` (start path of `startWorkflowHelper`).
+    fn add_workflow_execution_started_event(&self, execution: &WorkflowExecution, request: &HistoryStartWorkflowExecutionRequest) -> HResult<cadence_api::service_types::HistoryEvent>;
+    /// `AddFirstDecisionTaskScheduled`
+    fn add_first_decision_task_scheduled(&self, start_event: &cadence_api::service_types::HistoryEvent) -> HResult<()>;
+    /// `AddDecisionTaskScheduledEvent(bypassTaskGeneration)`
+    fn add_decision_task_scheduled_event(&self, bypass_task_generation: bool) -> HResult<()>;
 }
 #[async_trait]
 pub trait ExecutionContext: Send + Sync {
@@ -63,6 +69,10 @@ pub trait ExecutionContext: Send + Sync {
     fn get_workflow_execution(&self) -> Option<super::deps::MutableStateRef>;
     async fn load_workflow_execution(&self) -> HResult<super::deps::MutableStateRef>;
     async fn update_workflow_execution_tasks(&self, now: i64) -> HResult<()>;
+    /// `UpdateWorkflowExecutionAsActive`
+    async fn update_workflow_execution_as_active(&self, now: i64) -> HResult<()>;
+    /// `Clear` (drops the cached mutable state)
+    fn clear(&self);
 }
 
 #[derive(Debug, Clone, Default)]
