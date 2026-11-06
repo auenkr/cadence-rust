@@ -169,10 +169,16 @@ async fn send_error(w: &Mutex<OwnedWriteHalf>, id: u32, code: u8, trace: &[u8; 2
 
 /// Encode a call response (checksum none) split into frames.
 fn response_frames(id: u32, trace: [u8; 25], app_error: bool, arg2: Vec<u8>, arg3: Vec<u8>) -> Vec<Frame> {
-    // First frame: flags, code, trace, transport headers (as=thrift), csum type, args.
+    response_frames_as(id, trace, app_error, "thrift", arg2, arg3)
+}
+
+/// Like [`response_frames`] with an explicit `as` transport header (`thrift` / `json`).
+fn response_frames_as(id: u32, trace: [u8; 25], app_error: bool, encoding: &str, arg2: Vec<u8>, arg3: Vec<u8>) -> Vec<Frame> {
+    // First frame: flags, code, trace, transport headers (as=<encoding>), csum type, args.
     let mut head = vec![0u8, u8::from(app_error)];
     head.extend_from_slice(&trace);
-    head.extend_from_slice(&[1, 2, b'a', b's', 6, b't', b'h', b'r', b'i', b'f', b't']);
+    head.extend_from_slice(&[1, 2, b'a', b's', encoding.len() as u8]);
+    head.extend_from_slice(encoding.as_bytes());
     head.push(0);
     let mut stream: Vec<u8> = Vec::new(); // chunk stream: (len,bytes) for arg1, arg2, arg3
     let mut chunks: Vec<(usize, Vec<u8>)> = Vec::new(); // (arg index, data)
@@ -324,7 +330,60 @@ pub async fn dispatch(state: &ServerState, procedure: &str, args: &Struct) -> Re
     })
 }
 
+/// Ringpop gossip (`ringpop` TChannel service, JSON encoded) shares the History
+/// TChannel listener, as in Go where ringpop registers on the service dispatcher's channel.
+async fn handle_ringpop(w: &Mutex<OwnedWriteHalf>, id: u32, call: Call, handler: cadence_service_core::ringpop_tchannel::RingpopHandler) -> Result<()> {
+    use cadence_service_core::ringpop_tchannel::RingpopError;
+    if call.headers.get("as").map(String::as_str) != Some("json") {
+        return send_error(w, id, 6, &call.trace, "Cadence TChannel requires json encoding").await;
+    }
+    let Ok(method) = String::from_utf8(call.args[0].clone()) else {
+        return send_error(w, id, 6, &call.trace, "Malformed TChannel method").await;
+    };
+    let headers: Option<HashMap<String, String>> = match serde_json::from_slice(&call.args[1]) {
+        Ok(v) => v,
+        Err(e) => return send_error(w, id, 6, &call.trace, &format!("Malformed TChannel JSON headers: {e}")).await,
+    };
+    let remaining = (call.started + call.ttl).saturating_duration_since(Instant::now());
+    let result = match tokio::time::timeout(remaining, handler.call(method, headers, call.args[2].clone())).await {
+        Ok(r) => r,
+        Err(_) => return send_error(w, id, 1, &call.trace, "Request timed out").await,
+    };
+    let (app, arg2, mut body) = match result {
+        Ok(resp) => {
+            let arg2 = match resp.headers {
+                None => b"null\n".to_vec(),
+                Some(h) => {
+                    let mut b = serde_json::to_vec(&h)?;
+                    b.push(b'\n');
+                    b
+                }
+            };
+            (false, arg2, resp.body)
+        }
+        Err(RingpopError::Application(message)) => {
+            let mut b = serde_json::to_vec(&serde_json::json!({"type": "error", "message": message}))?;
+            b.push(b'\n');
+            (true, b"null\n".to_vec(), b)
+        }
+        Err(RingpopError::System(m)) => return send_error(w, id, 6, &call.trace, &m).await,
+    };
+    if !body.is_empty() && !body.ends_with(b"\n") {
+        body.push(b'\n');
+    }
+    for f in response_frames_as(id, call.trace, app, "json", arg2, body) {
+        write_frame(w, f).await?;
+    }
+    Ok(())
+}
+
 async fn handle_call(w: Arc<Mutex<OwnedWriteHalf>>, id: u32, call: Call, state: ServerState) -> Result<()> {
+    if call.service == "ringpop" {
+        return match state.ringpop.clone() {
+            Some(h) => handle_ringpop(&w, id, call, h).await,
+            None => send_error(&w, id, 6, &call.trace, "Unknown TChannel service").await,
+        };
+    }
     if call.service != SERVICE_NAME {
         return send_error(&w, id, 6, &call.trace, "Unknown TChannel service").await;
     }

@@ -93,7 +93,7 @@ impl ShardRegistry {
                 self.num_shards
             )));
         }
-        let owner = self.env.membership.lookup(&shard_id.to_string());
+        let owner = self.env.membership.lookup(&crate::lookup::shard_key(shard_id as i32));
         if let Err(e) = check_ownership(shard_id, self.env.membership.who_am_i(), owner.as_ref()) {
             // Not (or no longer) ours: drop any stale local state.
             self.close_shard(shard_id);
@@ -156,7 +156,7 @@ impl ShardRegistry {
         let who = self.env.membership.who_am_i().to_string();
         let ids: Vec<u32> = self.entries.lock().unwrap().keys().copied().collect();
         for id in ids {
-            let owner = self.env.membership.lookup(&id.to_string());
+            let owner = self.env.membership.lookup(&crate::lookup::shard_key(id as i32));
             if check_ownership(id, &who, owner.as_ref()).is_err() {
                 self.close_shard(id);
             }
