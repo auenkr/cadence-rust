@@ -37,3 +37,7 @@ Read this checkpoint, history-port-audit-20261105.md, individual gap notes and a
   history-gap-transferexec (head 318362c, CI rerun 42234619633; audit incomplete).
 - Worker mutstate4 (Add*/Replicate* methods from mutable_state_builder_methods_*.go) failed on rate limit before any commit; branch deleted. Relaunch next session.
 - Next: port Add*/Replicate* methods, real queue factory (visibility writer + archival client), TLS, dynamic config backends, grpc/thrift wrapper audit; then mixed-cluster gate.
+- 20:20 update: master CI after engine4 GREEN (run 42234625308). Merged apitypes (0d6f6a4, CI green per crate on code heads) and mutstate4 (CI 42235261718 GREEN after merging master): typed Add*/Replicate* for timer, timedout, completed, cancellation, common. Still unported: activity, child_workflow, signal, started, decision, semaphore methods; task generation/events cache/insertWorkflowRequest in ported methods.
+- history-gap-transferexec NOT merged: CI rerun 42234619633 FAILED (needs master merge + fix); audit incomplete.
+- engine4 remaining gaps: visibility writes/orphan branch cleanup no-op, request dedup rows, replicate_failover_markers no-op, no DLQ failover processor, NewEngine/Start/Stop/createMutableState + engine/interface.go not ported, TODO(link) facades in deps.rs/runtime.rs/types.rs.
+- apitypes gaps: ParentWorkflowDomainID/jitter_start_seconds lack Thrift fields; state_builder reads parent_workflow_domain not _id; no round-trip tests for new converters.
