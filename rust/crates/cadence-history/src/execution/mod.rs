@@ -30,3 +30,4 @@ pub mod workflow_repairer;
 pub mod semaphore;
 pub mod cache;
 pub mod mutable_state_decision_task_manager;
+pub mod mutable_state_builder;
