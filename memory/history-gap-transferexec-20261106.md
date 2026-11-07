@@ -26,4 +26,6 @@ Branch: history-gap-transferexec. Go: go/service/history/task. Rust: rust/crates
 | task_util.go, fetcher, redispatcher, processor, priority | not yet audited | see remaining gaps |
 
 ## Evidence
-CI run: see below once recorded.
+- 2026-11-07: merged origin/master; added `target_workflow_id` and `task_list` to `StartChildExecutionTask` in `task/deps.rs` (Go `persistence.StartChildExecutionTask` parity; the field was missing, so run 42234619633 failed to compile).
+- CI (rust-ci, package=cadence-history): https://github.com/auenkr/cadence-rust/actions/runs/42337445980 head a9e41851b conclusion success.
+- Re-checked the standby function list against Go: no new gaps. Still open: header argument not forwarded in recordChildExecutionStarted; task_util/fetcher/redispatcher/processor/priority not audited.
