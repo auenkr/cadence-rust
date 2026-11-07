@@ -231,6 +231,7 @@ impl TypedMutableState {
             &execution.run_id,
             &request_id,
             &event,
+            false,
         )?;
 
         // Go: SetHistoryTree(RunID) is not wired here.
@@ -278,12 +279,14 @@ impl TypedMutableState {
             &execution.run_id,
             &request_id,
             &event,
+            true,
         )?;
         Ok(event)
     }
 
     /// Go `ReplicateWorkflowExecutionStartedEvent` (task generation, events
     /// cache write and ACSP blob not wired).
+    #[allow(clippy::too_many_arguments)]
     pub fn replicate_workflow_execution_started_event(
         &mut self,
         env: &mut StartedEnv,
@@ -292,6 +295,7 @@ impl TypedMutableState {
         run_id: &str,
         request_id: &str,
         start_event: &HistoryEvent,
+        generate_delayed_decision_tasks: bool,
     ) -> Result<()> {
         let Some(a) = start_event.workflow_execution_started_event_attributes.as_ref() else {
             return internal_err("WorkflowExecutionStarted event is missing attributes");
@@ -387,9 +391,12 @@ impl TypedMutableState {
         if let Some(pc) = a.partition_config.as_ref() {
             self.execution_info.partition_config = pc.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         }
-        // Not wired: ActiveClusterSelectionPolicy blob, writeEventToCache,
-        // GenerateWorkflowStartTasks / GenerateRecordWorkflowStartedTasks /
-        // GenerateDelayedDecisionTasks.
+        // Not wired: ActiveClusterSelectionPolicy blob, writeEventToCache.
+        self.run_task_generator(0, |g| g.generate_workflow_start_tasks(ts, start_event))?;
+        self.run_task_generator(0, |g| g.generate_record_workflow_started_tasks(start_event))?;
+        if generate_delayed_decision_tasks && a.first_decision_task_backoff_seconds.unwrap_or_default() > 0 {
+            self.run_task_generator(0, |g| g.generate_delayed_decision_tasks(start_event))?;
+        }
         Ok(())
     }
 }

@@ -514,13 +514,39 @@ impl TypedMutableState {
         self.state_in_db = self.execution_info.state;
         self.next_event_id_in_db = self.execution_info.next_event_id;
         self.tasks.clear();
+        self.transfer_tasks.clear();
+        self.timer_tasks.clear();
         self.workflow_requests.clear();
         self.insert_workflow_requests.clear();
         self.history_events.clear();
     }
 
+    /// Go `closeTransactionHandleActivityUserTimerTasks` (must run last in
+    /// prepareCloseTransaction).
+    pub fn close_transaction_handle_activity_user_timer_tasks(&mut self) -> Result<()> {
+        if !self.is_workflow_execution_running() {
+            return Ok(());
+        }
+        self.run_task_generator(0, |g| g.generate_activity_timer_tasks())?;
+        self.run_task_generator(0, |g| g.generate_user_timer_tasks())
+    }
+
+    /// Drains generated transfer/timer tasks into the persistence task map
+    /// (Go `insertTransferTasks`/`insertTimerTasks` in `TasksByCategory`).
+    fn drain_encoded_tasks(&mut self) -> Result<BTreeMap<HistoryTaskCategory, Vec<Task>>> {
+        let transfer = std::mem::take(&mut self.transfer_tasks);
+        let timer = std::mem::take(&mut self.timer_tasks);
+        let mut by_category = self.tasks.clone();
+        for (category, tasks) in super::generated_task_encoding::encode_generated_tasks(&transfer, &timer)? {
+            by_category.entry(category).or_default().extend(tasks);
+        }
+        Ok(by_category)
+    }
+
     /// Go `CloseTransactionAsMutation`.
     pub fn close_transaction_as_mutation(&mut self) -> Result<(TypedWorkflowMutation, Vec<HistoryEvent>)> {
+        self.close_transaction_handle_activity_user_timer_tasks()?;
+        let tasks_by_category = self.drain_encoded_tasks()?;
         let events = std::mem::take(&mut self.history_events);
         self.advance_version_history(&events)?;
 
@@ -556,7 +582,7 @@ impl TypedMutableState {
             delete_signal_requested_ids: self.delete_signal_requested_ids.iter().cloned().collect(),
             new_buffered_events: self.update_buffered_events.clone(),
             clear_buffered_events: self.clear_buffered_events,
-            tasks_by_category: self.tasks.clone(),
+            tasks_by_category,
             workflow_requests: self.workflow_requests.clone(),
             condition: self.next_event_id_in_db,
         };
@@ -569,6 +595,8 @@ impl TypedMutableState {
         if !self.update_buffered_events.is_empty() || !self.buffered_events.is_empty() {
             return internal("cannot close transaction as snapshot with buffered events");
         }
+        self.close_transaction_handle_activity_user_timer_tasks()?;
+        let tasks_by_category = self.drain_encoded_tasks()?;
         let events = std::mem::take(&mut self.history_events);
         self.advance_version_history(&events)?;
         let snapshot = TypedWorkflowSnapshot {
@@ -582,7 +610,7 @@ impl TypedMutableState {
             request_cancel_infos: self.pending_request_cancel_info_ids.values().cloned().collect(),
             signal_infos: self.pending_signal_info_ids.values().cloned().collect(),
             signal_requested_ids: self.pending_signal_requested_ids.iter().cloned().collect(),
-            tasks_by_category: self.tasks.clone(),
+            tasks_by_category,
             workflow_requests: self.workflow_requests.clone(),
             condition: self.next_event_id_in_db,
         };
@@ -841,6 +869,8 @@ mod tests {
     #[test]
     fn mutation_tracks_updates_and_deletes_then_resets() {
         let mut state = TypedMutableState::new();
+        state.execution_info.domain_id = "11111111-1111-1111-1111-111111111111".into();
+        state.execution_info.run_id = "22222222-2222-2222-2222-222222222222".into();
         state.update_activity(ActivityInfo { schedule_id: 5, activity_id: "a".into(), ..ActivityInfo::default() });
         state.update_user_timer(TimerInfo { timer_id: "t".into(), started_id: 7, ..TimerInfo::default() });
         let (m, _) = state.close_transaction_as_mutation().unwrap();

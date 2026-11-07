@@ -271,6 +271,7 @@ impl TypedMutableState {
             .and_then(|a| a.first_decision_task_backoff_seconds)
             .unwrap_or_default();
         if backoff != 0 {
+            self.run_task_generator(0, |g| g.generate_delayed_decision_tasks(start_event))?;
             return Ok(false);
         }
         self.add_decision_task_scheduled_event(env, false)?;

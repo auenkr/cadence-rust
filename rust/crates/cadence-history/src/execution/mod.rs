@@ -40,4 +40,5 @@ pub mod mutable_state_methods_child_workflow;
 pub mod mutable_state_methods_signal;
 pub mod mutable_state_methods_activity;
 pub mod mutable_state_methods_started;
+pub mod generated_task_encoding;
 pub mod mutable_state_methods_decision;
