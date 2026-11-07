@@ -9,6 +9,7 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use cadence_api::admin::*;
+use cadence_api::tasks::RecordActivityTaskHeartbeatResponse;
 use cadence_api::service_types::{DescribeWorkflowExecutionResponse, HistoryEvent};
 use cadence_api::types::{ReplicationTask, ResetWorkflowExecutionResponse, StartWorkflowExecutionResponse};
 
