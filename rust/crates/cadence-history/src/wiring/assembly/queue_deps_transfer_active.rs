@@ -47,7 +47,7 @@ use crate::task::transfer_active_task_executor::{
     HistorySignalRequest, HistoryStartWorkflowRequest, HistoryTerminateRequest, ParentClosePolicy,
     ParentClosePolicyRequest, RecordChildExecutionCompletedRequest, RemoveSignalMutableStateRequest,
     RequestCancelInfo, ResetPointInfo, ResetVersionHistory, ScheduleDecisionTaskRequest, SignalInfo,
-    StartChildAttributes, TransferActiveDependencies, WorkflowExecutionRef, WorkflowResetRequest,
+    StartChildAttributes, StartChildRetryPolicy, TransferActiveDependencies, WorkflowExecutionRef, WorkflowResetRequest,
 };
 use crate::wiring::resources::domain_cache::HistoryDomainCache;
 use crate::task::transfer_task_executor_base::{DecisionState, StartEvent};
