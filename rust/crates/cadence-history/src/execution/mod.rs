@@ -36,3 +36,4 @@ pub mod mutable_state_methods_timer;
 pub mod mutable_state_methods_timedout;
 pub mod mutable_state_methods_completed;
 pub mod mutable_state_methods_cancellation;
+pub mod mutable_state_methods_activity;
