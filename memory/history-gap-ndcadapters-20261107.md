@@ -19,4 +19,4 @@ Status: PARTIAL. `UnwiredReplicator` is no longer wired; `ndc_adapters::NdcRepli
 8. `Replicator` trait ignores contexts/deadlines (as before).
 
 ## CI
-See final line below (filled after the run).
+cadence-history clippy+test: https://github.com/auenkr/cadence-rust/actions/runs/42341600908 head 7e038b33cba92c60303652ee85c2f70e5a35c635 conclusion success (code head; this line added after).
