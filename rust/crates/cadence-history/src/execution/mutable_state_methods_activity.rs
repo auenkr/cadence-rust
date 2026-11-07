@@ -533,6 +533,7 @@ impl TypedMutableState {
     /// Go `RetryActivity`. `fatal` is `failureOptions.FailureCategory == Fatal`;
     /// `jitter_sample` is the `rand.Float64()` value; `GenerateActivityRetryTasks`
     /// is the caller's job on `Ok(true)`.
+    #[allow(clippy::too_many_arguments)]
     pub fn retry_activity(
         &mut self,
         schedule_id: i64,
