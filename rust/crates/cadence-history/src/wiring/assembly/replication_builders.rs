@@ -301,7 +301,8 @@ impl crate::engine::runtime::ReplicationTaskStore for EngineTaskStore {
     }
 }
 
-/// Placeholder for the NDC `Replicator` (see module docs).
+/// Former placeholder for the NDC `Replicator`; superseded by
+/// `ndc_adapters::NdcReplicator` (kept for tests / fallback).
 pub struct UnwiredReplicator;
 
 #[async_trait]
@@ -521,7 +522,10 @@ impl ReplicationFactory for ReplicationFactoryImpl {
             dlq_handler: Arc::new(SqlReplicationDlqHandler::new(dlq)),
             ack_manager: Arc::new(SqlReplicationAckManager::new(ack_manager)),
             hydrator: Arc::new(EngineHydrator { inner: hydrator }),
-            replicator: Arc::new(UnwiredReplicator),
+            replicator: Arc::new(crate::wiring::assembly::ndc_adapters::NdcReplicator::new(
+                &ctx.core,
+                env.cluster.clone(),
+            )),
             dlq_daemon,
             metrics_emitter,
             task_processors: processors,
