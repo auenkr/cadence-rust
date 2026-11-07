@@ -6847,6 +6847,29 @@ mod tests {
     }
 
     #[test]
+    fn semaphore_and_cancel_activity_failed_event_attrs_round_trip() {
+        round_trip(&RequestCancelActivityTaskFailedEventAttributes {
+            activity_id: "a1".into(),
+            cause: "ACTIVITY_ID_UNKNOWN".into(),
+            decision_task_completed_event_id: 7,
+        });
+        round_trip(&SemaphoreAcquireInitiatedEventAttributes {
+            semaphore_name: "sem".into(),
+            wait_timeout_seconds: Some(30),
+            decision_task_completed_event_id: 4,
+        });
+        round_trip(&SemaphoreAcquiredEventAttributes {
+            token_id: 3,
+            initiated_event_id: 9,
+        });
+        round_trip(&SemaphoreReleasedEventAttributes {
+            token_id: 3,
+            initiated_event_id: 9,
+            decision_task_completed_event_id: 12,
+        });
+    }
+
+    #[test]
     fn frontend_conversion_fields_round_trip() {
         let hint = AutoConfigHint {
             enable_auto_config: true,

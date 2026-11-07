@@ -82,7 +82,13 @@ impl StateBuilder {
             self.mutable_state.execution_info["last_event_task_id"] = event.task_id.into();
             self.mutable_state.replicate_event(event.clone())?;
             match event.event_type.as_ref() {
-                Some(EventType::WorkflowExecutionStarted) => { self.mutable_state.replicate_workflow_execution_started_event(event); }
+                Some(EventType::WorkflowExecutionStarted) => {
+                    // Go: prefer ParentWorkflowDomainID (absent on older histories).
+                    if let Some(id) = event.workflow_execution_started_event_attributes.as_ref().and_then(|a| a.parent_workflow_domain_id.clone()) {
+                        self.mutable_state.execution_info["parent_domain_id"] = id.into();
+                    }
+                    self.mutable_state.replicate_workflow_execution_started_event(event);
+                }
                 Some(EventType::WorkflowExecutionSignaled) => self.mutable_state.replicate_workflow_execution_signaled_event(event),
                 Some(EventType::WorkflowExecutionCancelRequested) => { self.mutable_state.replicate_workflow_execution_cancel_requested_event(event); }
                 Some(EventType::SignalExternalWorkflowExecutionInitiated) => { self.mutable_state.replicate_signal_external_workflow_execution_initiated_event(event.event_id, event, ""); }
