@@ -150,7 +150,7 @@ impl TypedMutableState {
             Some(t) => t.name.clone(),
             None => prev.workflow_type_name.clone(),
         };
-        let w_type = WorkflowType { name: workflow_type, ..Default::default() };
+        let w_type = WorkflowType { name: workflow_type };
 
         let mut decision_timeout = (prev.decision_start_to_close_timeout_nanos / NANOS_PER_SECOND) as i32;
         if let Some(t) = attributes.task_start_to_close_timeout_seconds {
