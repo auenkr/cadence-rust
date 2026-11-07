@@ -15,6 +15,7 @@ pub mod failover;
 pub mod queue_deps;
 pub mod queue_deps_standby;
 pub mod queue_deps_timer_active;
+pub mod queue_deps_transfer_active;
 pub mod queue_exec;
 pub mod queue_factory;
 pub mod queues;
