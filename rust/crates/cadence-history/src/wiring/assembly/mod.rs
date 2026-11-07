@@ -12,6 +12,7 @@ pub mod engine_tasks;
 pub mod env;
 pub mod failover;
 pub mod queue_exec;
+pub mod queue_factory;
 pub mod queues;
 pub mod replication;
 pub mod replication_builders;
