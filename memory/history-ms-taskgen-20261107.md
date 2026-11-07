@@ -13,3 +13,5 @@ Caller notes (for owners of mutable_state_methods_*):
 - GeneratedTask -> persistence `Task` blob encoding is not done here (caller/persistence layer).
 
 CI evidence: see below.
+
+CI: https://github.com/auenkr/cadence-rust/actions/runs/42338506854 head c7f26fb1be053b153e40f8d65e9b2ffd65c4f4a3 conclusion success (clippy+tests, -p cadence-history)
