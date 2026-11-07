@@ -98,12 +98,13 @@ impl TypedMutableState {
     pub fn replicate_workflow_execution_canceled_event(
         &mut self,
         first_event_id: i64,
-        _event: &HistoryEvent,
+        event: &HistoryEvent,
     ) -> Result<()> {
         self.update_workflow_state_close_status(WORKFLOW_STATE_COMPLETED, CLOSE_STATUS_CANCELED)?;
         self.execution_info.completion_event_batch_id = first_event_id;
         self.clear_stickyness();
-        Ok(())
+        // Go: taskGenerator.GenerateWorkflowCloseTasks (writeEventToCache not wired)
+        self.generate_workflow_close_tasks(event)
     }
 
     /// Go `AddRequestCancelExternalWorkflowExecutionInitiatedEvent`.
@@ -141,7 +142,7 @@ impl TypedMutableState {
     }
 
     /// Go `ReplicateRequestCancelExternalWorkflowExecutionInitiatedEvent`
-    /// (`GenerateRequestCancelExternalTasks` not wired).
+    /// (including `GenerateRequestCancelExternalTasks`).
     pub fn replicate_request_cancel_external_workflow_execution_initiated_event(
         &mut self,
         first_event_id: i64,
@@ -155,6 +156,7 @@ impl TypedMutableState {
             cancel_request_id: cancel_request_id.to_string(),
         };
         self.update_request_cancel(rci.clone());
+        self.run_task_generator(0, |g| g.generate_request_cancel_external_tasks(event))?;
         Ok(rci)
     }
 

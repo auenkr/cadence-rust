@@ -6,7 +6,7 @@
 //! methods. Differences forced by the typed state not owning a clock, config,
 //! domain entry or task generator:
 //! * Go `timeSource.Now()` and config lookups are carried in [`DecisionEnv`].
-//! * Task generation (`taskGenerator.GenerateDecision*Tasks`) is NOT wired.
+//! * Task generation is wired via `run_task_generator` (tasks land in `transfer_tasks`/`timer_tasks`).
 //! * Logging / metrics (`logger.Warn`, `DecisionAttemptTimer`) are NOT wired.
 //! * `insertWorkflowRequest` stores only the request id (type/version are not
 //!   representable in the Rust `WorkflowRequest` yet).
@@ -296,6 +296,8 @@ impl TypedMutableState {
     ) -> Result<DecisionInfo> {
         let op = "add-decision-task-scheduled-event";
         self.check_mutability()?;
+        self.task_gen_env.normal_schedule_to_start_timeout_nanos = env.normal_schedule_to_start_timeout_nanos;
+        self.task_gen_env.normal_schedule_to_start_max_attempts = env.normal_schedule_to_start_max_attempts;
         if self.has_pending_decision() {
             return Err(self.create_internal_server_error(op));
         }
@@ -348,8 +350,8 @@ impl TypedMutableState {
         )
     }
 
-    /// Go `ReplicateDecisionTaskScheduledEvent`. `GenerateDecisionScheduleTasks`
-    /// is not wired (callers generate the task when `!bypass_task_generation`).
+    /// Go `ReplicateDecisionTaskScheduledEvent` (incl. `GenerateDecisionScheduleTasks`
+    /// unless bypassed; schedule-to-start config comes from `task_gen_env`).
     #[allow(clippy::too_many_arguments)]
     pub fn replicate_decision_task_scheduled_event(
         &mut self,
@@ -360,7 +362,7 @@ impl TypedMutableState {
         attempt: i64,
         schedule_timestamp: i64,
         original_scheduled_timestamp: i64,
-        _bypass_task_generation: bool,
+        bypass_task_generation: bool,
     ) -> Result<DecisionInfo> {
         // NOTE: for zombie workflow, should not change the state
         if self.execution_info.state != WORKFLOW_STATE_ZOMBIE {
@@ -379,10 +381,14 @@ impl TypedMutableState {
             original_schedule_timestamp: original_scheduled_timestamp,
         };
         self.update_decision(&decision);
+        if !bypass_task_generation {
+            let timeout = self.env_decision_schedule_to_start_timeout_nanos();
+            self.run_task_generator(timeout, |g| g.generate_decision_schedule_tasks(decision.schedule_id))?;
+        }
         Ok(decision)
     }
 
-    /// Go `ReplicateTransientDecisionTaskScheduled` (task generation not wired).
+    /// Go `ReplicateTransientDecisionTaskScheduled`.
     pub fn replicate_transient_decision_task_scheduled(&mut self, env: &DecisionEnv) -> Result<()> {
         if self.has_pending_decision() || self.execution_info.decision_attempt == 0 {
             return Ok(());
@@ -401,7 +407,8 @@ impl TypedMutableState {
             ..DecisionInfo::default()
         };
         self.update_decision(&decision);
-        Ok(())
+        let timeout = self.env_decision_schedule_to_start_timeout_nanos();
+        self.run_task_generator(timeout, |g| g.generate_decision_schedule_tasks(decision.schedule_id))
     }
 
     /// Go `AddDecisionTaskStartedEvent`; `task_list_name`/`identity` are the
@@ -471,7 +478,7 @@ impl TypedMutableState {
         Ok((event, decision))
     }
 
-    /// Go `ReplicateDecisionTaskStartedEvent` (`GenerateDecisionStartTasks` not wired).
+    /// Go `ReplicateDecisionTaskStartedEvent` (incl. `GenerateDecisionStartTasks`).
     pub fn replicate_decision_task_started_event(
         &mut self,
         decision: Option<DecisionInfo>,
@@ -506,6 +513,7 @@ impl TypedMutableState {
             original_schedule_timestamp: decision.original_schedule_timestamp,
         };
         self.update_decision(&updated);
+        self.run_task_generator(0, |g| g.generate_decision_start_tasks(schedule_id))?;
         Ok(updated)
     }
 
@@ -915,8 +923,7 @@ impl TypedMutableState {
             .search_attributes
             .insert(BINARY_CHECKSUMS.to_string(), bytes);
         if env.advanced_visibility_writing {
-            // Go: taskGenerator.GenerateWorkflowSearchAttrTasks()
-            env.needs_search_attr_tasks = true;
+            self.run_task_generator(0, |g| g.generate_workflow_search_attr_tasks())?;
         }
         Ok(())
     }

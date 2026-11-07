@@ -10,6 +10,7 @@ use cadence_api::enums::EventType;
 use cadence_api::service_types::HistoryEvent;
 
 use super::mutable_state_builder::{TypedMutableState, TypedMutableStateError};
+use super::mutable_state_task_generator::{MutableStateTaskGenerator, TaskGeneratorDomains, TypedTaskGeneratorState};
 use crate::mutable_state_builder_ext as ext;
 
 pub(crate) type Result<T> = std::result::Result<T, TypedMutableStateError>;
@@ -165,6 +166,109 @@ impl TypedMutableState {
             return Some(e);
         }
         check_and_clear_timer_fired_event(&mut self.history_events, timer_id)
+    }
+}
+
+/// Go mutable state `taskGenerator` environment: domain cache, rand and
+/// `WorkflowDeletionJitterRange(domain)` config.
+#[derive(Clone, Default)]
+pub struct TaskGenEnv {
+    pub domains: Option<std::sync::Arc<dyn TaskGeneratorDomains + Send + Sync>>,
+    pub deletion_jitter_range: i32,
+    /// Go config NormalDecisionScheduleToStartTimeout / ...MaxAttempts (domain-scoped).
+    pub normal_schedule_to_start_timeout_nanos: i64,
+    pub normal_schedule_to_start_max_attempts: i64,
+    rng_state: u64,
+}
+
+impl std::fmt::Debug for TaskGenEnv {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TaskGenEnv")
+            .field("domains", &self.domains.is_some())
+            .field("deletion_jitter_range", &self.deletion_jitter_range)
+            .finish()
+    }
+}
+
+/// Delegating handle so the generic adapter can borrow the shared domain cache.
+pub struct DomainsRef(Option<std::sync::Arc<dyn TaskGeneratorDomains + Send + Sync>>);
+
+impl DomainsRef {
+    fn get(&self) -> Result<&(dyn TaskGeneratorDomains + Send + Sync)> {
+        match &self.0 {
+            Some(d) => Ok(d.as_ref()),
+            None => internal_err("task generator domain cache is not configured"),
+        }
+    }
+}
+
+impl TaskGeneratorDomains for DomainsRef {
+    fn domain_id_by_name(&self, name: &str) -> Result<String> {
+        self.get()?.domain_id_by_name(name)
+    }
+    fn retention_days(&self, domain_id: &str, workflow_id: &str) -> Result<Option<i32>> {
+        match &self.0 {
+            Some(d) => d.retention_days(domain_id, workflow_id),
+            None => Ok(None),
+        }
+    }
+    fn is_global_domain(&self, domain_id: &str) -> Result<bool> {
+        self.get()?.is_global_domain(domain_id)
+    }
+}
+
+impl TypedMutableState {
+    /// Runs one Go `e.taskGenerator.Generate*` call against this state and
+    /// drains the generated tasks into `transfer_tasks`/`timer_tasks`
+    /// (Go `AddTransferTasks`/`AddTimerTasks`).
+    pub(crate) fn run_task_generator<R>(
+        &mut self,
+        decision_schedule_to_start_timeout_nanos: i64,
+        f: impl FnOnce(&mut MutableStateTaskGenerator<'_, TypedTaskGeneratorState<'_, DomainsRef>>) -> Result<R>,
+    ) -> Result<R> {
+        let domains = DomainsRef(self.task_gen_env.domains.clone());
+        let mut rng = self.task_gen_env.rng_state;
+        if rng == 0 {
+            rng = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(0x9E37_79B9_7F4A_7C15)
+                | 1;
+        }
+        let mut random = |upper: i64| -> i64 {
+            rng ^= rng << 13;
+            rng ^= rng >> 7;
+            rng ^= rng << 17;
+            if upper <= 0 { 0 } else { (rng % upper as u64) as i64 }
+        };
+        let (result, transfer, timer, timer_status) = {
+            let mut adapter = TypedTaskGeneratorState::new(self, &domains, &mut random);
+            adapter.decision_schedule_to_start_timeout_nanos = decision_schedule_to_start_timeout_nanos;
+            let result = f(&mut MutableStateTaskGenerator { state: &mut adapter });
+            (result, adapter.transfer_tasks, adapter.timer_tasks, adapter.activity_timer_status)
+        };
+        let _ = timer_status; // TODO: base ActivityInfo lacks TimerTaskStatus (see memory).
+        self.task_gen_env.rng_state = rng;
+        self.transfer_tasks.extend(transfer);
+        self.timer_tasks.extend(timer);
+        result
+    }
+
+    /// Go `GetDecisionScheduleToStartTimeout` from the stored task-generator env.
+    pub(crate) fn env_decision_schedule_to_start_timeout_nanos(&self) -> i64 {
+        if !self.execution_info.sticky_task_list.is_empty() {
+            return self.execution_info.sticky_schedule_to_start_timeout_nanos;
+        }
+        if self.execution_info.decision_attempt < self.task_gen_env.normal_schedule_to_start_max_attempts {
+            return self.task_gen_env.normal_schedule_to_start_timeout_nanos;
+        }
+        0
+    }
+
+    /// Go `taskGenerator.GenerateWorkflowCloseTasks(event, WorkflowDeletionJitterRange(domain))`.
+    pub(crate) fn generate_workflow_close_tasks(&mut self, event: &HistoryEvent) -> Result<()> {
+        let jitter = self.task_gen_env.deletion_jitter_range;
+        self.run_task_generator(0, |g| g.generate_workflow_close_tasks(event, jitter))
     }
 }
 

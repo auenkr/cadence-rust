@@ -41,12 +41,13 @@ impl TypedMutableState {
     pub fn replicate_workflow_execution_completed_event(
         &mut self,
         first_event_id: i64,
-        _event: &HistoryEvent,
+        event: &HistoryEvent,
     ) -> Result<()> {
         self.update_workflow_state_close_status(WORKFLOW_STATE_COMPLETED, CLOSE_STATUS_COMPLETED)?;
         self.execution_info.completion_event_batch_id = first_event_id;
         self.clear_stickyness();
-        Ok(())
+        // Go: taskGenerator.GenerateWorkflowCloseTasks (writeEventToCache not wired)
+        self.generate_workflow_close_tasks(event)
     }
 
     /// Go `AddFailWorkflowEvent`.
@@ -72,11 +73,12 @@ impl TypedMutableState {
     pub fn replicate_workflow_execution_failed_event(
         &mut self,
         first_event_id: i64,
-        _event: &HistoryEvent,
+        event: &HistoryEvent,
     ) -> Result<()> {
         self.update_workflow_state_close_status(WORKFLOW_STATE_COMPLETED, CLOSE_STATUS_FAILED)?;
         self.execution_info.completion_event_batch_id = first_event_id;
         self.clear_stickyness();
-        Ok(())
+        // Go: taskGenerator.GenerateWorkflowCloseTasks (writeEventToCache not wired)
+        self.generate_workflow_close_tasks(event)
     }
 }
