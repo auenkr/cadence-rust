@@ -23,6 +23,8 @@ pub enum TaskKind {
     StartChild { target_domain_id: String, target_workflow_id: String, initiated_id: i64 },
     CancelExecution { target_domain_id: String, target_workflow_id: String, target_run_id: String, child_only: bool, initiated_id: i64 },
     SignalExecution { target_domain_id: String, target_workflow_id: String, target_run_id: String, child_only: bool, initiated_id: i64 },
+    UserTimer { event_id: i64 },
+    ActivityTimeout { timeout_type: TimerType, event_id: i64, attempt: i64 },
     UpsertWorkflowSearchAttributes, ResetWorkflow,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,6 +48,7 @@ pub trait TaskGeneratorState: TimerSequenceState {
     fn child_info(&self, initiated_id: i64) -> Option<ChildExecutionInfo>;
     fn has_request_cancel(&self, initiated_id: i64) -> bool;
     fn has_signal(&self, initiated_id: i64) -> bool;
+    /// Rust's signal-initiated attributes lack Go's ChildWorkflowOnly; callers supply it.
     fn signal_child_only(&self, initiated_id: i64) -> bool;
     fn domain_id(&self, name: &str) -> Result<String, Self::Error>;
     /// Missing domains return None (one-day retention); all other errors propagate.
@@ -182,4 +185,215 @@ pub fn next_decision_timeout(attempt: i64, default_timeout: i64, mut random_belo
     let next = (60_000_000_000_f64 * 2_f64.powf((attempt - 2) as f64)).min(300_000_000_000_f64);
     let jitter = ((0.2 * next) as i64).max(1);
     (next * 0.8 + random_below(jitter) as f64) as i64
+}
+
+// ---------------------------------------------------------------------------
+// Adapter binding the generator to `TypedMutableState` (Go: the generator's
+// `mutableState MutableState` + `domainCache` + `rand`).
+//
+// Callers (Go call sites of NewMutableStateTaskGenerator in the
+// mutable_state_methods_* files) build a `TypedTaskGeneratorState`, run a
+// `MutableStateTaskGenerator { state: &mut adapter }` method, then drain
+// `transfer_tasks`/`timer_tasks` into the state's task categories
+// (Go `AddTransferTasks`/`AddTimerTasks`) and write back
+// `activity_timer_status` (Go ActivityInfo.TimerTaskStatus, which the base
+// `ActivityInfo` port does not carry yet).
+// ---------------------------------------------------------------------------
+use std::collections::BTreeMap;
+
+use super::mutable_state_builder::{TypedMutableState, TypedMutableStateError};
+use super::timer::TimerInfo;
+use super::timer_sequence::{ActivityTimerInfo, TimerSequenceId};
+
+/// Go `cache.DomainCache` subset used by the task generator.
+pub trait TaskGeneratorDomains {
+    /// Go `GetDomainID(name)`.
+    fn domain_id_by_name(&self, name: &str) -> Result<String, TypedMutableStateError>;
+    /// Go `GetDomainByID(id)` then `GetRetentionDays(workflowID)`; `Ok(None)` for EntityNotExists.
+    fn retention_days(&self, domain_id: &str, workflow_id: &str) -> Result<Option<i32>, TypedMutableStateError>;
+    /// Go `GetDomainByID(id).IsGlobalDomain()`.
+    fn is_global_domain(&self, domain_id: &str) -> Result<bool, TypedMutableStateError>;
+}
+
+pub struct TypedTaskGeneratorState<'a, D: TaskGeneratorDomains> {
+    pub state: &'a mut TypedMutableState,
+    pub domains: &'a D,
+    /// Go `rand.Intn`: uniform in [0, upper).
+    pub random: &'a mut dyn FnMut(i64) -> i64,
+    /// Go `GetDecisionScheduleToStartTimeout` (sticky timeout, normal
+    /// schedule-to-start while attempt < max attempts, else 0), nanoseconds.
+    pub decision_schedule_to_start_timeout_nanos: i64,
+    /// schedule_id -> (TimerTaskStatus, LastHeartbeatTimeoutVisibilityInSeconds).
+    pub activity_timer_status: BTreeMap<i64, (i32, i64)>,
+    /// initiated_id -> ChildWorkflowOnly for pending signals.
+    pub signal_child_only: BTreeMap<i64, bool>,
+    pub transfer_tasks: Vec<GeneratedTask>,
+    pub timer_tasks: Vec<GeneratedTask>,
+}
+
+impl<'a, D: TaskGeneratorDomains> TypedTaskGeneratorState<'a, D> {
+    pub fn new(state: &'a mut TypedMutableState, domains: &'a D, random: &'a mut dyn FnMut(i64) -> i64) -> Self {
+        Self {
+            state, domains, random, decision_schedule_to_start_timeout_nanos: 0,
+            activity_timer_status: BTreeMap::new(), signal_child_only: BTreeMap::new(),
+            transfer_tasks: Vec::new(), timer_tasks: Vec::new(),
+        }
+    }
+    fn key(&self) -> WorkflowExecutionKey {
+        let e = &self.state.execution_info;
+        WorkflowExecutionKey { domain_id: e.domain_id.clone(), workflow_id: e.workflow_id.clone(), run_id: e.run_id.clone() }
+    }
+    fn generated(&self, version: i64, timestamp: Option<i64>, task_list: String, kind: TaskKind) -> GeneratedTask {
+        GeneratedTask { workflow: self.key(), version, visibility_timestamp_unix_nanos: timestamp, task_list, kind }
+    }
+}
+
+impl<D: TaskGeneratorDomains> TimerSequenceState for TypedTaskGeneratorState<'_, D> {
+    type Error = TypedMutableStateError;
+    fn user_timers(&self) -> Vec<TimerInfo> { self.state.pending_timer_info_ids.values().cloned().collect() }
+    fn activities(&self) -> Vec<ActivityTimerInfo> {
+        self.state.pending_activity_info_ids.values().map(|a| {
+            let (status, hb) = self.activity_timer_status.get(&a.schedule_id).copied().unwrap_or_default();
+            ActivityTimerInfo { activity: a.clone(), timer_task_status: status, last_heartbeat_timeout_visibility_in_seconds: hb }
+        }).collect()
+    }
+    fn user_timer(&self, event_id: i64) -> Option<TimerInfo> {
+        self.state.pending_timer_event_id_to_id.get(&event_id).and_then(|id| self.state.pending_timer_info_ids.get(id)).cloned()
+    }
+    fn activity(&self, event_id: i64) -> Option<ActivityTimerInfo> {
+        let a = self.state.pending_activity_info_ids.get(&event_id)?;
+        let (status, hb) = self.activity_timer_status.get(&event_id).copied().unwrap_or_default();
+        Some(ActivityTimerInfo { activity: a.clone(), timer_task_status: status, last_heartbeat_timeout_visibility_in_seconds: hb })
+    }
+    fn missing_activity_info(&self, event_id: i64) -> Self::Error {
+        TypedMutableStateError::Internal(format!("unable to load activity info {event_id}"))
+    }
+    fn update_user_timer(&mut self, timer: TimerInfo) -> Result<(), Self::Error> {
+        self.state.update_user_timer(timer);
+        Ok(())
+    }
+    fn update_activity_timer(&mut self, activity: ActivityTimerInfo) -> Result<(), Self::Error> {
+        self.activity_timer_status.insert(activity.activity.schedule_id, (activity.timer_task_status, activity.last_heartbeat_timeout_visibility_in_seconds));
+        self.state.update_activity(activity.activity);
+        Ok(())
+    }
+    fn add_user_timer_task(&mut self, timer: TimerSequenceId) {
+        let task = self.generated(self.state.get_current_version(), Some(timer.timestamp_unix_nanos), self.state.execution_info.task_list.clone(), TaskKind::UserTimer { event_id: timer.event_id });
+        self.timer_tasks.push(task);
+    }
+    fn add_activity_timeout_task(&mut self, timer: TimerSequenceId, task_list: String) {
+        let task = self.generated(self.state.get_current_version(), Some(timer.timestamp_unix_nanos), task_list, TaskKind::ActivityTimeout { timeout_type: timer.timer_type, event_id: timer.event_id, attempt: i64::from(timer.attempt) });
+        self.timer_tasks.push(task);
+    }
+}
+
+impl<D: TaskGeneratorDomains> TaskGeneratorState for TypedTaskGeneratorState<'_, D> {
+    fn execution(&self) -> ExecutionTaskInfo {
+        let e = &self.state.execution_info;
+        ExecutionTaskInfo {
+            key: Some(self.key()),
+            task_list: e.task_list.clone(),
+            task_list_kind: e.task_list_kind,
+            workflow_timeout_seconds: (e.workflow_timeout_nanos / 1_000_000_000) as i32,
+            expiration_unix_nanos: if e.expiration_time_unix_nanos != 0 { Some(e.expiration_time_unix_nanos) } else { None },
+            decision_start_to_close_timeout_seconds: (e.decision_start_to_close_timeout_nanos / 1_000_000_000) as i32,
+        }
+    }
+    fn workflow_key(&self) -> WorkflowExecutionKey { self.key() }
+    fn current_version(&self) -> i64 { self.state.get_current_version() }
+    fn decision(&self, schedule_id: i64) -> Option<DecisionInfo> {
+        let e = &self.state.execution_info;
+        if e.decision_schedule_id != schedule_id { return None; }
+        let task_list = if e.sticky_task_list.is_empty() { e.task_list.clone() } else { e.sticky_task_list.clone() };
+        Some(DecisionInfo {
+            schedule_id: e.decision_schedule_id,
+            started_id: e.decision_started_id,
+            version: e.decision_version,
+            request_id: e.decision_request_id.clone(),
+            task_list,
+            start_to_close_timeout_seconds: (e.decision_timeout_nanos / 1_000_000_000) as i32,
+            started_timestamp: e.decision_started_time_unix_nanos,
+            attempt: e.decision_attempt,
+            schedule_timestamp: e.decision_scheduled_time_unix_nanos,
+            original_schedule_timestamp: e.decision_original_scheduled_time_unix_nanos,
+        })
+    }
+    fn update_decision(&mut self, decision: DecisionInfo) {
+        let e = &mut self.state.execution_info;
+        e.decision_version = decision.version;
+        e.decision_schedule_id = decision.schedule_id;
+        e.decision_started_id = decision.started_id;
+        e.decision_request_id = decision.request_id;
+        e.decision_timeout_nanos = i64::from(decision.start_to_close_timeout_seconds) * 1_000_000_000;
+        e.decision_attempt = decision.attempt;
+        e.decision_started_time_unix_nanos = decision.started_timestamp;
+        e.decision_scheduled_time_unix_nanos = decision.schedule_timestamp;
+        e.decision_original_scheduled_time_unix_nanos = decision.original_schedule_timestamp;
+    }
+    fn decision_schedule_to_start_timeout_nanos(&self) -> i64 { self.decision_schedule_to_start_timeout_nanos }
+    fn activity_info(&self, schedule_id: i64) -> Option<ActivityInfo> { self.state.pending_activity_info_ids.get(&schedule_id).cloned() }
+    fn child_info(&self, initiated_id: i64) -> Option<ChildExecutionInfo> { self.state.pending_child_execution_info_ids.get(&initiated_id).cloned() }
+    fn has_request_cancel(&self, initiated_id: i64) -> bool { self.state.pending_request_cancel_info_ids.contains_key(&initiated_id) }
+    fn has_signal(&self, initiated_id: i64) -> bool { self.state.pending_signal_info_ids.contains_key(&initiated_id) }
+    fn signal_child_only(&self, initiated_id: i64) -> bool { self.signal_child_only.get(&initiated_id).copied().unwrap_or(false) }
+    fn domain_id(&self, name: &str) -> Result<String, Self::Error> { self.domains.domain_id_by_name(name) }
+    fn retention_days(&self) -> Result<Option<i32>, Self::Error> {
+        let e = &self.state.execution_info;
+        self.domains.retention_days(&e.domain_id, &e.workflow_id)
+    }
+    fn is_global_domain(&self, domain_id: &str) -> Result<bool, Self::Error> { self.domains.is_global_domain(domain_id) }
+    fn internal_error(&self, message: String) -> Self::Error { TypedMutableStateError::Internal(message) }
+    fn bad_request(&self, message: String) -> Self::Error { TypedMutableStateError::BadRequest(message) }
+    fn target_domain_error(&self, error: Self::Error) -> Self::Error {
+        TypedMutableStateError::Internal(format!("cannot get target domain for child workflow: {error}"))
+    }
+    fn random_below(&mut self, upper: i64) -> i64 { (self.random)(upper) }
+    fn add_transfer_task(&mut self, task: GeneratedTask) { self.transfer_tasks.push(task); }
+    fn add_timer_task(&mut self, task: GeneratedTask) { self.timer_tasks.push(task); }
+}
+
+#[cfg(test)]
+mod typed_adapter_tests {
+    use super::*;
+
+    struct Domains;
+    impl TaskGeneratorDomains for Domains {
+        fn domain_id_by_name(&self, name: &str) -> Result<String, TypedMutableStateError> { Ok(format!("id-{name}")) }
+        fn retention_days(&self, _: &str, _: &str) -> Result<Option<i32>, TypedMutableStateError> { Ok(Some(3)) }
+        fn is_global_domain(&self, id: &str) -> Result<bool, TypedMutableStateError> { Ok(id == "global") }
+    }
+
+    fn state() -> TypedMutableState {
+        let mut s = TypedMutableState::new();
+        s.execution_info.domain_id = "d".into();
+        s.execution_info.workflow_id = "w".into();
+        s.execution_info.run_id = "r".into();
+        s.execution_info.task_list = "tl".into();
+        s.execution_info.workflow_timeout_nanos = 10_000_000_000;
+        s
+    }
+
+    #[test]
+    fn workflow_start_emits_timeout_timer() {
+        let mut s = state();
+        let mut rng = |_: i64| 0;
+        let mut adapter = TypedTaskGeneratorState::new(&mut s, &Domains, &mut rng);
+        let mut event = HistoryEvent::default();
+        event.version = 7;
+        event.workflow_execution_started_event_attributes = Some(Default::default());
+        MutableStateTaskGenerator { state: &mut adapter }.generate_workflow_start_tasks(1_000_000_000, &event).unwrap();
+        assert_eq!(adapter.timer_tasks.len(), 1);
+        assert_eq!(adapter.timer_tasks[0].visibility_timestamp_unix_nanos, Some(11_000_000_000));
+        assert_eq!(adapter.timer_tasks[0].version, 7);
+        assert_eq!(adapter.timer_tasks[0].kind, TaskKind::WorkflowTimeout);
+    }
+
+    #[test]
+    fn missing_decision_is_internal_error() {
+        let mut s = state();
+        let mut rng = |_: i64| 0;
+        let mut adapter = TypedTaskGeneratorState::new(&mut s, &Domains, &mut rng);
+        let err = MutableStateTaskGenerator { state: &mut adapter }.generate_decision_schedule_tasks(5).unwrap_err();
+        assert!(matches!(err, TypedMutableStateError::Internal(m) if m.contains("cannot get pending decision: 5")));
+    }
 }
