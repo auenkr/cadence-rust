@@ -14,4 +14,4 @@ New file `rust/crates/cadence-history/src/wiring/assembly/queue_deps_timer_activ
 - Not unit tested; CI = clippy + existing tests.
 
 ## Evidence
-(filled after CI)
+rust-ci package=cadence-history: https://github.com/auenkr/cadence-rust/actions/runs/42340019090 code head 1c07635d526f1a21675e534c389b18dc84204562 conclusion: success (clippy + tests).
