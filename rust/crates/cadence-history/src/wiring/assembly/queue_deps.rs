@@ -4,9 +4,9 @@
 //! dependencies).
 //!
 //! Done here: `TransferDependencies` (`TransferDepsImpl`) and
-//! `CleanupDependencies` (`CleanupDepsImpl`). The archiver is not ported yet, so
-//! `archive` / `archive_visibility` return an explicit error (TODO(link): archiver
-//! client); the domain archival flag is honoured so history is never deleted
+//! `CleanupDependencies` (`CleanupDepsImpl`). `archive` / `archive_visibility` go through
+//! `archiver_client` (Go archiver.Client), whose inline write archivers and archival-workflow
+//! signal seams are not ported yet and fail explicitly (TODO(link)); the domain archival flag is honoured so history is never deleted
 //! silently when archival is enabled.
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
@@ -17,6 +17,7 @@ use cadence_api::errors::CadenceError;
 use cadence_persistence::history_contract::{self as pc, PersistenceError};
 use cadence_thrift::{ToThrift, Writer};
 
+use super::archiver_client::{self, ArchivalTarget, ArchiveRequest as ArchiverRequest, ClientRequest};
 use super::engine_cache::{EngineExecutionCache, EngineExecutionContext};
 use super::engine_state::EngineMutableState;
 use super::env::HistoryEnv;
@@ -292,9 +293,35 @@ impl TransferDependencies for TransferDepsImpl {
         (self.env.config.transfer_processor_visibility_archival_time_limit)()
     }
 
-    async fn archive_visibility(&self, _record: VisibilityRecord, _domain: VisibilityDomain) -> TaskResult<()> {
-        // TODO(link): archiver client (visibility archival); the archiver is not ported yet.
-        Err(TaskError::Other("visibility archival is not supported yet: archiver client is not ported".into()))
+    async fn archive_visibility(&self, record: VisibilityRecord, domain: VisibilityDomain) -> TaskResult<()> {
+        // Go transferTaskExecutorBase.archiveVisibility: inline attempt, then archival-workflow signal.
+        let request = ClientRequest {
+            archive_request: ArchiverRequest {
+                domain_id: record.domain_id.clone(),
+                domain_name: record.domain.clone(),
+                workflow_id: record.workflow_id.clone(),
+                run_id: record.run_id.clone(),
+                workflow_type_name: record.workflow_type_name.clone(),
+                start_timestamp: record.start_timestamp,
+                execution_timestamp: record.execution_timestamp,
+                close_timestamp: record.close_timestamp,
+                close_status: record.close_status,
+                history_length: record.history_length,
+                memo: record.memo.clone(),
+                search_attributes: record.search_attributes.clone(),
+                visibility_uri: domain.visibility_uri.clone(),
+                uri: domain.history_uri.clone(),
+                targets: vec![ArchivalTarget::Visibility],
+                ..Default::default()
+            },
+            caller_service: "history".into(),
+            attempt_archive_inline: true,
+        };
+        let limit = (self.env.config.transfer_processor_visibility_archival_time_limit)();
+        match tokio::time::timeout(limit, archiver_client::default_client().archive(request)).await {
+            Ok(r) => r.map(|_| ()).map_err(TaskError::Other),
+            Err(_) => Err(TaskError::Other("context deadline exceeded".into())),
+        }
     }
 }
 
@@ -395,10 +422,35 @@ impl CleanupDependencies for CleanupDepsImpl {
         (self.env.config.enable_workflow_timer_task_cleanup)()
     }
 
-    async fn archive(&self, _request: ArchiveRequest) -> TaskResult<bool> {
-        // TODO(link): archiver client (history archival); the archiver is not ported yet. Failing keeps
-        // the task (and the history) instead of deleting data that should have been archived.
-        Err(TaskError::Other("history archival is not supported yet: archiver client is not ported".into()))
+    async fn archive(&self, request: ArchiveRequest) -> TaskResult<bool> {
+        // Go timerTaskExecutorBase.archiveWorkflow -> archiver.Client.Archive (history target).
+        let targets = request
+            .targets
+            .iter()
+            .map(|t| if *t == "visibility" { ArchivalTarget::Visibility } else { ArchivalTarget::History })
+            .collect();
+        let client_request = ClientRequest {
+            archive_request: ArchiverRequest {
+                domain_id: request.domain_id,
+                domain_name: request.domain_name,
+                workflow_id: request.workflow_id,
+                run_id: request.run_id,
+                shard_id: request.shard_id,
+                branch_token: request.branch_token,
+                next_event_id: request.next_event_id,
+                close_failover_version: request.close_failover_version,
+                uri: request.uri,
+                targets,
+                ..Default::default()
+            },
+            caller_service: request.caller_service.to_string(),
+            attempt_archive_inline: request.attempt_archive_inline,
+        };
+        let limit = (self.env.config.timer_processor_archival_time_limit)();
+        match tokio::time::timeout(limit, archiver_client::default_client().archive(client_request)).await {
+            Ok(r) => r.map(|resp| resp.history_archived_inline).map_err(TaskError::Other),
+            Err(_) => Err(TaskError::Other("context deadline exceeded".into())),
+        }
     }
 
     async fn delete_workflow_execution(&self, task: &dyn PersistenceTask, _domain_name: &str, shard_id: i32) -> TaskResult<()> {
