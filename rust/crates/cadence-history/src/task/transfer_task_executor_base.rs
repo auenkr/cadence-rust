@@ -67,7 +67,10 @@ pub struct VisibilityDomain {pub name:String,pub retention_days:i32,pub sampled_
 #[async_trait]
 pub trait TransferDependencies:Send+Sync {
  fn standby_task_missing_events_discard_delay(&self)->Duration;
- async fn write_to_dlq(&self,task:&dyn PersistenceTask,info:&PushMatchingInfo)->Result<()>;
+ /// Go: dlqWriter (TaskDLQWriter).
+ fn dlq_writer(&self)->Arc<dyn super::standby_task_util::TaskDLQWriter>;
+ /// Go: config.HistoryTaskDLQMode.
+ fn history_task_dlq_mode(&self)->StringPropertyFnWithDomainFilter;
  async fn add_activity_task(&self,request:AddMatchingTaskRequest)->Result<()>;
  async fn add_decision_task(&self,request:AddMatchingTaskRequest)->Result<()>;
  fn visibility_domain(&self,domain_id:&str,workflow_id:&str)->Result<VisibilityDomain>;
@@ -88,9 +91,16 @@ pub fn new_transfer_task_executor_base(shard:Arc<dyn ShardContext>,dependencies:
 }
 impl TransferTaskExecutorBase {
  async fn push(&self,task:&dyn PersistenceTask,info:&PushMatchingInfo,activity:bool,target:&str,schedule_id:i64)->Result<()> {
+  if activity&&task.get_task_type()!=ptask_type::TRANSFER_TASK_TYPE_ACTIVITY_TASK{self.logger.fatal("Cannot process non activity task",&[tag::task_type(task.get_task_type())]);}
+  if !activity&&task.get_task_type()!=ptask_type::TRANSFER_TASK_TYPE_DECISION_TASK{self.logger.fatal("Cannot process non decision task",&[tag::task_type(task.get_task_type())]);}
   if !should_push_to_matching(&self.shard,task).await? {
-   if self.shard.get_time_source().now().before(task.get_visibility_timestamp().add(self.dependencies.standby_task_missing_events_discard_delay())) {return Err(TaskError::Redispatch("post action is pushMatchingInfo".into()));}
-   return self.dependencies.write_to_dlq(task,info).await;
+   // Go: standbyTaskPostActionNoOp / standbyTaskPostActionWriteToDLQ with the push info.
+   let post:super::standby_task_util::PostActionInfo=Some(Arc::new(info.clone()));
+   if self.shard.get_time_source().now().before(task.get_visibility_timestamp().add(self.dependencies.standby_task_missing_events_discard_delay())) {
+    let f=super::standby_task_util::standby_task_post_action_no_op();return f(task,post,&self.logger).await;
+   }
+   let f=super::standby_task_util::standby_task_post_action_write_to_dlq(self.dependencies.dlq_writer(),self.shard.clone(),self.dependencies.history_task_dlq_mode());
+   return f(task,post,&self.logger).await;
   }
   let request=AddMatchingTaskRequest {domain_uuid:if activity{target}else{task.get_domain_id()}.into(),source_domain_uuid:activity.then(||task.get_domain_id().into()),execution:WorkflowIdentifier {domain_id:task.get_domain_id().into(),workflow_id:task.get_workflow_id().into(),run_id:task.get_run_id().into()},task_list:info.task_list.clone(),schedule_id,schedule_to_start_timeout_seconds:info.schedule_to_start_timeout.min(MAX_TASK_TIMEOUT),partition_config:info.partition_config.clone()};
   if activity {self.dependencies.add_activity_task(request).await}else{self.dependencies.add_decision_task(request).await}

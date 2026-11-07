@@ -801,7 +801,7 @@ define_ptask!(SignalExecutionTask, HistoryTaskCategory::Transfer, TRANSFER_TASK_
     { target_domain_id: String, target_workflow_id: String, target_run_id: String,
       target_child_workflow_only: bool, initiated_id: i64 });
 define_ptask!(StartChildExecutionTask, HistoryTaskCategory::Transfer, TRANSFER_TASK_TYPE_START_CHILD_EXECUTION,
-    { target_domain_id: String, initiated_id: i64 });
+    { target_domain_id: String, target_workflow_id: String, initiated_id: i64, task_list: String });
 define_ptask!(RecordWorkflowStartedTask, HistoryTaskCategory::Transfer, TRANSFER_TASK_TYPE_RECORD_WORKFLOW_STARTED, {});
 define_ptask!(ResetWorkflowTask, HistoryTaskCategory::Transfer, TRANSFER_TASK_TYPE_RESET_WORKFLOW, {});
 define_ptask!(UpsertWorkflowSearchAttributesTask, HistoryTaskCategory::Transfer,

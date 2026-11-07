@@ -535,7 +535,7 @@ impl TransferActiveTaskExecutor {
   ctx.release(None);
   // Finally create first decision task for Child execution so it is really started
   // entity not exist error is checked and ignored in HandleErr() method in task.go
-  self.create_first_decision_task(&task.target_domain_id,&execution_ref(&attributes.workflow_id,&child_run_id)).await
+  self.create_first_decision_task(&task.target_domain_id,&execution_ref(&task.target_workflow_id,&child_run_id)).await
  }
 
  // -------------------------------------------------------------------------
@@ -692,7 +692,7 @@ impl TransferActiveTaskExecutor {
     Some(ci) if ci.started_id==EMPTY_EVENT_ID=>{},
     _=>return Err(TaskError::EntityNotExists("Pending child execution not found.".into())),
    }
-   ms.add_child_workflow_execution_started_event(domain,&execution_ref(&initiated_attributes.workflow_id,run_id),initiated_attributes,initiated_event_id)
+   ms.add_child_workflow_execution_started_event(domain,&execution_ref(&task.target_workflow_id,run_id),initiated_attributes,initiated_event_id)
   },now).await
  }
  pub async fn record_start_child_execution_failed(&self,ctx:&dyn ActiveTransferContext,task:&StartChildExecutionTask,initiated_attributes:&StartChildAttributes,now:Time)->Result<()> {
