@@ -178,7 +178,10 @@ async fn dynamic_client(cfg: &ServiceConfig, root: &std::path::Path) -> anyhow::
 
 /// Resolves the Matching host owning a task list (Ringpop members labelled
 /// `cadence-matching`, hashed with the shared ring) to a lazy gRPC channel.
-fn matching_resolver(provider: Arc<MatchingRingpopProvider>) -> ChannelResolver {
+fn matching_resolver(
+    provider: Arc<MatchingRingpopProvider>,
+    tls: Option<cadence_service_core::grpc_tls::ClientTls>,
+) -> ChannelResolver {
     Arc::new(move |task_list: &str| {
         let hosts: Vec<Host> = provider
             .snapshot()
@@ -191,9 +194,9 @@ fn matching_resolver(provider: Arc<MatchingRingpopProvider>) -> ChannelResolver 
         if host.grpc_address.is_empty() {
             return Err(format!("matching host {} has no gRPC address", host.address));
         }
-        let endpoint = tonic::transport::Endpoint::from_shared(format!("http://{}", host.grpc_address))
-            .map_err(|e| e.to_string())?;
-        Ok(endpoint.connect_lazy())
+        // Go dials Matching with the matching service's rpc.tls client config.
+        cadence_service_core::grpc_tls::endpoint_channel(&host.grpc_address, tls.as_ref())
+            .map_err(|e| e.to_string())
     })
 }
 
@@ -265,13 +268,17 @@ pub async fn run(bin_name: &'static str) -> anyhow::Result<()> {
         &hostname(),
     ));
 
+    let matching_client_tls = match rpc_for(&cfg, "matching") {
+        Some(m) => cadence_service_core::grpc_tls::client_tls(&m.tls)?,
+        None => None,
+    };
     let env = HistoryEnv::build(HistoryEnvParams {
         config: service_config.clone(),
         persistence: cfg.persistence.clone(),
         cluster,
         who_am_i: provider.local_identity().to_owned(),
         hosts: Vec::new(),
-        matching_resolver: matching_resolver(provider.clone()),
+        matching_resolver: matching_resolver(provider.clone(), matching_client_tls),
         dynamic_client: Some(client),
     })
     .await?;
