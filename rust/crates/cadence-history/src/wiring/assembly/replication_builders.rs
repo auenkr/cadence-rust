@@ -409,7 +409,7 @@ impl ReplicationFactory for ReplicationFactoryImpl {
             Arc::new(HistoryResenderImpl::new(domains.clone(), shared.bean.clone(), self.history.clone()));
         let serializer: Arc<dyn PayloadSerializer> = Arc::new(ThriftPayloadSerializer);
         let mut executors: HashMap<String, Arc<dyn TaskExecutor>> = HashMap::new();
-        let mut daemons: Vec<Arc<dyn Daemon>> = Vec::new();
+        let mut processors: Vec<Arc<dyn Daemon>> = Vec::new();
         for fetcher in shared.fetchers.get_fetchers() {
             let source = fetcher.get_source_cluster().to_string();
             let executor: Arc<dyn TaskExecutor> = Arc::new(TaskExecutorImpl::new(
@@ -431,13 +431,18 @@ impl ReplicationFactory for ReplicationFactoryImpl {
                 serializer.clone(),
             );
             executors.insert(source, executor);
-            daemons.push(processor);
+            processors.push(processor);
         }
         let dlq = DlqHandlerImpl::new(shard_adapter.clone(), metrics.clone(), executors);
-        daemons.push(emitter);
-        daemons.push(dlq.clone());
+        let metrics_emitter: Arc<dyn Daemon> = emitter;
+        let dlq_daemon: Arc<dyn Daemon> = dlq.clone();
+        let mut daemons: Vec<Arc<dyn Daemon>> = processors.clone();
+        daemons.push(metrics_emitter.clone());
+        daemons.push(dlq_daemon.clone());
 
-        // No engine lifecycle exists yet: start now, stop when the shard closes.
+        // The shard controller does not drive `HistoryEngine::start` yet: start now, stop when the
+        // shard closes. The daemons are idempotent (CAS status), so the engine lifecycle host
+        // (`ReplicationParts::{dlq_daemon,metrics_emitter,task_processors}`) can start/stop them too.
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let _enter = handle.enter();
             for d in &daemons {
@@ -464,6 +469,9 @@ impl ReplicationFactory for ReplicationFactoryImpl {
             ack_manager: Arc::new(SqlReplicationAckManager::new(ack_manager)),
             hydrator: Arc::new(EngineHydrator { inner: hydrator }),
             replicator: Arc::new(UnwiredReplicator),
+            dlq_daemon,
+            metrics_emitter,
+            task_processors: processors,
         })
     }
 }

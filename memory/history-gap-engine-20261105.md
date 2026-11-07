@@ -42,3 +42,8 @@ Note: new trait methods on MutableState (get_last_write_version, is_resource_dup
 ## gap-engine5 (branch history-gap-engine5)
 - New engine/lifecycle.rs: `HistoryEngine::start/stop` (Go Start/Stop order), `EngineLifecycleHost` trait; `QueueProcessor` gained start/stop (queues.rs adapter over queue Daemon). createMutableState was already ported in start_workflow_execution.rs.
 - Gaps: `build_engine` wires `EngineLifecycleParts` whose DLQ processor, replication task processors/DLQ handler/metrics emitter and failover marker notifier are no-ops (not constructed in build_engine); NewEngine still not a 1:1 port (replication hydrator/task store/NDC replicator unwired); Engine trait (interface.go) not expressed as a Rust trait.
+
+## gap-engine6 (branch history-gap-engine6)
+- engine/interface.rs: trait `Engine` (all 47 methods of interface.go incl. Daemon start/stop), `impl Engine for HistoryEngine` delegating to inherent methods; no stubs were needed. Rust adaptations: no ctx; deadline kept where inherent method takes one.
+- `ReplicationParts` now carries `dlq_daemon`, `metrics_emitter`, `task_processors`; `EngineLifecycleParts` in build_engine starts/stops the real daemons (CAS-idempotent, so the existing early start in ReplicationFactoryImpl is kept because the shard controller does not call `HistoryEngine::start` yet).
+- Still no-op (no usable Rust wiring): history task DLQ processor (no Rust impl found), failover marker notifier (`MarkerNotifierImpl`/`build_marker_notifier` exist but HistoryEnv has no failover coordinator), `UnwiredReplicator` (NDC replicator), `NoopReplicationTaskStore`, hydrate_immediate. Controller must call `engine.start()`.

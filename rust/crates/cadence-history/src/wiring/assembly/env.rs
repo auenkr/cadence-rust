@@ -184,6 +184,12 @@ pub struct ReplicationParts {
     pub ack_manager: Arc<dyn ReplicationAckManager>,
     pub hydrator: Arc<dyn ReplicationHydrator>,
     pub replicator: Arc<dyn Replicator>,
+    /// Go `replicationDLQHandler` Start/Stop.
+    pub dlq_daemon: Arc<dyn crate::replication::deps::Daemon>,
+    /// Go `replicationMetricsEmitter` Start/Stop.
+    pub metrics_emitter: Arc<dyn crate::replication::deps::Daemon>,
+    /// Go `replicationTaskProcessors` Start/Stop.
+    pub task_processors: Vec<Arc<dyn crate::replication::deps::Daemon>>,
 }
 
 /// Implemented by the replication unit (D3).
