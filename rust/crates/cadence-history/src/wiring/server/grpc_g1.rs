@@ -2,9 +2,6 @@
 //! rate-limit gate, converts proto -> engine types, calls the handler and maps
 //! the result/error back. The orchestrator wires them into `GrpcHistory`.
 //!
-//! `ResetWorkflowExecution` is intentionally absent: the engine request type
-//! `HistoryResetWorkflowExecutionRequest` has no `reset_request` field (it holds a
-//! `failed_request`), so the proto request cannot be represented yet.
 use super::{errors, ServerState};
 use cadence_api::{enums as e, service_types as st, tasks as tk, types as t};
 use cadence_proto::api as papi;
@@ -337,4 +334,23 @@ mod tests {
         assert_eq!(o.signal_name, "s");
         assert_eq!(o.input, vec![9]);
     }
+}
+
+pub fn reset_in(v: papi::ResetWorkflowExecutionRequest) -> t::ResetWorkflowExecutionRequest {
+    t::ResetWorkflowExecutionRequest {
+        domain: v.domain,
+        workflow_execution: v.workflow_execution.map(c::execution),
+        reason: v.reason,
+        decision_finish_event_id: v.decision_finish_event_id,
+        request_id: v.request_id,
+        skip_signal_reapply: v.skip_signal_reapply,
+    }
+}
+
+/// Go `GRPCHandler.ResetWorkflowExecution`.
+pub async fn reset_workflow_execution(state: &ServerState, req: pb::ResetWorkflowExecutionRequest) -> Result<pb::ResetWorkflowExecutionResponse, Status> {
+    gate(state)?;
+    let r = et::HistoryResetWorkflowExecutionRequest { domain_uuid: req.domain_id, reset_request: req.request.map(reset_in) };
+    let resp = state.handler.reset_workflow_execution(Some(&r)).await.map_err(|e| st_err(&e))?;
+    Ok(pb::ResetWorkflowExecutionResponse { run_id: resp.run_id })
 }
