@@ -869,6 +869,8 @@ mod tests {
     #[test]
     fn mutation_tracks_updates_and_deletes_then_resets() {
         let mut state = TypedMutableState::new();
+        state.execution_info.domain_id = "11111111-1111-1111-1111-111111111111".into();
+        state.execution_info.run_id = "22222222-2222-2222-2222-222222222222".into();
         state.update_activity(ActivityInfo { schedule_id: 5, activity_id: "a".into(), ..ActivityInfo::default() });
         state.update_user_timer(TimerInfo { timer_id: "t".into(), started_id: 7, ..TimerInfo::default() });
         let (m, _) = state.close_transaction_as_mutation().unwrap();
