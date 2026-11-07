@@ -39,3 +39,5 @@ pub mod mutable_state_methods_cancellation;
 pub mod mutable_state_methods_child_workflow;
 pub mod mutable_state_methods_signal;
 pub mod mutable_state_methods_activity;
+pub mod mutable_state_methods_started;
+pub mod mutable_state_methods_decision;
