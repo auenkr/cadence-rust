@@ -222,7 +222,7 @@ impl Inner {
 
     /// Go `addTransientActivityStartedEvent`: materialises the Started event of a
     /// retried activity right before its close event. Returns the started id.
-    fn add_transient_started(&mut self, schedule_id: i64) -> HResult<i64> {
+    pub(super) fn add_transient_started(&mut self, schedule_id: i64) -> HResult<i64> {
         let Some(mut a) = self.pc_acts.get(&schedule_id).cloned() else {
             return Err(HistoryError::internal(format!("activity {schedule_id} not found")));
         };
@@ -663,7 +663,7 @@ impl EngineMutableState {
     // ---- history reads ----------------------------------------------------
 
     /// Reads events `[min, max)` of the current branch.
-    async fn read_events(&self, min: i64, max: i64) -> HResult<Vec<HistoryEvent>> {
+    pub(super) async fn read_events(&self, min: i64, max: i64) -> HResult<Vec<HistoryEvent>> {
         use crate::engine::deps_ms::MutableState;
         let branch = self.get_current_branch_token()?;
         let store = self

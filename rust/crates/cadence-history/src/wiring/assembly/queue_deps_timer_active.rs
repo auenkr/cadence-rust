@@ -4,10 +4,9 @@
 //! shard execution cache, and the `TimerWorkflow` read accessors / `delete_activity` /
 //! `update_workflow_execution_as_active` over `EngineMutableState`.
 //!
-//! Not done (explicit `TODO(link)` errors, see memory/history-gap-queuetimeractive-20261107.md): everything that needs
-//! timer sequences or timer/decision/activity timeout history events on `EngineMutableState`, which does not expose them
-//! yet. `user_timers` / `activity_timers` are infallible in the trait and return empty; DO NOT wire this adapter into
-//! the launcher before `TimerSequence` is backed by real state, or timers would be completed without firing.
+//! Timer support comes from `EngineMutableState` (engine_timer.rs). Still TODO(link): `retry_workflow` and
+//! `update_workflow_execution_with_new_as_active` (continue-as-new run creation); see
+//! memory/history-gap-timermut-20261107.md.
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,7 +15,9 @@ use async_trait::async_trait;
 
 use super::engine_cache::{EngineExecutionCache, EngineExecutionContext};
 use super::engine_state::EngineMutableState;
+use super::engine_timer::SeqTimer;
 use super::env::HistoryEnv;
+use cadence_api::enums::TimeoutType;
 use super::queue_deps::TransferDepsImpl;
 use crate::engine::deps::{HistoryError, ReleaseFunc, WorkflowExecution};
 use crate::engine::deps_ms::MutableState as _;
@@ -28,6 +29,29 @@ use crate::task::transfer_task_executor_base::{AddMatchingTaskRequest, TransferD
 
 fn todo_err<T>(what: &str) -> TaskResult<T> {
     Err(TaskError::Other(format!("timer active: {what} is not supported yet (TODO(link): EngineMutableState timer support)")))
+}
+
+fn seq(t: SeqTimer) -> TimerSequenceId {
+    TimerSequenceId {
+        event_id: t.event_id,
+        attempt: t.attempt,
+        timer_type: match t.timeout_type {
+            0 => TimerType::StartToClose,
+            1 => TimerType::ScheduleToStart,
+            2 => TimerType::ScheduleToClose,
+            _ => TimerType::Heartbeat,
+        },
+        expiry: Time(t.expiry_nanos),
+    }
+}
+
+fn timeout_type(t: TimerType) -> &'static str {
+    match t {
+        TimerType::StartToClose => "START_TO_CLOSE",
+        TimerType::ScheduleToStart => "SCHEDULE_TO_START",
+        TimerType::ScheduleToClose => "SCHEDULE_TO_CLOSE",
+        TimerType::Heartbeat => "HEARTBEAT",
+    }
 }
 
 fn he(e: HistoryError) -> TaskError {
@@ -71,18 +95,17 @@ impl TimerWorkflow for EngineTimerWorkflow {
         self.state.get_workflow_type().map(|t| t.name)
     }
     fn user_timers(&self) -> Vec<TimerSequenceId> {
-        // TODO(link): TimerSequence over EngineMutableState timer infos.
-        Vec::new()
+        self.state.seq_user_timers().into_iter().map(seq).collect()
     }
     fn activity_timers(&self) -> Vec<TimerSequenceId> {
-        // TODO(link): TimerSequence over EngineMutableState activity infos.
-        Vec::new()
+        self.state.seq_activity_timers().into_iter().map(seq).collect()
     }
-    fn user_timer_info(&self, _event_id: i64) -> Option<UserTimerInfo> {
-        None
+    fn user_timer_info(&self, event_id: i64) -> Option<UserTimerInfo> {
+        self.state.user_timer_by_started_id(event_id).map(|(timer_id, started_id)| UserTimerInfo { timer_id, started_id })
     }
     fn activity_info(&self, event_id: i64) -> Option<TimerActivityInfo> {
         let a = self.state.get_activity_info(event_id)?;
+        let f = self.state.activity_timer_fields(event_id)?;
         Some(TimerActivityInfo {
             schedule_id: a.schedule_id,
             started_id: a.started_id,
@@ -90,10 +113,10 @@ impl TimerWorkflow for EngineTimerWorkflow {
             version: a.version,
             domain_id: self.state.get_domain_entry().info.id.clone(),
             task_list: a.task_list,
-            // TODO(link): ScheduleToStartTimeout and timer_task_status are not kept in the engine ActivityInfo.
-            schedule_to_start_timeout: 0,
+            schedule_to_start_timeout: f.schedule_to_start_timeout_seconds,
+            // TODO(link): LastHeartbeatTimeoutVisibilityInSeconds is not kept in persistence ActivityInfo.
             last_heartbeat_timeout_visibility_in_seconds: 0,
-            timer_task_status: 0,
+            timer_task_status: f.timer_task_status,
             details: a.details,
         })
     }
@@ -107,43 +130,55 @@ impl TimerWorkflow for EngineTimerWorkflow {
         })
     }
     async fn resurrected_timers(&self) -> TaskResult<HashSet<String>> {
-        todo_err("resurrected timers")
+        self.state.resurrected_timers().await.map_err(he)
     }
     async fn resurrected_activities(&self) -> TaskResult<HashSet<i64>> {
         self.state.get_resurrected_activities().await.map_err(he)
     }
-    fn delete_user_timer(&self, _id: &str) -> TaskResult<()> {
-        todo_err("delete_user_timer")
+    fn delete_user_timer(&self, id: &str) -> TaskResult<()> {
+        self.state.delete_user_timer(id).map_err(he)
     }
     fn delete_activity(&self, id: i64) -> TaskResult<()> {
         self.state.delete_activity(id).map_err(he)
     }
-    fn add_timer_fired_event(&self, _id: &str) -> TaskResult<()> {
-        todo_err("add_timer_fired_event")
+    fn add_timer_fired_event(&self, id: &str) -> TaskResult<()> {
+        self.state.add_timer_fired(id).map_err(he)
     }
-    fn update_activity(&self, _info: TimerActivityInfo) -> TaskResult<()> {
-        todo_err("update_activity")
+    fn update_activity(&self, info: TimerActivityInfo) -> TaskResult<()> {
+        self.state.set_activity_timer_status(info.schedule_id, info.timer_task_status).map_err(he)
     }
-    fn retry_activity(&self, _info: &TimerActivityInfo, _timer_type: TimerType) -> TaskResult<bool> {
-        todo_err("retry_activity")
+    fn retry_activity(&self, info: &TimerActivityInfo, timer_type: TimerType) -> TaskResult<bool> {
+        let Some(a) = self.state.engine_activity_info(info.schedule_id) else {
+            return Err(TaskError::InternalService(format!("activity {} not found", info.schedule_id)));
+        };
+        let reason = format!("cadenceInternal:Timeout {}", timeout_type(timer_type));
+        self.state.retry_activity(&a, &reason, &[], None).map_err(he)
     }
-    fn add_activity_task_timed_out_event(&self, _info: &TimerActivityInfo, _timer_type: TimerType) -> TaskResult<()> {
-        todo_err("add_activity_task_timed_out_event")
+    fn add_activity_task_timed_out_event(&self, info: &TimerActivityInfo, timer_type: TimerType) -> TaskResult<()> {
+        let t = match timer_type {
+            TimerType::StartToClose => TimeoutType::StartToClose,
+            TimerType::ScheduleToStart => TimeoutType::ScheduleToStart,
+            TimerType::ScheduleToClose => TimeoutType::ScheduleToClose,
+            TimerType::Heartbeat => TimeoutType::Heartbeat,
+        };
+        self.state.add_activity_timed_out(info.schedule_id, info.started_id, t).map_err(he)
     }
     fn sticky(&self) -> bool {
         self.state.is_sticky_task_list_enabled()
     }
-    fn add_decision_task_timed_out_event(&self, _info: &TimerDecisionInfo) -> TaskResult<()> {
-        todo_err("add_decision_task_timed_out_event")
+    fn add_decision_task_timed_out_event(&self, info: &TimerDecisionInfo) -> TaskResult<()> {
+        self.state.add_decision_timed_out(info.schedule_id, info.started_id).map_err(he)
     }
-    fn add_decision_task_schedule_to_start_timeout_event(&self, _schedule_id: i64) -> TaskResult<()> {
-        todo_err("add_decision_task_schedule_to_start_timeout_event")
+    fn add_decision_task_schedule_to_start_timeout_event(&self, schedule_id: i64) -> TaskResult<()> {
+        self.state.add_decision_task_schedule_to_start_timeout(schedule_id).map_err(he)
     }
     fn decision_attempt(&self) -> i64 {
         self.state.get_pending_decision().map(|d| d.attempt).unwrap_or(0)
     }
-    fn terminate_decision_attempts_exceeded(&self, _message: &str) -> TaskResult<()> {
-        todo_err("terminate_decision_attempts_exceeded")
+    fn terminate_decision_attempts_exceeded(&self, message: &str) -> TaskResult<()> {
+        self.state
+            .terminate_workflow(self.state.get_next_event_id(), "DECISION_ATTEMPTS_EXCEEDS_LIMIT", message.as_bytes(), "history-service")
+            .map_err(he)
     }
     fn has_processed_or_pending_decision(&self) -> bool {
         self.state.has_processed_or_pending_decision()
@@ -152,7 +187,8 @@ impl TimerWorkflow for EngineTimerWorkflow {
         self.state.get_pending_decision().map(|d| d.schedule_id).unwrap_or(0)
     }
     fn add_upsert_workflow_search_attributes_task(&self) -> TaskResult<()> {
-        todo_err("add_upsert_workflow_search_attributes_task")
+        self.state.add_search_attributes_task();
+        Ok(())
     }
     fn schedule_decision(&self) -> TaskResult<()> {
         self.state.add_decision_task_scheduled_event(false).map_err(he)
@@ -166,18 +202,17 @@ impl TimerWorkflow for EngineTimerWorkflow {
     fn next_event_id(&self) -> i64 {
         self.state.get_next_event_id()
     }
-    fn retry_backoff_duration(&self, _reason: &str) -> Option<Duration> {
-        // TODO(link): retry policy backoff (workflow retry).
-        None
+    fn retry_backoff_duration(&self, reason: &str) -> Option<Duration> {
+        self.state.workflow_retry_backoff(reason)
     }
     async fn cron_backoff_duration(&self) -> TaskResult<Option<Duration>> {
-        todo_err("cron_backoff_duration")
+        self.state.workflow_cron_backoff().map_err(he)
     }
     fn cancel_requested(&self) -> bool {
         self.state.is_cancel_requested().0
     }
-    fn timeout_workflow(&self, _first_event_id: i64) -> TaskResult<()> {
-        todo_err("timeout_workflow")
+    fn timeout_workflow(&self, first_event_id: i64) -> TaskResult<()> {
+        self.state.add_timeout_workflow(first_event_id).map_err(he)
     }
     async fn retry_workflow(&self, _first_event_id: i64, _backoff: Duration, _cron: bool, _reason: &str) -> TaskResult<()> {
         todo_err("retry_workflow")
@@ -185,12 +220,21 @@ impl TimerWorkflow for EngineTimerWorkflow {
     async fn update_workflow_execution_with_new_as_active(&self, _now: Time) -> TaskResult<()> {
         todo_err("update_workflow_execution_with_new_as_active")
     }
-    async fn activity_scheduled_domain(&self, _event_id: i64) -> TaskResult<String> {
-        // TODO(link): read ActivityTaskScheduled event domain override; same-domain default.
-        Ok(self.state.get_domain_entry().info.name.clone())
+    async fn activity_scheduled_domain(&self, event_id: i64) -> TaskResult<String> {
+        let ev = self.state.get_activity_scheduled_event(event_id).await.map_err(he)?;
+        match ev.activity_task_scheduled_event_attributes.and_then(|a| a.domain) {
+            Some(d) if !d.is_empty() => Ok(d),
+            _ => Ok(self.state.get_domain_entry().info.name.clone()),
+        }
     }
     fn partition_config(&self) -> BytesMap {
-        BytesMap::new()
+        self.state
+            .get_execution_info()
+            .partition_config
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(k, v)| (k, v.into_bytes()))
+            .collect()
     }
 }
 

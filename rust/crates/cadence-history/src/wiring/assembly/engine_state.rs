@@ -166,6 +166,10 @@ pub(super) struct Inner {
     pub(super) upsert_acts: BTreeSet<i64>,
     pub(super) deleted_activities: HashSet<i64>,
     pub(super) heartbeats: BTreeMap<i64, pc::ActivityHeartbeat>,
+    /// User timers keyed by timer id (`TimerInfo.task_id` carries Go's `TaskStatus`).
+    pub(super) timers: BTreeMap<String, pc::TimerInfo>,
+    pub(super) upsert_timers: BTreeSet<String>,
+    pub(super) delete_timers: BTreeSet<String>,
     pub(super) children: BTreeMap<i64, ChildExecutionInfo>,
     pub(super) pc_children: BTreeMap<i64, pc::ChildExecutionInfo>,
     pub(super) upsert_children: BTreeSet<i64>,
@@ -333,6 +337,12 @@ impl EngineMutableState {
             activities.insert(kb.key, engine_activity(kb.key, &a, details));
             pc_acts.insert(kb.key, a);
         }
+        let mut timers = BTreeMap::new();
+        for kb in &snapshot.timer_infos {
+            let t = cadence_persistence::sqlblobs::timer_info_from_struct(&decode(&kb.value)?)
+                .map_err(|e| HistoryError::internal(format!("decode timer info: {e}")))?;
+            timers.insert(kb.key.clone(), t);
+        }
         let mut children = BTreeMap::new();
         let mut pc_children = BTreeMap::new();
         for kb in &snapshot.child_execution_infos {
@@ -377,6 +387,9 @@ impl EngineMutableState {
             upsert_acts: BTreeSet::new(),
             deleted_activities: HashSet::new(),
             heartbeats: snapshot.activity_heartbeats.clone(),
+            timers,
+            upsert_timers: BTreeSet::new(),
+            delete_timers: BTreeSet::new(),
             children,
             pc_children,
             upsert_children: BTreeSet::new(),

@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use cadence_api::service_types::HistoryEvent;
 use cadence_api::types::VersionHistoryItem;
 use cadence_persistence::history_contract as pc;
-use cadence_persistence::sqlblobs::{activity_info_to_struct, child_execution_info_to_struct, Encoding};
+use cadence_persistence::sqlblobs::{activity_info_to_struct, child_execution_info_to_struct, timer_info_to_struct, Encoding};
 
 use crate::engine::deps::{HResult, HistoryError};
 use crate::wiring::assembly::engine_state::EngineMutableState;
@@ -41,6 +41,7 @@ impl EngineMutableState {
         let mut g = self.inner.lock().unwrap();
         if active {
             g.flush_buffered();
+            g.create_next_user_timer();
             g.create_next_activity_timer();
         } else if !g.hist.is_empty() {
             return Err(HistoryError::internal("cannot close a tasks-only transaction with new history events"));
@@ -116,6 +117,12 @@ impl EngineMutableState {
                     .push(pc::KeyedBlob { key: *iid, value: blob(enc(&child_execution_info_to_struct(c))?) });
             }
         }
+        let mut upsert_timer_infos = Vec::new();
+        for id in &g.upsert_timers {
+            if let Some(t) = g.timers.get(id) {
+                upsert_timer_infos.push(pc::KeyedBlob { key: id.clone(), value: blob(enc(&timer_info_to_struct(t))?) });
+            }
+        }
         let new_buffered_events = if g.update_buffered.is_empty() {
             None
         } else {
@@ -131,6 +138,8 @@ impl EngineMutableState {
             last_write_version,
             upsert_activity_infos,
             delete_activity_infos,
+            upsert_timer_infos,
+            delete_timer_infos: g.delete_timers.iter().cloned().collect(),
             upsert_child_execution_infos,
             delete_child_execution_infos: g.deleted_children.iter().copied().collect(),
             upsert_signal_requested_ids: g.upsert_signal_requested.iter().cloned().collect(),
@@ -176,6 +185,8 @@ impl EngineMutableState {
         g.transfer_tasks.clear();
         g.timer_tasks.clear();
         g.upsert_acts.clear();
+        g.upsert_timers.clear();
+        g.delete_timers.clear();
         g.deleted_activities.clear();
         g.upsert_children.clear();
         g.deleted_children.clear();
