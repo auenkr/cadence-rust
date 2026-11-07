@@ -38,3 +38,4 @@ pub mod mutable_state_methods_completed;
 pub mod mutable_state_methods_cancellation;
 pub mod mutable_state_methods_child_workflow;
 pub mod mutable_state_methods_signal;
+pub mod mutable_state_methods_activity;
