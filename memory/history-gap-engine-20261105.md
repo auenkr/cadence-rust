@@ -38,3 +38,7 @@ Note: new trait methods on MutableState (get_last_write_version, is_resource_dup
 - New wiring/assembly/engine_start.rs: EngineStartHost (WorkflowStartHost) and EngineFailoverHost (DomainFailoverHost), wired in build_engine.
 - CI cadence-history: https://github.com/auenkr/cadence-rust/actions/runs/42226144095 head a1bf430119027afc5a7a97be6e38ff8e6ae4a614 conclusion success.
 - Remaining gaps: visibility writes, orphan history branch cleanup, workflow request dedup rows, ReplicateFailoverMarkers/DLQ failover (no-ops); history_engine.go NewEngine/Start/Stop and remaining TODO(link) facades in deps.rs/runtime.rs/types.rs not yet replaced.
+
+## gap-engine5 (branch history-gap-engine5)
+- New engine/lifecycle.rs: `HistoryEngine::start/stop` (Go Start/Stop order), `EngineLifecycleHost` trait; `QueueProcessor` gained start/stop (queues.rs adapter over queue Daemon). createMutableState was already ported in start_workflow_execution.rs.
+- Gaps: `build_engine` wires `EngineLifecycleParts` whose DLQ processor, replication task processors/DLQ handler/metrics emitter and failover marker notifier are no-ops (not constructed in build_engine); NewEngine still not a 1:1 port (replication hydrator/task store/NDC replicator unwired); Engine trait (interface.go) not expressed as a Rust trait.

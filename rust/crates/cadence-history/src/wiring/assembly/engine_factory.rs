@@ -201,6 +201,8 @@ pub fn build_engine(
         updater: Arc::new(EngineWorkflowUpdater::new(cache.clone(), core)),
         start_host,
         failover_host,
+        lifecycle_host: Arc::new(EngineLifecycleParts { graceful_failover: env.config.enable_graceful_failover.clone() }),
+        lifecycle_cancel: std::sync::Mutex::new(None),
         queue_processors,
         replication_dlq_handler: replication.dlq_handler,
         replication_ack_manager: replication.ack_manager,
@@ -246,4 +248,26 @@ struct NoopReplicationTaskStore;
 
 impl crate::engine::runtime::ReplicationTaskStore for NoopReplicationTaskStore {
     fn put(&self, _task: cadence_api::types::ReplicationTask) {}
+}
+
+/// `EngineLifecycleHost` for the components that are not constructed by `build_engine` yet
+/// (DLQ processor, replication task processors, metrics emitter, failover marker notifier);
+/// those are no-ops until their wiring lands (gap recorded in memory).
+struct EngineLifecycleParts {
+    graceful_failover: crate::config_collection::Prop<bool>,
+}
+
+#[async_trait::async_trait]
+impl crate::engine::lifecycle::EngineLifecycleHost for EngineLifecycleParts {
+    async fn start_dlq_processor(&self, _ctx: tokio_util::sync::CancellationToken) -> HResult<()> { Ok(()) }
+    async fn stop_dlq_processor(&self, _ctx: tokio_util::sync::CancellationToken) -> HResult<()> { Ok(()) }
+    fn start_replication_dlq_handler(&self) {}
+    fn stop_replication_dlq_handler(&self) {}
+    fn start_replication_metrics_emitter(&self) {}
+    fn stop_replication_metrics_emitter(&self) {}
+    fn start_replication_task_processors(&self) {}
+    fn stop_replication_task_processors(&self) {}
+    fn enable_graceful_failover(&self) -> bool { (self.graceful_failover)() }
+    fn start_failover_marker_notifier(&self) {}
+    fn stop_failover_marker_notifier(&self) {}
 }

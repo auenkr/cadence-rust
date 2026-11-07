@@ -21,3 +21,4 @@ pub mod reapply_events;
 pub mod describe_workflow_execution;
 pub mod start_workflow_execution;
 pub mod register_domain_failover_callback;
+pub mod lifecycle;

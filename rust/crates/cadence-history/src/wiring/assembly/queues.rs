@@ -134,6 +134,14 @@ fn to_queue_notify_info(
 
 #[async_trait]
 impl QueueProcessor for EngineQueueProcessor {
+    fn start(&self) {
+        crate::queue::deps::Daemon::start(self.inner.clone());
+    }
+
+    async fn stop(&self) {
+        crate::queue::deps::Daemon::stop(&*self.inner).await;
+    }
+
     async fn handle_action(&self, cluster: &str, action: QueueAction) -> HResult<Vec<String>> {
         match action {
             QueueAction::Reset => {

@@ -19,6 +19,10 @@ pub trait ActiveClusterManager: Send + Sync {
 pub enum QueueAction { Reset, GetState }
 #[async_trait]
 pub trait QueueProcessor: Send + Sync {
+    /// `processor.Start()`
+    fn start(&self);
+    /// `processor.Stop()`
+    async fn stop(&self);
     async fn handle_action(&self, cluster: &str, action: QueueAction) -> HResult<Vec<String>>;
     fn notify_new_task(&self, cluster: &str, info: &super::notify_tasks::NotifyTaskInfo);
     /// `FailoverDomain`
@@ -114,6 +118,9 @@ pub struct HistoryEngine {
     pub replication_task_store: Arc<dyn ReplicationTaskStore>,
     pub start_host: Arc<dyn super::start_workflow_execution::WorkflowStartHost>,
     pub failover_host: Arc<dyn super::register_domain_failover_callback::DomainFailoverHost>,
+    pub lifecycle_host: Arc<dyn super::lifecycle::EngineLifecycleHost>,
+    /// `lifecycleCancel`
+    pub lifecycle_cancel: std::sync::Mutex<Option<tokio_util::sync::CancellationToken>>,
 }
 
 /// Inputs of `replication.NewImmediateTaskHydrator`.
