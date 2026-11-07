@@ -14,6 +14,8 @@ pub enum StateBuilderError {
     #[error("version histories are missing")] MissingVersionHistories,
     #[error("invalid version history item")] VersionHistoryItem,
     #[error("Unknown event type")] UnknownEventType,
+    /// Go `ErrMissingSemaphoreInfo` (InternalServiceError).
+    #[error("unable to get semaphore info")] MissingSemaphoreInfo,
     #[error("unsupported or malformed replicated event {event_type:?} ({event_id})")]
     InvalidEvent { event_type: Option<EventType>, event_id: i64 },
 }
@@ -22,6 +24,44 @@ pub enum StateBuilderError {
 pub struct StateBuilder { pub mutable_state: MutableStateBuilder }
 
 impl StateBuilder {
+    /// Go `ReplicateSemaphoreAcquireInitiatedEvent`: the hold derives only from the event and run.
+    fn replicate_semaphore_acquire_initiated(&mut self, event: &HistoryEvent) -> Result<(), StateBuilderError> {
+        let attributes = event.semaphore_acquire_initiated_event_attributes.clone().unwrap_or_default();
+        let info = &self.mutable_state.execution_info;
+        let workflow_id = info.get("workflow_id").and_then(|v| v.as_str()).unwrap_or_default();
+        let run_id = info.get("run_id").and_then(|v| v.as_str()).unwrap_or_default();
+        // Same encoding as `execution::semaphore` (Go commonsemaphore.Owner.String()).
+        let owner_id = format!("{}:{}:{}:{}", workflow_id.len(), workflow_id, run_id, event.event_id);
+        let wait_nanos = i64::from(attributes.wait_timeout_seconds.unwrap_or_default()) * 1_000_000_000;
+        self.mutable_state.semaphore_state.upsert_semaphore_info(super::semaphore::SemaphoreInfo {
+            version: event.version,
+            initiated_id: event.event_id,
+            semaphore_name: attributes.semaphore_name,
+            owner_id,
+            // Measured from the event's own timestamp so replay gets the same deadline.
+            acquire_deadline_unix_nanos: event.timestamp.unwrap_or_default() + wait_nanos,
+            token_id: 0,
+        });
+        Ok(())
+    }
+    /// Go `ReplicateSemaphoreAcquiredEvent`.
+    fn replicate_semaphore_acquired(&mut self, event: &HistoryEvent) -> Result<(), StateBuilderError> {
+        let attributes = event.semaphore_acquired_event_attributes.clone().unwrap_or_default();
+        let mut info = self.mutable_state.semaphore_state.get_semaphore_info(attributes.initiated_event_id).cloned().ok_or(StateBuilderError::MissingSemaphoreInfo)?;
+        info.version = event.version;
+        info.token_id = attributes.token_id;
+        self.mutable_state.semaphore_state.upsert_semaphore_info(info);
+        Ok(())
+    }
+    /// Go `ReplicateSemaphoreReleasedEvent` -> `DeleteSemaphoreInfo`.
+    fn replicate_semaphore_released(&mut self, event: &HistoryEvent) -> Result<(), StateBuilderError> {
+        let id = event.semaphore_released_event_attributes.clone().unwrap_or_default().initiated_event_id;
+        let state = &mut self.mutable_state.semaphore_state;
+        state.pending.remove(&id);
+        state.updates.remove(&id);
+        state.deletes.insert(id);
+        Ok(())
+    }
     pub fn new(mutable_state: MutableStateBuilder) -> Self { Self { mutable_state } }
     /// Go `ApplyEvents`: replicates a batch onto mutable state.
     pub fn apply_events(&mut self, events: &[HistoryEvent]) -> Result<(), StateBuilderError> {
@@ -86,8 +126,9 @@ impl StateBuilder {
                 Some(EventType::WorkflowExecutionCompleted | EventType::WorkflowExecutionFailed | EventType::WorkflowExecutionTimedOut | EventType::WorkflowExecutionCanceled | EventType::WorkflowExecutionTerminated | EventType::WorkflowExecutionContinuedAsNew) => { self.mutable_state.replicate_workflow_close_event(event.event_id, event); }
                 // Go: no mutable state action is needed
                 Some(EventType::RequestCancelActivityTaskFailed | EventType::CancelTimerFailed) => {}
-                // GAP: Semaphore* replication needs cadence-api attribute types (missing); see memory.
-                Some(EventType::SemaphoreAcquireInitiated | EventType::SemaphoreAcquired | EventType::SemaphoreReleased) => {}
+                Some(EventType::SemaphoreAcquireInitiated) => self.replicate_semaphore_acquire_initiated(event)?,
+                Some(EventType::SemaphoreAcquired) => self.replicate_semaphore_acquired(event)?,
+                Some(EventType::SemaphoreReleased) => self.replicate_semaphore_released(event)?,
                 // Go: BadRequestError "Unknown event type"
                 _ => return Err(StateBuilderError::UnknownEventType),
             }

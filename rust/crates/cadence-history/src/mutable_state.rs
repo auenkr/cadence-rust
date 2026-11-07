@@ -136,6 +136,8 @@ pub struct MutableStateBuilder {
     pub decision_info: Option<DecisionInfo>,
     /// Activity ID to schedule event ID index used by mutable state lookups.
     pub activity_id_to_event_id: BTreeMap<String, i64>,
+    /// Go `pendingSemaphoreInfoIDs` / `updateSemaphoreInfos` / `deleteSemaphoreInfos`.
+    pub semaphore_state: crate::execution::semaphore::SemaphoreState,
 }
 
 impl Default for MutableStateBuilder {
@@ -150,7 +152,7 @@ impl Default for MutableStateBuilder {
             pending_signal_requested_ids: BTreeSet::new(), update_signal_requested_ids: BTreeSet::new(), delete_signal_requested_ids: BTreeSet::new(),
             buffered_events: Vec::new(), update_buffered_events: Vec::new(), clear_buffered_events: false,
             version_histories: None, history: Vec::new(), next_event_id: 1, next_event_id_in_db: 0, checksum: None,
-            decision_info: None, activity_id_to_event_id: BTreeMap::new(),
+            decision_info: None, activity_id_to_event_id: BTreeMap::new(), semaphore_state: Default::default(),
         }
     }
 }

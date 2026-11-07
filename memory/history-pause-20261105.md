@@ -29,3 +29,15 @@ Read this checkpoint, history-port-audit-20261105.md, individual gap notes and a
 - history-gap-handler2 (0d3d30e41) NOT merged: enables wiring persistence/resources/assembly modules and adds handler/handler_impl.rs; CI 42218488492 unverified at pause. Gaps in memory/history-gap-handler-20261105.md (Start/SignalWithStart need engine methods; replication/failover/RemoveTask/ReapplyEvents/RatelimitUpdate/cross-cluster RPCs return gap errors; lookup, service.go, real main.rs, wrapper audit not started).
 - Merged history-gap-timerq3 (df62bd8ac; code head CI 42218452225 green, last commit memory-only): queue/factory.rs + common.rs; master timer processors kept. Timer task executors still partial (memory/history-gap-timerq3-20261106.md).
 - Merged history-gap-decision3 (bd802889c; code head ba65e607c CI green: history 42220071139, api 42221059615): typed errors, CAN ASCP/domain lookup, AcquireSemaphore decision. Gaps in memory/history-gap-decision3-20261106.md.
+
+## 2026-11-06 20:05 IST pause (session 2)
+- Merged to master: startup (6050c9e), mutstate3 (bf91786, typed TypedMutableState, Add*/Replicate* methods NOT ported), engine4 (e41c88a, fixes engine_cache/engine_state/engine_factory compile errors; CI green on a1bf430).
+- Master CI after engine4: run 42234625308 (see result below).
+- Unmerged: history-gap-apitypes (head e5880ca, CI pending/unverified; worker hit API rate limit),
+  history-gap-transferexec (head 318362c, CI rerun 42234619633; audit incomplete).
+- Worker mutstate4 (Add*/Replicate* methods from mutable_state_builder_methods_*.go) failed on rate limit before any commit; branch deleted. Relaunch next session.
+- Next: port Add*/Replicate* methods, real queue factory (visibility writer + archival client), TLS, dynamic config backends, grpc/thrift wrapper audit; then mixed-cluster gate.
+- 20:20 update: master CI after engine4 GREEN (run 42234625308). Merged apitypes (0d6f6a4, CI green per crate on code heads) and mutstate4 (CI 42235261718 GREEN after merging master): typed Add*/Replicate* for timer, timedout, completed, cancellation, common. Still unported: activity, child_workflow, signal, started, decision, semaphore methods; task generation/events cache/insertWorkflowRequest in ported methods.
+- history-gap-transferexec NOT merged: CI rerun 42234619633 FAILED (needs master merge + fix); audit incomplete.
+- engine4 remaining gaps: visibility writes/orphan branch cleanup no-op, request dedup rows, replicate_failover_markers no-op, no DLQ failover processor, NewEngine/Start/Stop/createMutableState + engine/interface.go not ported, TODO(link) facades in deps.rs/runtime.rs/types.rs.
+- apitypes gaps: ParentWorkflowDomainID/jitter_start_seconds lack Thrift fields; state_builder reads parent_workflow_domain not _id; no round-trip tests for new converters.

@@ -205,3 +205,39 @@ impl Inner {
         self.refresh_activity(sid);
     }
 }
+
+const TRANSFER_RECORD_WORKFLOW_STARTED: i32 = 6;
+const TIMER_WORKFLOW_TIMEOUT: i32 = 3;
+const TIMER_WORKFLOW_BACKOFF: i32 = 6;
+
+/// Go `WorkflowBackoffTimeoutTypeRetry` / `WorkflowBackoffTimeoutTypeCron`.
+pub(super) const BACKOFF_TYPE_RETRY: i32 = 0;
+pub(super) const BACKOFF_TYPE_CRON: i32 = 1;
+
+impl Inner {
+    /// Go `GenerateWorkflowStartTasks` (workflow timeout timer).
+    pub(super) fn gen_workflow_start_timer(&mut self, timeout_at_nanos: i64, version: i64) {
+        let mut tt = self.timer_base(TIMER_WORKFLOW_TIMEOUT, version, timeout_at_nanos);
+        tt.task_list = self.exec.task_list.clone();
+        self.timer_tasks.push(tt);
+        self.dirty = true;
+    }
+
+    /// Go `GenerateRecordWorkflowStartedTasks`.
+    pub(super) fn gen_record_workflow_started(&mut self, version: i64) {
+        let mut t = self.transfer_base(TRANSFER_RECORD_WORKFLOW_STARTED, version);
+        t.target_domain_id = self.exec.domain_id.clone();
+        t.task_list = self.exec.task_list.clone();
+        self.transfer_tasks.push(t);
+        self.dirty = true;
+    }
+
+    /// Go `GenerateDelayedDecisionTasks` (workflow backoff timer).
+    pub(super) fn gen_delayed_decision_timer(&mut self, at_nanos: i64, backoff_type: i32, version: i64) {
+        let mut tt = self.timer_base(TIMER_WORKFLOW_BACKOFF, version, at_nanos);
+        tt.timeout_type = backoff_type;
+        tt.task_list = self.exec.task_list.clone();
+        self.timer_tasks.push(tt);
+        self.dirty = true;
+    }
+}

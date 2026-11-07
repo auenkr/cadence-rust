@@ -1513,6 +1513,60 @@ pub struct WorkflowExecutionContinuedAsNewEventAttributes {
         skip_serializing_if = "Option::is_none"
     )]
     pub cron_overlap_policy: Option<CronOverlapPolicy>,
+    #[serde(
+        rename = "jitterStartSeconds",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub jitter_start_seconds: Option<i32>,
+    #[serde(
+        rename = "activeClusterSelectionPolicy",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub active_cluster_selection_policy: Option<crate::types::ActiveClusterSelectionPolicy>,
+}
+
+/// shared.thrift `RequestCancelActivityTaskFailedEventAttributes`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct RequestCancelActivityTaskFailedEventAttributes {
+    #[serde(rename = "activityId", default, skip_serializing_if = "String::is_empty")]
+    pub activity_id: String,
+    #[serde(rename = "cause", default, skip_serializing_if = "String::is_empty")]
+    pub cause: String,
+    #[serde(rename = "decisionTaskCompletedEventId", default)]
+    pub decision_task_completed_event_id: i64,
+}
+
+/// shared.thrift `SemaphoreAcquireInitiatedEventAttributes`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SemaphoreAcquireInitiatedEventAttributes {
+    #[serde(rename = "semaphoreName", default, skip_serializing_if = "String::is_empty")]
+    pub semaphore_name: String,
+    #[serde(rename = "waitTimeoutSeconds", default, skip_serializing_if = "Option::is_none")]
+    pub wait_timeout_seconds: Option<i32>,
+    #[serde(rename = "decisionTaskCompletedEventId", default)]
+    pub decision_task_completed_event_id: i64,
+}
+
+/// shared.thrift `SemaphoreAcquiredEventAttributes`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SemaphoreAcquiredEventAttributes {
+    #[serde(rename = "tokenId", default)]
+    pub token_id: i32,
+    #[serde(rename = "initiatedEventId", default)]
+    pub initiated_event_id: i64,
+}
+
+/// shared.thrift `SemaphoreReleasedEventAttributes`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SemaphoreReleasedEventAttributes {
+    #[serde(rename = "tokenId", default)]
+    pub token_id: i32,
+    #[serde(rename = "initiatedEventId", default)]
+    pub initiated_event_id: i64,
+    #[serde(rename = "decisionTaskCompletedEventId", default)]
+    pub decision_task_completed_event_id: i64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

@@ -188,6 +188,8 @@ pub fn build_engine(
             })
         },
     });
+    let start_host = super::engine_start::EngineStartHost::new(core.clone(), env.config.clone());
+    let failover_host = super::engine_start::EngineFailoverHost::new(shard.clone(), env.domain_cache.clone());
     let cache = EngineExecutionCache::new(core.clone());
     let decision_handler = Arc::new(EngineDecisionHandler::new(cache.clone(), core.clone()));
     Arc::new(HistoryEngine {
@@ -197,6 +199,8 @@ pub fn build_engine(
         active_cluster_manager: Arc::new(DomainActiveClusterManager::new(env.domain_cache.clone())),
         time_source: env.clock.clone(),
         updater: Arc::new(EngineWorkflowUpdater::new(cache.clone(), core)),
+        start_host,
+        failover_host,
         queue_processors,
         replication_dlq_handler: replication.dlq_handler,
         replication_ack_manager: replication.ack_manager,

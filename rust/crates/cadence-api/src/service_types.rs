@@ -1028,6 +1028,24 @@ pub struct WorkflowExecutionStartedEventAttributes {
         skip_serializing_if = "Option::is_none"
     )]
     pub jitter_start_seconds: Option<i32>,
+    #[serde(
+        rename = "parentWorkflowDomainID",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub parent_workflow_domain_id: Option<String>,
+    #[serde(
+        rename = "prevAutoResetPoints",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub prev_auto_reset_points: Option<ResetPoints>,
+    #[serde(
+        rename = "activeClusterSelectionPolicy",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub active_cluster_selection_policy: Option<ActiveClusterSelectionPolicy>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1396,6 +1414,34 @@ pub struct HistoryEvent {
     )]
     pub child_workflow_execution_timed_out_event_attributes:
         Option<crate::tasks::ChildWorkflowExecutionTimedOutEventAttributes>,
+    #[serde(
+        rename = "requestCancelActivityTaskFailedEventAttributes",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub request_cancel_activity_task_failed_event_attributes:
+        Option<crate::tasks::RequestCancelActivityTaskFailedEventAttributes>,
+    #[serde(
+        rename = "semaphoreAcquireInitiatedEventAttributes",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub semaphore_acquire_initiated_event_attributes:
+        Option<crate::tasks::SemaphoreAcquireInitiatedEventAttributes>,
+    #[serde(
+        rename = "semaphoreAcquiredEventAttributes",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub semaphore_acquired_event_attributes:
+        Option<crate::tasks::SemaphoreAcquiredEventAttributes>,
+    #[serde(
+        rename = "semaphoreReleasedEventAttributes",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub semaphore_released_event_attributes:
+        Option<crate::tasks::SemaphoreReleasedEventAttributes>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
