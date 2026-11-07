@@ -246,8 +246,16 @@ impl Handler for HandlerImpl {
         self.engine_shard(r.shard_id).await?.merge_dlq_messages(r).await
     }
 
-    async fn notify_failover_markers(&self, _r: Option<&NotifyFailoverMarkersRequest>) -> HResult<()> {
-        Err(gap("NotifyFailoverMarkers"))
+    async fn notify_failover_markers(&self, request: Option<&NotifyFailoverMarkersRequest>) -> HResult<()> {
+        // Go `NotifyFailoverMarkers`: no shutdown/rate checks; hand each token to the coordinator.
+        let r = nil(request)?;
+        let coordinator = &self.registry.env().failover_coordinator;
+        for token in &r.failover_marker_tokens {
+            if let Some(marker) = token.failover_marker.clone() {
+                crate::failover::Coordinator::receive_failover_markers(&**coordinator, token.shard_ids.clone(), marker);
+            }
+        }
+        Ok(())
     }
 
     async fn poll_mutable_state(&self, request: Option<&PollMutableStateRequest>) -> HResult<PollMutableStateResponse> {
@@ -449,8 +457,16 @@ impl Handler for HandlerImpl {
         self.prep(true, &r.domain_uuid, wf).await?.terminate_workflow_execution(r).await
     }
 
-    async fn get_failover_info(&self, _r: Option<&GetFailoverInfoRequest>) -> HResult<GetFailoverInfoResponse> {
-        Err(gap("GetFailoverInfo (failover coordinator not wired into handler)"))
+    async fn get_failover_info(&self, request: Option<&GetFailoverInfoRequest>) -> HResult<GetFailoverInfoResponse> {
+        let r = nil(request)?;
+        self.check_shutdown()?;
+        match crate::failover::Coordinator::get_failover_info(&*self.registry.env().failover_coordinator, &r.domain_id) {
+            Ok(resp) => Ok(GetFailoverInfoResponse {
+                completed_shard_count: resp.completed_shard_count,
+                pending_shards: resp.pending_shards,
+            }),
+            Err(e) => Err(HistoryError::entity_not_exists(e.to_string())),
+        }
     }
 
     async fn ratelimit_update(&self, _r: Option<&RatelimitUpdateRequest>) -> HResult<RatelimitUpdateResponse> {
