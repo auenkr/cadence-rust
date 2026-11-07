@@ -30,7 +30,7 @@ impl TypedMutableState {
         self.execution_info.domain_id = domain_id.to_string();
         self.execution_info.workflow_id = workflow_id.to_string();
         self.execution_info.run_id = run_id.to_string();
-        self.execution_info.first_execution_run_id = a.first_execution_run_id.clone().unwrap_or_default();
+        self.execution_info.first_execution_run_id = a.first_execution_run_id.clone();
         self.execution_info.task_list = a.task_list.as_ref().map(|t| t.name.clone()).unwrap_or_default();
         self.execution_info.workflow_type_name =
             a.workflow_type.as_ref().map(|t| t.name.clone()).unwrap_or_default();
@@ -38,7 +38,7 @@ impl TypedMutableState {
             i64::from(a.execution_start_to_close_timeout_seconds.unwrap_or_default()) * NANOS_PER_SECOND;
         self.execution_info.decision_start_to_close_timeout_nanos =
             i64::from(a.task_start_to_close_timeout_seconds.unwrap_or_default()) * NANOS_PER_SECOND;
-        self.execution_info.cron_schedule = a.cron_schedule.clone().unwrap_or_default();
+        self.execution_info.cron_schedule = a.cron_schedule.clone();
         self.execution_info.attempt = a.attempt;
         if let Some(exp) = a.expiration_timestamp {
             self.execution_info.expiration_time_unix_nanos = exp;
@@ -72,9 +72,8 @@ impl TypedMutableState {
         if let Some(m) = a.memo.as_ref().and_then(|m| m.fields.as_ref()) {
             self.execution_info.memo = m.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         }
-        if let Some(sa) = a.search_attributes.as_ref() {
-            self.execution_info.search_attributes =
-                sa.indexed_fields.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        if let Some(sa) = a.search_attributes.as_ref().and_then(|s| s.indexed_fields.as_ref()) {
+            self.execution_info.search_attributes = sa.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         }
         if let Some(pc) = a.partition_config.as_ref() {
             self.execution_info.partition_config = pc.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
