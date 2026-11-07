@@ -921,3 +921,122 @@ impl TypedMutableState {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod decision_tests {
+    use super::*;
+
+    fn env() -> DecisionEnv {
+        DecisionEnv { now_nanos: 1_000_000_000, ..Default::default() }
+    }
+
+    fn scheduled() -> (TypedMutableState, DecisionEnv, DecisionInfo) {
+        let mut ms = TypedMutableState::new();
+        let env = env();
+        let di = ms.add_decision_task_scheduled_event(&env, true).expect("schedule");
+        (ms, env, di)
+    }
+
+    fn started() -> (TypedMutableState, DecisionEnv, i64, i64) {
+        let (mut ms, env, di) = scheduled();
+        let (ev, info) = ms
+            .add_decision_task_started_event(&env, di.schedule_id, "req-1", "tl", "worker")
+            .expect("start");
+        assert!(ev.is_some());
+        (ms, env, di.schedule_id, info.started_id)
+    }
+
+    #[test]
+    fn schedule_happy_path() {
+        let (ms, _env, di) = scheduled();
+        assert_eq!(di.schedule_id, 1);
+        assert_eq!(di.started_id, EMPTY_EVENT_ID);
+        assert_eq!(ms.execution_info.decision_schedule_id, 1);
+        assert!(ms.has_pending_decision());
+        assert!(!ms.has_in_flight_decision());
+    }
+
+    #[test]
+    fn schedule_twice_fails() {
+        let (mut ms, env, _) = scheduled();
+        assert!(ms.add_decision_task_scheduled_event(&env, true).is_err());
+    }
+
+    #[test]
+    fn start_happy_path() {
+        let (ms, _env, schedule_id, started_id) = started();
+        assert_eq!(started_id, schedule_id + 1);
+        assert_eq!(ms.execution_info.decision_started_id, started_id);
+        assert!(ms.has_in_flight_decision());
+    }
+
+    #[test]
+    fn start_unknown_schedule_id_fails() {
+        let (mut ms, env, _) = scheduled();
+        assert!(ms.add_decision_task_started_event(&env, 99, "r", "tl", "w").is_err());
+    }
+
+    #[test]
+    fn complete_happy_path() {
+        let (mut ms, mut env, schedule_id, started_id) = started();
+        let req = RespondDecisionTaskCompletedRequest::default();
+        let ev = ms
+            .add_decision_task_completed_event(&mut env, schedule_id, started_id, &req, 20)
+            .expect("complete");
+        assert_eq!(ev.event_type, Some(EventType::DecisionTaskCompleted));
+        assert_eq!(ms.execution_info.decision_schedule_id, EMPTY_EVENT_ID);
+        assert_eq!(ms.execution_info.decision_started_id, EMPTY_EVENT_ID);
+        assert!(!ms.has_pending_decision());
+    }
+
+    #[test]
+    fn complete_wrong_started_id_fails() {
+        let (mut ms, mut env, schedule_id, started_id) = started();
+        let req = RespondDecisionTaskCompletedRequest::default();
+        assert!(ms
+            .add_decision_task_completed_event(&mut env, schedule_id, started_id + 5, &req, 20)
+            .is_err());
+    }
+
+    #[test]
+    fn timeout_happy_path() {
+        let (mut ms, env, schedule_id, started_id) = started();
+        let ev = ms.add_decision_task_timed_out_event(&env, schedule_id, started_id).expect("timeout");
+        assert_eq!(ev.event_type, Some(EventType::DecisionTaskTimedOut));
+        assert_eq!(ms.execution_info.decision_started_id, EMPTY_EVENT_ID);
+        assert_eq!(ms.execution_info.decision_schedule_id, EMPTY_EVENT_ID);
+    }
+
+    #[test]
+    fn fail_happy_path() {
+        let (mut ms, env, schedule_id, started_id) = started();
+        ms.add_decision_task_failed_event(
+            &env,
+            schedule_id,
+            started_id,
+            DecisionTaskFailedCause::UnhandledDecision,
+            vec![],
+            "worker",
+            "reason",
+            "",
+            "",
+            "",
+            0,
+            "",
+        )
+        .expect("fail");
+        assert_eq!(ms.execution_info.decision_started_id, EMPTY_EVENT_ID);
+        assert_eq!(ms.execution_info.decision_schedule_id, EMPTY_EVENT_ID);
+        assert!(!ms.has_in_flight_decision());
+    }
+
+    #[test]
+    fn schedule_to_start_timeout_happy_path() {
+        let (mut ms, env, di) = scheduled();
+        let ev = ms
+            .add_decision_task_schedule_to_start_timeout_event(&env, di.schedule_id)
+            .expect("s2s timeout");
+        assert!(ev.is_some());
+        assert_eq!(ms.execution_info.decision_schedule_id, EMPTY_EVENT_ID);
+    }
+}
