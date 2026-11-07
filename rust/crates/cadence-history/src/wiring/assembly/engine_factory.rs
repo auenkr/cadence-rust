@@ -201,7 +201,12 @@ pub fn build_engine(
         updater: Arc::new(EngineWorkflowUpdater::new(cache.clone(), core)),
         start_host,
         failover_host,
-        lifecycle_host: Arc::new(EngineLifecycleParts { graceful_failover: env.config.enable_graceful_failover.clone() }),
+        lifecycle_host: Arc::new(EngineLifecycleParts {
+            graceful_failover: env.config.enable_graceful_failover.clone(),
+            dlq_daemon: replication.dlq_daemon.clone(),
+            metrics_emitter: replication.metrics_emitter.clone(),
+            task_processors: replication.task_processors.clone(),
+        }),
         lifecycle_cancel: std::sync::Mutex::new(None),
         queue_processors,
         replication_dlq_handler: replication.dlq_handler,
@@ -250,23 +255,27 @@ impl crate::engine::runtime::ReplicationTaskStore for NoopReplicationTaskStore {
     fn put(&self, _task: cadence_api::types::ReplicationTask) {}
 }
 
-/// `EngineLifecycleHost` for the components that are not constructed by `build_engine` yet
-/// (DLQ processor, replication task processors, metrics emitter, failover marker notifier);
-/// those are no-ops until their wiring lands (gap recorded in memory).
+/// `EngineLifecycleHost`: replication DLQ handler, metrics emitter and task processors are the
+/// real daemons built by `ReplicationFactoryImpl`. Still no-ops (recorded in memory): the history
+/// task DLQ processor (no Rust impl) and the failover marker notifier (`MarkerNotifierImpl` exists
+/// but the failover coordinator is not available in `HistoryEnv`).
 struct EngineLifecycleParts {
     graceful_failover: crate::config_collection::Prop<bool>,
+    dlq_daemon: Arc<dyn crate::replication::deps::Daemon>,
+    metrics_emitter: Arc<dyn crate::replication::deps::Daemon>,
+    task_processors: Vec<Arc<dyn crate::replication::deps::Daemon>>,
 }
 
 #[async_trait::async_trait]
 impl crate::engine::lifecycle::EngineLifecycleHost for EngineLifecycleParts {
     async fn start_dlq_processor(&self, _ctx: tokio_util::sync::CancellationToken) -> HResult<()> { Ok(()) }
     async fn stop_dlq_processor(&self, _ctx: tokio_util::sync::CancellationToken) -> HResult<()> { Ok(()) }
-    fn start_replication_dlq_handler(&self) {}
-    fn stop_replication_dlq_handler(&self) {}
-    fn start_replication_metrics_emitter(&self) {}
-    fn stop_replication_metrics_emitter(&self) {}
-    fn start_replication_task_processors(&self) {}
-    fn stop_replication_task_processors(&self) {}
+    fn start_replication_dlq_handler(&self) { self.dlq_daemon.start(); }
+    fn stop_replication_dlq_handler(&self) { self.dlq_daemon.stop(); }
+    fn start_replication_metrics_emitter(&self) { self.metrics_emitter.start(); }
+    fn stop_replication_metrics_emitter(&self) { self.metrics_emitter.stop(); }
+    fn start_replication_task_processors(&self) { self.task_processors.iter().for_each(|p| p.start()); }
+    fn stop_replication_task_processors(&self) { self.task_processors.iter().for_each(|p| p.stop()); }
     fn enable_graceful_failover(&self) -> bool { (self.graceful_failover)() }
     fn start_failover_marker_notifier(&self) {}
     fn stop_failover_marker_notifier(&self) {}
