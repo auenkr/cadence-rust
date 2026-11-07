@@ -214,6 +214,14 @@ pub fn build_engine(
             dlq_daemon: replication.dlq_daemon.clone(),
             metrics_emitter: replication.metrics_emitter.clone(),
             task_processors: replication.task_processors.clone(),
+            marker_notifier: super::failover::build_marker_notifier(
+                shard.clone(),
+                env.domain_cache.clone(),
+                env.cluster.metadata().current_cluster_name.clone(),
+                env.config_adapter.clone(),
+                env.failover_coordinator.clone(),
+                env.metrics.clone(),
+            ),
         }),
         lifecycle_cancel: std::sync::Mutex::new(None),
         queue_processors,
@@ -239,7 +247,7 @@ pub fn build_engine(
         history_event_notifier: Arc::new(NotifierAdapter::new(Notifier::new())),
         task_refresher: Arc::new(UnwiredTaskRefresher),
         events_reapplier: Arc::new(UnwiredEventsReapplier),
-        replication_task_store: Arc::new(NoopReplicationTaskStore),
+        replication_task_store: replication.task_store.clone(),
     })
 }
 
@@ -257,21 +265,15 @@ impl crate::engine::runtime::EventsReapplier for UnwiredEventsReapplier {
     }
 }
 
-struct NoopReplicationTaskStore;
-
-impl crate::engine::runtime::ReplicationTaskStore for NoopReplicationTaskStore {
-    fn put(&self, _task: cadence_api::types::ReplicationTask) {}
-}
-
 /// `EngineLifecycleHost`: replication DLQ handler, metrics emitter and task processors are the
 /// real daemons built by `ReplicationFactoryImpl`. Still no-ops (recorded in memory): the history
-/// task DLQ processor (no Rust impl) and the failover marker notifier (`MarkerNotifierImpl` exists
-/// but the failover coordinator is not available in `HistoryEnv`).
+/// task DLQ processor (no persistence manager wired).
 struct EngineLifecycleParts {
     graceful_failover: crate::config_collection::Prop<bool>,
     dlq_daemon: Arc<dyn crate::replication::deps::Daemon>,
     metrics_emitter: Arc<dyn crate::replication::deps::Daemon>,
     task_processors: Vec<Arc<dyn crate::replication::deps::Daemon>>,
+    marker_notifier: Arc<dyn crate::failover::MarkerNotifier>,
 }
 
 #[async_trait::async_trait]
@@ -285,6 +287,6 @@ impl crate::engine::lifecycle::EngineLifecycleHost for EngineLifecycleParts {
     fn start_replication_task_processors(&self) { self.task_processors.iter().for_each(|p| p.start()); }
     fn stop_replication_task_processors(&self) { self.task_processors.iter().for_each(|p| p.stop()); }
     fn enable_graceful_failover(&self) -> bool { (self.graceful_failover)() }
-    fn start_failover_marker_notifier(&self) {}
-    fn stop_failover_marker_notifier(&self) {}
+    fn start_failover_marker_notifier(&self) { crate::failover::MarkerNotifier::start(self.marker_notifier.clone()); }
+    fn stop_failover_marker_notifier(&self) { crate::failover::MarkerNotifier::stop(&*self.marker_notifier); }
 }

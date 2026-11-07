@@ -7,8 +7,7 @@
 //! process-level `TaskFetchers` are shared by all shards and created lazily.
 //!
 //! Deviations (documented in memory/history-port-wiring-20261105.md, Unit D8):
-//! * No engine lifecycle exists, so processors / DLQ handler / metrics emitter are
-//!   started when built and stopped by a watcher once the shard is closed.
+//! * Processors / DLQ handler / metrics emitter are started by `HistoryEngine::start`.
 //! * `Replicator` (NDC apply-events / sync-activity) is not wired: the execution
 //!   cache is still `Unwired*`, so `UnwiredReplicator` returns an internal error.
 //! * `MutableStateProvider` reads the persisted snapshot directly (no execution
@@ -217,8 +216,54 @@ impl ReplicationHydrator for EngineHydrator {
             .await
             .map_err(replication_error_to_history_error)
     }
-    async fn hydrate_immediate(&self, _input: crate::engine::runtime::ImmediateHydration) -> HResult<Option<ReplicationTask>> {
-        Err(HistoryError::internal("immediate replication hydration not wired (see memory/history-gap-handler-20261105.md)"))
+    /// `replication.NewImmediateTaskHydrator(isRunning, versionHistories, activities, blob, nextBlob).Hydrate(task)`.
+    async fn hydrate_immediate(&self, input: crate::engine::runtime::ImmediateHydration) -> HResult<Option<ReplicationTask>> {
+        use crate::replication::deps::{REPLICATION_TASK_TYPE_HISTORY, REPLICATION_TASK_TYPE_SYNC_ACTIVITY};
+        let blob_of = |b: &Option<crate::engine::notify_tasks::PersistedBlobRef>| {
+            b.as_ref().map(|b| cadence_thrift::history_blob::encode(b.events.clone()))
+        };
+        let i = &input.info;
+        let info = TaskInfo {
+            task_id: i.task_id,
+            domain_id: i.domain_id.clone(),
+            workflow_id: i.workflow_id.clone(),
+            run_id: i.run_id.clone(),
+            version: i.version,
+            visibility_timestamp_nanos: 0,
+        };
+        let task = match i.task_type {
+            REPLICATION_TASK_TYPE_HISTORY => HistoryTask::HistoryReplication {
+                first_event_id: i.first_event_id,
+                next_event_id: i.next_event_id,
+                branch_token: input.branch_token.clone(),
+                new_run_branch_token: input.new_run_branch_token.clone(),
+                info,
+            },
+            REPLICATION_TASK_TYPE_SYNC_ACTIVITY => HistoryTask::SyncActivity { scheduled_id: i.scheduled_id, info },
+            2 => HistoryTask::FailoverMarker { info },
+            _ => HistoryTask::Unknown { info },
+        };
+        TaskHydrator::new_immediate(
+            input.is_running,
+            input.version_histories.clone(),
+            input.activities.clone(),
+            blob_of(&input.history),
+            blob_of(&input.new_run_history),
+        )
+        .hydrate(&task)
+        .await
+        .map_err(replication_error_to_history_error)
+    }
+}
+
+/// Engine-facing `replication.TaskStore` over the shard's replication `TaskStore`.
+pub struct EngineTaskStore {
+    inner: Arc<TaskStore>,
+}
+
+impl crate::engine::runtime::ReplicationTaskStore for EngineTaskStore {
+    fn put(&self, task: ReplicationTask) {
+        self.inner.put(Some(Arc::new(task)));
     }
 }
 
@@ -395,7 +440,7 @@ impl ReplicationFactory for ReplicationFactoryImpl {
             Arc::new(ShardAckLevelStore::new(shard_adapter.clone())),
             metrics.clone(),
             reader.clone(),
-            store,
+            store.clone(),
             time.clone(),
             cfg.as_ref(),
             messages_size_fn(),
@@ -436,33 +481,7 @@ impl ReplicationFactory for ReplicationFactoryImpl {
         let dlq = DlqHandlerImpl::new(shard_adapter.clone(), metrics.clone(), executors);
         let metrics_emitter: Arc<dyn Daemon> = emitter;
         let dlq_daemon: Arc<dyn Daemon> = dlq.clone();
-        let mut daemons: Vec<Arc<dyn Daemon>> = processors.clone();
-        daemons.push(metrics_emitter.clone());
-        daemons.push(dlq_daemon.clone());
-
-        // The shard controller does not drive `HistoryEngine::start` yet: start now, stop when the
-        // shard closes. The daemons are idempotent (CAS status), so the engine lifecycle host
-        // (`ReplicationParts::{dlq_daemon,metrics_emitter,task_processors}`) can start/stop them too.
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            let _enter = handle.enter();
-            for d in &daemons {
-                d.start();
-            }
-            let shard = ctx.shard.clone();
-            handle.spawn(async move {
-                loop {
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                    if shard.closed_error().is_some() {
-                        for d in &daemons {
-                            d.stop();
-                        }
-                        return;
-                    }
-                }
-            });
-        } else {
-            tracing::warn!(shard_id, "no tokio runtime: replication processors not started");
-        }
+        // Daemons are started/stopped by `HistoryEngine::start/stop` (Go engine lifecycle).
 
         Ok(ReplicationParts {
             dlq_handler: Arc::new(SqlReplicationDlqHandler::new(dlq)),
@@ -472,6 +491,7 @@ impl ReplicationFactory for ReplicationFactoryImpl {
             dlq_daemon,
             metrics_emitter,
             task_processors: processors,
+            task_store: Arc::new(EngineTaskStore { inner: store }),
         })
     }
 }

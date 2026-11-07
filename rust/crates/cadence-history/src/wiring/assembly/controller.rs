@@ -54,6 +54,7 @@ pub struct ShardRegistry {
     replication: Arc<dyn ReplicationFactory>,
     entries: Arc<Mutex<HashMap<u32, Cell>>>,
     num_shards: u32,
+    runtime: OnceLock<tokio::runtime::Handle>,
 }
 
 impl ShardRegistry {
@@ -70,7 +71,12 @@ impl ShardRegistry {
             replication,
             entries: Arc::new(Mutex::new(HashMap::new())),
             num_shards,
+            runtime: OnceLock::new(),
         })
+    }
+
+    pub fn env(&self) -> &Arc<HistoryEnv> {
+        &self.env
     }
 
     pub fn shard_id_for_workflow(&self, workflow_id: &str) -> u32 {
@@ -113,11 +119,18 @@ impl ShardRegistry {
         let queues = self.queues.clone();
         let replication = self.replication.clone();
         let entries = self.entries.clone();
-        tokio::task::spawn_blocking(move || -> HResult<Arc<ShardEntry>> {
+        let handle = tokio::runtime::Handle::current();
+        let _ = self.runtime.set(handle.clone());
+        let entry = tokio::task::spawn_blocking(move || -> HResult<Arc<ShardEntry>> {
             let id = shard_id as i32;
             let on_close = entries.clone();
+            // Go `removeEngineForShard`: the engine is stopped when the shard goes away.
             let close_callback: Arc<dyn Fn(i32) + Send + Sync> = Arc::new(move |closed: i32| {
-                on_close.lock().unwrap().remove(&(closed as u32));
+                let cell = on_close.lock().unwrap().remove(&(closed as u32));
+                if let Some(entry) = cell.and_then(|c| c.get().cloned()) {
+                    let engine = entry.engine.clone();
+                    handle.spawn(async move { engine.stop().await });
+                }
             });
             let shard = factory.new_shard_context(id, close_callback)?;
             let (core, cache) = super::engine_factory::build_core(&env, &shard);
@@ -140,7 +153,21 @@ impl ShardRegistry {
             }))
         })
         .await
-        .map_err(|e| HistoryError::internal(format!("shard creation task failed: {e}")))?
+        .map_err(|e| HistoryError::internal(format!("shard creation task failed: {e}")))??;
+        // Go `newShardItem` -> `engine.Start()` after the engine is created.
+        entry.engine.start().await;
+        Ok(entry)
+    }
+
+    /// Stops the engine of a shard entry (Go `Engine.Stop`) on the runtime.
+    fn stop_engine(&self, entry: &Arc<ShardEntry>) {
+        let engine = entry.engine.clone();
+        match tokio::runtime::Handle::try_current().ok().or_else(|| self.runtime.get().cloned()) {
+            Some(h) => {
+                h.spawn(async move { engine.stop().await });
+            }
+            None => tracing::warn!(shard_id = entry.shard_id, "no tokio runtime: engine not stopped"),
+        }
     }
 
     pub fn owned_shard_ids(&self) -> Vec<u32> {
@@ -154,6 +181,7 @@ impl ShardRegistry {
     pub fn close_shard(&self, shard_id: u32) {
         let cell = self.entries.lock().unwrap().remove(&shard_id);
         if let Some(entry) = cell.and_then(|c| c.get().cloned()) {
+            self.stop_engine(&entry);
             entry.shard.close_shard(None);
         }
     }
@@ -175,6 +203,7 @@ impl ShardRegistry {
         let drained: Vec<Cell> = self.entries.lock().unwrap().drain().map(|(_, c)| c).collect();
         for cell in drained {
             if let Some(entry) = cell.get() {
+                self.stop_engine(entry);
                 entry.shard.close_shard(None);
             }
         }
