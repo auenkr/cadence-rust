@@ -120,10 +120,17 @@ impl ShardRegistry {
                 on_close.lock().unwrap().remove(&(closed as u32));
             });
             let shard = factory.new_shard_context(id, close_callback)?;
-            let ctx = ShardBuildCtx { env: env.clone(), shard: shard.clone(), engine_slot: Arc::new(OnceLock::new()) };
+            let (core, cache) = super::engine_factory::build_core(&env, &shard);
+            let ctx = ShardBuildCtx {
+                env: env.clone(),
+                shard: shard.clone(),
+                engine_slot: Arc::new(OnceLock::new()),
+                core: core.clone(),
+                cache: cache.clone(),
+            };
             let queue_processors = queues.build_queue_processors(&ctx).map_err(|e| HistoryError::internal(e.to_string()))?;
             let parts = replication.build_replication(&ctx).map_err(|e| HistoryError::internal(e.to_string()))?;
-            let engine = build_engine(&env, &shard, queue_processors, parts);
+            let engine = build_engine(&env, &shard, core, cache, queue_processors, parts);
             let _ = ctx.engine_slot.set(Arc::downgrade(&engine));
             Ok(Arc::new(ShardEntry {
                 shard_id: id,

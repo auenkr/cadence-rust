@@ -146,13 +146,9 @@ impl HistoryEventNotifier for NotifierAdapter {
     }
 }
 
-/// Builds the engine of one shard.
-pub fn build_engine(
-    env: &Arc<HistoryEnv>,
-    shard: &Arc<ShardContext>,
-    queue_processors: HashMap<HistoryTaskCategory, Arc<dyn QueueProcessor>>,
-    replication: ReplicationParts,
-) -> Arc<HistoryEngine> {
+/// Builds the shard's execution core and cache. They are created before the
+/// queue processors so the transfer / timer executors share the engine's cache.
+pub fn build_core(env: &Arc<HistoryEnv>, shard: &Arc<ShardContext>) -> (Arc<EngineCore>, Arc<EngineExecutionCache>) {
     let core = Arc::new(EngineCore {
         shard: shard.clone(),
         executions: env.persistence.executions.clone(),
@@ -188,9 +184,21 @@ pub fn build_engine(
             })
         },
     });
+    let cache = EngineExecutionCache::new(core.clone());
+    (core, cache)
+}
+
+/// Builds the engine of one shard.
+pub fn build_engine(
+    env: &Arc<HistoryEnv>,
+    shard: &Arc<ShardContext>,
+    core: Arc<EngineCore>,
+    cache: Arc<EngineExecutionCache>,
+    queue_processors: HashMap<HistoryTaskCategory, Arc<dyn QueueProcessor>>,
+    replication: ReplicationParts,
+) -> Arc<HistoryEngine> {
     let start_host = super::engine_start::EngineStartHost::new(core.clone(), env.config.clone());
     let failover_host = super::engine_start::EngineFailoverHost::new(shard.clone(), env.domain_cache.clone());
-    let cache = EngineExecutionCache::new(core.clone());
     let decision_handler = Arc::new(EngineDecisionHandler::new(cache.clone(), core.clone()));
     Arc::new(HistoryEngine {
         current_cluster_name: env.cluster.metadata().current_cluster_name.clone(),
