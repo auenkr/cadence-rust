@@ -1,9 +1,6 @@
 //! gRPC handlers for the group-3 History RPCs (replication, failover, DLQ,
 //! cross-cluster, host description). Free functions so the tonic trait impl in
 //! `grpc.rs` can delegate without this file touching it.
-//!
-//! Replication-message / DLQ read-merge-purge RPCs need the ReplicationTask
-//! proto converters, which do not exist yet; they answer UNIMPLEMENTED.
 use super::{errors, ServerState};
 use crate::engine::types as et;
 use cadence_api::enums as e;
@@ -199,28 +196,87 @@ pub async fn respond_cross_cluster_tasks_completed(
     Ok(pb::RespondCrossClusterTasksCompletedResponse { tasks: c::cross_cluster::task_requests_out(resp.tasks)? })
 }
 
-fn unimplemented(name: &str) -> Status {
-    Status::unimplemented(format!("{name}: ReplicationTask proto converters not ported yet"))
+
+use cadence_service_core::replication_convert as rc;
+
+fn dlq_type_in(v: i32) -> Result<Option<e::DLQType>, Status> {
+    rc::dlq_type_in(v).map_err(Status::invalid_argument)
 }
 
-pub async fn get_replication_messages(_s: &ServerState, _r: pb::GetReplicationMessagesRequest) -> Result<pb::GetReplicationMessagesResponse, Status> {
-    Err(unimplemented("GetReplicationMessages"))
+/// Go `GRPCHandler.GetReplicationMessages`.
+pub async fn get_replication_messages(state: &ServerState, req: pb::GetReplicationMessagesRequest) -> Result<pb::GetReplicationMessagesResponse, Status> {
+    gate(state)?;
+    let r = cadence_api::admin::GetReplicationMessagesRequest {
+        tokens: req.tokens.into_iter().map(rc::replication_token_in).collect(),
+        cluster_name: req.cluster_name,
+    };
+    let resp = state.handler.get_replication_messages(Some(&r)).await.map_err(|e| errors::grpc_status(&e))?;
+    Ok(pb::GetReplicationMessagesResponse {
+        shard_messages: resp
+            .messages_by_shard
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(shard, m)| (shard, rc::replication_messages_out(m)))
+            .collect(),
+    })
 }
 
-pub async fn get_dlq_replication_messages(_s: &ServerState, _r: pb::GetDlqReplicationMessagesRequest) -> Result<pb::GetDlqReplicationMessagesResponse, Status> {
-    Err(unimplemented("GetDLQReplicationMessages"))
+/// Go `GRPCHandler.GetDLQReplicationMessages`.
+pub async fn get_dlq_replication_messages(state: &ServerState, req: pb::GetDlqReplicationMessagesRequest) -> Result<pb::GetDlqReplicationMessagesResponse, Status> {
+    gate(state)?;
+    let r = cadence_api::admin::GetDLQReplicationMessagesRequest {
+        task_infos: req.task_infos.into_iter().map(rc::replication_task_info_in).collect(),
+    };
+    let resp = state.handler.get_dlq_replication_messages(Some(&r)).await.map_err(|e| errors::grpc_status(&e))?;
+    Ok(pb::GetDlqReplicationMessagesResponse { replication_tasks: rc::replication_tasks_out(resp.replication_tasks.unwrap_or_default()) })
 }
 
-pub async fn read_dlq_messages(_s: &ServerState, _r: pb::ReadDlqMessagesRequest) -> Result<pb::ReadDlqMessagesResponse, Status> {
-    Err(unimplemented("ReadDLQMessages"))
+/// Go `GRPCHandler.ReadDLQMessages`.
+pub async fn read_dlq_messages(state: &ServerState, req: pb::ReadDlqMessagesRequest) -> Result<pb::ReadDlqMessagesResponse, Status> {
+    gate(state)?;
+    let r = cadence_api::admin::ReadDLQMessagesRequest {
+        dlq_type: dlq_type_in(req.r#type)?,
+        shard_id: req.shard_id,
+        source_cluster: req.source_cluster,
+        inclusive_end_message_id: req.inclusive_end_message_id,
+        maximum_page_size: req.page_size,
+        next_page_token: req.next_page_token,
+    };
+    let resp = state.handler.read_dlq_messages(Some(&r)).await.map_err(|e| errors::grpc_status(&e))?;
+    Ok(pb::ReadDlqMessagesResponse {
+        r#type: resp.dlq_type.map_or(0, rc::dlq_type_out),
+        replication_tasks: rc::replication_tasks_out(resp.replication_tasks),
+        replication_tasks_info: resp.replication_tasks_info.into_iter().map(rc::replication_task_info_out).collect(),
+        next_page_token: resp.next_page_token,
+    })
 }
 
-pub async fn purge_dlq_messages(_s: &ServerState, _r: pb::PurgeDlqMessagesRequest) -> Result<pb::PurgeDlqMessagesResponse, Status> {
-    Err(unimplemented("PurgeDLQMessages"))
+/// Go `GRPCHandler.PurgeDLQMessages`.
+pub async fn purge_dlq_messages(state: &ServerState, req: pb::PurgeDlqMessagesRequest) -> Result<pb::PurgeDlqMessagesResponse, Status> {
+    gate(state)?;
+    let r = cadence_api::admin::PurgeDLQMessagesRequest {
+        dlq_type: dlq_type_in(req.r#type)?,
+        shard_id: req.shard_id,
+        source_cluster: req.source_cluster,
+        inclusive_end_message_id: req.inclusive_end_message_id,
+    };
+    state.handler.purge_dlq_messages(Some(&r)).await.map_err(|e| errors::grpc_status(&e))?;
+    Ok(pb::PurgeDlqMessagesResponse {})
 }
 
-pub async fn merge_dlq_messages(_s: &ServerState, _r: pb::MergeDlqMessagesRequest) -> Result<pb::MergeDlqMessagesResponse, Status> {
-    Err(unimplemented("MergeDLQMessages"))
+/// Go `GRPCHandler.MergeDLQMessages`.
+pub async fn merge_dlq_messages(state: &ServerState, req: pb::MergeDlqMessagesRequest) -> Result<pb::MergeDlqMessagesResponse, Status> {
+    gate(state)?;
+    let r = cadence_api::admin::MergeDLQMessagesRequest {
+        dlq_type: dlq_type_in(req.r#type)?,
+        shard_id: req.shard_id,
+        source_cluster: req.source_cluster,
+        inclusive_end_message_id: req.inclusive_end_message_id,
+        maximum_page_size: req.page_size,
+        next_page_token: req.next_page_token,
+    };
+    let resp = state.handler.merge_dlq_messages(Some(&r)).await.map_err(|e| errors::grpc_status(&e))?;
+    Ok(pb::MergeDlqMessagesResponse { next_page_token: resp.next_page_token })
 }
 
 #[cfg(test)]
