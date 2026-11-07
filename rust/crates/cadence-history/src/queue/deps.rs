@@ -174,6 +174,10 @@ pub trait PersistenceTask: Send + Sync + fmt::Debug {
     fn get_visibility_timestamp(&self) -> Time;
     /// Go `persistence.IsTaskCorrupted`.
     fn is_corrupted(&self) -> bool;
+    /// Downcast hook so the queue wiring can recover the full task blob.
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        None
+    }
 }
 
 /// Go `GetHistoryTasksRequest` (only the fields the queue package sets).

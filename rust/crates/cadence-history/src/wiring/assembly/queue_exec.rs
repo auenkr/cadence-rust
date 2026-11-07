@@ -3,9 +3,8 @@
 //! redispatcher adapters, the `HistoryTaskFactory` (Go `task.NewHistoryTask`) and the builders for
 //! the transfer and timer queue processors.
 //!
-//! Known gap (memory/history-port-wiring-20261105.md, Unit D7): the SQL history task rows
-//! (`SqlHistoryTask`) only carry identity fields, so executors that downcast to task-type specific
-//! structs (`task::deps::*Task`) still need a richer row decoder.
+//! `TaskInfoAdapter` decodes the full task blob (`SqlHistoryTask`) into the task-type specific
+//! structs (`task::deps::*Task`) that the executors downcast to.
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -125,11 +124,53 @@ pub struct TaskInfoAdapter {
     domain_id: String,
     workflow_id: String,
     run_id: String,
+    /// Fully decoded task (what executors downcast to); `None` for unknown task types.
+    typed: Option<Arc<dyn t::PersistenceTask>>,
+}
+
+/// Go `persistence.Task` -> typed task struct by task type.
+fn typed_task(inner: &Arc<dyn q::PersistenceTask>) -> Option<Arc<dyn t::PersistenceTask>> {
+    use crate::wiring::persistence::queues::SqlHistoryTask;
+    let row = inner.as_any()?.downcast_ref::<SqlHistoryTask>()?;
+    if let Some(x) = row.transfer_task() {
+        let wf = t::WorkflowIdentifier { domain_id: x.domain_id.clone(), workflow_id: x.workflow_id.clone(), run_id: x.run_id.clone() };
+        let td = t::TaskData { version: x.version, task_id: inner.get_task_id(), visibility_timestamp: t::Time(inner.get_visibility_timestamp().0) };
+        let (wf, td) = (|| wf.clone(), || td.clone());
+        return Some(match x.task_type {
+            0 => Arc::new(t::DecisionTask { workflow_identifier: wf(), task_data: td(), target_domain_id: x.target_domain_id.clone(), task_list: x.task_list.clone(), schedule_id: x.schedule_id }) as Arc<dyn t::PersistenceTask>,
+            1 => Arc::new(t::ActivityTask { workflow_identifier: wf(), task_data: td(), target_domain_id: x.target_domain_id.clone(), task_list: x.task_list.clone(), schedule_id: x.schedule_id }),
+            2 => Arc::new(t::CloseExecutionTask { workflow_identifier: wf(), task_data: td() }),
+            3 => Arc::new(t::CancelExecutionTask { workflow_identifier: wf(), task_data: td(), target_domain_id: x.target_domain_id.clone(), target_workflow_id: x.target_workflow_id.clone(), target_run_id: x.target_run_id.clone(), target_child_workflow_only: x.target_child_workflow_only, initiated_id: x.schedule_id }),
+            4 => Arc::new(t::StartChildExecutionTask { workflow_identifier: wf(), task_data: td(), target_domain_id: x.target_domain_id.clone(), target_workflow_id: x.target_workflow_id.clone(), initiated_id: x.schedule_id, task_list: x.task_list.clone() }),
+            5 => Arc::new(t::SignalExecutionTask { workflow_identifier: wf(), task_data: td(), target_domain_id: x.target_domain_id.clone(), target_workflow_id: x.target_workflow_id.clone(), target_run_id: x.target_run_id.clone(), target_child_workflow_only: x.target_child_workflow_only, initiated_id: x.schedule_id }),
+            6 => Arc::new(t::RecordWorkflowStartedTask { workflow_identifier: wf(), task_data: td() }),
+            7 => Arc::new(t::ResetWorkflowTask { workflow_identifier: wf(), task_data: td() }),
+            8 => Arc::new(t::UpsertWorkflowSearchAttributesTask { workflow_identifier: wf(), task_data: td(), task_list: x.task_list.clone() }),
+            9 => Arc::new(t::RecordWorkflowClosedTask { workflow_identifier: wf(), task_data: td() }),
+            10 => Arc::new(t::RecordChildExecutionCompletedTask { workflow_identifier: wf(), task_data: td(), target_domain_id: x.target_domain_id.clone(), target_workflow_id: x.target_workflow_id.clone(), target_run_id: x.target_run_id.clone() }),
+            11 => Arc::new(t::ApplyParentClosePolicyTask { workflow_identifier: wf(), task_data: td(), target_domain_ids: x.target_domain_ids.clone() }),
+            _ => return None,
+        });
+    }
+    let x = row.timer_task()?;
+    let wf = t::WorkflowIdentifier { domain_id: x.domain_id.clone(), workflow_id: x.workflow_id.clone(), run_id: x.run_id.clone() };
+    let td = t::TaskData { version: x.version, task_id: inner.get_task_id(), visibility_timestamp: t::Time(inner.get_visibility_timestamp().0) };
+    Some(match x.task_type {
+        0 => Arc::new(t::DecisionTimeoutTask { workflow_identifier: wf, task_data: td, event_id: x.event_id, schedule_attempt: x.schedule_attempt, timeout_type: x.timeout_type }) as Arc<dyn t::PersistenceTask>,
+        1 => Arc::new(t::ActivityTimeoutTask { workflow_identifier: wf, task_data: td, event_id: x.event_id, attempt: x.schedule_attempt, timeout_type: x.timeout_type }),
+        2 => Arc::new(t::UserTimerTask { workflow_identifier: wf, task_data: td, event_id: x.event_id }),
+        3 => Arc::new(t::WorkflowTimeoutTask { workflow_identifier: wf, task_data: td }),
+        4 => Arc::new(t::DeleteHistoryEventTask { workflow_identifier: wf, task_data: td }),
+        5 => Arc::new(t::ActivityRetryTimerTask { workflow_identifier: wf, task_data: td, event_id: x.event_id, attempt: x.schedule_attempt }),
+        6 => Arc::new(t::WorkflowBackoffTimerTask { workflow_identifier: wf, task_data: td, event_id: x.event_id, timeout_type: x.timeout_type }),
+        _ => return None,
+    })
 }
 
 impl TaskInfoAdapter {
     pub fn new(inner: Arc<dyn q::PersistenceTask>) -> Arc<Self> {
         Arc::new(Self {
+            typed: typed_task(&inner),
             domain_id: inner.get_domain_id(),
             workflow_id: inner.get_workflow_id(),
             run_id: inner.get_run_id(),
@@ -143,7 +184,19 @@ impl TaskInfoAdapter {
 
 impl t::PersistenceTask for TaskInfoAdapter {
     fn as_any(&self) -> &dyn std::any::Any {
+        match &self.typed {
+            Some(typed) => typed.as_any(),
+            None => self,
+        }
+    }
+    fn wrapper_any(&self) -> &dyn std::any::Any {
         self
+    }
+    fn get_original_task_list(&self) -> String {
+        self.typed.as_ref().map(|x| x.get_original_task_list()).unwrap_or_default()
+    }
+    fn get_original_task_list_kind(&self) -> t::TaskListKind {
+        self.typed.as_ref().map(|x| x.get_original_task_list_kind()).unwrap_or_default()
     }
     fn get_task_category(&self) -> t::HistoryTaskCategory {
         to_task_category(self.inner.get_task_category())
@@ -327,7 +380,7 @@ impl q::Redispatcher for RedispatcherAdapter {
 fn to_task_filter(filter: TaskFilter) -> ti::Filter {
     Arc::new(move |info: &dyn t::PersistenceTask| -> t::Result<bool> {
         let adapter = info
-            .as_any()
+            .wrapper_any()
             .downcast_ref::<TaskInfoAdapter>()
             .ok_or_else(|| t::TaskError::Other("unexpected persistence task type".into()))?;
         let fut = filter(adapter.inner().clone());
