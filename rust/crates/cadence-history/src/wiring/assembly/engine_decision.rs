@@ -56,7 +56,7 @@ fn invalid_action(what: &str, next_event_id: i64) -> HistoryError {
 
 impl Inner {
     /// Go `FailDecision`.
-    fn fail_decision(&mut self, increment_attempt: bool, now_nanos: i64) {
+    pub(super) fn fail_decision(&mut self, increment_attempt: bool, now_nanos: i64) {
         self.clear_stickyness();
         let attempt = if increment_attempt { self.pc_exec.decision_attempt + 1 } else { 0 };
         self.pc_exec.decision_version = EMPTY_VERSION;

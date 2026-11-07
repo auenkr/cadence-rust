@@ -27,7 +27,7 @@ const TIMEOUT_HEARTBEAT: i32 = 3;
 const NANOS_PER_SECOND: i64 = 1_000_000_000;
 
 impl Inner {
-    fn transfer_base(&self, task_type: i32, version: i64) -> pc::TransferTask {
+    pub(super) fn transfer_base(&self, task_type: i32, version: i64) -> pc::TransferTask {
         pc::TransferTask {
             domain_id: self.exec.domain_id.clone(),
             workflow_id: self.exec.workflow_id.clone(),
@@ -38,7 +38,7 @@ impl Inner {
         }
     }
 
-    fn timer_base(&self, task_type: i32, version: i64, visibility_nanos: i64) -> pc::TimerTask {
+    pub(super) fn timer_base(&self, task_type: i32, version: i64, visibility_nanos: i64) -> pc::TimerTask {
         pc::TimerTask {
             domain_id: self.exec.domain_id.clone(),
             workflow_id: self.exec.workflow_id.clone(),

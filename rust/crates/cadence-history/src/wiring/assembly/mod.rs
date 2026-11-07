@@ -9,6 +9,7 @@ pub mod engine_factory;
 pub mod engine_start;
 pub mod engine_state;
 pub mod engine_tasks;
+pub mod engine_timer;
 pub mod env;
 pub mod failover;
 pub mod queue_deps;
