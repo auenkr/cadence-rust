@@ -289,6 +289,25 @@ pub async fn schedule_decision_task(state: &ServerState, req: pb::ScheduleDecisi
     Ok(pb::ScheduleDecisionTaskResponse {})
 }
 
+pub fn reset_in(v: papi::ResetWorkflowExecutionRequest) -> t::ResetWorkflowExecutionRequest {
+    t::ResetWorkflowExecutionRequest {
+        domain: v.domain,
+        workflow_execution: v.workflow_execution.map(c::execution),
+        reason: v.reason,
+        decision_finish_event_id: v.decision_finish_event_id,
+        request_id: v.request_id,
+        skip_signal_reapply: v.skip_signal_reapply,
+    }
+}
+
+/// Go `GRPCHandler.ResetWorkflowExecution`.
+pub async fn reset_workflow_execution(state: &ServerState, req: pb::ResetWorkflowExecutionRequest) -> Result<pb::ResetWorkflowExecutionResponse, Status> {
+    gate(state)?;
+    let r = et::HistoryResetWorkflowExecutionRequest { domain_uuid: req.domain_id, reset_request: req.request.map(reset_in) };
+    let resp = state.handler.reset_workflow_execution(Some(&r)).await.map_err(|e| st_err(&e))?;
+    Ok(pb::ResetWorkflowExecutionResponse { run_id: resp.run_id })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -334,23 +353,4 @@ mod tests {
         assert_eq!(o.signal_name, "s");
         assert_eq!(o.input, vec![9]);
     }
-}
-
-pub fn reset_in(v: papi::ResetWorkflowExecutionRequest) -> t::ResetWorkflowExecutionRequest {
-    t::ResetWorkflowExecutionRequest {
-        domain: v.domain,
-        workflow_execution: v.workflow_execution.map(c::execution),
-        reason: v.reason,
-        decision_finish_event_id: v.decision_finish_event_id,
-        request_id: v.request_id,
-        skip_signal_reapply: v.skip_signal_reapply,
-    }
-}
-
-/// Go `GRPCHandler.ResetWorkflowExecution`.
-pub async fn reset_workflow_execution(state: &ServerState, req: pb::ResetWorkflowExecutionRequest) -> Result<pb::ResetWorkflowExecutionResponse, Status> {
-    gate(state)?;
-    let r = et::HistoryResetWorkflowExecutionRequest { domain_uuid: req.domain_id, reset_request: req.request.map(reset_in) };
-    let resp = state.handler.reset_workflow_execution(Some(&r)).await.map_err(|e| st_err(&e))?;
-    Ok(pb::ResetWorkflowExecutionResponse { run_id: resp.run_id })
 }

@@ -297,6 +297,21 @@ impl ToThrift for ScheduleDecisionTaskRequest {
     }
 }
 
+impl FromThrift for HistoryResetWorkflowExecutionRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, Error> {
+        Ok(Self { domain_uuid: s.req_string(10, "")?, reset_request: s.opt_struct(20)? })
+    }
+}
+
+impl ToThrift for HistoryResetWorkflowExecutionRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain_uuid);
+        f.ostruct(20, self.reset_request.as_ref());
+        f.finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -402,20 +417,5 @@ mod tests {
             .unwrap()
             .response
             .is_none());
-    }
-}
-
-impl FromThrift for HistoryResetWorkflowExecutionRequest {
-    fn from_thrift(s: &Struct) -> Result<Self, Error> {
-        Ok(Self { domain_uuid: s.req_string(10, "")?, reset_request: s.opt_struct(20)? })
-    }
-}
-
-impl ToThrift for HistoryResetWorkflowExecutionRequest {
-    fn to_thrift(&self) -> Struct {
-        let mut f = Fields::new();
-        f.sstr(10, &self.domain_uuid);
-        f.ostruct(20, self.reset_request.as_ref());
-        f.finish()
     }
 }
