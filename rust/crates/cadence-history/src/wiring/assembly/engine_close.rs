@@ -142,6 +142,8 @@ impl EngineMutableState {
             delete_timer_infos: g.delete_timers.iter().cloned().collect(),
             upsert_child_execution_infos,
             delete_child_execution_infos: g.deleted_children.iter().copied().collect(),
+            delete_request_cancel_infos: g.deleted_request_cancels.iter().copied().collect(),
+            delete_signal_infos: g.deleted_signals.iter().copied().collect(),
             upsert_signal_requested_ids: g.upsert_signal_requested.iter().cloned().collect(),
             delete_signal_requested_ids: g.delete_signal_requested.iter().cloned().collect(),
             new_buffered_events,
@@ -190,6 +192,8 @@ impl EngineMutableState {
         g.deleted_activities.clear();
         g.upsert_children.clear();
         g.deleted_children.clear();
+        g.deleted_request_cancels.clear();
+        g.deleted_signals.clear();
         g.upsert_signal_requested.clear();
         g.delete_signal_requested.clear();
         g.clear_buffered = false;

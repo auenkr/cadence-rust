@@ -712,6 +712,22 @@ impl EngineMutableState {
             .ok_or_else(|| HistoryError::internal("workflow start event is missing"))
     }
 
+    /// Go `GetCompletionEvent`: the last event of the closed workflow.
+    pub(super) async fn ev_completion_event(&self) -> HResult<HistoryEvent> {
+        let (batch, next) = {
+            let g = self.inner.lock().unwrap();
+            if g.exec.is_running() {
+                return Err(HistoryError::internal("workflow execution is still running, no completion event"));
+            }
+            (g.pc_exec.completion_event_batch_id, g.next_event_id)
+        };
+        let events = self.read_events(batch, next).await?;
+        events
+            .into_iter()
+            .find(|e| e.event_id == next - 1)
+            .ok_or_else(|| HistoryError::internal("workflow completion event is missing"))
+    }
+
     /// Go `GetActivityScheduledEvent`.
     pub(super) async fn ev_activity_scheduled_event(&self, schedule_id: i64) -> HResult<HistoryEvent> {
         let batch = {
