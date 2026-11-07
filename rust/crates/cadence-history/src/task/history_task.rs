@@ -286,6 +286,8 @@ impl Task for TaskImpl {
         let should_process = match (self.task_filter)(self.task.as_ref()) {
             Ok(v) => v,
             Err(e) => {
+                // Go assigns the (false) filter result to shouldProcessTask before checking err.
+                self.inner.lock().unwrap().should_process_task = false;
                 log_event(&self.event_logger, "TaskFilter execution failed", vec![detail(&e)]);
                 tokio::time::sleep(LOAD_DOMAIN_ENTRY_FOR_TASK_RETRY_DELAY).await;
                 return Err(e);
@@ -543,14 +545,26 @@ impl TaskImpl {
             return Some(err);
         }
 
+        // Go sets err = nil for these two cases and then falls through to the failure
+        // counter and the final "Fail to process task" log before returning nil.
+        let mut cleared = false;
         if err == TaskError::TaskDiscarded {
             scope.inc_counter(metrics::TASK_DISCARDED_PER_DOMAIN);
-            return None;
+            cleared = true;
         }
 
         if err == TaskError::MissingVersionHistories {
             self.logger.error("Encounter 2DC workflow during task processing.", &[]);
             scope.inc_counter(metrics::TASK_UNSUPPORTED_PER_DOMAIN);
+            cleared = true;
+        }
+
+        if cleared {
+            scope.inc_counter(metrics::TASK_FAILURES_PER_DOMAIN);
+            logger.error(
+                "Fail to process task",
+                &[tag::life_cycle_processing_failed(), tag::attempt_count(self.get_attempt() as i64)],
+            );
             return None;
         }
 
