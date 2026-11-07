@@ -85,6 +85,8 @@ pub struct HistoryEnv {
     pub matching_resolver: ChannelResolver,
     pub dynamic_client: Option<Arc<dyn DynamicClient>>,
     pub identity: String,
+    /// Go `failover.NewCoordinator` (handler-level; started by the handler).
+    pub failover_coordinator: Arc<crate::failover::CoordinatorImpl>,
 }
 
 impl HistoryEnv {
@@ -143,16 +145,35 @@ impl HistoryEnv {
                 .map_err(|e| anyhow::anyhow!("start domain cache: {e:?}"))?;
         }
 
+        let domain_persistence = stores
+            .domain_metadata_persistence
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("configured default store has no domain metadata persistence"))?;
         let metrics_registry = MetricsRegistry::new();
+        let config_adapter = Arc::new(ConfigAdapter::new(config.clone()));
+        let clock = Arc::new(SystemClock);
+        let domain_cache = Arc::new(HistoryDomainCache::new(matching_domain_cache.clone()));
+        let metrics = Arc::new(MetricsClientImpl::new(metrics_registry.clone()));
+        let failover_coordinator = super::failover::build_failover_coordinator(super::failover::FailoverDeps {
+            domain_manager: Arc::new(crate::wiring::resources::failover_domain_manager::PersistenceDomainManager::new(
+                domain_persistence,
+            )),
+            time_source: clock.clone(),
+            domain_cache: domain_cache.clone(),
+            config: config_adapter.clone(),
+            metrics: metrics.clone(),
+            history_client: None,
+        })
+        .coordinator;
         Ok(Arc::new(Self {
-            config_adapter: Arc::new(ConfigAdapter::new(config.clone())),
+            config_adapter,
             config,
             persistence,
-            clock: Arc::new(SystemClock),
+            clock,
             cluster: Arc::new(ClusterMetadataImpl::new(cluster)),
-            domain_cache: Arc::new(HistoryDomainCache::new(matching_domain_cache.clone())),
+            domain_cache,
             matching_domain_cache,
-            metrics: Arc::new(MetricsClientImpl::new(metrics_registry.clone())),
+            metrics,
             metrics_registry,
             domain_scope_cache: Arc::new(DomainMetricsScopeCacheImpl::default()),
             membership: Arc::new(MembershipResolver::new(who_am_i.clone(), hosts)),
@@ -162,6 +183,7 @@ impl HistoryEnv {
             matching_resolver,
             dynamic_client,
             identity: who_am_i,
+            failover_coordinator,
         }))
     }
 }
@@ -194,6 +216,8 @@ pub struct ReplicationParts {
     pub ack_manager: Arc<dyn ReplicationAckManager>,
     pub hydrator: Arc<dyn ReplicationHydrator>,
     pub replicator: Arc<dyn Replicator>,
+    /// `replication.TaskStore` of the shard (engine pre-hydration cache).
+    pub task_store: Arc<dyn crate::engine::runtime::ReplicationTaskStore>,
     /// Go `replicationDLQHandler` Start/Stop.
     pub dlq_daemon: Arc<dyn crate::replication::deps::Daemon>,
     /// Go `replicationMetricsEmitter` Start/Stop.

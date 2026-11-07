@@ -128,12 +128,18 @@ impl HandlerImpl {
 #[async_trait]
 impl Handler for HandlerImpl {
     fn start(&self) {
+        // Go `handler.Start`: the failover coordinator runs only with graceful failover.
+        let env = self.registry.env();
+        if (env.config.enable_graceful_failover)() && tokio::runtime::Handle::try_current().is_ok() {
+            crate::failover::Coordinator::start(env.failover_coordinator.clone());
+        }
         self.started.store(true, Ordering::SeqCst);
     }
 
     fn stop(&self) {
         self.shutting_down.store(true, Ordering::SeqCst);
         self.registry.close_all();
+        crate::failover::Coordinator::stop(&*self.registry.env().failover_coordinator);
     }
 
     async fn prepare_to_stop(&self, remaining: Duration) -> Duration {
