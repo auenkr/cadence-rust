@@ -50,6 +50,57 @@ impl TypedMutableState {
         self.generate_workflow_close_tasks(event)
     }
 
+    /// Go `AddWorkflowExecutionTerminatedEvent` (logging/metrics not wired).
+    pub fn add_workflow_execution_terminated_event(
+        &mut self,
+        timestamp_unix_nanos: i64,
+        first_event_id: i64,
+        reason: &str,
+        details: Vec<u8>,
+        identity: &str,
+    ) -> Result<HistoryEvent> {
+        self.check_mutability()?;
+        let event = self.add_history_event(timestamp_unix_nanos, EventType::WorkflowExecutionTerminated, |e| {
+            e.workflow_execution_terminated_event_attributes = Some(
+                cadence_api::service_types::WorkflowExecutionTerminatedEventAttributes {
+                    reason: reason.to_string(),
+                    details,
+                    identity: identity.to_string(),
+                },
+            );
+        })?;
+        self.replicate_workflow_execution_terminated_event(first_event_id, &event)?;
+        Ok(event)
+    }
+
+    /// Go `ReplicateWorkflowExecutionTerminatedEvent` (writeEventToCache not wired).
+    pub fn replicate_workflow_execution_terminated_event(
+        &mut self,
+        first_event_id: i64,
+        event: &HistoryEvent,
+    ) -> Result<()> {
+        self.update_workflow_state_close_status(WORKFLOW_STATE_COMPLETED, super::mutable_state_methods_common::CLOSE_STATUS_TERMINATED)?;
+        self.execution_info.completion_event_batch_id = first_event_id;
+        self.clear_stickyness();
+        self.generate_workflow_close_tasks(event)
+    }
+
+    /// Go `ReplicateWorkflowExecutionContinuedAsNewEvent` (writeEventToCache not
+    /// wired; `AddContinueAsNewEvent` itself is not ported).
+    pub fn replicate_workflow_execution_continued_as_new_event(
+        &mut self,
+        first_event_id: i64,
+        event: &HistoryEvent,
+    ) -> Result<()> {
+        self.update_workflow_state_close_status(
+            WORKFLOW_STATE_COMPLETED,
+            super::mutable_state_methods_common::CLOSE_STATUS_CONTINUED_AS_NEW,
+        )?;
+        self.execution_info.completion_event_batch_id = first_event_id;
+        self.clear_stickyness();
+        self.generate_workflow_close_tasks(event)
+    }
+
     /// Go `AddFailWorkflowEvent`.
     pub fn add_fail_workflow_event(
         &mut self,
