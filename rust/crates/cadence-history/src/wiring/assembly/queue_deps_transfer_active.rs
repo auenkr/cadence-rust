@@ -527,7 +527,6 @@ impl TransferActiveDependencies for TransferActiveDepsImpl {
                     input: r.input,
                     request_id: r.request_id,
                     control: r.control,
-                    ..Default::default()
                 }),
                 external_workflow_execution: r.external_workflow_execution.as_ref().and_then(api_execution),
                 child_workflow_only: r.child_workflow_only,
