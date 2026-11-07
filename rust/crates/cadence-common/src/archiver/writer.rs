@@ -277,7 +277,7 @@ mod tests {
         let c = FilestoreWriterConfig::new("0666", "0700").unwrap();
         assert_eq!((c.file_mode, c.dir_mode), (0o666, 0o700));
         assert!(FilestoreWriterConfig::new("zz", "0700").is_err());
-        assert!(FilestoreWriterConfig::new("0666", "9").is_err());
+        assert!(FilestoreWriterConfig::new("0666", "08").is_err());
     }
 
     #[test]
