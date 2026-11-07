@@ -120,6 +120,7 @@ impl TypedMutableState {
         };
         self.pending_child_execution_info_ids.insert(ci.initiated_id, ci.clone());
         self.update_child_execution_infos.insert(ci.initiated_id, ci.clone());
+        self.run_task_generator(0, |g| g.generate_child_workflow_tasks(event))?;
         Ok(ci)
     }
 

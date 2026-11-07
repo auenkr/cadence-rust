@@ -32,11 +32,12 @@ impl TypedMutableState {
     pub fn replicate_workflow_execution_timedout_event(
         &mut self,
         first_event_id: i64,
-        _event: &HistoryEvent,
+        event: &HistoryEvent,
     ) -> Result<()> {
         self.update_workflow_state_close_status(WORKFLOW_STATE_COMPLETED, CLOSE_STATUS_TIMED_OUT)?;
         self.execution_info.completion_event_batch_id = first_event_id;
         self.clear_stickyness();
-        Ok(())
+        // Go: taskGenerator.GenerateWorkflowCloseTasks (writeEventToCache not wired)
+        self.generate_workflow_close_tasks(event)
     }
 }

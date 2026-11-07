@@ -159,11 +159,14 @@ impl TypedMutableState {
                 header: attributes.header.clone(),
             });
         })?;
+        // Go: ReplicateActivityTaskScheduledEvent(.., true) skips task generation, then
+        // (unless local dispatch, which is not wired) GenerateActivityTransferTasks.
         let ai = self.replicate_activity_task_scheduled_event(
             decision_completed_event_id,
             &event,
             target_domain_id,
         )?;
+        self.run_task_generator(0, |g| g.generate_activity_transfer_tasks(&event))?;
         Ok((event, ai))
     }
 
@@ -532,7 +535,7 @@ impl TypedMutableState {
 
     /// Go `RetryActivity`. `fatal` is `failureOptions.FailureCategory == Fatal`;
     /// `jitter_sample` is the `rand.Float64()` value; `GenerateActivityRetryTasks`
-    /// is the caller's job on `Ok(true)`.
+    /// is wired in.
     #[allow(clippy::too_many_arguments)]
     pub fn retry_activity(
         &mut self,
@@ -595,6 +598,7 @@ impl TypedMutableState {
         ai.last_failure_details = failure_details;
         ai.last_retry_interval_seconds = next_interval_seconds;
         self.pending_activity_info_ids.insert(schedule_id, ai.clone());
+        self.run_task_generator(0, |g| g.generate_activity_retry_tasks(schedule_id))?;
         self.update_activity_infos.insert(schedule_id, ai);
         self.sync_activity_tasks.insert(schedule_id);
         Ok(true)

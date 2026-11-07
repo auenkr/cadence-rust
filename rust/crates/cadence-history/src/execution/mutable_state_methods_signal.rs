@@ -184,7 +184,7 @@ impl TypedMutableState {
     }
 
     /// Go `ReplicateSignalExternalWorkflowExecutionInitiatedEvent`
-    /// (`GenerateSignalExternalTasks` not wired).
+    /// (including `GenerateSignalExternalTasks`).
     pub fn replicate_signal_external_workflow_execution_initiated_event(
         &mut self,
         first_event_id: i64,
@@ -204,6 +204,8 @@ impl TypedMutableState {
             control: a.control.clone(),
         };
         self.update_signal(si.clone());
+        // GAP: Rust attributes lack Go ChildWorkflowOnly, so child_only is false.
+        self.run_task_generator(0, |g| g.generate_signal_external_tasks(event))?;
         Ok(si)
     }
 

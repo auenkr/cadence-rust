@@ -142,6 +142,12 @@ pub struct TypedMutableState {
     pub condition: i64,
     /// Go `hBuilder` events produced in the current transaction.
     pub history_events: Vec<HistoryEvent>,
+    /// Go `insertTransferTasks`/`insertTimerTasks` (AddTransferTasks/AddTimerTasks
+    /// target); persistence blob encoding happens at the persistence layer.
+    pub transfer_tasks: Vec<super::mutable_state_task_generator::GeneratedTask>,
+    pub timer_tasks: Vec<super::mutable_state_task_generator::GeneratedTask>,
+    /// Go `taskGenerator` environment (domain cache, config, rand).
+    pub task_gen_env: super::mutable_state_methods_common::TaskGenEnv,
 }
 
 impl TypedMutableState {
