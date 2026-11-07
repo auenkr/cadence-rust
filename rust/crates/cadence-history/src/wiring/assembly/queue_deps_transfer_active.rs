@@ -7,13 +7,13 @@
 //! the in-process `HistoryEngine` supports (start, signal, request cancel,
 //! terminate, remove signal, schedule decision), `get_current_execution`, config.
 //!
+//! Also done: child started / start child failed / external cancel+signal events
+//! (`engine_events_transfer.rs`), record child execution completed (full close
+//! event), initiated event decoding, auto reset point, current version history.
+//!
 //! Not done (explicit errors, TODO(link)):
-//! * `record_child_execution_completed`: the task level `CloseEvent` is lossy, the
-//!   engine needs the full completion `HistoryEvent`.
-//! * mutable state mutations that `EngineMutableState` lacks (child started /
-//!   start child failed / external cancel+signal events).
 //! * `send_parent_close_policy_request` (parent close policy worker client),
-//!   `reset_workflow` (workflow resetter), `find_auto_reset_point`.
+//!   `reset_workflow` (workflow resetter).
 //! * Multi host forwarding of history client calls: shards owned by other hosts
 //!   surface `ShardOwnershipLost` (same as `RegistryHistoryClient`).
 //! * Request fields the engine request types do not carry (delay start,
@@ -37,7 +37,7 @@ use crate::engine::deps_ms::MutableState as EngineMs;
 use crate::engine::runtime::HistoryEngine;
 use crate::engine::types as et;
 use crate::task::deps::{
-    metrics, ptask_type, tag, ActiveClusterSelectionPolicy, BytesMap, DomainCache, DomainCacheEntry, Logger,
+    metrics, ptask_type, tag, ActiveClusterSelectionPolicy, ClusterAttribute, BytesMap, DomainCache, DomainCacheEntry, Logger,
     MetricsScope, PersistenceTask, Result as TaskResult, TaskError, TaskListKind, Time, TimeSource,
 };
 use crate::task::transfer_active_task_executor as ta;
@@ -49,6 +49,7 @@ use crate::task::transfer_active_task_executor::{
     RequestCancelInfo, ResetPointInfo, ResetVersionHistory, ScheduleDecisionTaskRequest, SignalInfo,
     StartChildAttributes, TransferActiveDependencies, WorkflowExecutionRef, WorkflowResetRequest,
 };
+use crate::wiring::resources::domain_cache::HistoryDomainCache;
 use crate::task::transfer_task_executor_base::{DecisionState, StartEvent};
 
 fn todo_err(what: &str) -> TaskError {
@@ -106,11 +107,12 @@ fn map_kind(v: i32) -> TaskListKind {
 /// `ActiveMutableState` over a loaded `EngineMutableState`.
 pub struct EngineActiveMutableState {
     state: Arc<EngineMutableState>,
+    domain_cache: Arc<HistoryDomainCache>,
 }
 
 impl EngineActiveMutableState {
-    pub fn new(state: Arc<EngineMutableState>) -> Arc<Self> {
-        Arc::new(Self { state })
+    pub fn new(state: Arc<EngineMutableState>, domain_cache: Arc<HistoryDomainCache>) -> Arc<Self> {
+        Arc::new(Self { state, domain_cache })
     }
 
     fn child_from_pc(c: &cadence_persistence::history_contract::ChildExecutionInfo) -> ChildExecutionInfo {
@@ -121,6 +123,8 @@ impl EngineActiveMutableState {
             started_run_id: String::from_utf8_lossy(&c.started_run_id).into_owned(),
             create_request_id: c.create_request_id.clone(),
             parent_close_policy: map_policy(c.parent_close_policy),
+            domain_id: c.domain_id.clone(),
+            domain_name: c.domain_name.clone(),
         }
     }
 }
@@ -186,10 +190,9 @@ impl ActiveMutableState for EngineActiveMutableState {
             cron_schedule: i.cron_schedule,
             memo: i.memo.map(|m| m.into_iter().collect::<BytesMap>()),
             search_attributes: i.search_attributes.map(|m| m.into_iter().collect::<BytesMap>()).unwrap_or_default(),
-            // TODO(link): cluster attribute conversion of the active cluster selection policy.
-            active_cluster_selection_policy: i
-                .active_cluster_selection_policy
-                .map(|_| ActiveClusterSelectionPolicy { cluster_attribute: None }),
+            active_cluster_selection_policy: i.active_cluster_selection_policy.map(|p| ActiveClusterSelectionPolicy {
+                cluster_attribute: p.cluster_attribute.map(|a| ClusterAttribute { scope: a.scope, name: a.name }),
+            }),
         }
     }
 
@@ -257,32 +260,65 @@ impl ActiveMutableState for EngineActiveMutableState {
     }
 
     fn current_version_history(&self) -> TaskResult<Option<Arc<dyn ResetVersionHistory>>> {
-        // TODO(link): reset path (workflow resetter) is not ported; see find_auto_reset_point.
-        Err(todo_err("current version history for reset"))
+        // Go `versionHistories.GetCurrentVersionHistory`.
+        let Some(vh) = EngineMs::get_version_histories(&*self.state) else { return Ok(None) };
+        match vh.histories.get(vh.current_version_history_index as usize) {
+            Some(h) => Ok(Some(Arc::new(CurrentVersionHistory { history: h.clone() }) as Arc<dyn ResetVersionHistory>)),
+            None => Err(TaskError::InternalService("current version history index out of range".into())),
+        }
     }
 
-    fn find_auto_reset_point(&self, _time_source: &dyn TimeSource, _domain: &DomainCacheEntry) -> Option<(String, ResetPointInfo)> {
-        // TODO(link): execution.FindAutoResetPoint (bad binaries). None disables the auto reset.
+    fn find_auto_reset_point(&self, time_source: &dyn TimeSource, domain: &DomainCacheEntry) -> Option<(String, ResetPointInfo)> {
+        // execution.FindAutoResetPoint(timeSource, &domainEntry.GetConfig().BadBinaries, AutoResetPoints)
+        let points = EngineMs::get_execution_info(&*self.state).auto_reset_points?;
+        if points.points.is_empty() {
+            return None;
+        }
+        let meta = self.domain_cache.inner().get_domain_by_id(&domain.info.id).ok()?;
+        let binaries = meta.decoded_bad_binaries.as_ref()?.binaries.as_ref()?;
+        let now = time_source.now().0;
+        for p in &points.points {
+            let Some(Some(bin)) = binaries.get(&p.binary_checksum) else { continue };
+            if !p.resettable {
+                continue;
+            }
+            let expiring = p.expiring_time_nano.unwrap_or(0);
+            if expiring == 0 || now < expiring {
+                return Some((
+                    bin.reason.clone(),
+                    ResetPointInfo {
+                        run_id: p.run_id.clone(),
+                        binary_checksum: p.binary_checksum.clone(),
+                        first_decision_completed_id: p.first_decision_completed_id,
+                    },
+                ));
+            }
+        }
         None
     }
 
-    fn add_child_workflow_execution_started_event(&self, _domain: &str, _execution: &WorkflowExecutionRef, _attributes: &StartChildAttributes, _initiated_id: i64) -> TaskResult<()> {
-        Err(todo_err("AddChildWorkflowExecutionStartedEvent"))
+    fn add_child_workflow_execution_started_event(&self, domain: &str, execution: &WorkflowExecutionRef, attributes: &StartChildAttributes, initiated_id: i64) -> TaskResult<()> {
+        let header = attributes
+            .header
+            .as_ref()
+            .map(|h| api::Header { fields: Some(h.iter().map(|(k, v)| (k.clone(), v.clone())).collect()) });
+        let exec = WorkflowExecution::new(execution.workflow_id.clone(), execution.run_id.clone());
+        self.state.add_child_started(domain, &exec, initiated_id, header).map_err(he)
     }
-    fn add_start_child_workflow_execution_failed_event(&self, _initiated_id: i64, _attributes: &StartChildAttributes) -> TaskResult<()> {
-        Err(todo_err("AddStartChildWorkflowExecutionFailedEvent"))
+    fn add_start_child_workflow_execution_failed_event(&self, initiated_id: i64, _attributes: &StartChildAttributes) -> TaskResult<()> {
+        self.state.add_start_child_failed(initiated_id).map_err(he)
     }
-    fn add_external_workflow_execution_cancel_requested(&self, _initiated_id: i64, _domain: &str, _workflow_id: &str, _run_id: &str) -> TaskResult<()> {
-        Err(todo_err("AddExternalWorkflowExecutionCancelRequested"))
+    fn add_external_workflow_execution_cancel_requested(&self, initiated_id: i64, domain: &str, workflow_id: &str, run_id: &str) -> TaskResult<()> {
+        self.state.add_external_cancel_requested(initiated_id, domain, workflow_id, run_id).map_err(he)
     }
-    fn add_external_workflow_execution_signaled(&self, _initiated_id: i64, _domain: &str, _workflow_id: &str, _run_id: &str, _control: &[u8]) -> TaskResult<()> {
-        Err(todo_err("AddExternalWorkflowExecutionSignaled"))
+    fn add_external_workflow_execution_signaled(&self, initiated_id: i64, domain: &str, workflow_id: &str, run_id: &str, control: &[u8]) -> TaskResult<()> {
+        self.state.add_external_signaled(initiated_id, domain, workflow_id, run_id, control).map_err(he)
     }
-    fn add_request_cancel_external_workflow_execution_failed_event(&self, _initiated_id: i64, _domain: &str, _workflow_id: &str, _run_id: &str) -> TaskResult<()> {
-        Err(todo_err("AddRequestCancelExternalWorkflowExecutionFailedEvent"))
+    fn add_request_cancel_external_workflow_execution_failed_event(&self, initiated_id: i64, domain: &str, workflow_id: &str, run_id: &str) -> TaskResult<()> {
+        self.state.add_request_cancel_external_failed(initiated_id, domain, workflow_id, run_id).map_err(he)
     }
-    fn add_signal_external_workflow_execution_failed_event(&self, _initiated_id: i64, _domain: &str, _workflow_id: &str, _run_id: &str, _control: &[u8]) -> TaskResult<()> {
-        Err(todo_err("AddSignalExternalWorkflowExecutionFailedEvent"))
+    fn add_signal_external_workflow_execution_failed_event(&self, initiated_id: i64, domain: &str, workflow_id: &str, run_id: &str, control: &[u8]) -> TaskResult<()> {
+        self.state.add_signal_external_failed(initiated_id, domain, workflow_id, run_id, control).map_err(he)
     }
 
     fn schedule_decision(&self) -> TaskResult<()> {
@@ -298,6 +334,7 @@ impl ActiveMutableState for EngineActiveMutableState {
             timestamp: event.timestamp.unwrap_or_default(),
             continued_as_new_attributes_present: attrs.is_some(),
             continued_as_new_failure_reason: attrs.and_then(|a| a.failure_reason.clone()).unwrap_or_default(),
+            full_event: Some(Arc::new(event.clone())),
         })
     }
 
@@ -315,9 +352,58 @@ impl ActiveMutableState for EngineActiveMutableState {
         })
     }
 
-    async fn child_execution_initiated_event(&self, _initiated_id: i64) -> TaskResult<StartChildAttributes> {
-        // TODO(link): decode StartChildWorkflowExecutionInitiated from the child's initiated_event blob.
-        Err(todo_err("child execution initiated event"))
+    async fn child_execution_initiated_event(&self, initiated_id: i64) -> TaskResult<StartChildAttributes> {
+        let a = self.state.decode_child_initiated_event(initiated_id).map_err(he)?;
+        let fields = |m: Option<std::collections::HashMap<String, Vec<u8>>>| m.map(|m| m.into_iter().collect::<BytesMap>());
+        Ok(StartChildAttributes {
+            domain: a.domain,
+            workflow_id: a.workflow_id,
+            workflow_type: a.workflow_type.map(|t| t.name).unwrap_or_default(),
+            task_list: a.task_list.map(|t| t.name).unwrap_or_default(),
+            input: a.input,
+            header: fields(a.header.and_then(|h| h.fields)),
+            execution_start_to_close_timeout_seconds: a.execution_start_to_close_timeout_seconds,
+            task_start_to_close_timeout_seconds: a.task_start_to_close_timeout_seconds,
+            workflow_id_reuse_policy: a.workflow_id_reuse_policy.map(|p| p as i32),
+            retry_policy: a.retry_policy.map(|r| StartChildRetryPolicy {
+                initial_interval_seconds: r.initial_interval_in_seconds,
+                backoff_coefficient: r.backoff_coefficient,
+                maximum_interval_seconds: r.maximum_interval_in_seconds,
+                maximum_attempts: r.maximum_attempts,
+                non_retriable_error_reasons: r.non_retriable_error_reasons,
+                expiration_interval_seconds: r.expiration_interval_in_seconds,
+            }),
+            cron_schedule: a.cron_schedule,
+            cron_overlap_policy: a.cron_overlap_policy.map(|p| p as i32),
+            memo: fields(a.memo.and_then(|m| m.fields)),
+            search_attributes: fields(a.search_attributes.and_then(|m| m.indexed_fields)),
+            delay_start_seconds: a.delay_start_seconds,
+            jitter_start_seconds: a.jitter_start_seconds,
+            first_run_at_timestamp: a.first_run_at_timestamp,
+        })
+    }
+}
+
+/// `execution.VersionHistory` subset for the reset path.
+struct CurrentVersionHistory {
+    history: api::VersionHistory,
+}
+
+impl ResetVersionHistory for CurrentVersionHistory {
+    fn get_event_version(&self, event_id: i64) -> TaskResult<i64> {
+        // Go `VersionHistory.GetEventVersion`.
+        if event_id < 1 {
+            return Err(TaskError::InternalService(format!("invalid event id {event_id}")));
+        }
+        self.history
+            .items
+            .iter()
+            .find(|i| event_id <= i.event_id)
+            .map(|i| i.version)
+            .ok_or_else(|| TaskError::InternalService(format!("event id {event_id} not found in version history")))
+    }
+    fn get_branch_token(&self) -> Vec<u8> {
+        self.history.branch_token.clone()
     }
 }
 
@@ -328,12 +414,13 @@ pub struct EngineActiveTransferContext {
     context: Arc<EngineExecutionContext>,
     release: ReleaseFunc,
     released: AtomicBool,
+    domain_cache: Arc<HistoryDomainCache>,
 }
 
 impl EngineActiveTransferContext {
     async fn load(&self) -> TaskResult<Arc<EngineActiveMutableState>> {
         let state = self.context.load_state().await.map_err(he)?;
-        Ok(EngineActiveMutableState::new(state))
+        Ok(EngineActiveMutableState::new(state, self.domain_cache.clone()))
     }
 }
 
@@ -437,7 +524,7 @@ impl TransferActiveDepsImpl {
     }
 }
 
-fn to_api_start(a: &StartChildAttributes, domain: &str, request_id: &str) -> api::StartWorkflowExecutionRequest {
+fn to_api_start(a: &StartChildAttributes, domain: &str, request_id: &str, policy: Option<&ActiveClusterSelectionPolicy>) -> api::StartWorkflowExecutionRequest {
     let to_fields = |m: &Option<BytesMap>| m.as_ref().map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
     api::StartWorkflowExecutionRequest {
         domain: domain.to_string(),
@@ -460,6 +547,13 @@ fn to_api_start(a: &StartChildAttributes, domain: &str, request_id: &str) -> api
             ..Default::default()
         }),
         cron_schedule: a.cron_schedule.clone(),
+        cron_overlap_policy: a.cron_overlap_policy.and_then(cadence_api::enums::CronOverlapPolicy::from_i32),
+        delay_start_seconds: a.delay_start_seconds,
+        jitter_start_seconds: a.jitter_start_seconds,
+        first_run_at_timestamp: a.first_run_at_timestamp,
+        active_cluster_selection_policy: policy.map(|p| api::ActiveClusterSelectionPolicy {
+            cluster_attribute: p.cluster_attribute.as_ref().map(|c| api::ClusterAttribute { scope: c.scope.clone(), name: c.name.clone() }),
+        }),
         memo: to_fields(&a.memo).map(|fields| api::Memo { fields: Some(fields) }),
         search_attributes: to_fields(&a.search_attributes).map(|f| api::SearchAttributes { indexed_fields: Some(f) }),
         header: to_fields(&a.header).map(|fields| api::Header { fields: Some(fields) }),
@@ -481,7 +575,7 @@ impl TransferActiveDependencies for TransferActiveDepsImpl {
             .await
             .map_err(|_| TaskError::ContextDeadlineExceeded)?
             .map_err(he)?;
-        Ok(Arc::new(EngineActiveTransferContext { context, release, released: AtomicBool::new(false) }))
+        Ok(Arc::new(EngineActiveTransferContext { context, release, released: AtomicBool::new(false), domain_cache: self.env.domain_cache.clone() }))
     }
 
     fn allow_internal(&self, _domain_id: &str, _workflow_id: &str) -> bool {
@@ -489,9 +583,20 @@ impl TransferActiveDependencies for TransferActiveDepsImpl {
         true
     }
 
-    async fn record_child_execution_completed(&self, _request: RecordChildExecutionCompletedRequest) -> TaskResult<()> {
-        // TODO(link): needs the full completion HistoryEvent, the task level CloseEvent is lossy.
-        Err(todo_err("RecordChildExecutionCompleted"))
+    async fn record_child_execution_completed(&self, r: RecordChildExecutionCompletedRequest) -> TaskResult<()> {
+        let engine = self.engine_for(&r.workflow_execution.workflow_id).await?;
+        let event = r.completion_event.full_event.as_deref().cloned();
+        engine
+            .record_child_execution_completed(&et::RecordChildExecutionCompletedRequest {
+                domain_uuid: r.domain_uuid,
+                workflow_execution: api_execution(&r.workflow_execution),
+                initiated_id: r.initiated_id,
+                completed_execution: api_execution(&r.completed_execution),
+                completion_event: event,
+                started_id: crate::engine::deps::EMPTY_EVENT_ID,
+            })
+            .await
+            .map_err(he)
     }
 
     async fn request_cancel_workflow_execution(&self, r: HistoryRequestCancelRequest) -> TaskResult<()> {
@@ -550,7 +655,7 @@ impl TransferActiveDependencies for TransferActiveDepsImpl {
     async fn start_workflow_execution(&self, r: HistoryStartWorkflowRequest) -> TaskResult<String> {
         let workflow_id = r.request.attributes.workflow_id.clone();
         let engine = self.engine_for(&workflow_id).await?;
-        let start = to_api_start(&r.request.attributes, &r.request.domain, &r.request.request_id);
+        let start = to_api_start(&r.request.attributes, &r.request.domain, &r.request.request_id, r.request.active_cluster_selection_policy.as_ref());
         let response = engine
             .start_workflow_execution(&et::HistoryStartWorkflowExecutionRequest {
                 domain_uuid: r.domain_uuid,
@@ -638,17 +743,20 @@ impl TransferActiveDependencies for TransferActiveDepsImpl {
     }
 
     fn get_child_execution_domain_id(&self, child: &ChildExecutionInfo, parent_domain: &DomainCacheEntry) -> TaskResult<String> {
-        // execution.GetChildExecutionDomainID: the persisted child domain id (empty for old
-        // records, then the parent's domain) is not carried by the task level child info.
-        // TODO(link): carry child domain id/name in ChildExecutionInfo; use the parent domain.
-        let _ = child;
-        let _ = &self.domains;
+        // execution.GetChildExecutionDomainID
+        if !child.domain_id.is_empty() {
+            return Ok(child.domain_id.clone());
+        }
+        if !child.domain_name.is_empty() {
+            return self.domains.get_domain(&child.domain_name).map(|d| d.info.id.clone());
+        }
         Ok(parent_domain.info.id.clone())
     }
 
     fn advanced_visibility_writing_enabled(&self) -> bool {
-        // TODO(link): `system.advancedVisibilityWritingMode` is not in the Rust config (Go default: off).
-        false
+        // common.IsAdvancedVisibilityWritingEnabled
+        self.env.config.is_advanced_vis_config_exist
+            && !matches!((self.env.config.write_visibility_store_name)().as_str(), "db" | "off")
     }
 
     fn enable_parent_close_policy_worker(&self) -> bool {

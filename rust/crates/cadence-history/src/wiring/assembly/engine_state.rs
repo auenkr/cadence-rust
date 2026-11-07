@@ -170,6 +170,10 @@ pub(super) struct Inner {
     pub(super) pc_children: BTreeMap<i64, pc::ChildExecutionInfo>,
     pub(super) upsert_children: BTreeSet<i64>,
     pub(super) deleted_children: BTreeSet<i64>,
+    /// Initiated ids of request-cancel infos completed in this transaction.
+    pub(super) deleted_request_cancels: BTreeSet<i64>,
+    /// Initiated ids of signal infos completed in this transaction.
+    pub(super) deleted_signals: BTreeSet<i64>,
     pub(super) signal_requested: HashSet<String>,
     pub(super) upsert_signal_requested: BTreeSet<String>,
     pub(super) delete_signal_requested: BTreeSet<String>,
@@ -381,6 +385,8 @@ impl EngineMutableState {
             pc_children,
             upsert_children: BTreeSet::new(),
             deleted_children: BTreeSet::new(),
+            deleted_request_cancels: BTreeSet::new(),
+            deleted_signals: BTreeSet::new(),
             signal_requested: snapshot.signal_requested_ids.iter().cloned().collect(),
             upsert_signal_requested: BTreeSet::new(),
             delete_signal_requested: BTreeSet::new(),
@@ -495,7 +501,7 @@ impl MutableState for EngineMutableState {
         })
     }
     async fn get_completion_event(&self) -> HResult<cadence_api::service_types::HistoryEvent> {
-        Err(HistoryError::internal("get_completion_event: completion event blob decoding not wired"))
+        self.ev_completion_event().await
     }
     fn is_workflow_execution_running(&self) -> bool {
         self.inner.lock().unwrap().exec.is_running()

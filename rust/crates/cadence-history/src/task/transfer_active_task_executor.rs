@@ -35,7 +35,7 @@ pub struct RequestCancelInfo {pub version:i64,pub cancel_request_id:String}
 #[derive(Clone,Debug)]
 pub struct SignalInfo {pub version:i64,pub signal_name:String,pub signal_request_id:String,pub input:Vec<u8>,pub control:Vec<u8>}
 #[derive(Clone,Debug)]
-pub struct ChildExecutionInfo {pub version:i64,pub started_id:i64,pub started_workflow_id:String,pub started_run_id:String,pub create_request_id:String,pub parent_close_policy:ParentClosePolicy}
+pub struct ChildExecutionInfo {pub version:i64,pub started_id:i64,pub started_workflow_id:String,pub started_run_id:String,pub create_request_id:String,pub parent_close_policy:ParentClosePolicy,pub domain_id:String,pub domain_name:String}
 #[derive(Clone,Debug,Default)]
 pub struct ActiveExecutionInfo {
  pub domain_id:String,pub workflow_id:String,pub run_id:String,pub task_list:String,pub task_list_kind:TaskListKind,
@@ -48,7 +48,9 @@ pub struct ActiveExecutionInfo {
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
 pub enum CloseEventType {Completed,Failed,Canceled,Terminated,TimedOut,ContinuedAsNew,Other}
 #[derive(Clone,Debug)]
-pub struct CloseEvent {pub event_id:i64,pub event_type:CloseEventType,pub timestamp:i64,pub continued_as_new_attributes_present:bool,pub continued_as_new_failure_reason:String}
+pub struct CloseEvent {pub event_id:i64,pub event_type:CloseEventType,pub timestamp:i64,pub continued_as_new_attributes_present:bool,pub continued_as_new_failure_reason:String,
+ /// Full completion event (needed by RecordChildExecutionCompleted).
+ pub full_event:Option<Arc<cadence_api::service_types::HistoryEvent>>}
 #[derive(Clone,Debug,Default)]
 pub struct StartChildRetryPolicy {pub initial_interval_seconds:i32,pub backoff_coefficient:f64,pub maximum_interval_seconds:i32,pub maximum_attempts:i32,pub non_retriable_error_reasons:Vec<String>,pub expiration_interval_seconds:i32}
 /// `types.StartChildWorkflowExecutionInitiatedEventAttributes`
