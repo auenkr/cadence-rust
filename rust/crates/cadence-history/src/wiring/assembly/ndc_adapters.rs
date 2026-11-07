@@ -19,6 +19,8 @@
 //!
 //! See memory/history-gap-ndcadapters-20261107.md for the follow-up task list.
 
+#![allow(clippy::result_large_err)]
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
