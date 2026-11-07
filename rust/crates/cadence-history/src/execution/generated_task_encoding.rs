@@ -75,6 +75,10 @@ pub fn to_transfer_task(t: &GeneratedTask) -> Result<pc::TransferTask, TypedMuta
     if o.target_domain_id.is_empty() {
         o.target_domain_id = o.domain_id.clone();
     }
+    // Go persistence.TransferTaskTransferTargetRunID: dummy run id for tasks without a target run.
+    if o.target_run_id.is_empty() {
+        o.target_run_id = "30000000-0000-f000-f000-000000000002".to_string();
+    }
     Ok(o)
 }
 
