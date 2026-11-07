@@ -136,7 +136,7 @@ pub struct SqlHistoryManager {
     pub shard_id: i32,
 }
 
-fn branch_request(shard_id: i32, token: &[u8]) -> Result<HistoryBranchRequest, PersistenceError> {
+pub(crate) fn branch_request(shard_id: i32, token: &[u8]) -> Result<HistoryBranchRequest, PersistenceError> {
     let branch = cadence_persistence::history_branch::decode(token)
         .map_err(|e| PersistenceError::InvalidPersistenceRequest(e.to_string()))?;
     Ok(HistoryBranchRequest {

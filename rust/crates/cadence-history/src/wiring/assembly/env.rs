@@ -79,6 +79,10 @@ pub struct HistoryEnv {
     pub membership: Arc<MembershipResolver>,
     pub client_checker: Arc<VersionChecker>,
     pub query_matching: Arc<GrpcQueryMatchingClient>,
+    /// Visibility (`executions_visibility`) writer shared by the transfer / timer executors.
+    pub visibility: Arc<crate::wiring::persistence::visibility::SqlVisibilityWriter>,
+    /// Matching channel resolver (add-task RPCs of the transfer executors).
+    pub matching_resolver: ChannelResolver,
     pub dynamic_client: Option<Arc<dyn DynamicClient>>,
     pub identity: String,
 }
@@ -120,6 +124,7 @@ impl HistoryEnv {
 
         let executions: Arc<dyn GoExecutionStore> =
             Arc::new(SqlWorkflowStore::new(backend.clone(), Encoding::ThriftRW, 0, 0));
+        let visibility = Arc::new(crate::wiring::persistence::visibility::SqlVisibilityWriter::new(backend.clone()));
         let history_v2: Arc<dyn GoHistoryV2Store> = Arc::new(SqlHistoryV2Store::new(backend, Encoding::ThriftRW));
         let persistence = HistoryPersistence {
             shard_store: Arc::new(SqlShardStore::new(shard_rows.clone())),
@@ -152,7 +157,9 @@ impl HistoryEnv {
             domain_scope_cache: Arc::new(DomainMetricsScopeCacheImpl::default()),
             membership: Arc::new(MembershipResolver::new(who_am_i.clone(), hosts)),
             client_checker: Arc::new(VersionChecker),
-            query_matching: Arc::new(GrpcQueryMatchingClient::new(matching_resolver)),
+            query_matching: Arc::new(GrpcQueryMatchingClient::new(matching_resolver.clone())),
+            visibility,
+            matching_resolver,
             dynamic_client,
             identity: who_am_i,
         }))
@@ -167,6 +174,9 @@ pub struct ShardBuildCtx {
     /// Filled with the engine once it is built, so queue processors that need the
     /// engine can resolve it lazily.
     pub engine_slot: Arc<OnceLock<Weak<HistoryEngine>>>,
+    /// Execution core and cache of the shard, shared with the engine.
+    pub core: Arc<super::engine_cache::EngineCore>,
+    pub cache: Arc<super::engine_cache::EngineExecutionCache>,
 }
 
 /// Implemented by the queue unit (D2): builds the per-shard transfer / timer
