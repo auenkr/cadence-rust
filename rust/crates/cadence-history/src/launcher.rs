@@ -2,7 +2,6 @@
 //! (`cadence-server start --services history`) -- config load, resources, shard
 //! registry, handler chain, Thrift/TChannel + gRPC servers, Ringpop membership,
 //! health and graceful shutdown.
-use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
@@ -18,11 +17,10 @@ use cadence_service_core::service::ServiceName;
 
 use crate::config::Config;
 use crate::config_collection::{Collection, DynamicClient};
-use crate::engine::deps::HistoryTaskCategory;
-use crate::engine::runtime::QueueProcessor;
 use crate::service::{MembershipControl, Service};
 use crate::wiring::assembly::controller::ShardRegistry;
-use crate::wiring::assembly::env::{HistoryEnv, HistoryEnvParams, QueueFactory, ShardBuildCtx};
+use crate::wiring::assembly::env::{HistoryEnv, HistoryEnvParams};
+use crate::wiring::assembly::queue_factory::{ExecQueueFactory, MissingExecutorsProvider};
 use crate::wiring::assembly::replication_builders::{RegistryHistoryClient, ReplicationFactoryImpl};
 use crate::wiring::resources::dynconfig::FileDynamicClient;
 use crate::wiring::resources::membership_feed::{refresh_from_snapshot, spawn_membership_feed};
@@ -34,24 +32,6 @@ const MATCHING_RINGPOP_SERVICE: &str = "cadence-matching";
 const DEFAULT_HISTORY_TCHANNEL_PORT: u16 = 7934;
 const DEFAULT_HISTORY_GRPC_PORT: u16 = 7834;
 const DEFAULT_MAX_MESSAGE_SIZE: usize = 4 * 1024 * 1024;
-
-/// Queue processors are built by the queue unit once the visibility writer and
-/// archival client exist (memory/history-gap-startup-20261106.md). Until then a
-/// shard runs with no transfer/timer processors, which is logged loudly.
-struct UnwiredQueueFactory;
-
-impl QueueFactory for UnwiredQueueFactory {
-    fn build_queue_processors(
-        &self,
-        ctx: &ShardBuildCtx,
-    ) -> anyhow::Result<HashMap<HistoryTaskCategory, Arc<dyn QueueProcessor>>> {
-        tracing::error!(
-            shard_id = ctx.shard.shard_id(),
-            "history queue processors are not wired in the Rust startup: transfer/timer tasks will NOT be processed"
-        );
-        Ok(HashMap::new())
-    }
-}
 
 /// `membership.Resolver.EvictSelf` over the Ringpop provider.
 struct RingpopMembership(Arc<MatchingRingpopProvider>);
@@ -255,7 +235,7 @@ pub async fn run(bin_name: &'static str) -> anyhow::Result<()> {
 
     let history_client = RegistryHistoryClient::new();
     let replication = Arc::new(ReplicationFactoryImpl::new(history_client.clone()));
-    let registry = ShardRegistry::new(env.clone(), Arc::new(UnwiredQueueFactory), replication.clone());
+    let registry = ShardRegistry::new(env.clone(), Arc::new(ExecQueueFactory::new(Arc::new(MissingExecutorsProvider))), replication.clone());
     history_client.bind(&registry);
 
     let service = Arc::new(Service::new(env.clone(), registry.clone(), Arc::new(RingpopMembership(provider.clone()))));
