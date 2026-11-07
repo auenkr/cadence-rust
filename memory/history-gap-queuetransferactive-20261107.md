@@ -27,3 +27,4 @@ Not wired into launcher.rs (item 5 of history-gap-queuedeps-20261107.md).
 
 ## Evidence
 See bottom (filled after CI).
+- rust-ci.yml package=cadence-history: https://github.com/auenkr/cadence-rust/actions/runs/42341090019 head 3b09db344a1dd4a2cbbf55fee6d8c2423469e7e3 conclusion: success (clippy + tests; code head, memory-only commit follows).
