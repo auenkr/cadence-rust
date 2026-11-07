@@ -21,3 +21,4 @@
   Archival-enabled domains therefore still retry and never lose history. Rates use Go defaults (not read from dynamic config yet).
 
 ## Evidence
+- rust-ci.yml package=cadence-history: https://github.com/auenkr/cadence-rust/actions/runs/42340900693 head 5ccd112fbcfd215fc06e9b4d957e0a14a6a16674 conclusion: success (clippy + tests).
