@@ -4,6 +4,11 @@
 //! Done here: `TransferStandbyDependencies` (`TransferStandbyDepsImpl`) with the
 //! `TransferWorkflow` adapter (`EngineTransferWorkflow`) over `EngineMutableState`.
 //!
+//! `TimerStandbyDependencies` (`TimerStandbyDepsImpl`): config, clock, history resend and DLQ are
+//! real; `load_workflow` returns an explicit error because `EngineMutableState` does not track
+//! user timer infos nor implement the timer sequence / `update_as_passive` (TODO(link): needs
+//! timer state in engine_state.rs, shared with TimerActiveDependencies).
+//!
 //! Known deviations (TODO(link)):
 //! - request-cancel / signal infos are read from the loaded snapshot, which is what
 //!   a freshly loaded standby state holds (standby processing never mutates them).
@@ -30,6 +35,7 @@ use crate::task::deps::{
     TaskList, TaskListKind, Time,
 };
 use crate::task::standby_task_util::{HistoryResendInfo, TaskDLQWriter};
+use crate::task::timer_standby_task_executor::{StandbyTimerWorkflow, TimerStandbyDependencies};
 use crate::task::transfer_standby_task_executor::{
     TransferActivityInfo, TransferDecisionInfo, TransferPendingInfo, TransferStandbyDependencies, TransferWorkflow,
 };
@@ -388,5 +394,66 @@ impl TransferStandbyDependencies for TransferStandbyDepsImpl {
     fn history_task_dlq_mode(&self) -> StringPropertyFnWithDomainFilter {
         let f = self.env.config.history_task_dlq_mode.clone();
         Arc::new(move |domain: &str| f(domain))
+    }
+}
+
+/// `TimerStandbyDependencies` over the shard's config, clock and history resender.
+pub struct TimerStandbyDepsImpl {
+    env: Arc<HistoryEnv>,
+    shard: Arc<ShardContext>,
+    resender: Arc<dyn HistoryResender>,
+}
+
+impl TimerStandbyDepsImpl {
+    pub fn new(env: Arc<HistoryEnv>, shard: Arc<ShardContext>, resender: Arc<dyn HistoryResender>) -> Arc<Self> {
+        Arc::new(Self { env, shard, resender })
+    }
+}
+
+#[async_trait]
+impl TimerStandbyDependencies for TimerStandbyDepsImpl {
+    async fn load_workflow(&self, _task: &dyn PersistenceTask, _event_id: i64) -> TaskResult<Option<Arc<dyn StandbyTimerWorkflow>>> {
+        // TODO(link): EngineMutableState has no user timer infos, timer sequence or update_as_passive yet.
+        Err(TaskError::Other("timer standby workflow is not supported yet: timer state is not ported to EngineMutableState".into()))
+    }
+    fn standby_cluster_delay(&self) -> Duration {
+        (self.env.config.standby_cluster_delay)()
+    }
+    fn current_time(&self, cluster: &str) -> Time {
+        Time(self.shard.get_current_time(cluster))
+    }
+    fn enable_timer_queue_v2(&self, shard_id: i32) -> bool {
+        (self.env.config.enable_timer_queue_v2)(shard_id)
+    }
+    fn resend_delay(&self) -> Duration {
+        (self.env.config.standby_task_missing_events_resend_delay)()
+    }
+    fn discard_delay(&self) -> Duration {
+        (self.env.config.standby_task_missing_events_discard_delay)()
+    }
+    fn delete_history_event_context_timeout(&self) -> Duration {
+        Duration::from_secs((self.env.config.delete_history_event_context_timeout)().max(0) as u64)
+    }
+    fn dlq_writer(&self) -> Arc<dyn TaskDLQWriter> {
+        Arc::new(SqlTaskDlqWriter)
+    }
+    fn history_task_dlq_mode(&self) -> StringPropertyFnWithDomainFilter {
+        let f = self.env.config.history_task_dlq_mode.clone();
+        Arc::new(move |domain: &str| f(domain))
+    }
+    async fn send_single_workflow_history(&self, cluster: &str, task: &dyn PersistenceTask, last_event_id: i64, last_event_version: i64) -> TaskResult<()> {
+        self.resender
+            .send_single_workflow_history(
+                cluster,
+                task.get_domain_id(),
+                task.get_workflow_id(),
+                task.get_run_id(),
+                Some(last_event_id),
+                Some(last_event_version),
+                None,
+                None,
+            )
+            .await
+            .map_err(|e| TaskError::InternalService(e.to_string()))
     }
 }
