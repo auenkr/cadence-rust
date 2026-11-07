@@ -5,6 +5,9 @@
 //! `visibilityArchiver.go` Query/ValidateURI, `queryParser.go`).
 //! Archive (write) paths belong to the History service and are not ported here.
 
+mod writer;
+pub use writer::*;
+
 use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::Arc;
