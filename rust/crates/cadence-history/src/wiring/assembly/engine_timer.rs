@@ -12,7 +12,6 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use cadence_api::enums::{EventType, TimeoutType};
 use cadence_api::tasks::*;
-use cadence_persistence::history_contract as pc;
 
 use crate::engine::deps::{
     ActivityInfo, HResult, HistoryError, EMPTY_EVENT_ID, WORKFLOW_CLOSE_STATUS_TIMED_OUT, WORKFLOW_STATE_COMPLETED,
