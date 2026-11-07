@@ -71,6 +71,10 @@ pub fn to_transfer_task(t: &GeneratedTask) -> Result<pc::TransferTask, TypedMuta
         TaskKind::UpsertWorkflowSearchAttributes => o.task_type = 8,
         other => return Err(enc_err(format!("not a transfer task: {other:?}"))),
     }
+    // The thrift blob requires a UUID; tasks without a target use their own domain.
+    if o.target_domain_id.is_empty() {
+        o.target_domain_id = o.domain_id.clone();
+    }
     Ok(o)
 }
 
