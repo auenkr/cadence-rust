@@ -378,9 +378,7 @@ mod typed_adapter_tests {
         let mut s = state();
         let mut rng = |_: i64| 0;
         let mut adapter = TypedTaskGeneratorState::new(&mut s, &Domains, &mut rng);
-        let mut event = HistoryEvent::default();
-        event.version = 7;
-        event.workflow_execution_started_event_attributes = Some(Default::default());
+        let event = HistoryEvent { version: 7, workflow_execution_started_event_attributes: Some(Default::default()), ..Default::default() };
         MutableStateTaskGenerator { state: &mut adapter }.generate_workflow_start_tasks(1_000_000_000, &event).unwrap();
         assert_eq!(adapter.timer_tasks.len(), 1);
         assert_eq!(adapter.timer_tasks[0].visibility_timestamp_unix_nanos, Some(11_000_000_000));
