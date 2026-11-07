@@ -246,7 +246,41 @@ impl ReplicationHydrator for EngineHydrator {
         TaskHydrator::new_immediate(
             input.is_running,
             input.version_histories.clone(),
-            input.activities.clone(),
+            input
+                .activities
+                .iter()
+                .map(|(id, a)| {
+                    // The engine-side ActivityInfo is a subset; fields it lacks are not used by the
+                    // sync-activity task hydration.
+                    let converted = ActivityInfo {
+                        version: a.version,
+                        schedule_id: a.schedule_id,
+                        scheduled_time: a.scheduled_time,
+                        started_id: a.started_id,
+                        started_time: a.started_time,
+                        activity_id: a.activity_id.clone(),
+                        domain_id: input.info.domain_id.clone(),
+                        schedule_to_close_timeout: a.schedule_to_close_timeout,
+                        cancel_requested: a.cancel_requested,
+                        cancel_request_id: a.cancel_request_id,
+                        task_list: a.task_list.clone(),
+                        attempt: a.attempt,
+                        request_id: a.request_id.clone(),
+                        started_identity: a.started_identity.clone(),
+                        last_heartbeat_updated_time: a.last_heart_beat_updated_time,
+                        details: a.details.clone(),
+                        has_retry_policy: a.has_retry_policy,
+                        maximum_attempts: a.maximum_attempts,
+                        expiration_time: a.expiration_time,
+                        last_failure_reason: a.last_failure_reason.clone(),
+                        last_failure_details: a.last_failure_details.clone(),
+                        last_retry_interval_seconds: a.last_retry_interval_seconds,
+                        last_worker_identity: a.last_worker_identity.clone(),
+                        ..Default::default()
+                    };
+                    (*id, converted)
+                })
+                .collect(),
             blob_of(&input.history),
             blob_of(&input.new_run_history),
         )
