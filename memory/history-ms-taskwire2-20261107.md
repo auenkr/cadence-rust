@@ -18,4 +18,6 @@ Branch `history-ms-taskwire2` (from master d7dfd0519).
 - SetHistoryTree, writeEventToCache, ACSP blob, logging.
 
 ## CI
-(pending)
+https://github.com/auenkr/cadence-rust/actions/runs/42342268187 code head 9afe99e1e7bc8d6526bd314f58589b661837337e conclusion success (-p cadence-history, clippy+tests).
+
+Encoding notes: thrift blob needs UUIDs, so transfer tasks default target_domain_id to own domain and target_run_id to Go's dummy `30000000-0000-f000-f000-000000000002`.
