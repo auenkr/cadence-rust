@@ -41,3 +41,25 @@ Read this checkpoint, history-port-audit-20261105.md, individual gap notes and a
 - history-gap-transferexec NOT merged: CI rerun 42234619633 FAILED (needs master merge + fix); audit incomplete.
 - engine4 remaining gaps: visibility writes/orphan branch cleanup no-op, request dedup rows, replicate_failover_markers no-op, no DLQ failover processor, NewEngine/Start/Stop/createMutableState + engine/interface.go not ported, TODO(link) facades in deps.rs/runtime.rs/types.rs.
 - apitypes gaps: ParentWorkflowDomainID/jitter_start_seconds lack Thrift fields; state_builder reads parent_workflow_domain not _id; no round-trip tests for new converters.
+
+## 2026-11-07 pause (11:25 IST, at user request)
+Merged today (all CI green on code heads; master CI dispatched after each, latest run 42344423196 on transfermut merge):
+transferexec, queuefactory, ms-childsignal, transferexec2, engine5, ms-activity, ms-decision, taskinfra, ms-taskgen, engine6,
+queuedeps, ms-started2, ms-taskwire, apitypes2, queuestandby, queuetimeractive, engine7, startup2, queueexecrows,
+queuetransferactive, handlerfailover, ndcadapters, timermut, ms-taskwire2, archwriters, transfermut. No open worker branches.
+Per-branch details: memory/history-*-20261107.md.
+
+KEY DESIGN DECISION FOR NEXT SESSION: three mutable-state types exist — engine `EngineMutableState` (used by queue adapters,
+timer/transfer mutators), `TypedMutableState` (execution/, ported Add*/Replicate* + task gen), replay
+`mutable_state::MutableStateBuilder` (StateBuilder/NDC). Go has one. Unify (likely make engine use TypedMutableState)
+before finishing NDC adapters (TODO(ndc-adapters) stubs) and wiring queues live.
+
+Remaining gaps:
+- Queues not live: `MissingExecutorsProvider` in queue_factory; no real QueueExecProvider in launcher.rs.
+- Timer adapter: retry_workflow / update_workflow_execution_with_new_as_active TODO(link) (needs continue-as-new run creation).
+- Transfer adapter: send_parent_close_policy_request, reset_workflow error; allow_internal always true.
+- NDC: execution cache/mutable state/state builder/rebuilder/txn manager/new_mutable_state/context hooks stubbed; standby delay hardcoded 5m.
+- Task gen: AddContinueAsNewEvent, reset tasks + buffered flush in close, task_id/visibility 0 until shard assigns, activity timer status not stored (dup tasks).
+- Archival: HistoryBatchSource over history store, s3/gcs writers, archival signal client, dynamic-config rates.
+- Replication clients to remote clusters dial without TLS. History DLQ manager. OpenFeature DC.
+- Then: mixed-cluster gate + parity audit.
