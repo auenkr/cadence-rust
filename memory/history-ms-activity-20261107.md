@@ -12,3 +12,5 @@ pending-activity count limits + local dispatch + GenerateActivityTransferTasks/R
 (caller passes target_domain_id), logging/data-inconsistency, ActivityInfo lacks last_failure_category,
 task_list_kind, timer_task_status, scheduled_event; FailureOptions.failure_category emitted as None.
 Clock/jitter passed by caller.
+
+CI: https://github.com/auenkr/cadence-rust/actions/runs/42337855766 head 99c6c4f86f223110e643afd5f810f88164557bda conclusion success (package=cadence-history clippy+test)
