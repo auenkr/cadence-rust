@@ -626,3 +626,41 @@ pub fn event(v: st::HistoryEvent) -> Result<p::HistoryEvent, Status> {
         attributes: Some(attributes),
     })
 }
+
+#[cfg(test)]
+mod semaphore_event_tests {
+    use super::*;
+
+    #[test]
+    fn semaphore_and_cancel_failed_events_convert_to_proto() {
+        let ev = event(st::HistoryEvent {
+            event_type: Some(EventType::SemaphoreAcquired),
+            semaphore_acquired_event_attributes: Some(tasks::SemaphoreAcquiredEventAttributes {
+                token_id: 3,
+                initiated_event_id: 9,
+            }),
+            ..Default::default()
+        })
+        .unwrap();
+        match ev.attributes {
+            Some(p::history_event::Attributes::SemaphoreAcquiredEventAttributes(a)) => {
+                assert_eq!(a.initiated_event_id, 9);
+            }
+            other => panic!("unexpected attributes: {other:?}"),
+        }
+        let ev = event(st::HistoryEvent {
+            event_type: Some(EventType::SemaphoreReleased),
+            semaphore_released_event_attributes: Some(tasks::SemaphoreReleasedEventAttributes {
+                token_id: 3,
+                initiated_event_id: 9,
+                decision_task_completed_event_id: 12,
+            }),
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(matches!(
+            ev.attributes,
+            Some(p::history_event::Attributes::SemaphoreReleasedEventAttributes(_))
+        ));
+    }
+}
