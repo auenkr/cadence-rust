@@ -557,7 +557,6 @@ fn to_api_start(a: &StartChildAttributes, domain: &str, request_id: &str, policy
         memo: to_fields(&a.memo).map(|fields| api::Memo { fields: Some(fields) }),
         search_attributes: to_fields(&a.search_attributes).map(|f| api::SearchAttributes { indexed_fields: Some(f) }),
         header: to_fields(&a.header).map(|fields| api::Header { fields: Some(fields) }),
-        ..Default::default()
     }
 }
 
