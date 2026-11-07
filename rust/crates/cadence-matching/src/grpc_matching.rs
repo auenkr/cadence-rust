@@ -4208,7 +4208,7 @@ async fn serve_with_listener_tls_inner(
     Ok(())
 }
 
-fn no_identity_tls_incoming(
+pub fn no_identity_tls_incoming(
     listener: tokio::net::TcpListener,
     acceptor: tokio_rustls::TlsAcceptor,
 ) -> impl tokio_stream::Stream<Item = std::io::Result<NoIdentityTlsStream>> + Send + 'static {
@@ -4272,7 +4272,7 @@ fn no_identity_tls_incoming(
     )
 }
 
-struct NoIdentityTlsStream(tokio_rustls::server::TlsStream<tokio::net::TcpStream>);
+pub struct NoIdentityTlsStream(tokio_rustls::server::TlsStream<tokio::net::TcpStream>);
 impl tokio::io::AsyncRead for NoIdentityTlsStream {
     fn poll_read(
         mut self: std::pin::Pin<&mut Self>,

@@ -4,7 +4,7 @@ use crate::engine::types::{
     HistoryDescribeWorkflowExecutionRequest, HistoryQueryWorkflowRequest,
     HistoryQueryWorkflowResponse, HistoryReapplyEventsRequest, HistoryRefreshWorkflowTasksRequest,
     HistoryRequestCancelWorkflowExecutionRequest, HistoryResetStickyTaskListRequest,
-    HistoryResetStickyTaskListResponse, HistorySignalWithStartWorkflowExecutionRequest,
+    HistoryResetStickyTaskListResponse, HistoryResetWorkflowExecutionRequest, HistorySignalWithStartWorkflowExecutionRequest,
     HistorySignalWorkflowExecutionRequest, HistoryStartWorkflowExecutionRequest,
     HistoryTerminateWorkflowExecutionRequest, ParentExecutionInfo, ScheduleDecisionTaskRequest,
 };
@@ -293,6 +293,21 @@ impl ToThrift for ScheduleDecisionTaskRequest {
         f.sstr(10, &self.domain_uuid);
         f.ostruct(20, self.workflow_execution.as_ref());
         f.obool(30, self.is_first_decision);
+        f.finish()
+    }
+}
+
+impl FromThrift for HistoryResetWorkflowExecutionRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, Error> {
+        Ok(Self { domain_uuid: s.req_string(10, "")?, reset_request: s.opt_struct(20)? })
+    }
+}
+
+impl ToThrift for HistoryResetWorkflowExecutionRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain_uuid);
+        f.ostruct(20, self.reset_request.as_ref());
         f.finish()
     }
 }

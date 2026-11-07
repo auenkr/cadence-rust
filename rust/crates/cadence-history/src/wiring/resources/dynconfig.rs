@@ -106,6 +106,91 @@ impl DynamicClient for FileDynamicClient {
     }
 }
 
+/// Go `configStoreClient` (common/dynamicconfig/configstore) read path: polls the
+/// persisted snapshot and resolves a key with Go `getValueWithFilters` semantics.
+pub struct ConfigStoreDynamicClient {
+    client: Arc<cadence_persistence::config_store::ConfigStoreClient>,
+}
+
+impl ConfigStoreDynamicClient {
+    pub fn new(client: Arc<cadence_persistence::config_store::ConfigStoreClient>) -> Arc<Self> {
+        Arc::new(Self { client })
+    }
+
+    /// Go `pollForDynamicConfig`: refresh the snapshot every poll interval.
+    pub fn spawn_poller(self: &Arc<Self>) -> tokio::task::JoinHandle<()> {
+        let client = Arc::clone(&self.client);
+        tokio::spawn(async move {
+            let mut t = tokio::time::interval(client.poll_interval());
+            loop {
+                t.tick().await;
+                let c = Arc::clone(&client);
+                match tokio::task::spawn_blocking(move || c.update()).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => tracing::warn!("config store dynamic config update failed: {e}"),
+                    Err(e) => tracing::warn!("config store dynamic config update panicked: {e}"),
+                }
+            }
+        })
+    }
+}
+
+fn blob_json(blob: &Option<cadence_api::types::DataBlob>) -> Option<Value> {
+    serde_json::from_slice(&blob.as_ref()?.data).ok()
+}
+
+fn filter_value(f: &Filters, name: &str) -> Option<Value> {
+    let s = |o: &Option<String>| o.as_ref().map(|v| Value::String(v.clone()));
+    match name.to_lowercase().as_str() {
+        "domainname" => s(&f.domain_name),
+        "domainid" => s(&f.domain_id),
+        "tasklistname" => s(&f.task_list),
+        "workflowid" => s(&f.workflow_id),
+        "shardid" => f.shard_id.map(Value::from),
+        _ => None,
+    }
+}
+
+impl DynamicClient for ConfigStoreDynamicClient {
+    fn get_value(&self, key: &str, filters: &Filters) -> Option<Value> {
+        let snapshot = self.client.snapshot()?;
+        let entries = snapshot.entries?;
+        let entry = entries.iter().find(|e| e.name.eq_ignore_ascii_case(key))?;
+        let provided = [
+            filters.domain_name.is_some(),
+            filters.domain_id.is_some(),
+            filters.task_list.is_some(),
+            filters.workflow_id.is_some(),
+            filters.shard_id.is_some(),
+        ]
+        .into_iter()
+        .filter(|b| *b)
+        .count();
+        let mut default = None;
+        for v in &entry.values {
+            if v.filters.is_empty() {
+                if let Some(parsed) = blob_json(&v.value) {
+                    default = Some(parsed);
+                }
+                continue;
+            }
+            if v.filters.len() > provided {
+                continue;
+            }
+            let matched = v.filters.iter().all(|f| {
+                match (filter_value(filters, &f.name), blob_json(&f.value)) {
+                    (Some(got), Some(want)) => got == want,
+                    _ => false,
+                }
+            });
+            if matched {
+                return blob_json(&v.value);
+            }
+        }
+        default
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

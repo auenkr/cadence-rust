@@ -114,6 +114,14 @@ pub struct Service {
     membership: Arc<dyn MembershipControl>,
     server: Mutex<Option<RunningServer>>,
     stop_c: Notify,
+    grpc_tls: Mutex<GrpcTls>,
+}
+
+/// Go `rpc.tls` for the gRPC listener.
+#[derive(Default, Clone)]
+pub struct GrpcTls {
+    pub tls: Option<tonic::transport::ServerTlsConfig>,
+    pub custom: Option<Arc<rustls::ServerConfig>>,
 }
 
 impl Service {
@@ -137,7 +145,13 @@ impl Service {
             membership,
             server: Mutex::new(None),
             stop_c: Notify::new(),
+            grpc_tls: Mutex::new(GrpcTls::default()),
         }
+    }
+
+    /// Configures the gRPC listener TLS (call before [`start`](Self::start)).
+    pub fn set_grpc_tls(&self, tls: GrpcTls) {
+        *self.grpc_tls.lock().unwrap() = tls;
     }
 
     /// Go `Service.Start`: registers the Thrift and gRPC handlers on the listeners and
@@ -161,6 +175,11 @@ impl Service {
         // Host-level rate limiting is done by HandlerImpl (Go handler.go), not the transport.
         cfg.rps = 0.0;
         cfg.ringpop = ringpop;
+        {
+            let t = self.grpc_tls.lock().unwrap().clone();
+            cfg.grpc_tls = t.tls;
+            cfg.grpc_tls_custom = t.custom;
+        }
         let running = HistoryServer::start_with_listeners(cfg, self.handler.clone(), thrift, grpc).await?;
         *self.server.lock().unwrap() = Some(running);
         tracing::info!("history started");
