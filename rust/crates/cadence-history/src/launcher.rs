@@ -114,8 +114,8 @@ fn load_config(config: Option<String>, env: Option<String>, zone: Option<String>
 }
 
 /// Builds the dynamic-config client selected by the config (Go `dynamicconfigfx`).
-/// ConfigStore / OpenFeature providers are not supported by the Rust History yet.
-fn dynamic_client(cfg: &ServiceConfig, root: &std::path::Path) -> anyhow::Result<Arc<dyn DynamicClient>> {
+/// OpenFeature is not supported by the Rust History yet.
+async fn dynamic_client(cfg: &ServiceConfig, root: &std::path::Path) -> anyhow::Result<Arc<dyn DynamicClient>> {
     match cfg.dynamic_config_provider() {
         DynamicConfigProvider::FileBased(p) if !p.filepath.is_empty() => {
             let path = std::path::PathBuf::from(&p.filepath);
@@ -131,8 +131,47 @@ fn dynamic_client(cfg: &ServiceConfig, root: &std::path::Path) -> anyhow::Result
             Ok(client)
         }
         DynamicConfigProvider::FileBased(_) | DynamicConfigProvider::Nop => Ok(FileDynamicClient::empty()),
-        _ => anyhow::bail!(
-            "History dynamic config provider is not supported yet (only filebased/nop); see memory/history-gap-startup-20261106.md"
+        DynamicConfigProvider::ConfigStore(store) => {
+            // Go dynamicconfigfx: a client that cannot be created means NOP.
+            eprintln!("initialising ConfigStore dynamic config client");
+            let client_config = cadence_persistence::config_store::ClientConfig {
+                poll_interval: Duration::from_nanos(store.poll_interval_nanos as u64),
+                update_retry_attempts: store.update_retry_attempts,
+                fetch_timeout: Duration::from_nanos(store.fetch_timeout_nanos as u64),
+                update_timeout: Duration::from_nanos(store.update_timeout_nanos as u64),
+            };
+            let persistence = cfg.persistence.clone();
+            let created = tokio::task::spawn_blocking(move || {
+                let stores = cadence_matching::matching_task_store::open_configured_default_store(
+                    &persistence,
+                    "",
+                    Arc::new(|| false),
+                    Arc::new(|| "thriftrw".to_string()),
+                    false,
+                )
+                .map_err(|e| e.to_string())?;
+                let task_store = stores.task_store;
+                let fetch: cadence_persistence::config_store::ConfigRowFetcher = Arc::new(move |row_type| {
+                    cadence_persistence::matching_task_store::MatchingTaskStore::fetch_latest_config(&*task_store, row_type)
+                });
+                cadence_persistence::config_store::ConfigStoreClient::new(&client_config, fetch)
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("joining config store startup: {e}"))?;
+            match created {
+                Ok(client) => {
+                    let client = crate::wiring::resources::dynconfig::ConfigStoreDynamicClient::new(Arc::new(client));
+                    client.spawn_poller();
+                    Ok(client as Arc<dyn DynamicClient>)
+                }
+                Err(e) => {
+                    eprintln!("warning: creating ConfigStore dynamic config client: {e}; using no-op configuration");
+                    Ok(FileDynamicClient::empty())
+                }
+            }
+        }
+        DynamicConfigProvider::OpenFeature(_) => anyhow::bail!(
+            "History OpenFeature dynamic config provider is not supported yet; see memory/history-gap-startup2-20261107.md"
         ),
     }
 }
@@ -188,10 +227,14 @@ pub async fn run(bin_name: &'static str) -> anyhow::Result<()> {
     let cluster: Metadata = metadata.metadata();
 
     let rpc = rpc_for(&cfg, "history").cloned().unwrap_or_default();
-    anyhow::ensure!(
-        !rpc.tls.enabled,
-        "history rpc.tls is not supported by the Rust History yet (memory/history-gap-startup-20261106.md)"
-    );
+    // Go rpc.NewParams: History's own rpc.tls secures the gRPC listener.
+    let grpc_tls = crate::service::GrpcTls {
+        tls: match cadence_service_core::grpc_tls::server_tls_custom_incoming(&rpc.tls)? {
+            Some(_) => None,
+            None => cadence_service_core::grpc_tls::server_tls(&rpc.tls)?,
+        },
+        custom: cadence_service_core::grpc_tls::server_tls_custom_incoming(&rpc.tls)?,
+    };
     let ip = bind_ip(&rpc)?;
     let tchannel_port = if rpc.port > 0 { rpc.port } else { DEFAULT_HISTORY_TCHANNEL_PORT };
     let grpc_port = history_grpc_port.or(Some(rpc.grpc_port).filter(|p| *p > 0)).unwrap_or(DEFAULT_HISTORY_GRPC_PORT);
@@ -212,7 +255,7 @@ pub async fn run(bin_name: &'static str) -> anyhow::Result<()> {
         grpc_addr.port(),
     )?);
 
-    let client = dynamic_client(&cfg, &root)?;
+    let client = dynamic_client(&cfg, &root).await?;
     let collection = Collection::new(client.clone());
     let service_config = Arc::new(Config::new(
         &collection,
@@ -239,6 +282,7 @@ pub async fn run(bin_name: &'static str) -> anyhow::Result<()> {
     history_client.bind(&registry);
 
     let service = Arc::new(Service::new(env.clone(), registry.clone(), Arc::new(RingpopMembership(provider.clone()))));
+    service.set_grpc_tls(grpc_tls);
     // The TChannel listener must accept Ringpop JOIN before the provider bootstraps.
     service
         .start(thrift_listener, grpc_listener, Some(provider.handler()), max_message_size)

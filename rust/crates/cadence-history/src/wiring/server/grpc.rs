@@ -184,14 +184,36 @@ impl HistoryApi for GrpcHistory {
     }
 }
 
-pub async fn serve(listener: TcpListener, state: ServerState, mut stop: watch::Receiver<bool>) {
+pub async fn serve(
+    listener: TcpListener,
+    state: ServerState,
+    mut stop: watch::Receiver<bool>,
+    tls: Option<tonic::transport::ServerTlsConfig>,
+    custom_tls: Option<std::sync::Arc<rustls::ServerConfig>>,
+) {
     let max = state.max_message_size;
     let svc = HistoryApiServer::new(GrpcHistory { state }).max_decoding_message_size(max).max_encoding_message_size(max);
-    let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
-    let _ = tonic::transport::Server::builder()
-        .add_service(svc)
-        .serve_with_incoming_shutdown(incoming, async move {
-            let _ = stop.wait_for(|v| *v).await;
-        })
-        .await;
+    let shutdown = async move {
+        let _ = stop.wait_for(|v| *v).await;
+    };
+    let builder = match cadence_service_core::grpc_tls::server_builder(tls) {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::error!("history gRPC TLS config: {e}");
+            return;
+        }
+    };
+    let mut server = builder;
+    let router = server.add_service(svc);
+    let result = if let Some(config) = custom_tls {
+        let acceptor = tokio_rustls::TlsAcceptor::from(config);
+        let incoming = cadence_matching::grpc_matching::no_identity_tls_incoming(listener, acceptor);
+        router.serve_with_incoming_shutdown(incoming, shutdown).await
+    } else {
+        let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
+        router.serve_with_incoming_shutdown(incoming, shutdown).await
+    };
+    if let Err(e) = result {
+        tracing::error!("history gRPC server stopped: {e}");
+    }
 }

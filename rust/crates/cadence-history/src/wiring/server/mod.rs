@@ -32,6 +32,10 @@ pub struct ServerConfig {
     pub shutdown_grace: Duration,
     /// Ringpop gossip handler served on the Thrift TChannel listener (`ringpop` service).
     pub ringpop: Option<cadence_service_core::ringpop_tchannel::RingpopHandler>,
+    /// Go `rpc.tls` for the gRPC listener (the TChannel listener stays plaintext, as in Go).
+    pub grpc_tls: Option<tonic::transport::ServerTlsConfig>,
+    /// Go-compatible TLS cases tonic cannot express (no server identity, empty client CA pool).
+    pub grpc_tls_custom: Option<Arc<rustls::ServerConfig>>,
 }
 
 impl ServerConfig {
@@ -43,6 +47,8 @@ impl ServerConfig {
             rps: 0.0,
             shutdown_grace: Duration::from_secs(10),
             ringpop: None,
+            grpc_tls: None,
+            grpc_tls_custom: None,
         }
     }
 }
@@ -93,7 +99,7 @@ impl HistoryServer {
         let (stop, rx) = watch::channel(false);
         handler.start();
         let t1 = tokio::spawn(tchannel::serve(thrift, state.clone(), rx.clone()));
-        let t2 = tokio::spawn(grpc::serve(grpc_listener, state, rx));
+        let t2 = tokio::spawn(grpc::serve(grpc_listener, state, rx, cfg.grpc_tls.clone(), cfg.grpc_tls_custom.clone()));
         Ok(RunningServer { thrift_addr, grpc_addr, handler, grace: cfg.shutdown_grace, stop, tasks: vec![t1, t2] })
     }
 }
