@@ -737,6 +737,11 @@ pub struct TaskData {
 /// TODO(link): replace by persistence::Task
 pub trait PersistenceTask: Send + Sync + Debug {
     fn as_any(&self) -> &dyn Any;
+    /// The wrapper object itself (differs from `as_any` only for queue-wiring adapters, whose
+    /// `as_any` exposes the typed task the executors downcast to).
+    fn wrapper_any(&self) -> &dyn Any {
+        self.as_any()
+    }
     fn get_task_category(&self) -> HistoryTaskCategory;
     fn get_task_type(&self) -> i32;
     fn get_domain_id(&self) -> &str;

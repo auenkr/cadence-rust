@@ -31,9 +31,20 @@ pub struct SqlHistoryTask {
     task_type: i32,
     version: i64,
     visibility_nanos: i64,
+    /// Full decoded blob (category 1).
+    transfer: Option<pc::TransferTask>,
+    /// Full decoded blob (category 2).
+    timer: Option<pc::TimerTask>,
 }
 
 impl SqlHistoryTask {
+    pub fn transfer_task(&self) -> Option<&pc::TransferTask> {
+        self.transfer.as_ref()
+    }
+    pub fn timer_task(&self) -> Option<&pc::TimerTask> {
+        self.timer.as_ref()
+    }
+
     fn decode(category: pc::HistoryTaskCategory, task: &pc::Task) -> Result<Self, String> {
         let value = sqlblobs::Encoding::parse(&task.data.encoding)
             .and_then(|e| e.decode(&task.data.data))
@@ -43,26 +54,30 @@ impl SqlHistoryTask {
                 let t = sqlblobs::transfer_task_from_struct(&value).map_err(|e| e.to_string())?;
                 Ok(Self {
                     category_id: 1,
-                    domain_id: t.domain_id,
-                    workflow_id: t.workflow_id,
-                    run_id: t.run_id,
+                    domain_id: t.domain_id.clone(),
+                    workflow_id: t.workflow_id.clone(),
+                    run_id: t.run_id.clone(),
                     task_id: task.task_id,
                     task_type: t.task_type,
                     version: t.version,
                     visibility_nanos: t.visibility_time_unix_nanos,
+                    transfer: Some(t),
+                    timer: None,
                 })
             }
             2 => {
                 let t = sqlblobs::timer_task_from_struct(&value).map_err(|e| e.to_string())?;
                 Ok(Self {
                     category_id: 2,
-                    domain_id: t.domain_id,
-                    workflow_id: t.workflow_id,
-                    run_id: t.run_id,
+                    domain_id: t.domain_id.clone(),
+                    workflow_id: t.workflow_id.clone(),
+                    run_id: t.run_id.clone(),
                     task_id: task.task_id,
                     task_type: t.task_type,
                     version: t.version,
                     visibility_nanos: task.visibility_timestamp_unix_nanos,
+                    transfer: None,
+                    timer: Some(t),
                 })
             }
             other => Err(format!("unsupported history task category {other}")),
@@ -123,6 +138,9 @@ impl q::PersistenceTask for SqlHistoryTask {
     }
     fn get_visibility_timestamp(&self) -> q::Time {
         q::Time(self.visibility_nanos)
+    }
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
     }
     fn is_corrupted(&self) -> bool {
         self.domain_id.is_empty() || self.workflow_id.is_empty() || self.run_id.is_empty()
