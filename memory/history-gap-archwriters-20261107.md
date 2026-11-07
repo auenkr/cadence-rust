@@ -10,3 +10,5 @@
 
 ## Evidence
 (see CI below)
+- cadence-history: https://github.com/auenkr/cadence-rust/actions/runs/42342025121 (head daf4393, code identical to final for history) success
+- cadence-common: https://github.com/auenkr/cadence-rust/actions/runs/42342655926 head 3d592a3b86d4a2aa3875e7b186fae96681edf5d1 success (first run 42342395858 failed on a wrong test mode "9"; fixed)
