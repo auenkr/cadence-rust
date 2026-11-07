@@ -286,6 +286,7 @@ impl TypedMutableState {
 
     /// Go `ReplicateWorkflowExecutionStartedEvent` (task generation, events
     /// cache write and ACSP blob not wired).
+    #[allow(clippy::too_many_arguments)]
     pub fn replicate_workflow_execution_started_event(
         &mut self,
         env: &mut StartedEnv,
