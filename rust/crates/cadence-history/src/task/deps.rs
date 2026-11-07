@@ -766,6 +766,9 @@ pub trait PersistenceTask: Send + Sync + Debug {
 
 macro_rules! define_ptask {
     ($name:ident, $cat:expr, $ty:expr, { $($f:ident : $t:ty),* $(,)? }) => {
+        define_ptask!($name, $cat, $ty, { $($f : $t),* }, {});
+    };
+    ($name:ident, $cat:expr, $ty:expr, { $($f:ident : $t:ty),* $(,)? }, { $($extra:tt)* }) => {
         #[derive(Clone, Debug, Default)]
         pub struct $name {
             pub workflow_identifier: WorkflowIdentifier,
@@ -788,6 +791,7 @@ macro_rules! define_ptask {
             fn get_version(&self) -> i64 { self.task_data.version }
             fn get_task_id(&self) -> i64 { self.task_data.task_id }
             fn get_visibility_timestamp(&self) -> Time { self.task_data.visibility_timestamp }
+            $($extra)*
         }
     };
 }
@@ -795,9 +799,13 @@ macro_rules! define_ptask {
 use ptask_type::*;
 
 define_ptask!(ActivityTask, HistoryTaskCategory::Transfer, TRANSFER_TASK_TYPE_ACTIVITY_TASK,
-    { target_domain_id: String, task_list: String, schedule_id: i64 });
+    { target_domain_id: String, task_list: String, schedule_id: i64,
+      original_task_list: String, original_task_list_kind: TaskListKind }, { fn get_original_task_list(&self) -> String { self.original_task_list.clone() }
+      fn get_original_task_list_kind(&self) -> TaskListKind { self.original_task_list_kind } });
 define_ptask!(DecisionTask, HistoryTaskCategory::Transfer, TRANSFER_TASK_TYPE_DECISION_TASK,
-    { target_domain_id: String, task_list: String, schedule_id: i64 });
+    { target_domain_id: String, task_list: String, schedule_id: i64,
+      original_task_list: String, original_task_list_kind: TaskListKind }, { fn get_original_task_list(&self) -> String { self.original_task_list.clone() }
+      fn get_original_task_list_kind(&self) -> TaskListKind { self.original_task_list_kind } });
 define_ptask!(CloseExecutionTask, HistoryTaskCategory::Transfer, TRANSFER_TASK_TYPE_CLOSE_EXECUTION, {});
 define_ptask!(CancelExecutionTask, HistoryTaskCategory::Transfer, TRANSFER_TASK_TYPE_CANCEL_EXECUTION,
     { target_domain_id: String, target_workflow_id: String, target_run_id: String,

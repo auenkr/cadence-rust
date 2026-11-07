@@ -202,15 +202,71 @@ impl ArchiverClient {
 
 const NOT_PORTED: &str = "archiver is not ported yet (no write-side archiver / archival workflow signal client in Rust)";
 
-/// Default seams: explicit errors (callers keep the task and the data).
-struct UnconfiguredInline;
+/// Inline archivers: the `file://` (filestore) scheme is written like Go (same on-disk format);
+/// other schemes (s3 / gs) and history without a [`HistoryBatchSource`] keep failing explicitly so
+/// the task is retried and the data is kept. Go default config: fileMode 0666, dirMode 0766.
+struct UnconfiguredInline {
+    history_source: Option<Arc<dyn cadence_common::archiver::HistoryBatchSource + Send + Sync>>,
+}
 #[async_trait]
 impl InlineArchivers for UnconfiguredInline {
-    async fn archive_history(&self, _r: &ClientRequest) -> Result<(), String> {
-        Err(format!("inline history archival: {NOT_PORTED}"))
+    async fn archive_history(&self, r: &ClientRequest) -> Result<(), String> {
+        let a = &r.archive_request;
+        let uri = cadence_common::archiver::parse_uri(&a.uri).map_err(|e| e.to_string())?;
+        if uri.scheme != cadence_common::archiver::FILESTORE_SCHEME {
+            return Err(format!("inline history archival for scheme {:?}: {NOT_PORTED}", uri.scheme));
+        }
+        let Some(source) = self.history_source.clone() else {
+            return Err(format!("inline history archival: no history batch source ({NOT_PORTED})"));
+        };
+        let cfg = cadence_common::archiver::FilestoreWriterConfig::new("0666", "0766").map_err(|e| e.to_string())?;
+        let req = cadence_common::archiver::ArchiveHistoryRequest {
+            domain_id: a.domain_id.clone(),
+            domain_name: a.domain_name.clone(),
+            workflow_id: a.workflow_id.clone(),
+            run_id: a.run_id.clone(),
+            branch_token: a.branch_token.clone(),
+            next_event_id: a.next_event_id,
+            close_failover_version: a.close_failover_version,
+        };
+        tokio::task::spawn_blocking(move || {
+            cadence_common::archiver::filestore_archive_history(&cfg, &uri, &req, source.as_ref())
+        })
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
     }
-    async fn archive_visibility(&self, _r: &ClientRequest) -> Result<(), String> {
-        Err(format!("inline visibility archival: {NOT_PORTED}"))
+    async fn archive_visibility(&self, r: &ClientRequest) -> Result<(), String> {
+        let a = &r.archive_request;
+        let uri = cadence_common::archiver::parse_uri(&a.visibility_uri).map_err(|e| e.to_string())?;
+        if uri.scheme != cadence_common::archiver::FILESTORE_SCHEME {
+            return Err(format!("inline visibility archival for scheme {:?}: {NOT_PORTED}", uri.scheme));
+        }
+        let cfg = cadence_common::archiver::FilestoreWriterConfig::new("0666", "0766").map_err(|e| e.to_string())?;
+        let req = cadence_common::archiver::ArchiveVisibilityRequest {
+            domain_id: a.domain_id.clone(),
+            domain_name: a.domain_name.clone(),
+            workflow_id: a.workflow_id.clone(),
+            run_id: a.run_id.clone(),
+            workflow_type_name: a.workflow_type_name.clone(),
+            start_timestamp: a.start_timestamp,
+            execution_timestamp: a.execution_timestamp,
+            close_timestamp: a.close_timestamp,
+            close_status: a.close_status,
+            history_length: a.history_length,
+            memo: a.memo.clone(),
+            search_attributes: Some(
+                a.search_attributes
+                    .iter()
+                    .map(|(k, v)| (k.clone(), String::from_utf8_lossy(v).into_owned()))
+                    .collect(),
+            ),
+            history_archival_uri: a.uri.clone(),
+        };
+        tokio::task::spawn_blocking(move || cadence_common::archiver::filestore_archive_visibility(&cfg, &uri, &req))
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())
     }
 }
 struct UnconfiguredSignaler;
@@ -232,7 +288,7 @@ pub fn default_client() -> &'static ArchiverClient {
             AllowLimiter::new(|| 300),
             AllowLimiter::new(|| 1000),
             AllowLimiter::new(|| 1000),
-            Arc::new(UnconfiguredInline),
+            Arc::new(UnconfiguredInline { history_source: None }),
             Arc::new(UnconfiguredSignaler),
         )
     })
@@ -300,6 +356,7 @@ mod tests {
 
     #[tokio::test]
     async fn default_client_fails_explicitly() {
+        // empty URIs are invalid -> explicit error, task is kept
         assert!(default_client().archive(req(true)).await.is_err());
     }
 }

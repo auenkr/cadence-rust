@@ -128,6 +128,14 @@ pub struct TaskInfoAdapter {
     typed: Option<Arc<dyn t::PersistenceTask>>,
 }
 
+fn tl_kind(v: i32) -> t::TaskListKind {
+    match v {
+        1 => t::TaskListKind::Sticky,
+        2 => t::TaskListKind::Ephemeral,
+        _ => t::TaskListKind::Normal,
+    }
+}
+
 /// Go `persistence.Task` -> typed task struct by task type.
 fn typed_task(inner: &Arc<dyn q::PersistenceTask>) -> Option<Arc<dyn t::PersistenceTask>> {
     use crate::wiring::persistence::queues::SqlHistoryTask;
@@ -137,8 +145,8 @@ fn typed_task(inner: &Arc<dyn q::PersistenceTask>) -> Option<Arc<dyn t::Persiste
         let td = t::TaskData { version: x.version, task_id: inner.get_task_id(), visibility_timestamp: t::Time(inner.get_visibility_timestamp().0) };
         let (wf, td) = (|| wf.clone(), || td.clone());
         return Some(match x.task_type {
-            0 => Arc::new(t::DecisionTask { workflow_identifier: wf(), task_data: td(), target_domain_id: x.target_domain_id.clone(), task_list: x.task_list.clone(), schedule_id: x.schedule_id }) as Arc<dyn t::PersistenceTask>,
-            1 => Arc::new(t::ActivityTask { workflow_identifier: wf(), task_data: td(), target_domain_id: x.target_domain_id.clone(), task_list: x.task_list.clone(), schedule_id: x.schedule_id }),
+            0 => Arc::new(t::DecisionTask { workflow_identifier: wf(), task_data: td(), target_domain_id: x.target_domain_id.clone(), task_list: x.task_list.clone(), schedule_id: x.schedule_id, original_task_list: x.original_task_list.clone(), original_task_list_kind: tl_kind(x.original_task_list_kind) }) as Arc<dyn t::PersistenceTask>,
+            1 => Arc::new(t::ActivityTask { workflow_identifier: wf(), task_data: td(), target_domain_id: x.target_domain_id.clone(), task_list: x.task_list.clone(), schedule_id: x.schedule_id, original_task_list: x.original_task_list.clone(), original_task_list_kind: tl_kind(x.original_task_list_kind) }),
             2 => Arc::new(t::CloseExecutionTask { workflow_identifier: wf(), task_data: td() }),
             3 => Arc::new(t::CancelExecutionTask { workflow_identifier: wf(), task_data: td(), target_domain_id: x.target_domain_id.clone(), target_workflow_id: x.target_workflow_id.clone(), target_run_id: x.target_run_id.clone(), target_child_workflow_only: x.target_child_workflow_only, initiated_id: x.schedule_id }),
             4 => Arc::new(t::StartChildExecutionTask { workflow_identifier: wf(), task_data: td(), target_domain_id: x.target_domain_id.clone(), target_workflow_id: x.target_workflow_id.clone(), initiated_id: x.schedule_id, task_list: x.task_list.clone() }),
