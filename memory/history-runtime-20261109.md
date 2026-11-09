@@ -46,3 +46,9 @@ Base: master c42480cdc. History is incomplete. Rust Matching and Frontend are re
 - History CI 42581586431 on efa4f3924a25583c8b709fb558359fca4f046897: clippy succeeded, tests observed running.
 - Separate cadence-persistence CI dispatched on the identical commit via t3/history-timer-persistence-validation (separate ref avoids cancelling History CI): https://github.com/auenkr/cadence-rust/actions/runs/42581990928. Conclusion pending; do not merge until relevant checks pass.
 - Three normal-mode Luna implementation slices dispatched: handlers (medium), queue domain adapters (medium), owned NDC structural seam (high). Each owns a separate checkout and must commit/push and dispatch CI.
+
+## Parallel task processor + WRR scheduler port (branch t3/history-parallel-task-processor)
+- New `rust/crates/cadence-history/src/task/parallel_processor.rs`: `ParallelTaskProcessor` (Go parallel_task_processor.go: worker pool, dynamic WorkerCount monitor tick, drain+nack on stop, panic -> handle_err+nack(None), retry via cadence-common `Retrier` + shutdown check, ack/nack) and `WeightedRoundRobinTaskScheduler<K>` (Go weighted_round_robin_task_scheduler.go with IWRR schedule + weighted channel pool, Submit/TrySubmit, dispatchers).
+- Own minimal `CommonTask`/`CommonProcessor` traits (Go common/task.Task), since history `task::interface::Task` requires PersistenceTask; adapter to be added in queue wiring.
+- Intentionally unported: idle channel TTL cleanup in WRR pool, metrics scopes, FIFO and hierarchical WRR schedulers.
+- Validation: CI run recorded below.
