@@ -94,7 +94,7 @@
   </div>
 </header>
 <main>
-<p class="note">History checkpoint 2026-11-09: Rust History/Frontend/Matching boot in the new mixed gate, but SDK StartWorkflowExecution fails at an unwired handler and live queue processors are absent. Queue configuration adapter passed CI 42568401701. Timer-status corrections await CI 42581586431. Owned NDC state and lossless persistence bridge remain incomplete. <a href="history-runtime-20261109.md">Evidence and next tasks</a>.</p>
+<p class="note">History checkpoint 2026-11-09: Rust History/Frontend/Matching boot in the new mixed gate. StartWorkflowExecution and SignalWithStartWorkflowExecution now route through the real History engine after Go-equivalent handler checks, with race retry regression coverage; crate CI pending. Live queue processors are absent. Queue configuration adapter passed CI 42568401701. Timer-status corrections await CI 42581586431. Owned NDC state and lossless persistence bridge remain incomplete. No History completion claimed. <a href="history-runtime-20261109.md">Evidence and next tasks</a>.</p>
   <section class="est">
     <h2>Frontend + Matching benchmark — verified results</h2>
     <p>Corrected capped run 41767896292 passed all 30,000 workflows in 30 measured runs. Five-run median Go/Rust throughput: concurrency1 12.77/10.78, concurrency16 33.58/29.82, concurrency64 31.13/27.55 workflows/s. Rust used more Frontend/Matching CPU time per fixed workload and less sampled cgroup memory. Strict CI/local evidence verification and report reproduction passed. Go History/Worker stayed constant; initial uncapped measurements remain separate.</p>
