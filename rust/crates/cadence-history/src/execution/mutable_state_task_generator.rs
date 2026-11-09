@@ -404,6 +404,8 @@ mod typed_adapter_tests {
             scheduled_time: 1_000_000_000,
             started_id: 8,
             started_time: 2_000_000_000,
+            schedule_to_close_timeout: 100,
+            start_to_close_timeout: 100,
             heartbeat_timeout: 10,
             task_list: "activity-tl".into(),
             ..Default::default()

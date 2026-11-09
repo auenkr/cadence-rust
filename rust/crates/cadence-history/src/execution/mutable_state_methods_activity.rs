@@ -621,6 +621,8 @@ mod activity_timer_retry_tests {
             activity_id: "a".into(),
             has_retry_policy: true,
             initial_interval: 1,
+            backoff_coefficient: 2.0,
+            maximum_interval: 10,
             maximum_attempts: 5,
             attempt: 1,
             timer_task_status: 15,
