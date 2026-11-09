@@ -247,7 +247,13 @@ impl TypedMutableState {
             let result = f(&mut MutableStateTaskGenerator { state: &mut adapter });
             (result, adapter.transfer_tasks, adapter.timer_tasks, adapter.activity_timer_status)
         };
-        let _ = timer_status; // TODO: base ActivityInfo lacks TimerTaskStatus (see memory).
+        for (schedule_id, (timer_task_status, last_heartbeat_visibility)) in timer_status {
+            if let Some(activity) = self.pending_activity_info_ids.get_mut(&schedule_id) {
+                activity.timer_task_status = timer_task_status;
+                activity.last_heartbeat_timeout_visibility_in_seconds = last_heartbeat_visibility;
+                self.update_activity_infos.insert(schedule_id, activity.clone());
+            }
+        }
         self.task_gen_env.rng_state = rng;
         self.transfer_tasks.extend(transfer);
         self.timer_tasks.extend(timer);

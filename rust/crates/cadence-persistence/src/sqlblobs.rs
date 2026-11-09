@@ -269,6 +269,8 @@ pub fn activity_info_from_struct(value: &Struct) -> Result<ActivityInfo> {
         cancel_requested: boolv(40)?,
         cancel_request_id: i64v(42)?,
         timer_task_status: i32v(44)?,
+        // Go keeps this deduplication hint only in memory, never in sqlblobs.
+        last_heartbeat_timeout_visibility_in_seconds: 0,
         attempt: i32v(46)?,
         task_list: strv(48)?,
         task_list_kind: i32v(49)?,
@@ -1122,13 +1124,16 @@ mod tests {
             scheduled_time_unix_nanos: 1_700_000_000_123_456_789,
             schedule_to_close_timeout_seconds: 3600,
             activity_id: "act".into(),
+            timer_task_status: 5,
+            last_heartbeat_timeout_visibility_in_seconds: 1_700_000_123,
             retry_non_retriable_errors: vec!["Fatal".into()],
             ..Default::default()
         };
-        assert_eq!(
-            activity_info_from_struct(&activity_info_to_struct(&activity)).unwrap(),
-            activity
-        );
+        let encoded = activity_info_to_struct(&activity);
+        assert!(!encoded.fields.iter().any(|(id, _)| *id == 76));
+        let mut expected = activity;
+        expected.last_heartbeat_timeout_visibility_in_seconds = 0;
+        assert_eq!(activity_info_from_struct(&encoded).unwrap(), expected);
     }
 
     #[test]

@@ -195,9 +195,8 @@ pub fn next_decision_timeout(attempt: i64, default_timeout: i64, mut random_belo
 // mutable_state_methods_* files) build a `TypedTaskGeneratorState`, run a
 // `MutableStateTaskGenerator { state: &mut adapter }` method, then drain
 // `transfer_tasks`/`timer_tasks` into the state's task categories
-// (Go `AddTransferTasks`/`AddTimerTasks`) and write back
-// `activity_timer_status` (Go ActivityInfo.TimerTaskStatus, which the base
-// `ActivityInfo` port does not carry yet).
+// (Go `AddTransferTasks`/`AddTimerTasks`). Activity timer status is updated
+// on the pending ActivityInfo and included in the persistence mutation.
 // ---------------------------------------------------------------------------
 use std::collections::BTreeMap;
 
@@ -223,7 +222,8 @@ pub struct TypedTaskGeneratorState<'a, D: TaskGeneratorDomains> {
     /// Go `GetDecisionScheduleToStartTimeout` (sticky timeout, normal
     /// schedule-to-start while attempt < max attempts, else 0), nanoseconds.
     pub decision_schedule_to_start_timeout_nanos: i64,
-    /// schedule_id -> (TimerTaskStatus, LastHeartbeatTimeoutVisibilityInSeconds).
+    /// Timer fields changed while generating activity timeout tasks; flushed
+    /// back into pending activity rows by `run_task_generator`.
     pub activity_timer_status: BTreeMap<i64, (i32, i64)>,
     /// initiated_id -> ChildWorkflowOnly for pending signals.
     pub signal_child_only: BTreeMap<i64, bool>,
@@ -253,8 +253,7 @@ impl<D: TaskGeneratorDomains> TimerSequenceState for TypedTaskGeneratorState<'_,
     fn user_timers(&self) -> Vec<TimerInfo> { self.state.pending_timer_info_ids.values().cloned().collect() }
     fn activities(&self) -> Vec<ActivityTimerInfo> {
         self.state.pending_activity_info_ids.values().map(|a| {
-            let (status, hb) = self.activity_timer_status.get(&a.schedule_id).copied().unwrap_or_default();
-            ActivityTimerInfo { activity: a.clone(), timer_task_status: status, last_heartbeat_timeout_visibility_in_seconds: hb }
+            ActivityTimerInfo { activity: a.clone(), timer_task_status: a.timer_task_status, last_heartbeat_timeout_visibility_in_seconds: a.last_heartbeat_timeout_visibility_in_seconds }
         }).collect()
     }
     fn user_timer(&self, event_id: i64) -> Option<TimerInfo> {
@@ -262,8 +261,7 @@ impl<D: TaskGeneratorDomains> TimerSequenceState for TypedTaskGeneratorState<'_,
     }
     fn activity(&self, event_id: i64) -> Option<ActivityTimerInfo> {
         let a = self.state.pending_activity_info_ids.get(&event_id)?;
-        let (status, hb) = self.activity_timer_status.get(&event_id).copied().unwrap_or_default();
-        Some(ActivityTimerInfo { activity: a.clone(), timer_task_status: status, last_heartbeat_timeout_visibility_in_seconds: hb })
+        Some(ActivityTimerInfo { activity: a.clone(), timer_task_status: a.timer_task_status, last_heartbeat_timeout_visibility_in_seconds: a.last_heartbeat_timeout_visibility_in_seconds })
     }
     fn missing_activity_info(&self, event_id: i64) -> Self::Error {
         TypedMutableStateError::Internal(format!("unable to load activity info {event_id}"))
@@ -273,8 +271,11 @@ impl<D: TaskGeneratorDomains> TimerSequenceState for TypedTaskGeneratorState<'_,
         Ok(())
     }
     fn update_activity_timer(&mut self, activity: ActivityTimerInfo) -> Result<(), Self::Error> {
-        self.activity_timer_status.insert(activity.activity.schedule_id, (activity.timer_task_status, activity.last_heartbeat_timeout_visibility_in_seconds));
-        self.state.update_activity(activity.activity);
+        let mut activity_info = activity.activity;
+        activity_info.timer_task_status = activity.timer_task_status;
+        activity_info.last_heartbeat_timeout_visibility_in_seconds = activity.last_heartbeat_timeout_visibility_in_seconds;
+        self.activity_timer_status.insert(activity_info.schedule_id, (activity_info.timer_task_status, activity_info.last_heartbeat_timeout_visibility_in_seconds));
+        self.state.update_activity(activity_info);
         Ok(())
     }
     fn add_user_timer_task(&mut self, timer: TimerSequenceId) {
@@ -393,5 +394,36 @@ mod typed_adapter_tests {
         let mut adapter = TypedTaskGeneratorState::new(&mut s, &Domains, &mut rng);
         let err = MutableStateTaskGenerator { state: &mut adapter }.generate_decision_schedule_tasks(5).unwrap_err();
         assert!(matches!(err, TypedMutableStateError::Internal(m) if m.contains("cannot get pending decision: 5")));
+    }
+
+    #[test]
+    fn emitted_activity_timer_status_survives_snapshot_and_suppresses_regeneration() {
+        let mut s = state();
+        let mut activity = ActivityInfo {
+            schedule_id: 7,
+            scheduled_time: 1_000_000_000,
+            started_id: 8,
+            started_time: 2_000_000_000,
+            schedule_to_close_timeout: 100,
+            start_to_close_timeout: 100,
+            heartbeat_timeout: 10,
+            task_list: "activity-tl".into(),
+            ..Default::default()
+        };
+        s.update_activity(activity.clone());
+        let mut rng = |_: i64| 0;
+        {
+            let mut adapter = TypedTaskGeneratorState::new(&mut s, &Domains, &mut rng);
+            assert!(TimerSequence { state: &mut adapter }.create_next_activity_timer().unwrap());
+            assert_eq!(adapter.timer_tasks.len(), 1);
+            // The persisted status is read on the next generation pass.
+            assert!(!TimerSequence { state: &mut adapter }.create_next_activity_timer().unwrap());
+        }
+        activity.timer_task_status = 8;
+        activity.last_heartbeat_timeout_visibility_in_seconds = 12;
+        assert_eq!(s.pending_activity_info_ids.get(&7), Some(&activity));
+        let snapshot = s.close_transaction_as_snapshot().unwrap().0;
+        assert_eq!(snapshot.activity_infos[0].timer_task_status, 8);
+        assert_eq!(snapshot.activity_infos[0].last_heartbeat_timeout_visibility_in_seconds, 12);
     }
 }
