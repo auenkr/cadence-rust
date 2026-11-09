@@ -747,8 +747,8 @@ mod tests {
         }
         s.start().await;
         wait_for(|| rec.order.lock().unwrap().len() == 6).await;
-        // weight(1)=3, weight(2)=1: first round yields both keys, then only key 1 twice, then key 2 leftovers
-        assert_eq!(*rec.order.lock().unwrap(), vec![1, 2, 1, 1, 2, 2]);
+        // weight(1)=3, weight(2)=1: Go IWRR cycle is [1,1,1,2]; key 2 leftovers drain next cycle
+        assert_eq!(*rec.order.lock().unwrap(), vec![1, 1, 1, 2, 2, 2]);
         s.stop().await;
     }
 
