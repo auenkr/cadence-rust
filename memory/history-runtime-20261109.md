@@ -35,3 +35,8 @@ Base: master c42480cdc. History is incomplete. Rust Matching and Frontend are re
 - Initial mixed gate 6ba567bfd: FAILURE, https://github.com/auenkr/cadence-rust/actions/runs/42567851631. Rust History/Frontend/Matching and Go Worker booted. SDK StartWorkflowExecution fails because handler_impl.rs still returns the historical engine-start gap even though engine/interface.rs now delegates to real implementation. Queue factory logs absent transfer/timer processors. Preserved binary hashes, source SHA, steps, SDK and History logs under evidence/history-runtime-20261109/initial-mysql-grpc/.
 - Timer status CI 42568093309 failed on two fields incorrectly added to engine ActivityInfo projection. Engine already holds its timer data separately; removed those projection fields in efa4f3924. New CI: https://github.com/auenkr/cadence-rust/actions/runs/42581586431, pending. No timer branch merged yet.
 - Host load recovered below 6; narrow Luna work can resume.
+
+## Compaction checkpoint (13:20 IST)
+- Resumed on clean master 55bfaccd5; progress dashboard now reflects actual failing mixed gate and incomplete runtime wiring.
+- Timer correction head efa4f3924a25583c8b709fb558359fca4f046897 still in progress at https://github.com/auenkr/cadence-rust/actions/runs/42581586431.
+- Resource check: load 0.11, MemAvailable 3.9GiB. Next independent Luna slices: Start/SignalWithStart handlers, queue allocator domain adapters, owned NDC state structural seam. No local Cargo or Go validation.
