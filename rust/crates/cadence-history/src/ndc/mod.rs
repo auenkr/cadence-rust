@@ -168,6 +168,9 @@ pub trait NdcMutableState {
     fn get_version_histories(&self) -> Option<&VersionHistories>;
     fn get_version_histories_mut(&mut self) -> Option<&mut VersionHistories>;
     fn set_version_histories(&mut self, v: VersionHistories) -> NdcResult<()>;
+    fn get_current_version(&self) -> i64;
+    fn get_start_version(&self) -> NdcResult<i64>;
+    fn get_last_write_version(&self) -> NdcResult<i64>;
     fn get_update_condition(&self) -> i64;
     fn set_update_condition(&mut self, c: i64);
     fn has_buffered_events(&self) -> bool;
@@ -178,9 +181,9 @@ pub trait NdcMutableState {
     fn get_next_event_id(&self) -> i64;
     fn get_current_branch_token(&self) -> NdcResult<Vec<u8>>;
     /// Go `IsResourceDuplicated(definition.NewEventReappliedID(runID, eventID, version))`.
-    fn is_event_reapplied(&self, run_id: &str, event_id: i64, version: i64) -> bool;
+    fn is_event_reapplied(&self, run_id: &str, event_id: i64, version: i64) -> NdcResult<bool>;
     /// Go `UpdateDuplicatedResource(definition.NewEventReappliedID(...))`.
-    fn update_event_reapplied(&mut self, run_id: &str, event_id: i64, version: i64);
+    fn update_event_reapplied(&mut self, run_id: &str, event_id: i64, version: i64) -> NdcResult<()>;
     fn add_workflow_execution_signaled(
         &mut self,
         signal_name: &str,
@@ -188,7 +191,7 @@ pub trait NdcMutableState {
         identity: &str,
         request_id: &str,
     ) -> NdcResult<()>;
-    fn get_activity_info(&self, schedule_id: i64) -> Option<NdcActivityInfo>;
+    fn get_activity_info(&self, schedule_id: i64) -> NdcResult<Option<NdcActivityInfo>>;
     fn replicate_activity_info(
         &mut self,
         request: &SyncActivityRequest,
@@ -287,7 +290,7 @@ pub trait NdcExecutionCache {
         execution: &WorkflowExecution,
         mutable_state: Box<dyn NdcMutableState>,
         release_noop: bool,
-    ) -> Box<dyn NdcWorkflow>;
+    ) -> NdcResult<Box<dyn NdcWorkflow>>;
 }
 
 /// Go `defer func(){ if rec := recover() ... }()` part 1: runs `f`, capturing a panic.
@@ -319,12 +322,13 @@ pub fn get_reapplicable_events(
     ms: &dyn NdcMutableState,
     events: &[HistoryEvent],
     run_id: &str,
-) -> Vec<HistoryEvent> {
+) -> NdcResult<Vec<HistoryEvent>> {
     use cadence_api::enums::EventType;
-    events
-        .iter()
-        .filter(|e| e.event_type == Some(EventType::WorkflowExecutionSignaled))
-        .filter(|e| !ms.is_event_reapplied(run_id, e.event_id, e.version))
-        .cloned()
-        .collect()
+    let mut result = Vec::new();
+    for event in events.iter().filter(|e| e.event_type == Some(EventType::WorkflowExecutionSignaled)) {
+        if !ms.is_event_reapplied(run_id, event.event_id, event.version)? {
+            result.push(event.clone());
+        }
+    }
+    Ok(result)
 }

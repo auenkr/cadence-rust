@@ -122,7 +122,7 @@ impl<'a> TransactionManagerImpl<'a> {
             let info = base_ms.get_execution_info();
             let (domain_id, workflow_id, base_run_id) = (info.domain_id, info.workflow_id, info.run_id);
 
-            let events_to_reapply = get_reapplicable_events(base_ms, &events.events, &base_run_id);
+            let events_to_reapply = get_reapplicable_events(base_ms, &events.events, &base_run_id)?;
             if events_to_reapply.is_empty() {
                 return Ok((UpdateWorkflowMode::UpdateCurrent, TransactionPolicy::Passive));
             }

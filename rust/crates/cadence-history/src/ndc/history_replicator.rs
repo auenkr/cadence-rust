@@ -53,7 +53,7 @@ pub trait HistoryReplicatorEnv {
     fn resetter_env(&self) -> &dyn WorkflowResetterEnv;
     fn now_nanos(&self) -> i64;
     /// Go `domainCache.GetDomainByID` + `NewMutableStateBuilderWithVersionHistories(.., EmptyVersion)`.
-    fn new_mutable_state(&self, domain_id: &str) -> NdcResult<Box<dyn NdcMutableState>>;
+    fn new_mutable_state(&self, domain_id: &str, execution: &WorkflowExecution) -> NdcResult<Box<dyn NdcMutableState>>;
     /// Go `uuid.New()`.
     fn new_request_id(&self) -> String {
         uuid::Uuid::new_v4().to_string()
@@ -152,7 +152,7 @@ impl<'a> HistoryReplicatorImpl<'a> {
     }
 
     fn apply_start_events(&self, mut workflow: Box<dyn NdcWorkflow>, task: &ReplicationTask) -> NdcResult<()> {
-        let mut mutable_state = match self.env.new_mutable_state(task.get_domain_id()) {
+        let mut mutable_state = match self.env.new_mutable_state(task.get_domain_id(), task.get_execution()) {
             Ok(m) => m,
             Err(e) => {
                 workflow.release(Some(&e));
@@ -262,16 +262,26 @@ impl<'a> HistoryReplicatorImpl<'a> {
             }
         };
 
-        let new_workflow = new_mutable_state.map(|ms| {
+        let new_workflow = match new_mutable_state {
+            Some(ms) => {
             let info = ms.get_execution_info();
             let execution = WorkflowExecution {
                 workflow_id: info.workflow_id.clone(),
                 run_id: info.run_id.clone(),
             };
-            self.env
+            match self.env
                 .execution_cache()
                 .new_workflow(&info.domain_id, &execution, ms, true)
-        });
+            {
+                Ok(workflow) => Some(workflow),
+                Err(error) => {
+                    workflow.release(Some(&error));
+                    return Err(error);
+                }
+            }
+            }
+            None => None,
+        };
 
         let result = self.env.transaction_manager().update_workflow(
             task.get_event_time(),

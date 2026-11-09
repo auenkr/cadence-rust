@@ -46,6 +46,7 @@ use crate::ndc::{
 };
 use crate::shard_context::ShardContext;
 use crate::wiring::assembly::engine_cache::EngineCore;
+use crate::wiring::assembly::ndc_state::OwnedNdcMutableState;
 use crate::wiring::persistence::engine_ndc::{
     SqlBranchManagerEnv, SqlHistoryManager, SqlWorkflowResetterEnv,
 };
@@ -125,14 +126,12 @@ impl NdcExecutionCache for TodoNdcExecutionCache {
     }
     fn new_workflow(
         &self,
-        _domain_id: &str,
-        _execution: &WorkflowExecution,
+        domain_id: &str,
+        execution: &WorkflowExecution,
         _mutable_state: Box<dyn NdcMutableState>,
         _release_noop: bool,
-    ) -> Box<dyn NdcWorkflow> {
-        // The trait is infallible; the failure is reported by `new_mutable_state`
-        // (which is the only producer of the `mutable_state` argument).
-        unreachable!("TODO(ndc-adapters): TodoNdcExecutionCache::new_workflow needs a NdcMutableState, none can be created")
+    ) -> NdcResult<Box<dyn NdcWorkflow>> {
+        Err(todo_error(&format!("NdcExecutionCache::new_workflow for domain {domain_id} run {}", execution.run_id)))
     }
 }
 
@@ -149,7 +148,7 @@ impl NdcStateBuilder for TodoNdcStateBuilder {
         _events: &[HistoryEvent],
         _new_events: &[HistoryEvent],
     ) -> NdcResult<Option<Box<dyn NdcMutableState>>> {
-        Err(todo_error("NdcStateBuilder::apply_events"))
+        Err(todo_error("NdcStateBuilder::apply_events (typed replay dispatcher not implemented)"))
     }
 }
 
@@ -274,8 +273,13 @@ impl HistoryReplicatorEnv for EngineNdcEnv {
     fn now_nanos(&self) -> i64 {
         self.clock.now()
     }
-    fn new_mutable_state(&self, _domain_id: &str) -> NdcResult<Box<dyn NdcMutableState>> {
-        Err(todo_error("HistoryReplicatorEnv::new_mutable_state"))
+    fn new_mutable_state(&self, domain_id: &str, execution: &WorkflowExecution) -> NdcResult<Box<dyn NdcMutableState>> {
+        Ok(Box::new(OwnedNdcMutableState::new(
+            domain_id,
+            execution,
+            self.now_nanos(),
+            crate::execution::mutable_state_methods_common::TaskGenEnv::default(),
+        )))
     }
     fn standby_cluster_delay_nanos(&self) -> i64 {
         DEFAULT_STANDBY_CLUSTER_DELAY_NANOS
