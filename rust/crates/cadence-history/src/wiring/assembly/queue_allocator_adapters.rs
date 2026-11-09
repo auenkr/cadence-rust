@@ -83,7 +83,7 @@ mod tests {
             info: DomainInfo { status: Some(cadence_api::enums::DomainStatus::Deprecated), ..DomainInfo::default() },
             replication: DomainReplicationConfiguration {
                 active_cluster_name: "west".into(),
-                clusters: vec![ClusterReplicationConfiguration { cluster_name: "west".into(), ..Default::default() }, ClusterReplicationConfiguration { cluster_name: "east".into(), ..Default::default() }],
+                clusters: vec![ClusterReplicationConfiguration { cluster_name: "west".into() }, ClusterReplicationConfiguration { cluster_name: "east".into() }],
                 active_clusters: Some(ActiveClusters::default()),
             },
             is_global_domain: true,
