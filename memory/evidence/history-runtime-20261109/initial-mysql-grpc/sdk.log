@@ -1,0 +1,19 @@
+STEP describe-domain ok
+{"level":"info","ts":"2026-11-09T05:38:19.966Z","caller":"internal/internal_worker.go:182","msg":"No logger configured for cadence worker. Created default one."}
+{"level":"info","ts":"2026-11-09T05:38:19.966Z","caller":"internal/internal_worker.go:186","msg":"No metrics scope configured for cadence worker. Use NoopScope as default."}
+{"level":"info","ts":"2026-11-09T05:38:20.012Z","caller":"internal/internal_worker.go:858","msg":"Started Workflow Worker","Domain":"fe-gate-t-4e58e1","TaskList":"fe-gate-f86c2b30-8d71-4ad9-8696-567ac0012138","WorkerID":"22327@runnervmwuk1x@fe-gate-f86c2b30-8d71-4ad9-8696-567ac0012138@b695b89f-cd51-4337-88cb-fa4d4653b0b8"}
+{"level":"info","ts":"2026-11-09T05:38:20.014Z","caller":"internal/internal_worker.go:883","msg":"Started Activity Worker","Domain":"fe-gate-t-4e58e1","TaskList":"fe-gate-f86c2b30-8d71-4ad9-8696-567ac0012138","WorkerID":"22327@runnervmwuk1x@fe-gate-f86c2b30-8d71-4ad9-8696-567ac0012138@b695b89f-cd51-4337-88cb-fa4d4653b0b8"}
+STEP worker-start ok
+STEP start-echo FAIL code:invalid-argument message:error InternalServiceError (cadence internal error, msg: StartWorkflowExecution (engine start not ported): engine dependency not ported yet (see memory/history-gap-handler-20261105.md)) not declared for StartWorkflowExecution
+STEP workflow-id-250-chars-accepted FAIL code:invalid-argument message:error InternalServiceError (cadence internal error, msg: StartWorkflowExecution (engine start not ported): engine dependency not ported yet (see memory/history-gap-handler-20261105.md)) not declared for StartWorkflowExecution
+STEP workflow-id-1001-chars-rejected ok
+STEP start-child FAIL code:invalid-argument message:error InternalServiceError (cadence internal error, msg: StartWorkflowExecution (engine start not ported): engine dependency not ported yet (see memory/history-gap-handler-20261105.md)) not declared for StartWorkflowExecution
+STEP describe-task-list ok
+STEP list-task-list-partitions ok
+STEP get-task-lists-by-domain FAIL code:deadline-exceeded message:timeout
+STEP start-cancel FAIL code:deadline-exceeded message:timeout
+STEP start-terminate FAIL code:deadline-exceeded message:timeout
+STEP sched-create-grpc FAIL signal: killed: 
+STEP start-signal-query FAIL code:deadline-exceeded message:timeout
+STEP list-closed FAIL code:deadline-exceeded message:timeout
+RESULT failures=9

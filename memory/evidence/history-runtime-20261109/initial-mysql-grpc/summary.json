@@ -1,0 +1,28 @@
+{
+  "failedSteps": [
+    "sdk-start-echo",
+    "sdk-workflow-id-250-chars-accepted",
+    "sdk-start-child",
+    "sdk-get-task-lists-by-domain",
+    "sdk-start-cancel",
+    "sdk-start-terminate",
+    "sdk-sched-create-grpc",
+    "sdk-start-signal-query",
+    "sdk-list-closed",
+    "sdk-driver-exit",
+    "metrics-probe-start",
+    "admin-probe-get-cross-cluster-tasks-deprecated",
+    "admin-probe-reapply-events-unknown-workflow",
+    "archival-start-0",
+    "archival-terminate-0",
+    "archival-start-1",
+    "archival-terminate-1",
+    "archival-list-archived-visibility",
+    "archival-list-archived-paged",
+    "archival-go-visibility-wrote-archive",
+    "global-ratelimiter-global-serves-requests",
+    "global-ratelimiter-local-shadow-global-serves-requests",
+    "global-ratelimiter-global-shadow-local-serves-requests"
+  ],
+  "stepCount": 124
+}

@@ -7,7 +7,11 @@
     "two_history": false,
     "outbound": "grpc"
   },
-  "observed_status": "in_progress",
-  "conclusion": null,
-  "purpose": "Initial diagnostic runtime gate; no acceptance claim"
+  "observed_status": "completed",
+  "conclusion": "failure",
+  "purpose": "Initial diagnostic runtime gate; no acceptance claim",
+  "findings": [
+    "StartWorkflowExecution handler still returns explicit engine-start gap despite implementation existing",
+    "Queue factory returns no transfer/timer processors"
+  ]
 }

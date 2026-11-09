@@ -1,0 +1,29 @@
+Cadence internal history gRPC listening on 127.0.0.1:20899
+Cadence internal history Thrift/TChannel listening on 127.0.0.1:10147
+Matching startup stage: Ringpop provider lifecycle lock begin
+Matching startup stage: Ringpop provider lifecycle lock acquired
+Matching Ringpop JOIN attempt 1 started: targets=["127.0.0.1:16490", "127.0.0.1:21008", "127.0.0.1:14253"]
+Matching Ringpop JOIN attempt 1 completed: successes=["127.0.0.1:21008", "127.0.0.1:14253", "127.0.0.1:16490"] failures=[]
+Matching startup stage: Ringpop ready
+Matching startup stage: Ringpop membership monitor started
+Matching startup stage: Ringpop healer started
+Matching startup stage: Ringpop labels publication begin
+Matching startup stage: Ringpop labels publication complete
+Matching startup stage: Ringpop provider snapshot publication begin
+Matching startup stage: Ringpop provider snapshot publication complete
+Matching startup stage: Ringpop provider lifecycle started
+Matching Ringpop received PING #1 from 127.0.0.1:21008; accepted_changes=["127.0.0.1:21008:alive"]; members=["127.0.0.1:14253:alive", "127.0.0.1:21008:alive", "127.0.0.1:16490:alive", "127.0.0.1:10147:alive"]
+Matching Ringpop received PING #2 from 127.0.0.1:14253; accepted_changes=[]; members=["127.0.0.1:14253:alive", "127.0.0.1:21008:alive", "127.0.0.1:16490:alive", "127.0.0.1:10147:alive"]
+Matching Ringpop received PING #3 from 127.0.0.1:16490; accepted_changes=[]; members=["127.0.0.1:14253:alive", "127.0.0.1:21008:alive", "127.0.0.1:16490:alive", "127.0.0.1:10147:alive"]
+Matching Ringpop received PING #4 from 127.0.0.1:16490; accepted_changes=[]; members=["127.0.0.1:16490:alive", "127.0.0.1:10147:alive", "127.0.0.1:14253:alive", "127.0.0.1:21008:alive"]
+Matching Ringpop received PING #5 from 127.0.0.1:14253; accepted_changes=[]; members=["127.0.0.1:16490:alive", "127.0.0.1:10147:alive", "127.0.0.1:14253:alive", "127.0.0.1:21008:alive"]
+Matching Ringpop received PING #6 from 127.0.0.1:21008; accepted_changes=[]; members=["127.0.0.1:16490:alive", "127.0.0.1:10147:alive", "127.0.0.1:14253:alive", "127.0.0.1:21008:alive"]
+Matching Ringpop received PING #7 from 127.0.0.1:21008; accepted_changes=[]; members=["127.0.0.1:16490:alive", "127.0.0.1:21008:alive", "127.0.0.1:14253:alive", "127.0.0.1:10147:alive"]
+Matching Ringpop received PING #8 from 127.0.0.1:16490; accepted_changes=[]; members=["127.0.0.1:16490:alive", "127.0.0.1:21008:alive", "127.0.0.1:14253:alive", "127.0.0.1:10147:alive"]
+2026-11-09T05:48:50.483459Z ERROR cadence_history::wiring::assembly::queue_factory: history queue executors are not wired: transfer/timer tasks will NOT be processed shard_id=1
+2026-11-09T05:48:50.484246Z ERROR cadence_history::engine::register_domain_failover_callback: transfer processor not found
+2026-11-09T05:49:02.598822Z ERROR cadence_history::wiring::assembly::queue_factory: history queue executors are not wired: transfer/timer tasks will NOT be processed shard_id=0
+2026-11-09T05:49:02.599200Z ERROR cadence_history::engine::register_domain_failover_callback: transfer processor not found
+2026-11-09T05:49:02.640884Z ERROR cadence_history::wiring::assembly::queue_factory: history queue executors are not wired: transfer/timer tasks will NOT be processed shard_id=2
+2026-11-09T05:49:02.641249Z ERROR cadence_history::engine::register_domain_failover_callback: transfer processor not found
+2026-11-09T05:54:32.393648Z ERROR cadence_history::wiring::assembly::queue_factory: history queue executors are not wired: transfer/timer tasks will NOT be processed shard_id=0

@@ -29,3 +29,9 @@ Base: master c42480cdc. History is incomplete. Rust Matching and Frontend are re
 - Added assembly/queue_policy.rs with QueueConfig and ProcessorConfig builders over History Config callbacks. Callbacks retain live dynamic values/domain filters; threshold maps are converted from BTreeMap to HashMap on each read. No guessed defaults or captured startup values.
 - Added regression coverage for dynamic batch/retry/threshold changes after queue adapter construction. CI-only validation pending.
 - Allocator domain/active-cluster adapters and live executor provider are still open. This helper alone does not process tasks.
+
+## CI results and runtime diagnosis (13:18 IST)
+- Queue config adapter 882d6511b: success, https://github.com/auenkr/cadence-rust/actions/runs/42568401701 (cadence-history clippy/tests); merged/pushed master.
+- Initial mixed gate 6ba567bfd: FAILURE, https://github.com/auenkr/cadence-rust/actions/runs/42567851631. Rust History/Frontend/Matching and Go Worker booted. SDK StartWorkflowExecution fails because handler_impl.rs still returns the historical engine-start gap even though engine/interface.rs now delegates to real implementation. Queue factory logs absent transfer/timer processors. Preserved binary hashes, source SHA, steps, SDK and History logs under evidence/history-runtime-20261109/initial-mysql-grpc/.
+- Timer status CI 42568093309 failed on two fields incorrectly added to engine ActivityInfo projection. Engine already holds its timer data separately; removed those projection fields in efa4f3924. New CI: https://github.com/auenkr/cadence-rust/actions/runs/42581586431, pending. No timer branch merged yet.
+- Host load recovered below 6; narrow Luna work can resume.

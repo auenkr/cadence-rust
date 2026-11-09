@@ -1,0 +1,8 @@
+{
+  "history": "rust",
+  "frontend": "rust",
+  "matching": "rust",
+  "worker": "go",
+  "goServices": "worker",
+  "historyHosts": 1
+}
