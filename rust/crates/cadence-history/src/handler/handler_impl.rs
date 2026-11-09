@@ -503,9 +503,7 @@ mod start_handler_tests {
 
     #[test]
     fn signal_with_start_retries_only_go_concurrency_conflicts() {
-        assert!(signal_with_start_retryable(&HistoryError::PersistenceAlreadyStarted(Box::new(
-            crate::engine::deps::PersistenceAlreadyStarted::default(),
-        ))));
+        assert!(signal_with_start_retryable(&HistoryError::PersistenceAlreadyStarted(Box::default())));
         assert!(signal_with_start_retryable(&HistoryError::CurrentWorkflowConditionFailed("race".into())));
         assert!(!signal_with_start_retryable(&HistoryError::DuplicateRequest {
             request_type: WorkflowRequestType::Start,
