@@ -61,6 +61,13 @@ fn gap(name: &str) -> HistoryError {
     HistoryError::internal(format!("{name}: engine dependency not ported yet (see memory/history-gap-handler-20261105.md)"))
 }
 
+fn signal_with_start_retryable(error: &HistoryError) -> bool {
+    matches!(
+        error,
+        HistoryError::PersistenceAlreadyStarted(_) | HistoryError::CurrentWorkflowConditionFailed(_)
+    )
+}
+
 impl HandlerImpl {
     pub fn new(registry: Arc<ShardRegistry>, rps: f64) -> Self {
         Self {
@@ -411,8 +418,20 @@ impl Handler for HandlerImpl {
         self.engine(&wf.workflow_id).await?.schedule_decision_task(r).await
     }
 
-    async fn signal_with_start_workflow_execution(&self, _r: Option<&HistorySignalWithStartWorkflowExecutionRequest>) -> HResult<cadence_api::types::StartWorkflowExecutionResponse> {
-        Err(gap("SignalWithStartWorkflowExecution (engine start/signal-with-start not ported)"))
+    async fn signal_with_start_workflow_execution(&self, request: Option<&HistorySignalWithStartWorkflowExecutionRequest>) -> HResult<cadence_api::types::StartWorkflowExecutionResponse> {
+        let r = nil(request)?;
+        self.check_shutdown()?;
+        self.check_domain_and_rate(&r.domain_uuid)?;
+        let workflow_id = r.signal_with_start_request.as_ref().map(|q| q.workflow_id.as_str()).unwrap_or("");
+        let engine = self.engine(workflow_id).await?;
+        match engine.signal_with_start_workflow_execution(r).await {
+            Err(e) if signal_with_start_retryable(&e) => {
+                // Go retries once when concurrent signal-with-start requests race
+                // while creating/reusing the workflow execution.
+                engine.signal_with_start_workflow_execution(r).await
+            }
+            result => result,
+        }
     }
 
     async fn signal_workflow_execution(&self, request: Option<&HistorySignalWorkflowExecutionRequest>) -> HResult<()> {
@@ -421,8 +440,11 @@ impl Handler for HandlerImpl {
         self.prep(true, &r.domain_uuid, wf).await?.signal_workflow_execution(r).await
     }
 
-    async fn start_workflow_execution(&self, _r: Option<&HistoryStartWorkflowExecutionRequest>) -> HResult<cadence_api::types::StartWorkflowExecutionResponse> {
-        Err(gap("StartWorkflowExecution (engine start not ported)"))
+    async fn start_workflow_execution(&self, request: Option<&HistoryStartWorkflowExecutionRequest>) -> HResult<cadence_api::types::StartWorkflowExecutionResponse> {
+        let r = nil(request)?;
+        self.check_domain_and_rate(&r.domain_uuid)?;
+        let workflow_id = r.start_request.as_ref().map(|q| q.workflow_id.as_str()).unwrap_or("");
+        self.engine(workflow_id).await?.start_workflow_execution(r).await
     }
 
     async fn sync_activity(&self, request: Option<&SyncActivityRequest>) -> HResult<()> {
@@ -471,5 +493,24 @@ impl Handler for HandlerImpl {
 
     async fn ratelimit_update(&self, _r: Option<&RatelimitUpdateRequest>) -> HResult<RatelimitUpdateResponse> {
         Err(gap("RatelimitUpdate (ratelimit aggregator not ported)"))
+    }
+}
+
+#[cfg(test)]
+mod start_handler_tests {
+    use super::*;
+    use crate::engine::deps::WorkflowRequestType;
+
+    #[test]
+    fn signal_with_start_retries_only_go_concurrency_conflicts() {
+        assert!(signal_with_start_retryable(&HistoryError::PersistenceAlreadyStarted(Box::new(
+            crate::engine::deps::PersistenceAlreadyStarted::default(),
+        ))));
+        assert!(signal_with_start_retryable(&HistoryError::CurrentWorkflowConditionFailed("race".into())));
+        assert!(!signal_with_start_retryable(&HistoryError::DuplicateRequest {
+            request_type: WorkflowRequestType::Start,
+            run_id: "run".into(),
+        }));
+        assert!(!signal_with_start_retryable(&HistoryError::internal("unrelated")));
     }
 }

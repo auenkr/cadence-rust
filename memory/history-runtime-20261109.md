@@ -40,3 +40,9 @@ Base: master c42480cdc. History is incomplete. Rust Matching and Frontend are re
 - Resumed on clean master 55bfaccd5; progress dashboard now reflects actual failing mixed gate and incomplete runtime wiring.
 - Timer correction head efa4f3924a25583c8b709fb558359fca4f046897 still in progress at https://github.com/auenkr/cadence-rust/actions/runs/42581586431.
 - Resource check: load 0.11, MemAvailable 3.9GiB. Next independent Luna slices: Start/SignalWithStart handlers, queue allocator domain adapters, owned NDC state structural seam. No local Cargo or Go validation.
+
+## Start and SignalWithStart handler routing
+- Implemented `StartWorkflowExecution` handler dispatch to the real engine delegate. It preserves Go ordering: nil request, domain validation, rate limit, shard selection by nested workflow ID, engine call. Go does not add a handler shutdown check for start.
+- Implemented `SignalWithStartWorkflowExecution` dispatch with Go ordering including shutdown, then domain/rate checks, shard selection, and a single retry only for persistence already-started/current-workflow-condition conflicts. Added focused coverage that accepts exactly those conflict classes and rejects duplicate/unrelated errors.
+- The initial mixed SDK gate failed before exercising either engine operation because these handler methods returned explicit gaps. After this change the same SDK start path should reach the real engine; CI result will determine whether further engine/runtime blockers remain. No local Cargo or Go commands were run.
+- Remaining limitations are explicit: engine start/signal-with-start semantics and their persistence/visibility/queue dependencies are implemented but not yet proven end-to-end on this branch. Existing mixed gate coverage is narrower than History parity; queues/NDC, replication/failover, other persistence backends, failure/restart/recovery and SDK workflow coverage remain incomplete. This bounded handler fix does not complete History.
