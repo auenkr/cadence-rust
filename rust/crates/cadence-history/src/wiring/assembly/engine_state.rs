@@ -133,8 +133,6 @@ pub(super) fn engine_activity(schedule_id: i64, a: &pc::ActivityInfo, details: V
         schedule_to_close_timeout: a.schedule_to_close_timeout_seconds,
         cancel_requested: a.cancel_requested,
         cancel_request_id: a.cancel_request_id,
-        timer_task_status: a.timer_task_status,
-        last_heartbeat_timeout_visibility_in_seconds: a.last_heartbeat_timeout_visibility_in_seconds,
         has_retry_policy: a.has_retry_policy,
         version: a.version,
         started_identity: a.started_identity.clone(),
