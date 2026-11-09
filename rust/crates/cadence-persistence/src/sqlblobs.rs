@@ -191,9 +191,6 @@ pub fn activity_info_to_struct(info: &ActivityInfo) -> Struct {
                 }),
             ),
             (74, F64(info.retry_jitter_coefficient)),
-            // Rust extension for the persistence ActivityInfo field not yet
-            // represented in upstream sqlblobs.thrift. Go ignores unknown fields.
-            (76, I64(info.last_heartbeat_timeout_visibility_in_seconds)),
         ],
     }
 }
@@ -272,7 +269,8 @@ pub fn activity_info_from_struct(value: &Struct) -> Result<ActivityInfo> {
         cancel_requested: boolv(40)?,
         cancel_request_id: i64v(42)?,
         timer_task_status: i32v(44)?,
-        last_heartbeat_timeout_visibility_in_seconds: i64v(76)?,
+        // Go keeps this deduplication hint only in memory, never in sqlblobs.
+        last_heartbeat_timeout_visibility_in_seconds: 0,
         attempt: i32v(46)?,
         task_list: strv(48)?,
         task_list_kind: i32v(49)?,
@@ -1131,10 +1129,11 @@ mod tests {
             retry_non_retriable_errors: vec!["Fatal".into()],
             ..Default::default()
         };
-        assert_eq!(
-            activity_info_from_struct(&activity_info_to_struct(&activity)).unwrap(),
-            activity
-        );
+        let encoded = activity_info_to_struct(&activity);
+        assert!(!encoded.fields.iter().any(|(id, _)| *id == 76));
+        let mut expected = activity;
+        expected.last_heartbeat_timeout_visibility_in_seconds = 0;
+        assert_eq!(activity_info_from_struct(&encoded).unwrap(), expected);
     }
 
     #[test]
