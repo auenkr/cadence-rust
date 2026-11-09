@@ -1,0 +1,13 @@
+{
+  "run_url": "https://github.com/auenkr/cadence-rust/actions/runs/42567851631",
+  "head_sha": "6ba567bfd51302966c9c257c9764cdb4c5bf9578",
+  "workflow": "history-mixed-gate.yml",
+  "inputs": {
+    "database": "mysql",
+    "two_history": false,
+    "outbound": "grpc"
+  },
+  "observed_status": "in_progress",
+  "conclusion": null,
+  "purpose": "Initial diagnostic runtime gate; no acceptance claim"
+}

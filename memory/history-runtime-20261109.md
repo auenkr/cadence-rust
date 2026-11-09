@@ -11,5 +11,5 @@ Base: master c42480cdc. History is incomplete. Rust Matching and Frontend are re
 
 ## Validation
 - Python AST parse and shell syntax checks passed locally; no Cargo/rustfmt/Go builds or tests run locally.
-- Runtime gate not yet dispatched; record exact run/head/conclusion once available.
+- Initial MySQL/gRPC single-host diagnostic gate dispatched: https://github.com/auenkr/cadence-rust/actions/runs/42567851631 on 6ba567bfd51302966c9c257c9764cdb4c5bf9578, observed in progress; no conclusion yet. Evidence identity: memory/evidence/history-runtime-20261109/mysql-grpc-initial.json.
 - Final requirement remains fresh dedicated CI target, clippy followed by workspace tests, and full runtime/parity evidence. No History service completion is claimed.
