@@ -9,8 +9,6 @@
 //! `TransferStandbyDependencies`, `TimerActiveDependencies`,
 //! `TimerStandbyDependencies`, `CleanupDependencies`) over the real
 //! execution cache, history/matching clients, visibility manager and archiver.
-//! Those implementations do not exist yet; see
-//! memory/history-gap-queuefactory-20261107.md.
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -25,14 +23,14 @@ pub trait QueueExecProvider: Send + Sync {
     fn queue_exec(&self, ctx: &ShardBuildCtx) -> anyhow::Result<Option<QueueExec>>;
 }
 
-/// Provider used until the executor dependency adapters exist.
-pub struct MissingExecutorsProvider;
+/// Explicit startup failure until the full per-shard executor assembly exists.
+/// Go always builds transfer and timer processors; silently starting without them
+/// would accept work while never processing it.
+pub struct UnassembledExecutorsProvider;
 
-impl QueueExecProvider for MissingExecutorsProvider {
-    fn queue_exec(&self, _ctx: &ShardBuildCtx) -> anyhow::Result<Option<QueueExec>> {
-        // TODO(link): implement the *Dependencies traits of task::{transfer,timer}_{active,standby}
-        // executors (execution cache, history client, visibility manager, archiver) and return a QueueExec.
-        Ok(None)
+impl QueueExecProvider for UnassembledExecutorsProvider {
+    fn queue_exec(&self, ctx: &ShardBuildCtx) -> anyhow::Result<Option<QueueExec>> {
+        anyhow::bail!("History shard {} cannot start: runtime queue executor assembly is incomplete (active/standby executors, queue shard context, and task allocator are not assembled)", ctx.shard.shard_id())
     }
 }
 
@@ -54,13 +52,7 @@ impl QueueFactory for ExecQueueFactory {
     ) -> anyhow::Result<HashMap<HistoryTaskCategory, Arc<dyn QueueProcessor>>> {
         match self.provider.queue_exec(ctx)? {
             Some(exec) => Ok(build_queue_processors(QueueDeps { processors: HashMap::new(), exec: Some(exec) })),
-            None => {
-                tracing::error!(
-                    shard_id = ctx.shard.shard_id(),
-                    "history queue executors are not wired: transfer/timer tasks will NOT be processed"
-                );
-                Ok(HashMap::new())
-            }
+            None => anyhow::bail!("History queue provider returned no processors for shard {}", ctx.shard.shard_id()),
         }
     }
 }
