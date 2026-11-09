@@ -52,3 +52,4 @@ Base: master c42480cdc. History is incomplete. Rust Matching and Frontend are re
 - Own minimal `CommonTask`/`CommonProcessor` traits (Go common/task.Task), since history `task::interface::Task` requires PersistenceTask; adapter to be added in queue wiring.
 - Intentionally unported: idle channel TTL cleanup in WRR pool, metrics scopes, FIFO and hierarchical WRR schedulers.
 - Validation: CI run recorded below.
+- CI: https://github.com/auenkr/cadence-rust/actions/runs/42583661321 head af1efd90 conclusion success (clippy + cadence-history tests). First run 42582745421 failed only on a wrong WRR order assertion in my test.
