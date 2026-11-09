@@ -28,4 +28,5 @@ The Rust repository already has task executor dependency adapters in `queue_deps
 
 - Starting parent: `c42480cdc7f7e106a95e13660567a105d7fa95fc`.
 - No local Cargo, rustfmt, Go build/test, or mixed-cluster gate was run, per current host/CI rules.
-- Implementation commit/SHA and CI run URL/head/conclusion: to be filled after push and workflow dispatch.
+- Implementation commit: `8044e4ad2b68279ef06541870a8b69fc8b75e900` on `t3/wire-history-queues` (pushed to origin).
+- CI: https://github.com/auenkr/cadence-rust/actions/runs/42567588843, head `8044e4ad2b68279ef06541870a8b69fc8b75e900`, package `cadence-history`; status was `in_progress` when checked. The workflow was dispatched successfully; no conclusion is claimed.
