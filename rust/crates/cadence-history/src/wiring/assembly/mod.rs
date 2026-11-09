@@ -22,6 +22,7 @@ pub mod queue_deps_transfer_active;
 pub mod queue_exec;
 pub mod queue_factory;
 pub mod queue_policy;
+pub mod queue_allocator_adapters;
 pub mod queues;
 pub mod replication;
 pub mod replication_builders;
