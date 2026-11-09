@@ -153,7 +153,7 @@ const DATA = {
       ]},
     { name: "History", order: 3, status: "part",
       acceptance: "SQL persistence implementation port now includes workflow mutations/conflict resolution, state maps, tasks/DLQ and History-v2 for MySQL/PostgreSQL on history-port-persist. Fresh-target crate Clippy and tests passed at 5933bcf0f (run 41924189215). No SQL integration or service acceptance claimed. See <code>memory/history-port-persist-20261104.md</code>.",
-      note: "Largest service (~75k Go lines, about 6x Matching). History SQL contracts and store implementations are wired. Mixed Go/Rust History service acceptance remains incomplete.",
+      note: "Nov 9: runtime continuation active; owned-state bridge audit saved, Rust History SDK gate added (not yet passed), live queue assembly and NDC remain incomplete. Largest service (~75k Go lines, about 6x Matching). History SQL contracts and store implementations are wired. Mixed Go/Rust History service acceptance remains incomplete.",
       components: [
         {n:"execution (mutable state, workflow ctx)", dir:"history/execution", d:"none"},
         {n:"task (transfer/timer processors)", dir:"history/task", d:"none"},

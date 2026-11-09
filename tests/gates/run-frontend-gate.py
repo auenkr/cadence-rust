@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Frontend mixed gate (MySQL): Go History+Worker, Rust Matching and Rust Frontend (cadence-server).
+"""SDK mixed gate: Rust Matching/Frontend, Go Worker, and selectable Go or Rust History.
 
 No Go Frontend or Go Matching runs. Steps are recorded in OUT/steps.json; every failing step
 keeps its error text, so Rust Frontend gaps are reported precisely instead of aborting the run.
@@ -13,6 +13,8 @@ ap = argparse.ArgumentParser()
 ap.add_argument('--database', choices=['mysql', 'postgres', 'cassandra'], default='mysql')
 ap.add_argument('--out', type=Path, required=True)
 ap.add_argument('--rust-binary', type=Path, required=True)
+ap.add_argument('--rust-history-binary', type=Path,
+                help='replace every Go History host with the standalone Rust History binary; Go runs Worker only')
 ap.add_argument('--go-server', type=Path, required=True)
 ap.add_argument('--go-cli', type=Path, required=True)
 ap.add_argument('--driver', type=Path, required=True)
@@ -22,7 +24,7 @@ ap.add_argument('--sdk-timeout-seconds', type=int, default=900,
                 help='SDK driver wall-clock limit, including restart and shutdown (default: 900)')
 ap.add_argument('--kafka-broker', help='host:port of a plaintext Kafka broker; enables the async workflow acceptance steps')
 ap.add_argument('--kafka-container', help='docker container name of that broker (stopped/started for the broker-down step)')
-ap.add_argument('--two-history', action='store_true', help='run a second Go History host and kill/restart it while SDK workflows run')
+ap.add_argument('--two-history', action='store_true', help='run a second History host and kill/restart it while SDK workflows run')
 ap.add_argument('--kafka-topic', default='cadence-async-gate')
 ap.add_argument('--es-url', help='http://host:port of Elasticsearch; enables advanced visibility (needs --kafka-broker for the Go indexer)')
 ap.add_argument('--es-index', default='cadence-visibility-dev')
@@ -171,6 +173,22 @@ assert not re.search(r'(?m)^histograms:', rt)
 # Go emits cadence_latency_ns only when histogram migration allows it (default "timer").
 rt = rt.rstrip('\n') + '\nhistograms:\n  default: both\n' + async_yaml
 (work / 'rust.yaml').write_text(rt)
+if args.rust_history_binary and args.two_history:
+    rt2 = rt
+    for a, b in [('HISTORY_PORT_GRPC', 'HISTORY2_PORT_GRPC'), ('HISTORY_PORT_PPROF', 'HISTORY2_PORT_PPROF'), ('HISTORY_PORT', 'HISTORY2_PORT')]:
+        # Change this host's listener only; bootstrap seeds must still include both hosts.
+        rt2 = re.sub(r'(?m)^(      (?:port|grpcPort): )' + ports[a] + r'$',
+                     lambda m: m.group(1) + ports[b], rt2)
+    (work / 'rust-history2.yaml').write_text(rt2)
+worker_name = 'go-worker' if args.rust_history_binary else 'go-history-worker'
+history_name = 'rust-history' if args.rust_history_binary else worker_name
+history2_name = 'rust-history-2' if args.rust_history_binary else 'go-history-2'
+service_names = [worker_name, 'rust-matching', 'rust-frontend']
+if args.rust_history_binary:
+    service_names.append(history_name)
+if args.two_history:
+    service_names.append(history2_name)
+
 
 # ---- process helpers
 procs = {}
@@ -224,7 +242,7 @@ def dump_domain_rows(tag):
         (work / f'db-domains-{tag}.log').write_text(repr(e))
 
 def record_services_alive(phase):
-    for name in ['go-history-worker', 'rust-matching', 'rust-frontend'] + (['go-history-2'] if args.two_history else []):
+    for name in service_names:
         exit_code = procs[name].poll()
         record(f'{name}-alive-{phase}', exit_code is None, f'exit={exit_code}')
 def run(name, cmd, timeout=120, env=None):
@@ -249,29 +267,49 @@ cli_g = [args.go_cli, '--address', f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', '
 status = 0
 try:
     (work / 'rust-binary.sha256').write_text(subprocess.run(['sha256sum', str(args.rust_binary)], capture_output=True, text=True).stdout)
-    start('go-history-worker', [args.go_server, '--config', work / 'config', '--zone', plugin, 'start', '--auto-setup', '--services', 'history,worker'])
-    history_ready = wait_port(ports['HISTORY_PORT_GRPC'], 240, 'go-history-worker')
-    record('go-history-listening', history_ready)
-    if not history_ready:
-        raise SystemExit(1)
-    go_history2 = lambda: [args.go_server, '--config', work / 'config2', '--zone', plugin, 'start', '--services', 'history']
-    if args.two_history:
-        start('go-history-2', go_history2())
-        h2 = wait_port(ports['HISTORY2_PORT_GRPC'], 240, 'go-history-2')
-        record('go-history-2-listening', h2)
-        if not h2:
+    go_services = 'worker' if args.rust_history_binary else 'history,worker'
+    start(worker_name, [args.go_server, '--config', work / 'config', '--zone', plugin, 'start', '--auto-setup', '--services', go_services])
+    if args.rust_history_binary:
+        (work / 'rust-history-binary.sha256').write_text(subprocess.run(
+            ['sha256sum', str(args.rust_history_binary)], check=True, capture_output=True, text=True).stdout)
+        # Worker initializes the original Go schema before the Rust stores open it.
+        ready = wait_port(ports['WORKER_PORT'], 240, worker_name)
+        record('go-worker-schema-ready', ready)
+        if not ready:
             raise SystemExit(1)
+        history_cmd = lambda cfg: [args.rust_history_binary, '--config', cfg, '--root', work, 'start', '--services', 'history']
+        start(history_name, history_cmd(work / 'rust.yaml'))
+        history2_cmd = lambda: history_cmd(work / 'rust-history2.yaml')
+        (work / 'service-stack.json').write_text(json.dumps({
+            'history': 'rust', 'frontend': 'rust', 'matching': 'rust', 'worker': 'go',
+            'goServices': go_services, 'historyHosts': 2 if args.two_history else 1,
+        }, indent=2))
+    else:
+        ready = wait_port(ports['HISTORY_PORT_GRPC'], 240, history_name)
+        record('go-history-listening', ready)
+        if not ready:
+            raise SystemExit(1)
+        history2_cmd = lambda: [args.go_server, '--config', work / 'config2', '--zone', plugin, 'start', '--services', 'history']
+    if args.two_history:
+        start(history2_name, history2_cmd())
     # Matching opens gRPC only after Ringpop bootstrap. Launch its Frontend
     # seed before waiting for Matching readiness so both can join the ring.
     start('rust-matching', rust_matching())
     start('rust-frontend', rust_frontend(), env=frontend_env)
+    history_ready = wait_port(ports['HISTORY_PORT_GRPC'], 240, history_name)
+    record(f'{history_name}-listening', history_ready)
+    if args.two_history:
+        h2 = wait_port(ports['HISTORY2_PORT_GRPC'], 240, history2_name)
+        record(f'{history2_name}-listening', h2)
+    else:
+        h2 = True
     matching_ready = wait_port(ports['RUST_MATCHING_PORT_GRPC'], 120, 'rust-matching')
     record('rust-matching-listening', matching_ready)
     fe_t = wait_port(ports['FRONTEND_PORT'], 120, 'rust-frontend')
     fe_g = wait_port(ports['FRONTEND_PORT_GRPC'], 10, 'rust-frontend')
     record('rust-frontend-tchannel-listening', fe_t)
     record('rust-frontend-grpc-listening', fe_g)
-    if not (matching_ready and fe_t and fe_g):
+    if not (history_ready and h2 and matching_ready and fe_t and fe_g):
         raise SystemExit(1)
     time.sleep(20)  # ring convergence
     dom_t, dom_g = 'fe-gate-t-' + secrets.token_hex(3), 'fe-gate-g-' + secrets.token_hex(3)
@@ -302,14 +340,14 @@ try:
     while drv.poll() is None:
         if (marks / 'history-churn-request').exists() and not churned:
             churned = True
-            kill('go-history-2')
-            record('go-history-2-killed', True)
+            kill(history2_name)
+            record(f'{history2_name}-killed', True)
             time.sleep(20)  # shard ownership moves to the surviving host while SDK traffic continues
-            record('go-history-1-alive-during-churn', procs['go-history-worker'].poll() is None)
+            record(f'{history_name}-alive-during-churn', procs[history_name].poll() is None)
             record('rust-frontend-alive-during-churn', procs['rust-frontend'].poll() is None)
-            start('go-history-2', go_history2())
-            ok = wait_port(ports['HISTORY2_PORT_GRPC'], 240, 'go-history-2')
-            record('go-history-2-restarted-listening', ok)
+            start(history2_name, history2_cmd())
+            ok = wait_port(ports['HISTORY2_PORT_GRPC'], 240, history2_name)
+            record(f'{history2_name}-restarted-listening', ok)
             time.sleep(30)  # ring reconvergence, shards move back
             (marks / 'history-churn-done').write_text('x')
         if time.monotonic() >= sdk_deadline:
@@ -1014,7 +1052,7 @@ except Exception as e:
 finally:
     for n in list(procs):
         kill(n)
-    for n in ['rust-frontend', 'rust-matching', 'go-history-worker'] + (['go-history-2'] if args.two_history else []):
+    for n in service_names:
         lp = work / f'{n}.log'
         print(f'--- {n}.log tail', flush=True)
         print('\n'.join(lp.read_text(errors='replace').splitlines()[-25:]) if lp.exists() else '(none)', flush=True)
