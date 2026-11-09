@@ -59,6 +59,7 @@ impl OwnedNdcMutableState {
     pub fn now_nanos(&self) -> i64 { self.now_nanos }
     pub fn task_gen_env(&self) -> &TaskGenEnv { &self.task_gen_env }
 
+    #[allow(clippy::result_large_err)]
     fn unsupported<T>(&self, operation: &str) -> NdcResult<T> {
         Err(NdcError::internal(format!(
             "NDC owned state operation `{operation}` is unsupported until replay and the lossless persistence/cache bridge are implemented"
