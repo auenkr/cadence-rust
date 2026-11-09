@@ -97,6 +97,8 @@ fn to_activity_info(
         schedule_to_close_timeout: p.schedule_to_close_timeout_seconds,
         start_to_close_timeout: p.start_to_close_timeout_seconds,
         heartbeat_timeout: p.heartbeat_timeout_seconds,
+        timer_task_status: p.timer_task_status,
+        last_heartbeat_timeout_visibility_in_seconds: p.last_heartbeat_timeout_visibility_in_seconds,
         cancel_requested: p.cancel_requested,
         cancel_request_id: p.cancel_request_id,
         task_list: p.task_list,

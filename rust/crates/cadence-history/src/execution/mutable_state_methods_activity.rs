@@ -101,8 +101,9 @@ impl TypedMutableState {
             .as_ref()
             .and_then(|o| o.next_retry_interval_seconds)
             .unwrap_or_default();
-        // Timer task status is not part of ActivityInfo here; see gaps in memory.
-        let _ = (reset_activity_timer_task_status, TIMER_TASK_STATUS_NONE);
+        if reset_activity_timer_task_status {
+            ai.timer_task_status = TIMER_TASK_STATUS_NONE;
+        }
         let ai = ai.clone();
         self.update_activity_infos.insert(ai.schedule_id, ai);
         Ok(())
@@ -593,6 +594,8 @@ impl TypedMutableState {
         ai.started_id = EMPTY_EVENT_ID;
         ai.request_id = String::new();
         ai.started_time = 0;
+        ai.timer_task_status = TIMER_TASK_STATUS_NONE;
+        ai.last_heartbeat_timeout_visibility_in_seconds = 0;
         ai.last_failure_reason = failure_reason.to_string();
         ai.last_worker_identity = ai.started_identity.clone();
         ai.last_failure_details = failure_details;
@@ -602,5 +605,33 @@ impl TypedMutableState {
         self.update_activity_infos.insert(schedule_id, ai);
         self.sync_activity_tasks.insert(schedule_id);
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod activity_timer_retry_tests {
+    use super::*;
+
+    #[test]
+    fn retry_clears_activity_timer_status_and_heartbeat_visibility() {
+        let mut state = TypedMutableState::new();
+        state.current_version = 1;
+        let activity = ActivityInfo {
+            schedule_id: 7,
+            activity_id: "a".into(),
+            has_retry_policy: true,
+            initial_interval: 1,
+            maximum_attempts: 5,
+            attempt: 1,
+            timer_task_status: 15,
+            last_heartbeat_timeout_visibility_in_seconds: 123,
+            ..Default::default()
+        };
+        state.update_activity(activity);
+
+        assert!(state.retry_activity(7, 10_000_000_000, "failure", vec![], None, false, 0.0).unwrap());
+        let retried = state.get_activity_info(7).unwrap();
+        assert_eq!(retried.timer_task_status, TIMER_TASK_STATUS_NONE);
+        assert_eq!(retried.last_heartbeat_timeout_visibility_in_seconds, 0);
     }
 }

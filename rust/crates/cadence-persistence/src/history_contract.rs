@@ -125,6 +125,7 @@ pub struct ActivityInfo {
     pub cancel_requested: bool,
     pub cancel_request_id: i64,
     pub timer_task_status: i32,
+    pub last_heartbeat_timeout_visibility_in_seconds: i64,
     pub attempt: i32,
     pub task_list: String,
     pub task_list_kind: i32,

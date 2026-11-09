@@ -32,6 +32,12 @@ pub struct ActivityInfo {
     pub schedule_to_close_timeout: i32,
     pub start_to_close_timeout: i32,
     pub heartbeat_timeout: i32,
+    /// Go ActivityInfo.TimerTaskStatus bitset, persisted across transactions.
+    #[serde(default)]
+    pub timer_task_status: i32,
+    /// Go LastHeartbeatTimeoutVisibilityInSeconds.
+    #[serde(default)]
+    pub last_heartbeat_timeout_visibility_in_seconds: i64,
     pub cancel_requested: bool,
     pub cancel_request_id: i64,
     pub task_list: String,
