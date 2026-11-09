@@ -17,3 +17,7 @@ Branch: `t3/history-activity-timer-status`.
 ## Remaining gaps
 
 - This is a bounded persistence/timer status slice, not a History service parity audit. The heartbeat visibility sqlblobs field is a Rust extension at field ID 76 and should be reconciled if upstream adds this field to `sqlblobs.thrift`.
+
+- CI dispatch: https://github.com/auenkr/cadence-rust/actions/runs/42567893660
+- CI head SHA: `8d030b8d46973818ce6d25f859d2a5db10dcacc5`
+- CI status at dispatch verification: `in_progress` (conclusion pending).
