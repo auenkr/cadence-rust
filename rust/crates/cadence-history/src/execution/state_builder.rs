@@ -123,8 +123,16 @@ impl StateBuilder {
                         state.replicate_decision_task_started_event(None, event.version, a.scheduled_event_id, event.event_id, &a.request_id, event.timestamp.unwrap_or_default())?;
                     }
                     Some(EventType::DecisionTaskCompleted) => state.replicate_decision_task_completed_event(&mut DecisionEnv::default(), event)?,
-                    Some(EventType::DecisionTaskTimedOut) => state.replicate_decision_task_timed_out_event(&DecisionEnv::default(), event)?,
-                    Some(EventType::DecisionTaskFailed) => state.replicate_decision_task_failed_event(&DecisionEnv::default(), Some(event))?,
+                    Some(EventType::DecisionTaskTimedOut) => {
+                        let env = DecisionEnv { now_nanos: event.timestamp.unwrap_or_default(), ..Default::default() };
+                        state.replicate_decision_task_timed_out_event(&env, event)?;
+                        state.replicate_transient_decision_task_scheduled(&env)?;
+                    }
+                    Some(EventType::DecisionTaskFailed) => {
+                        let env = DecisionEnv { now_nanos: event.timestamp.unwrap_or_default(), ..Default::default() };
+                        state.replicate_decision_task_failed_event(&env, Some(event))?;
+                        state.replicate_transient_decision_task_scheduled(&env)?;
+                    }
                     Some(EventType::ActivityTaskScheduled) => {
                         state.replicate_activity_task_scheduled_event(first.event_id, event, domain_id)?;
                     }
