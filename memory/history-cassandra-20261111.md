@@ -43,3 +43,19 @@ Remaining (later pieces): history v2 writers, visibility trait + Cassandra write
 - rust-ci @1967d791f: persistence 43054595642, matching 43054601773, history 43054609240 all success.
 - Gaps: create_history_tasks still errors (Task has no category/range id; no Rust caller; SQL also unimplemented) - not done. Semaphore maps not done.
 - Gates dispatched @1967d791f: cassandra/grpc/false 43056030102, cassandra/grpc/true 43056035699, mysql/grpc/false 43056041172 (results below).
+
+## Gate results (final, 2026-11-12)
+Fixes since pieces 1-4: Cassandra task reader/writer take task_id and timer visibility from `Task` (blob has none; also queues.rs fallback); visibility TTL bound as int; current-run `create_request_id` is uuid; UDT list/map binds use `Filled` (driver needs UDT keyspace/name from column type; history_tree ancestors bound as value, not literal); clippy useless_format.
+
+| Run | Gate | Head SHA | Result |
+|---|---|---|---|
+| https://github.com/auenkr/cadence-rust/actions/runs/43075200452 | cassandra/grpc/two_history=false | 998213ba0 | success |
+| https://github.com/auenkr/cadence-rust/actions/runs/43075206911 | cassandra/grpc/two_history=true | 998213ba0 | FAIL (restart-churn timeouts; flaky) |
+| https://github.com/auenkr/cadence-rust/actions/runs/43080788217 | cassandra/grpc/two_history=true (rerun) | e658298a8 | success |
+| https://github.com/auenkr/cadence-rust/actions/runs/43075212994 | mysql/grpc/false | 998213ba0 | success |
+| https://github.com/auenkr/cadence-rust/actions/runs/43079175139 | mysql/grpc/true | 998213ba0 | success |
+| 43076177515, 43076183276 | rust-ci persistence / history | e658298a8 | success |
+
+Rust binary SHA256 (run 43080788217): cadence-server ad037508ca60c8f0f32202d07aafde4968102564809735c63cf816f25f32dbaa; cadence-history 191513a6050d820317efe365b52d4ed0e7d6d557a2de1c97980696c6da38d2dc.
+
+Open items: the cassandra/true failure on 43075206911 passed on rerun, so treat it as an intermittent after-restart stall (not root-caused; no Cassandra-specific error in logs); `create_history_tasks` category-less stub still returns Internal; semaphore maps and `select_workflow_timer_tasks` (empty Vec) not done; visibility upsert returns "Operation is not supported" like Go's nosql store.
