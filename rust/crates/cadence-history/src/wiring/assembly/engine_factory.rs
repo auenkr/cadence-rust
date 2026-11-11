@@ -208,6 +208,8 @@ pub fn build_engine(
     let start_host = super::engine_start::EngineStartHost::new(core.clone(), env.config.clone());
     let failover_host = super::engine_start::EngineFailoverHost::new(shard.clone(), env.domain_cache.clone());
     let decision_handler = Arc::new(EngineDecisionHandler::new(cache.clone(), core.clone(), env.config.clone()));
+    let workflow_resetter =
+        Arc::new(super::engine_resetter::EngineWorkflowResetter::new(core.clone(), cache.clone()));
     Arc::new(HistoryEngine {
         current_cluster_name: env.cluster.metadata().current_cluster_name.clone(),
         domain_cache: env.domain_cache.clone(),
@@ -246,7 +248,7 @@ pub fn build_engine(
         matching_client: env.query_matching.clone(),
         raw_matching_client: env.query_matching.clone(),
         client_checker: env.client_checker.clone(),
-        workflow_resetter: Arc::new(UnwiredWorkflowResetter),
+        workflow_resetter,
         history_reader: Arc::new(SqlHistoryReader::new(shard.shard_id(), env.persistence.history_nodes.clone())),
         current_execution_reader: Arc::new(SqlCurrentExecutionReader::new(
             env.persistence.executions.clone(),

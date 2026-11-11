@@ -790,9 +790,13 @@ impl EngineMutableState {
                 "signalCount": g.exec.signal_count,
                 "cancelRequested": g.pc_exec.cancel_requested,
             },
+            // Go `VersionHistories` (CLI reads the current branch token from it).
+            "versionHistories": g.version_histories,
             "pendingActivities": g.pc_acts.keys().collect::<Vec<_>>(),
             "pendingChildExecutions": g.pc_children.keys().collect::<Vec<_>>(),
-            "bufferedEvents": g.buffered.len() + g.update_buffered.len(),
+            // Go `BufferedEvents []*types.HistoryEvent`: the CLI unmarshals this
+            // into persistence.WorkflowMutableState, so it must be an event list.
+            "bufferedEvents": g.buffered.iter().chain(g.update_buffered.iter()).collect::<Vec<_>>(),
         }))
     }
 }
