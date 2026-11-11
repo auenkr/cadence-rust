@@ -636,14 +636,14 @@ mod start_handler_tests {
 
     #[test]
     fn replication_messages_sorted_oldest_first_nil_last() {
-        let mut v = vec![shard_msgs(1, None, 1), shard_msgs(2, Some(20), 1), shard_msgs(3, Some(10), 1)];
+        let mut v = [shard_msgs(1, None, 1), shard_msgs(2, Some(20), 1), shard_msgs(3, Some(10), 1)];
         v.sort_by(cmp_replication_shard_messages);
         assert_eq!(v.iter().map(|m| m.shard_id).collect::<Vec<_>>(), vec![3, 2, 1]);
     }
 
     #[test]
     fn replication_messages_equal_time_smaller_first() {
-        let mut v = vec![shard_msgs(1, Some(5), 3), shard_msgs(2, Some(5), 1)];
+        let mut v = [shard_msgs(1, Some(5), 3), shard_msgs(2, Some(5), 1)];
         v.sort_by(cmp_replication_shard_messages);
         assert_eq!(v[0].shard_id, 2);
     }
