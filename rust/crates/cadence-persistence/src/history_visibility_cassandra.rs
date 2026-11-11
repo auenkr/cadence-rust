@@ -123,7 +123,7 @@ impl CassandraVisibilityStore {
         let with_ttl = ttl_seconds <= MAX_CASSANDRA_TTL;
         let mut values = open_values(row)?;
         if with_ttl {
-            values.push(bound(ttl_seconds));
+            values.push(bound(ttl_seconds as i32));
         }
         let mut statement = Statement::new(insert_text("open_executions", OPEN_COLS, 17, with_ttl));
         // Go `WithTimestamp(UnixNanoToDBTimestamp(start))` (the value is passed through as-is).
@@ -149,7 +149,7 @@ impl CassandraVisibilityStore {
         for table in ["closed_executions", "closed_executions_v2"] {
             let mut values = closed_values(row)?;
             if with_ttl {
-                values.push(bound(ttl_seconds));
+                values.push(bound(ttl_seconds as i32));
             }
             batch.append_statement(Statement::new(insert_text(table, CLOSED_COLS, 20, with_ttl)));
             all.push(values);
