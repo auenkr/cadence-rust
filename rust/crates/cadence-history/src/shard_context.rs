@@ -867,9 +867,7 @@ mod tests {
     async fn task_write_gate_keeps_read_level_behind_uncommitted_ids() {
         let store = Arc::new(Store(Mutex::new(vec![]), false));
         let c = Arc::new(ctx(store, Arc::new(AtomicUsize::new(0))).unwrap());
-        let read = |c: &ShardContext| match c.update_if_needed_and_get_queue_max_read_level(HistoryTaskCategory::Transfer, "") {
-            k => k,
-        };
+        let read = |c: &ShardContext| c.update_if_needed_and_get_queue_max_read_level(HistoryTaskCategory::Transfer, "");
         // Writer A allocates id 80 and has not committed yet.
         let gate_a = c.lock_task_writes().await;
         let mut slots_a = vec![(0, 0)];
