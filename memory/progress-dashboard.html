@@ -81,7 +81,7 @@
 </style>
 </head>
 <body>
-<section style="padding:16px;border:2px solid #d9a441;margin:16px"><strong>PAUSED — 2026-11-11 13:30 IST, at user request.</strong><p>History: live queue executors, mutable-state codec/overlay/txn (plan 1-4a), typed replay, NDC cache merged. Mixed gate still failing: first blocker RespondDecisionTaskCompleted (decision command processor) not ported. See memory/history-pause-20261105.md.</p></section>
+<section style="padding:16px;border:2px solid #d9a441;margin:16px"><strong>PAUSED — 2026-11-11 13:30 IST, at user request.</strong><p>UPDATE 2026-11-11: RespondDecisionTaskCompleted ported on branch history-dtcompleted (rust-ci 42987382521 green; mixed gate 42988554202 fails later: child workflows, search-attribute validation, others). See memory/history-dtcompleted-20261111.md.</p><p>History: live queue executors, mutable-state codec/overlay/txn (plan 1-4a), typed replay, NDC cache merged. Mixed gate still failing: first blocker RespondDecisionTaskCompleted (decision command processor) not ported. See memory/history-pause-20261105.md.</p></section>
 <header>
   <h1>Cadence migration: Go → Rust</h1>
   <div class="sub">Snapshot <span id="asof"></span> · source of truth: <code>memory/</code> in the repo · edit the <code>DATA</code> block in this file to update</div>

@@ -5,6 +5,7 @@ pub mod controller;
 pub mod engine_cache;
 pub mod engine_close;
 pub mod engine_decision;
+pub mod engine_decision_ops;
 pub mod engine_events;
 pub mod engine_events_transfer;
 pub mod engine_factory;
