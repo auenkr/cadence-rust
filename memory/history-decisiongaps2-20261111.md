@@ -16,3 +16,10 @@ Branch `history-decisiongaps2` (from origin/master).
 ## Remaining
 - Thrift RespondDecisionTaskCompleted `activitiesToDispatchLocally` in the response is already mapped; no end-to-end local-activity SDK run was done.
 - Fix generate-grpc-decisions.py to match the hand edit.
+
+## Gate result and root cause (appended)
+- mysql gate run 43060154371 on f36fff08: FAILED (sdk-complete-echo/describe-closed/complete-child: activity START_TO_CLOSE). Root cause: Rust frontend/API dropped `activitiesToDispatchLocally` from the history response, so locally dispatched (already started) activities never reached the SDK.
+- Fix (commits 9cbd0ce, f899dad): cadence-api `ActivityLocalDispatchInfo` + response field; thrift/proto/JSON conversions; frontend workflow_matching.rs and cadence-matching grpc.rs pass-through; persistence in-memory response fills the field.
+- rust-ci run 43063568361 on f899dad8dbc959d20f06f0d5dbd8e1bb0532c583: success (full workspace).
+- mysql gate run 43065856244 (https://github.com/auenkr/cadence-rust/actions/runs/43065856244) on f899dad8: success.
+- Remaining: rust/tools/generate-grpc-decisions.py still emits the old request_local_dispatch rejection (decisions.rs hand-edited).
