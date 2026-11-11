@@ -18,6 +18,8 @@ pub mod new_workflow_transaction_manager;
 pub mod replication_task;
 pub mod transaction_manager;
 pub mod workflow_resetter;
+#[cfg(test)]
+pub(crate) mod test_support;
 
 use cadence_api::errors::{BadRequestError, InternalServiceError, RetryTaskV2Error};
 use cadence_api::service_types::HistoryEvent;
