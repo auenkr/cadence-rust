@@ -17,3 +17,14 @@ Branch: `history-typed-replay3`
 - CI run URL: pending
 - Code head SHA: pending
 - Conclusion: pending
+
+## CI evidence
+
+- Successful run: https://github.com/auenkr/cadence-rust/actions/runs/42988820951
+- Validated code head SHA: `aee60fec25cc565b22c437623724ac70e0fb3724`
+- Conclusion: success; cadence-history Clippy and tests passed.
+- Earlier run `42985399424` found a moved-event compile error in the new test; fixed by using `std::slice::from_ref`.
+- Run `42985992031` found a Clippy `cloned_ref_to_slice_refs` lint; fixed with that same borrowed slice.
+- Run `42986696513` passed Clippy but found the test's completed-state expectation was wrong; corrected it to Go's completed value (`2`).
+- Run `42987720341` found that run linkage validation needed the expected new `WorkflowExecution` as an explicit input. Added that input and verified it matches the continued-as-new attribute.
+- All validation was on GitHub Actions. Local `git diff --check` passed; no Cargo, rustfmt, or Go command was run locally.
