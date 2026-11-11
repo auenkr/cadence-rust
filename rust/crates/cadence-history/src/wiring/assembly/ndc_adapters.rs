@@ -13,7 +13,7 @@
 //! cache lock; persistence methods are explicit errors until plan item 5a).
 //!
 //! NOT yet backed by the real mutable state (each returns a `TODO(...)` error):
-//! * `NdcStateBuilder`, `NdcStateRebuilder` (need that bridge).
+//! * `NdcStateBuilder` (needs that bridge). `NdcStateRebuilder` is real (ndc_rebuild.rs).
 //! * `NdcTransactionManager` (needs `TransactionManagerCollaborators`).
 //!
 //! See memory/history-gap-ndcadapters-20261107.md for the follow-up task list.
@@ -46,9 +46,12 @@ use crate::ndc::{
 use crate::shard_context::ShardContext;
 use crate::wiring::assembly::engine_cache::{EngineCore, EngineExecutionCache};
 use crate::wiring::assembly::ndc_workflow::EngineNdcExecutionCache;
+use crate::wiring::assembly::ndc_rebuild::{
+    EngineTaskDomains, NdcRebuildEnv, RebuildPager, SqlNdcStateRebuilder, UnavailableRebuildPager,
+};
 use crate::wiring::assembly::ndc_state::OwnedNdcMutableState;
 use crate::wiring::persistence::engine_ndc::{
-    SqlBranchManagerEnv, SqlHistoryManager, SqlWorkflowResetterEnv,
+    SqlBranchManagerEnv, SqlHistoryManager, SqlHistoryPager, SqlWorkflowResetterEnv,
 };
 
 /// Go `config.StandbyClusterDelay` default (5 minutes) in nanoseconds.
@@ -130,25 +133,21 @@ impl NdcStateBuilder for TodoNdcStateBuilder {
     }
 }
 
-/// `NdcStateRebuilder` placeholder.
-pub struct TodoNdcStateRebuilder;
-
-impl NdcStateRebuilder for TodoNdcStateRebuilder {
-    fn rebuild(
-        &self,
-        _now_nanos: i64,
-        _base_domain_id: &str,
-        _base_workflow_id: &str,
-        _base_run_id: &str,
-        _base_branch_token: &[u8],
-        _base_last_event_id: i64,
-        _base_last_event_version: i64,
-        _target_run_id: &str,
-        _target_branch_token: &dyn Fn() -> NdcResult<Vec<u8>>,
-        _request_id: &str,
-    ) -> NdcResult<(Box<dyn NdcMutableState>, i64)> {
-        Err(todo_error("NdcStateRebuilder::rebuild"))
-    }
+/// Real `NdcStateRebuilder` over the history store (see `ndc_rebuild.rs`).
+fn new_state_rebuilder(core: &EngineCore) -> SqlNdcStateRebuilder {
+    let state_params = core.state_params.clone();
+    let pager: Arc<dyn RebuildPager> = match (core.state_params)("").history_nodes {
+        Some(nodes) => Arc::new(SqlHistoryPager { nodes, shard_id: core.shard.shard_id() }),
+        None => Arc::new(UnavailableRebuildPager),
+    };
+    SqlNdcStateRebuilder::new(NdcRebuildEnv {
+        pager,
+        domains: core.domains.clone(),
+        task_domains: Arc::new(EngineTaskDomains { domains: core.domains.clone(), state_params: state_params.clone() }),
+        state_params,
+        // TODO(ndc-config): `IsAdvancedVisibilityWritingEnabled` is not exposed to EngineCore yet.
+        advanced_visibility_writing: Arc::new(|| false),
+    })
 }
 
 /// `NdcTransactionManager` placeholder.
@@ -196,7 +195,7 @@ pub struct EngineNdcEnv {
     cache: EngineNdcExecutionCache,
     transactions: TodoNdcTransactionManager,
     state_builder: TodoNdcStateBuilder,
-    state_rebuilder: TodoNdcStateRebuilder,
+    state_rebuilder: SqlNdcStateRebuilder,
     branch_env: SqlBranchManagerEnv,
     resetter_env: SqlWorkflowResetterEnv,
     clock: Arc<dyn crate::engine::deps::TimeSource>,
@@ -220,7 +219,7 @@ impl EngineNdcEnv {
             ),
             transactions: TodoNdcTransactionManager,
             state_builder: TodoNdcStateBuilder,
-            state_rebuilder: TodoNdcStateRebuilder,
+            state_rebuilder: new_state_rebuilder(core),
             branch_env: SqlBranchManagerEnv { history: history.clone(), domains: core.domains.clone() },
             resetter_env: SqlWorkflowResetterEnv { history, domains: core.domains.clone() },
             clock: core.clock.clone(),

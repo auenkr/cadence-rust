@@ -227,6 +227,20 @@ impl TypedMutableState {
         f: impl FnOnce(&mut MutableStateTaskGenerator<'_, TypedTaskGeneratorState<'_, DomainsRef>>) -> Result<R>,
     ) -> Result<R> {
         let domains = DomainsRef(self.task_gen_env.domains.clone());
+        self.run_task_generator_with(&domains, decision_schedule_to_start_timeout_nanos, |adapter| {
+            f(&mut MutableStateTaskGenerator { state: adapter })
+        })
+    }
+
+    /// Same as [`Self::run_task_generator`] but with a caller-supplied domain
+    /// resolver and direct access to the adapter, so a multi-step flow (Go
+    /// `RefreshTasks`) drains its generated tasks into this state exactly once.
+    pub(crate) fn run_task_generator_with<D: TaskGeneratorDomains, R>(
+        &mut self,
+        domains: &D,
+        decision_schedule_to_start_timeout_nanos: i64,
+        f: impl FnOnce(&mut TypedTaskGeneratorState<'_, D>) -> Result<R>,
+    ) -> Result<R> {
         let mut rng = self.task_gen_env.rng_state;
         if rng == 0 {
             rng = std::time::SystemTime::now()
@@ -242,9 +256,9 @@ impl TypedMutableState {
             if upper <= 0 { 0 } else { (rng % upper as u64) as i64 }
         };
         let (result, transfer, timer, timer_status) = {
-            let mut adapter = TypedTaskGeneratorState::new(self, &domains, &mut random);
+            let mut adapter = TypedTaskGeneratorState::new(self, domains, &mut random);
             adapter.decision_schedule_to_start_timeout_nanos = decision_schedule_to_start_timeout_nanos;
-            let result = f(&mut MutableStateTaskGenerator { state: &mut adapter });
+            let result = f(&mut adapter);
             (result, adapter.transfer_tasks, adapter.timer_tasks, adapter.activity_timer_status)
         };
         for (schedule_id, (timer_task_status, last_heartbeat_visibility)) in timer_status {
