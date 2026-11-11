@@ -106,7 +106,7 @@ impl EngineOps<'_> {
         g.exec.close_status = status;
         g.pc_exec.state = WORKFLOW_STATE_COMPLETED;
         g.pc_exec.close_status = status;
-        g.pc_exec.completion_event_batch_id = completed_id;
+        g.pc_exec.completion_event_batch_id = g.hist.iter().find(|e| e.event_id > 0).map(|e| e.event_id).unwrap_or(completed_id);
         g.clear_stickyness();
         g.gen_workflow_close_tasks(&params, ms * 1_000_000, ev.version);
         Ok(())
@@ -557,11 +557,12 @@ impl Operations for EngineOps<'_> {
                     child_workflow_only: attrs.child_workflow_only,
                 });
         });
+        let batch_id = g.hist.iter().find(|e| e.event_id > 0).map(|e| e.event_id).unwrap_or(completed_id);
         g.pc_cancels.insert(
             ev.event_id,
             pc::RequestCancelInfo {
                 version: ev.version,
-                initiated_event_batch_id: completed_id,
+                initiated_event_batch_id: batch_id,
                 cancel_request_id: request_id.to_string(),
             },
         );
@@ -591,11 +592,12 @@ impl Operations for EngineOps<'_> {
                     control: attrs.control,
                 });
         });
+        let batch_id = g.hist.iter().find(|e| e.event_id > 0).map(|e| e.event_id).unwrap_or(completed_id);
         g.pc_signals.insert(
             ev.event_id,
             pc::SignalInfo {
                 version: ev.version,
-                initiated_event_batch_id: completed_id,
+                initiated_event_batch_id: batch_id,
                 request_id: request_id.to_string(),
                 name: a.signal_name.clone(),
                 input: a.input.clone(),
@@ -645,11 +647,12 @@ impl Operations for EngineOps<'_> {
                 .encode(&ev.to_thrift())
                 .map_err(|e| internal(format!("encode child initiated event: {e}")))?
         };
+        let batch_id = g.hist.iter().find(|e| e.event_id > 0).map(|e| e.event_id).unwrap_or(completed_id);
         g.pc_children.insert(
             ev.event_id,
             pc::ChildExecutionInfo {
                 version: ev.version,
-                initiated_event_batch_id: completed_id,
+                initiated_event_batch_id: batch_id,
                 started_id: EMPTY_EVENT_ID,
                 initiated_event: blob,
                 initiated_event_encoding: "thriftrw".to_string(),

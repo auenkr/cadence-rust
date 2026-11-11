@@ -45,19 +45,18 @@ impl MutableStateTaskRefresher for EngineTaskRefresher {
             .as_any_arc()
             .and_then(|a| a.downcast::<EngineMutableState>().ok())
             .ok_or_else(|| HistoryError::internal("mutable state is not an EngineMutableState"))?;
-        let (closed, next_event_id, cancels, signals, own_domain) = {
+        let (closed, cancels, signals, own_domain) = {
             let g = state.inner.lock().unwrap();
             (
                 !g.exec.is_running(),
-                g.next_event_id,
-                g.pc_cancels.keys().copied().collect::<Vec<_>>(),
-                g.pc_signals.keys().copied().collect::<Vec<_>>(),
+                g.pc_cancels.iter().map(|(k, v)| (*k, v.initiated_event_batch_id)).collect::<Vec<_>>(),
+                g.pc_signals.iter().map(|(k, v)| (*k, v.initiated_event_batch_id)).collect::<Vec<_>>(),
                 g.exec.domain_id.clone(),
             )
         };
         let start_event = state.ev_start_event().await?;
         let completion = if closed {
-            state.read_events(next_event_id - 1, next_event_id).await?.into_iter().next()
+            Some(state.ev_completion_event().await?)
         } else {
             None
         };
@@ -65,9 +64,9 @@ impl MutableStateTaskRefresher for EngineTaskRefresher {
             return Err(HistoryError::internal("unable to get workflow completion event"));
         }
         let mut initiated: BTreeMap<i64, HistoryEvent> = BTreeMap::new();
-        for id in cancels.into_iter().chain(signals) {
+        for (id, batch) in cancels.into_iter().chain(signals) {
             let event = state
-                .read_events(id, id + 1)
+                .read_events(batch, id + 1)
                 .await?
                 .into_iter()
                 .find(|e| e.event_id == id)
