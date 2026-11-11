@@ -68,6 +68,17 @@ pub struct ConfiguredMatchingStores {
     pub history_visibility_sql_backend: Option<cadence_persistence::history_sql_backend::SqlBackend>,
     /// History's shard row store over the same pool (MySQL/PostgreSQL only).
     pub history_shard_store: Option<Arc<dyn cadence_persistence::history_sql::ShardStore>>,
+    /// History's Cassandra stores (Cassandra default store only).
+    pub history_cassandra: Option<HistoryCassandraStores>,
+}
+
+/// History persistence over a Cassandra default store (Go `nosql` factory outputs).
+#[derive(Clone)]
+pub struct HistoryCassandraStores {
+    pub executions: Arc<dyn cadence_persistence::history_contract::GoExecutionStore>,
+    pub history_v2: Arc<dyn cadence_persistence::history_contract::GoHistoryV2Store>,
+    /// Visibility keyspace writer (separate visibility store when configured).
+    pub visibility: cadence_persistence::history_visibility_cassandra::CassandraVisibilityStore,
 }
 
 fn validate_sql_shards(sql: &crate::config::SqlConfig) -> anyhow::Result<()> {
@@ -258,6 +269,7 @@ pub fn open_configured_default_store(
             ),
             None => driver.clone(),
         };
+        let history_visibility_driver = visibility_driver.clone();
         let visibility: Arc<dyn cadence_persistence::visibility_reader::VisibilityStore> = Arc::new(
             cadence_persistence::visibility_cassandra::CassandraVisibilityStore::new(
                 visibility_driver,
@@ -288,7 +300,22 @@ pub fn open_configured_default_store(
         return Ok(ConfiguredMatchingStores {
             history_sql_backend: None,
             history_visibility_sql_backend: None,
-            history_shard_store: None,
+            history_shard_store: Some(Arc::new(
+                cadence_persistence::history_shard_cassandra::CassandraShardStore::new(driver.clone()),
+            )),
+            history_cassandra: Some(HistoryCassandraStores {
+                executions: Arc::new(
+                    cadence_persistence::history_execution_cassandra::CassandraExecutionStore::new(driver.clone())
+                        .with_shard_id(0)
+                        .with_target_cluster(active_cluster_name),
+                ),
+                history_v2: Arc::new(
+                    cadence_persistence::history_v2_cassandra::CassandraHistoryV2Store::new(driver.clone()),
+                ),
+                visibility: cadence_persistence::history_visibility_cassandra::CassandraVisibilityStore::new(
+                    history_visibility_driver,
+                ),
+            }),
             history_node_store: Some(Arc::new(
                 cadence_persistence::history_cassandra::CassandraHistoryNodeStore::new(driver.clone()),
             )),
@@ -335,6 +362,7 @@ pub fn open_configured_default_store(
                 history_sql_backend: None,
                 history_visibility_sql_backend: None,
                 history_shard_store: None,
+                history_cassandra: None,
                 history_node_store: None,
                 visibility_store: None,
                 domain_id_parse: crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic,
@@ -428,6 +456,7 @@ pub fn open_configured_default_store(
                 history_sql_backend: Some(cadence_persistence::history_sql_backend::SqlBackend::mysql(&store)),
                 history_visibility_sql_backend: Some(vis_backend),
                 history_shard_store: Some(Arc::new(cadence_persistence::history_shard_sql::MySqlShardStore::from_task_store(&store))),
+                history_cassandra: None,
                 history_node_store: Some(store.clone()),
                 visibility_store: Some(visibility),
                 domain_id_parse: crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic,
@@ -528,6 +557,7 @@ pub fn open_configured_default_store(
                 history_sql_backend: Some(cadence_persistence::history_sql_backend::SqlBackend::postgres(&store)),
                 history_visibility_sql_backend: Some(vis_backend),
                 history_shard_store: Some(Arc::new(cadence_persistence::history_shard_sql::PostgresShardStore::from_task_store(&store))),
+                history_cassandra: None,
                 history_node_store: Some(store.clone()),
                 visibility_store: Some(visibility),
                 domain_id_parse: crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic,
