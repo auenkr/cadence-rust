@@ -6,6 +6,8 @@
 //! (`{field: ?, ...}`); the per-field values come from a single ordered
 //! `Fields` list so the literal text and the bound values cannot drift apart.
 //! Reads map `CqlValue` generically.
+#![allow(clippy::too_many_arguments)]
+
 use crate::cassandra::CassandraBlockingSession;
 use crate::history_contract::*;
 use crate::history_execution_cassandra::{
@@ -794,7 +796,7 @@ pub(crate) fn push_requests(
     };
     for r in requests {
         let request_id = parse_uuid(&r.request_id)?;
-        for task_id in [EMPTY_REQUEST_VERSION * -1, version * -1] {
+        for task_id in [-EMPTY_REQUEST_VERSION, -version] {
             let mut v = key_values(shard, ROW_TYPE_REQUEST_START, domain, workflow, request_id, task_id);
             v.push(bound(parse_uuid(run)?));
             v.push(bound(now));
@@ -1255,10 +1257,7 @@ pub(crate) fn parse_execution_info(udt: &HashMap<&str, &CqlValue>) -> WorkflowEx
             Some(DataBlob { encoding, data })
         }
     };
-    let empty_uuid = |n: &str| {
-        let v = get_str(g(n));
-        v
-    };
+    let empty_uuid = |n: &str| get_str(g(n));
     WorkflowExecutionInfo {
         domain_id: get_str(g("domain_id")),
         workflow_id: get_str(g("workflow_id")),
@@ -1330,7 +1329,7 @@ fn encode_blob(st: &cadence_thrift::value::Struct) -> Result<DataBlob, E> {
     Ok(DataBlob { encoding: Encoding::ThriftRW.as_str().to_owned(), data: Encoding::ThriftRW.encode(st).map_err(internal)? })
 }
 
-fn map_entries<'a>(v: Option<&'a CqlValue>) -> Vec<(&'a CqlValue, HashMap<&'a str, &'a CqlValue>)> {
+fn map_entries(v: Option<&CqlValue>) -> Vec<(&CqlValue, HashMap<&str, &CqlValue>)> {
     match v {
         Some(CqlValue::Map(entries)) => entries.iter().map(|(k, x)| (k, udt_map(Some(x)))).collect(),
         _ => Vec::new(),
