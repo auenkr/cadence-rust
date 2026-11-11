@@ -230,7 +230,10 @@ impl NdcMutableState for OwnedNdcMutableState {
         }] };
         Ok((snapshot, batches))
     }
-    fn transaction_committed(&mut self) { self.typed.cleanup_transaction(); }
+    fn close_transaction_as_mutation(&mut self, now_nanos: i64, policy: TransactionPolicy) -> NdcResult<(cadence_persistence::history_contract::WorkflowMutation, Vec<WorkflowEvents>)> {
+        TransactionState::close_mutation(self, now_nanos, policy)
+    }
+    fn transaction_committed(&mut self) { self.typed.cleanup_transaction(); self.update_condition = self.typed.next_event_id_in_db; self.typed.condition = self.update_condition; }
 }
 
 impl TransactionState for OwnedNdcMutableState {
@@ -247,7 +250,7 @@ impl TransactionState for OwnedNdcMutableState {
         Ok((mutation, batches))
     }
     fn close_snapshot(&mut self, now: i64, policy: TransactionPolicy) -> NdcResult<(WorkflowSnapshot, Vec<WorkflowEvents>)> { self.close_transaction_as_snapshot(now, policy) }
-    fn transaction_committed(&mut self) { self.typed.cleanup_transaction(); }
+    fn transaction_committed(&mut self) { self.typed.cleanup_transaction(); self.update_condition = self.typed.next_event_id_in_db; self.typed.condition = self.update_condition; }
 }
 
 #[cfg(test)]

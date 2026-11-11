@@ -8,7 +8,7 @@
 //! (`block_in_place` + `Handle::block_on`, so a multi-thread runtime is required).
 
 use std::any::Any;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -20,8 +20,8 @@ use cadence_api::service_types::HistoryEvent;
 use cadence_persistence::history_contract::{
     ConflictResolveWorkflowExecutionRequest, ConflictResolveWorkflowMode, CreateWorkflowExecutionRequest,
     CreateWorkflowMode, DataBlob, GoExecutionStore, GoHistoryV2Store, HistoryBranchRange, HistoryBranchRequest,
-    PersistenceError, UpdateWorkflowExecutionRequest, UpdateWorkflowMode, WorkflowMutation, WorkflowRequest,
-    WorkflowRequestMode, WorkflowSnapshot,
+    HistoryTaskCategory, PersistenceError, Task, UpdateWorkflowExecutionRequest, UpdateWorkflowMode,
+    WorkflowMutation, WorkflowRequest, WorkflowRequestMode, WorkflowSnapshot,
 };
 use cadence_persistence::history_reader::{read_history_branch, HistoryNodeStore, ReadHistoryBranchRequest};
 
@@ -426,6 +426,14 @@ pub trait WorkflowContextHooks<M: TransactionState> {
         new_workflow: Option<&mut WorkflowSnapshot>,
     ) -> Result<(), M::Error>;
     async fn reapply_events(&mut self, batches: &[WorkflowEvents]) -> Result<(), M::Error>;
+    /// Go shard `allocateTransferIDs` / `allocateTimerIDs`: assigns task IDs
+    /// (and visibility timestamps) to the encoded tasks of one write image
+    /// before the write. The hook remembers what to publish after commit.
+    fn allocate_task_ids(&mut self, tasks: &mut BTreeMap<HistoryTaskCategory, Vec<Task>>) -> Result<(), M::Error>;
+    /// The write is durable: advance max read level and notify queues.
+    fn tasks_committed(&mut self);
+    /// The write failed: drop the pending allocation (handle ownership loss).
+    fn write_failed(&mut self, error: &M::Error);
 }
 
 /// Implements [`WorkflowContextStore`] and [`ConflictContextStore`] on SQL stores.
@@ -535,21 +543,32 @@ where
         requests: WorkflowRequestMode,
     ) -> Result<(), M::Error> {
         // Go does not retry create (a timeout may have succeeded).
+        let mut snapshot = snapshot.clone();
+        if let Err(e) = self.hooks.allocate_task_ids(&mut snapshot.tasks_by_category) {
+            self.hooks.write_failed(&e);
+            return Err(e);
+        }
         let request = CreateWorkflowExecutionRequest {
             shard_id: self.shard_id,
             range_id: (self.range_id)(),
             mode,
             previous_run_id: previous_run.to_string(),
             previous_last_write_version: previous_version,
-            new_workflow_snapshot: snapshot.clone(),
+            new_workflow_snapshot: snapshot,
             workflow_request_mode: requests,
             current_timestamp_unix_nanos: now_unix_nanos(),
         };
-        self.executions
-            .create_workflow_execution(request)
-            .await
-            .map(|_| ())
-            .map_err(|e| M::Error::from(to_history_error(e)))
+        match self.executions.create_workflow_execution(request).await {
+            Ok(_) => {
+                self.hooks.tasks_committed();
+                Ok(())
+            }
+            Err(e) => {
+                let e = M::Error::from(to_history_error(e));
+                self.hooks.write_failed(&e);
+                Err(e)
+            }
+        }
     }
     async fn update_with_retry(
         &mut self,
@@ -559,19 +578,36 @@ where
         mode: UpdateWorkflowMode,
         requests: WorkflowRequestMode,
     ) -> Result<(), M::Error> {
+        let mut mutation = mutation.clone();
+        let mut new_snapshot = new_workflow.cloned();
+        let allocated = self.hooks.allocate_task_ids(&mut mutation.tasks_by_category).and_then(|_| match new_snapshot.as_mut() {
+            Some(s) => self.hooks.allocate_task_ids(&mut s.tasks_by_category),
+            None => Ok(()),
+        });
+        if let Err(e) = allocated {
+            self.hooks.write_failed(&e);
+            return Err(e);
+        }
         let request = UpdateWorkflowExecutionRequest {
             shard_id: self.shard_id,
             range_id: (self.range_id)(),
             mode,
-            update_workflow_mutation: mutation.clone(),
-            new_workflow_snapshot: new_workflow.cloned(),
+            update_workflow_mutation: mutation,
+            new_workflow_snapshot: new_snapshot,
             workflow_request_mode: requests,
             current_timestamp_unix_nanos: now_unix_nanos(),
         };
-        self.executions
-            .update_workflow_execution(request)
-            .await
-            .map_err(|e| M::Error::from(to_history_error(e)))
+        match self.executions.update_workflow_execution(request).await {
+            Ok(()) => {
+                self.hooks.tasks_committed();
+                Ok(())
+            }
+            Err(e) => {
+                let e = M::Error::from(to_history_error(e));
+                self.hooks.write_failed(&e);
+                Err(e)
+            }
+        }
     }
     fn notify_snapshot(&mut self, snapshot: Option<&WorkflowSnapshot>, history: &[PersistedBlob], persistence_error: bool) {
         self.hooks.notify_snapshot(snapshot, history, persistence_error)
