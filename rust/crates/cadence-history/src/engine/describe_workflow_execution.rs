@@ -63,7 +63,7 @@ pub async fn create_describe_workflow_execution_response(mutable_state: &dyn Mut
     Ok(result)
 }
 
-fn map_workflow_execution_configuration(info: &WorkflowExecutionInfo) -> WorkflowExecutionConfiguration {
+pub(crate) fn map_workflow_execution_configuration(info: &WorkflowExecutionInfo) -> WorkflowExecutionConfiguration {
     WorkflowExecutionConfiguration {
         task_list: Some(map_decision_info_to_task_list(info)),
         execution_start_to_close_timeout_seconds: Some(info.workflow_timeout),
@@ -71,7 +71,7 @@ fn map_workflow_execution_configuration(info: &WorkflowExecutionInfo) -> Workflo
     }
 }
 
-fn map_workflow_execution_info(
+pub(crate) fn map_workflow_execution_info(
     info: &WorkflowExecutionInfo,
     start_event: &HistoryEvent,
     domain_cache: &dyn DomainCache,
@@ -126,7 +126,7 @@ fn to_internal_workflow_execution_close_status(status: i32) -> Option<WorkflowEx
     }
 }
 
-fn map_pending_activity_info(ai: &ActivityInfo, scheduled_event: &HistoryEvent) -> PendingActivityInfo {
+pub(crate) fn map_pending_activity_info(ai: &ActivityInfo, scheduled_event: &HistoryEvent) -> PendingActivityInfo {
     let mut p = PendingActivityInfo { activity_id: ai.activity_id.clone(), schedule_id: ai.schedule_id, ..Default::default() };
     let mut state = PendingActivityState::Scheduled;
     if ai.cancel_requested {
@@ -172,7 +172,7 @@ fn map_pending_activity_info(ai: &ActivityInfo, scheduled_event: &HistoryEvent) 
     p
 }
 
-fn map_pending_child_execution_info(child: &PendingChildInfo, domain_entry: &DomainCacheEntry, domain_cache: &dyn DomainCache) -> HResult<PendingChildExecutionInfo> {
+pub(crate) fn map_pending_child_execution_info(child: &PendingChildInfo, domain_entry: &DomainCacheEntry, domain_cache: &dyn DomainCache) -> HResult<PendingChildExecutionInfo> {
     // execution.GetChildExecutionDomainName
     let child_domain_name = if !child.domain_id.is_empty() {
         domain_cache.get_domain_name(&child.domain_id)
@@ -198,7 +198,7 @@ fn map_pending_child_execution_info(child: &PendingChildInfo, domain_entry: &Dom
     })
 }
 
-fn map_pending_decision_info(di: &DecisionInfo) -> PendingDecisionInfo {
+pub(crate) fn map_pending_decision_info(di: &DecisionInfo) -> PendingDecisionInfo {
     let mut pending = PendingDecisionInfo {
         state: Some(PendingDecisionState::Scheduled),
         scheduled_timestamp: Some(di.schedule_timestamp),
@@ -214,6 +214,6 @@ fn map_pending_decision_info(di: &DecisionInfo) -> PendingDecisionInfo {
     pending
 }
 
-fn map_decision_info_to_task_list(info: &WorkflowExecutionInfo) -> TaskList {
+pub(crate) fn map_decision_info_to_task_list(info: &WorkflowExecutionInfo) -> TaskList {
     TaskList { name: info.task_list.clone(), kind: info.task_list_kind, ..Default::default() }
 }
