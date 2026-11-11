@@ -200,6 +200,10 @@ impl EngineMutableState {
             }
             i.partition_config = request.partition_config.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         }
+        // The close transaction copies `last_processed_event` back into the
+        // execution info; a run without a first decision (child workflow) must keep
+        // EmptyEventID or ScheduleDecisionTask would see a "processed" decision.
+        g.last_processed_event = EMPTY_EVENT_ID;
         let p = g.pc_exec.clone();
         {
             let e = &mut g.exec;
