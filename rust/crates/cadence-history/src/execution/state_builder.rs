@@ -368,13 +368,13 @@ mod typed_replay_tests {
 
     #[test]
     fn typed_replay_rejects_missing_timer_attributes_and_unknown_event_types() {
-        let mut state = state();
+        let mut typed_state = state();
         let missing_attributes = HistoryEvent { event_type: Some(EventType::TimerStarted), ..Default::default() };
-        assert!(matches!(StateBuilder::apply_events_typed(&mut state, "d", "r", &WorkflowExecution::default(), &[missing_attributes]), Err(StateBuilderError::Timer(_))));
+        assert!(matches!(StateBuilder::apply_events_typed(&mut typed_state, "d", "r", &WorkflowExecution::default(), &[missing_attributes]), Err(StateBuilderError::Timer(_))));
 
-        let mut state = state();
+        let mut typed_state = state();
         let unknown = HistoryEvent { event_type: None, ..Default::default() };
-        assert!(matches!(StateBuilder::apply_events_typed(&mut state, "d", "r", &WorkflowExecution::default(), &[unknown]), Err(StateBuilderError::UnknownEventType)));
+        assert!(matches!(StateBuilder::apply_events_typed(&mut typed_state, "d", "r", &WorkflowExecution::default(), &[unknown]), Err(StateBuilderError::UnknownEventType)));
     }
 
     #[test]
