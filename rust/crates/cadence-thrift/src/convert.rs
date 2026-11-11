@@ -4466,6 +4466,9 @@ impl FromThrift for RespondDecisionTaskCompletedResponse {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {
             decision_task: s.opt_struct(10)?,
+            activities_to_dispatch_locally: s
+                .opt_map_str::<ActivityLocalDispatchInfo>(20)?
+                .unwrap_or_default(),
         })
     }
 }
@@ -4474,6 +4477,33 @@ impl ToThrift for RespondDecisionTaskCompletedResponse {
     fn to_thrift(&self) -> Struct {
         let mut f = Fields::new();
         f.ostruct(10, self.decision_task.as_ref());
+        if !self.activities_to_dispatch_locally.is_empty() {
+            f.omap_str_struct(20, &Some(self.activities_to_dispatch_locally.clone()));
+        }
+        f.finish()
+    }
+}
+
+impl FromThrift for ActivityLocalDispatchInfo {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            activity_id: s.req_string(10, "")?,
+            scheduled_timestamp: s.opt_i64(20)?,
+            started_timestamp: s.opt_i64(30)?,
+            scheduled_timestamp_of_this_attempt: s.opt_i64(40)?,
+            task_token: s.bytes_or_empty(50)?,
+        })
+    }
+}
+
+impl ToThrift for ActivityLocalDispatchInfo {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.activity_id);
+        f.oi64(20, self.scheduled_timestamp);
+        f.oi64(30, self.started_timestamp);
+        f.oi64(40, self.scheduled_timestamp_of_this_attempt);
+        f.sbytes(50, &self.task_token);
         f.finish()
     }
 }
@@ -4807,6 +4837,7 @@ impl FromThrift for ScheduleActivityTaskDecisionAttributes {
             heartbeat_timeout_seconds: s.opt_i32(60)?,
             retry_policy: s.opt_struct(70)?,
             header: s.opt_struct(80)?,
+            request_local_dispatch: s.bool_or_false(90)?,
         })
     }
 }
@@ -4825,6 +4856,7 @@ impl ToThrift for ScheduleActivityTaskDecisionAttributes {
         f.oi32(60, self.heartbeat_timeout_seconds);
         f.ostruct(70, self.retry_policy.as_ref());
         f.ostruct(80, self.header.as_ref());
+        f.obool(90, self.request_local_dispatch);
         f.finish()
     }
 }

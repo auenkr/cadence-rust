@@ -77,7 +77,13 @@ impl HistoryApi for GrpcHistory {
         super::grpc_g2::record_activity_task_started(&self.state, request.into_inner()).await.map(Response::new)
     }
     async fn respond_decision_task_completed(&self, request: Request<pb::RespondDecisionTaskCompletedRequest>) -> Result<Response<pb::RespondDecisionTaskCompletedResponse>, Status> {
-        super::grpc_g2::respond_decision_task_completed(&self.state, request.into_inner()).await.map(Response::new)
+        let headers = crate::wiring::assembly::engine_decision::ClientHeaders::from_lookup(|k| {
+            request.metadata().get(k).and_then(|v| v.to_str().ok()).map(str::to_string)
+        });
+        crate::wiring::assembly::engine_decision::CLIENT_HEADERS
+            .scope(headers, super::grpc_g2::respond_decision_task_completed(&self.state, request.into_inner()))
+            .await
+            .map(Response::new)
     }
     async fn respond_decision_task_failed(&self, request: Request<pb::RespondDecisionTaskFailedRequest>) -> Result<Response<pb::RespondDecisionTaskFailedResponse>, Status> {
         super::grpc_g2::respond_decision_task_failed(&self.state, request.into_inner()).await.map(Response::new)

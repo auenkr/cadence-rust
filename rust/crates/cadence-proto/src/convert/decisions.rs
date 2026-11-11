@@ -6,11 +6,7 @@ use tonic::Status;
 fn schedule_activity_task_decision_attributes(
     v: p::ScheduleActivityTaskDecisionAttributes,
 ) -> Result<tasks::ScheduleActivityTaskDecisionAttributes, Status> {
-    if v.request_local_dispatch {
-        return Err(Status::unimplemented(
-            "ScheduleActivityTaskDecisionAttributes.request_local_dispatch has not been ported.",
-        ));
-    }
+    let request_local_dispatch = v.request_local_dispatch;
     Ok(tasks::ScheduleActivityTaskDecisionAttributes {
         activity_id: v.activity_id,
         activity_type: v.activity_type.map(|t| t::ActivityType { name: t.name }),
@@ -25,6 +21,7 @@ fn schedule_activity_task_decision_attributes(
         header: v.header.map(|m| t::Header {
             fields: Some(m.fields.into_iter().map(|(k, p)| (k, p.data)).collect()),
         }),
+        request_local_dispatch,
     })
 }
 fn complete_workflow_execution_decision_attributes(
