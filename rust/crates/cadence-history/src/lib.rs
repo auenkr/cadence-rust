@@ -144,3 +144,7 @@ pub mod workflowcache;
 pub mod queuev2;
 pub mod failover;
 pub mod replication;
+#[cfg(test)]
+mod shard_tests;
+#[cfg(test)]
+mod shard_context_tests;
