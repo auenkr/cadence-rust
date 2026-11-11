@@ -30,10 +30,10 @@ jobs:
       CARGO_TARGET_DIR: /tmp/cadence-history-gate-${{ github.run_id }}-${{ github.run_attempt }}
       CARGO_BUILD_JOBS: 2
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: true
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go/go.mod
           cache-dependency-path: |
@@ -83,7 +83,7 @@ jobs:
           exit "$result"
       - name: Upload reproducible evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: history-mixed-gate-${{ inputs.database }}-${{ inputs.outbound }}
           retention-days: 3
