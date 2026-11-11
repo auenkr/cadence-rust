@@ -19,6 +19,6 @@ Branch: `history-ndcpersist3` (base `9120a28ea`). Go source: `execution/context.
 
 ## CI
 
-- Run URL: pending
-- Code head SHA: pending
-- Conclusion: pending
+- Run URL: https://github.com/auenkr/cadence-rust/actions/runs/42997350580
+- Code head SHA: c6215026d8b88c37077d9fc4526c54551918f1fa
+- Conclusion: success (clippy + cadence-history tests)
