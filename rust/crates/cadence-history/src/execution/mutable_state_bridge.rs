@@ -107,7 +107,7 @@ pub fn mutation_to_persistence(
     use cadence_thrift::value::Struct;
     use pc::{ActivityInfo, ChildExecutionInfo, RequestCancelInfo, SignalInfo, TimerInfo};
     fn blob(value: Struct, previous: Option<&pc::DataBlob>) -> HResult<pc::DataBlob> {
-        let mut merged = previous.map(|b| decode(b)).transpose()?.unwrap_or_default();
+        let mut merged = previous.map(decode).transpose()?.unwrap_or_default();
         for (id, field) in value.fields { merged.fields.retain(|(old, _)| *old != id); merged.fields.push((id, field)); }
         let encoding = previous.map(|b| sqlblobs::Encoding::parse(&b.encoding)).transpose()
             .map_err(|e| HistoryError::internal(format!("parse prior row encoding: {e}")))?
@@ -184,11 +184,11 @@ pub fn mutation_to_persistence(
             result.activity_heartbeats.insert(id, pc::ActivityHeartbeat { details: info.details.clone(), updated_time_unix_nanos: info.last_heartbeat_updated_time });
         }
     }
-    for info in &mutation.upsert_timer_infos { let id = info.timer_id.clone(); result.upsert_timer_infos.push(keyed(id.clone(), &pc::TimerInfo { version: info.version, started_id: info.started_id, expiry_time_unix_nanos: info.expiry_time_unix_nanos, task_id: i64::from(info.task_status), ..Default::default() }, find_timer(&id))?); }
+    for info in &mutation.upsert_timer_infos { let id = info.timer_id.clone(); result.upsert_timer_infos.push(keyed(id.clone(), &pc::TimerInfo { version: info.version, started_id: info.started_id, expiry_time_unix_nanos: info.expiry_time_unix_nanos, task_id: i64::from(info.task_status) }, find_timer(&id))?); }
     for info in &mutation.upsert_child_execution_infos { let id = info.initiated_id; result.upsert_child_execution_infos.push(keyed(id, &pc::ChildExecutionInfo { version: info.version, initiated_event_batch_id: info.initiated_event_batch_id, started_id: info.started_id, started_workflow_id: info.started_workflow_id.clone(), started_run_id: info.started_run_id.as_bytes().to_vec(), create_request_id: info.create_request_id.clone(), domain_id: info.domain_id.clone(), workflow_type_name: info.workflow_type_name.clone(), parent_close_policy: info.parent_close_policy.map_or(0, |x| x as i32), ..Default::default() }, find_child(id))?); }
     for info in &mutation.upsert_request_cancel_infos { let id=info.initiated_id; result.upsert_request_cancel_infos.push(keyed(id, &pc::RequestCancelInfo { version: info.version, initiated_event_batch_id: info.initiated_event_batch_id, cancel_request_id: info.cancel_request_id.clone() }, find_cancel(id))?); }
     for info in &mutation.upsert_signal_infos { let id=info.initiated_id; result.upsert_signal_infos.push(keyed(id, &pc::SignalInfo { version: info.version, initiated_event_batch_id: info.initiated_event_batch_id, request_id: info.signal_request_id.clone(), name: info.signal_name.clone(), input: info.input.clone(), control: info.control.clone() }, find_signal(id))?); }
-    for timer in &mutation.rewrite_timer_infos { let id=timer.timer_id.clone(); result.rewrite_timer_infos.push(keyed(id.clone(), &pc::TimerInfo { version: timer.version, started_id: timer.started_id, expiry_time_unix_nanos: timer.expiry_time_unix_nanos, task_id: i64::from(timer.task_status), ..Default::default() }, find_timer(&id))?); }
+    for timer in &mutation.rewrite_timer_infos { let id=timer.timer_id.clone(); result.rewrite_timer_infos.push(keyed(id.clone(), &pc::TimerInfo { version: timer.version, started_id: timer.started_id, expiry_time_unix_nanos: timer.expiry_time_unix_nanos, task_id: i64::from(timer.task_status) }, find_timer(&id))?); }
     for activity in &mutation.rewrite_activity_infos {
         if let Some(row) = result.upsert_activity_infos.iter().find(|r| r.key == activity.schedule_id) { result.rewrite_activity_infos.push(row.clone()); }
         else if let Some(old) = find_activity(activity.schedule_id) { result.rewrite_activity_infos.push(pc::KeyedBlob { key: activity.schedule_id, value: old.clone() }); }
@@ -354,12 +354,14 @@ mod tests {
             ..Default::default()
         };
         let persisted = mutation_to_persistence(&changed, &envelope).unwrap();
-        let mut reloaded = pc::WorkflowSnapshot::default();
-        reloaded.activity_infos = persisted.upsert_activity_infos;
-        reloaded.timer_infos = persisted.upsert_timer_infos;
-        reloaded.child_execution_infos = persisted.upsert_child_execution_infos;
-        reloaded.request_cancel_infos = persisted.upsert_request_cancel_infos;
-        reloaded.signal_infos = persisted.upsert_signal_infos;
+        let reloaded = pc::WorkflowSnapshot {
+            activity_infos: persisted.upsert_activity_infos,
+            timer_infos: persisted.upsert_timer_infos,
+            child_execution_infos: persisted.upsert_child_execution_infos,
+            request_cancel_infos: persisted.upsert_request_cancel_infos,
+            signal_infos: persisted.upsert_signal_infos,
+            ..Default::default()
+        };
         let roundtrip = snapshot_to_envelope(reloaded).unwrap();
         let activity = &roundtrip.activities[&11];
         assert_eq!(activity.activity_id, "new-id");
