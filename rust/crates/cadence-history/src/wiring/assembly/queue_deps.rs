@@ -285,11 +285,6 @@ impl TransferDependencies for TransferDepsImpl {
         if record.search_attributes.contains_key("CadenceChangeVersion") {
             return Ok(());
         }
-        tracing::warn!(
-            workflow_id = %record.workflow_id,
-            keys = ?record.search_attributes.keys().collect::<Vec<_>>(),
-            "visibility upsert not supported by SQL store"
-        );
         // Go sql visibility store: UpsertWorkflowExecution returns the
         // *types.BadRequestError ErrVisibilityOperationNotSupported.
         self.env.visibility.upsert().map_err(|e| match e {
