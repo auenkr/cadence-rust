@@ -71,7 +71,7 @@ impl StateBuilder {
     }
     pub fn new(mutable_state: MutableStateBuilder) -> Self { Self { mutable_state } }
 
-    /// Replay the currently supported history families into typed mutable state.
+    /// Replay history families with typed Replicate* transitions.
     /// Incoming events are metadata and are never appended or assigned new IDs.
     pub fn apply_events_typed(
         state: &mut TypedMutableState,
@@ -146,6 +146,46 @@ impl StateBuilder {
                     Some(EventType::ActivityTaskCancelRequested) => state.replicate_activity_task_cancel_requested_event(event)?,
                     Some(EventType::ActivityTaskCanceled) => state.replicate_activity_task_canceled_event(event)?,
                     Some(EventType::RequestCancelActivityTaskFailed) => {}
+                    Some(EventType::TimerStarted) => { state.replicate_timer_started_event(event)?; }
+                    Some(EventType::TimerFired) => state.replicate_timer_fired_event(event)?,
+                    Some(EventType::TimerCanceled) => state.replicate_timer_canceled_event(event)?,
+                    Some(EventType::StartChildWorkflowExecutionInitiated) => {
+                        state.replicate_start_child_workflow_execution_initiated_event(first.event_id, event, request_id, domain_id)?;
+                    }
+                    Some(EventType::ChildWorkflowExecutionStarted) => state.replicate_child_workflow_execution_started_event(event)?,
+                    Some(EventType::StartChildWorkflowExecutionFailed) => state.replicate_start_child_workflow_execution_failed_event(event)?,
+                    Some(EventType::ChildWorkflowExecutionCompleted) => state.replicate_child_workflow_execution_completed_event(event)?,
+                    Some(EventType::ChildWorkflowExecutionFailed) => state.replicate_child_workflow_execution_failed_event(event)?,
+                    Some(EventType::ChildWorkflowExecutionCanceled) => state.replicate_child_workflow_execution_canceled_event(event)?,
+                    Some(EventType::ChildWorkflowExecutionTimedOut) => state.replicate_child_workflow_execution_timed_out_event(event)?,
+                    Some(EventType::ChildWorkflowExecutionTerminated) => state.replicate_child_workflow_execution_terminated_event(event)?,
+                    Some(EventType::RequestCancelExternalWorkflowExecutionInitiated) => {
+                        state.replicate_request_cancel_external_workflow_execution_initiated_event(first.event_id, event, request_id)?;
+                    }
+                    Some(EventType::ExternalWorkflowExecutionCancelRequested) => state.replicate_external_workflow_execution_cancel_requested(event)?,
+                    Some(EventType::RequestCancelExternalWorkflowExecutionFailed) => state.replicate_request_cancel_external_workflow_execution_failed_event(event)?,
+                    Some(EventType::WorkflowExecutionSignaled) => state.replicate_workflow_execution_signaled(event)?,
+                    Some(EventType::SignalExternalWorkflowExecutionInitiated) => {
+                        state.replicate_signal_external_workflow_execution_initiated_event(first.event_id, event, request_id)?;
+                    }
+                    Some(EventType::SignalExternalWorkflowExecutionFailed) => state.replicate_signal_external_workflow_execution_failed_event(event)?,
+                    Some(EventType::ExternalWorkflowExecutionSignaled) => state.replicate_external_workflow_execution_signaled(event)?,
+                    Some(EventType::WorkflowExecutionCancelRequested) => state.replicate_workflow_execution_cancel_requested_event(event)?,
+                    // Typed state has no marker history or search-attribute projection yet.
+                    // Refuse these events rather than acknowledge them while losing payloads.
+                    Some(EventType::MarkerRecorded | EventType::UpsertWorkflowSearchAttributes) => {
+                        return Err(StateBuilderError::TypedReplayNotYetSupported { event_type: event.event_type });
+                    }
+                    Some(EventType::WorkflowExecutionCompleted) => state.replicate_workflow_execution_completed_event(first.event_id, event)?,
+                    Some(EventType::WorkflowExecutionFailed) => state.replicate_workflow_execution_failed_event(first.event_id, event)?,
+                    Some(EventType::WorkflowExecutionTimedOut) => state.replicate_workflow_execution_timedout_event(first.event_id, event)?,
+                    Some(EventType::WorkflowExecutionCanceled) => state.replicate_workflow_execution_canceled_event(first.event_id, event)?,
+                    Some(EventType::WorkflowExecutionTerminated) => state.replicate_workflow_execution_terminated_event(first.event_id, event)?,
+                    Some(EventType::WorkflowExecutionContinuedAsNew) => state.replicate_workflow_execution_continued_as_new_event(first.event_id, event)?,
+                    Some(EventType::SemaphoreAcquireInitiated | EventType::SemaphoreAcquired | EventType::SemaphoreReleased) => {
+                        return Err(StateBuilderError::TypedReplayNotYetSupported { event_type: event.event_type });
+                    }
+                    None => return Err(StateBuilderError::UnknownEventType),
                     other => return Err(StateBuilderError::TypedReplayNotYetSupported { event_type: other }),
                 }
             }
@@ -322,8 +362,19 @@ mod typed_replay_tests {
     #[test]
     fn typed_replay_rejects_unimplemented_events_explicitly() {
         let mut state = state();
-        let event = HistoryEvent { event_type: Some(EventType::TimerStarted), ..Default::default() };
+        let event = HistoryEvent { event_type: Some(EventType::MarkerRecorded), ..Default::default() };
         assert!(matches!(StateBuilder::apply_events_typed(&mut state, "d", "r", &WorkflowExecution::default(), &[event]), Err(StateBuilderError::TypedReplayNotYetSupported { .. })));
+    }
+
+    #[test]
+    fn typed_replay_rejects_missing_timer_attributes_and_unknown_event_types() {
+        let mut typed_state = state();
+        let missing_attributes = HistoryEvent { event_type: Some(EventType::TimerStarted), ..Default::default() };
+        assert!(matches!(StateBuilder::apply_events_typed(&mut typed_state, "d", "r", &WorkflowExecution::default(), &[missing_attributes]), Err(StateBuilderError::Typed(_))));
+
+        let mut typed_state = state();
+        let unknown = HistoryEvent { event_type: None, ..Default::default() };
+        assert!(matches!(StateBuilder::apply_events_typed(&mut typed_state, "d", "r", &WorkflowExecution::default(), &[unknown]), Err(StateBuilderError::UnknownEventType)));
     }
 
     #[test]
