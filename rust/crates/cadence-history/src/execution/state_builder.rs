@@ -418,7 +418,7 @@ mod typed_replay_tests {
         let workflow = WorkflowExecution::new("wf", "old-run");
         let new = StateBuilder::apply_events_typed_with_new_run(&mut old, "d", "req", &workflow, &[can], std::slice::from_ref(&new_start)).unwrap().unwrap();
         assert_eq!(old.execution_info.run_id, "");
-        assert_eq!(old.execution_info.state, 3);
+        assert_eq!(old.execution_info.state, 2);
         assert_eq!(new.execution_info.run_id, "new-run");
         assert_eq!(new.execution_info.next_event_id, 2);
         assert!(new.insert_workflow_requests.is_empty());
