@@ -219,7 +219,14 @@ impl Operations for EngineOps<'_> {
         let sid = ev.event_id;
         let mut info = pc::ActivityInfo {
             version: ev.version,
-            scheduled_event_batch_id: completed_id,
+            // Go ReplicateActivityTaskScheduledEvent(firstEventID, ..): the first event of
+            // the history batch (a transient decision's scheduled event precedes the completion).
+            scheduled_event_batch_id: self
+                .hist
+                .iter()
+                .find(|e| e.event_id > 0)
+                .map(|e| e.event_id)
+                .unwrap_or(completed_id),
             scheduled_time_unix_nanos: now_nanos,
             started_id: EMPTY_EVENT_ID,
             activity_id: a.activity_id.clone(),
