@@ -130,14 +130,16 @@ impl<'a> TransactionManagerForNewWorkflow<'a> {
         if let Some(current) = current_workflow {
             let prev_run_id = current.mutable_state().get_execution_info().run_id;
             let prev_vector_clock = current.get_vector_clock()?;
-            return target.create_workflow_execution(
+            target.create_workflow_execution(
                 snapshot,
                 blob,
                 CreateWorkflowMode::WorkflowIdReuse,
                 &prev_run_id,
                 prev_vector_clock.last_write_version,
                 WorkflowRequestMode::Replicated,
-            );
+            )?;
+            target.mutable_state_mut().transaction_committed();
+            return Ok(());
         }
         target.create_workflow_execution(
             snapshot,
@@ -146,7 +148,9 @@ impl<'a> TransactionManagerForNewWorkflow<'a> {
             "",
             0,
             WorkflowRequestMode::Replicated,
-        )
+        )?;
+        target.mutable_state_mut().transaction_committed();
+        Ok(())
     }
 
     fn create_as_zombie(
@@ -183,7 +187,7 @@ impl<'a> TransactionManagerForNewWorkflow<'a> {
             0,
             WorkflowRequestMode::Replicated,
         ) {
-            Ok(()) => Ok(()),
+            Ok(()) => { target.mutable_state_mut().transaction_committed(); Ok(()) },
             Err(NdcError::WorkflowExecutionAlreadyStarted(_)) => Ok(()),
             Err(e) => Err(e),
         }

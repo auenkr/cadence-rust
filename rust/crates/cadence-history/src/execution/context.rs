@@ -55,6 +55,8 @@ pub trait TransactionState {
     async fn start_transaction(&mut self, incoming_version: i64) -> Result<bool, Self::Error>;
     fn close_mutation(&mut self, now: i64, policy: TransactionPolicy) -> Result<(WorkflowMutation, Vec<WorkflowEvents>), Self::Error>;
     fn close_snapshot(&mut self, now: i64, policy: TransactionPolicy) -> Result<(WorkflowSnapshot, Vec<WorkflowEvents>), Self::Error>;
+    /// Drop transaction deltas only after the persistence commit succeeds.
+    fn transaction_committed(&mut self) {}
 }
 
 /// Shard-facing calls preserve the Go retry boundaries. Implementations assign
@@ -149,6 +151,7 @@ impl<M: TransactionState, S: WorkflowContextStore<M>> WorkflowContext<M, S> {
         if let Err(err) = self.store.create_with_retry(&domain, snapshot, mode, previous_run, previous_version, requests).await {
             if self.store.possibly_successful(&err) { self.store.notify_snapshot(Some(snapshot), &histories, true); } return Err(err);
         }
+        if let Some(state) = &mut self.mutable_state { state.transaction_committed(); }
         self.store.notify_snapshot(Some(snapshot), &histories, false); self.store.emit_session_stats(&domain); Ok(())
     }
     pub async fn update_workflow_execution_tasks(&mut self, now: i64) -> Result<(), M::Error> {
@@ -167,6 +170,7 @@ impl<M: TransactionState, S: WorkflowContextStore<M>> WorkflowContext<M, S> {
         if let Err(err) = self.store.update_with_retry(&domain, &mutation, None, UpdateWorkflowMode::IgnoreCurrent, WorkflowRequestMode::New).await {
             if self.store.possibly_successful(&err) { self.store.notify_mutation(&mutation, &[], true); } return Err(err);
         }
+        if let Some(state) = &mut self.mutable_state { state.transaction_committed(); }
         self.store.notify_mutation(&mutation, &[], false); self.store.emit_session_stats(&domain); Ok(())
     }
 }
@@ -212,7 +216,7 @@ impl<M: TransactionState, S: WorkflowContextStore<M>> WorkflowContext<M, S> {
         result
     }
     #[allow(clippy::too_many_arguments)]
-    async fn update_inner(&mut self, now: i64, mode: UpdateWorkflowMode, new: Option<&mut Self>, policy: TransactionPolicy, new_policy: Option<TransactionPolicy>, requests: WorkflowRequestMode) -> Result<(), M::Error> {
+    async fn update_inner(&mut self, now: i64, mode: UpdateWorkflowMode, mut new: Option<&mut Self>, policy: TransactionPolicy, new_policy: Option<TransactionPolicy>, requests: WorkflowRequestMode) -> Result<(), M::Error> {
         let state = self.mutable_state.as_mut().ok_or_else(|| self.store.internal_error("mutable state not loaded"))?;
         let (mut mutation, current_events) = state.close_mutation(now, policy)?;
         let domain = self.store.domain_name(&self.key.domain_id)?;
@@ -226,7 +230,7 @@ impl<M: TransactionState, S: WorkflowContextStore<M>> WorkflowContext<M, S> {
         }
         self.set_history_size(size); mutation.execution_info.history_size = size;
         let mut snapshot = None; let mut new_events = Vec::new();
-        if let (Some(context), Some(new_policy)) = (new, new_policy) {
+        if let (Some(context), Some(new_policy)) = (new.as_deref_mut(), new_policy) {
             if let Some(state) = &mut context.mutable_state {
                 let (mut image, events) = state.close_snapshot(now, new_policy)?;
                 if !image.workflow_requests.is_empty() && !mutation.workflow_requests.is_empty() {
@@ -249,6 +253,8 @@ impl<M: TransactionState, S: WorkflowContextStore<M>> WorkflowContext<M, S> {
         if let Err(err) = self.store.update_with_retry(&domain, &mutation, snapshot.as_ref(), mode, requests).await {
             if self.store.possibly_successful(&err) { self.store.notify_mutation(&mutation, &blobs, true); self.store.notify_snapshot(snapshot.as_ref(), &blobs, true); } return Err(err);
         }
+        if let Some(state) = &mut self.mutable_state { state.transaction_committed(); }
+        if let Some(context) = new.as_deref_mut() { if let Some(state) = &mut context.mutable_state { state.transaction_committed(); } }
         let state = self.mutable_state.as_ref().expect("loaded state");
         self.store.notify_history(state);
         self.store.notify_mutation(&mutation, &blobs, false); self.store.notify_snapshot(snapshot.as_ref(), &blobs, false);
