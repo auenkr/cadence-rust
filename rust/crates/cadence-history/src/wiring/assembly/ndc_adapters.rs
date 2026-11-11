@@ -116,20 +116,62 @@ impl HistoryBatchDeserializer for ThriftBatchDeserializer {
 
 // ---------------------------------------------------------------- TODO components
 
-/// `NdcStateBuilder` placeholder.
-pub struct TodoNdcStateBuilder;
+/// Go `execution.StateBuilder.ApplyEvents` over the typed replay entry.
+pub struct TypedNdcStateBuilder;
 
-impl NdcStateBuilder for TodoNdcStateBuilder {
+impl NdcStateBuilder for TypedNdcStateBuilder {
     fn apply_events(
         &self,
-        _mutable_state: &mut dyn NdcMutableState,
-        _domain_id: &str,
-        _request_id: &str,
-        _execution: &WorkflowExecution,
-        _events: &[HistoryEvent],
-        _new_events: &[HistoryEvent],
+        mutable_state: &mut dyn NdcMutableState,
+        domain_id: &str,
+        request_id: &str,
+        execution: &WorkflowExecution,
+        events: &[HistoryEvent],
+        new_events: &[HistoryEvent],
     ) -> NdcResult<Option<Box<dyn NdcMutableState>>> {
-        Err(todo_error("NdcStateBuilder::apply_events (typed replay dispatcher not implemented)"))
+        use cadence_api::enums::EventType;
+        let owned = mutable_state
+            .as_any_mut()
+            .and_then(|a| a.downcast_mut::<OwnedNdcMutableState>())
+            .ok_or_else(|| NdcError::internal("NdcStateBuilder requires an OwnedNdcMutableState"))?;
+        // Go: the new run id comes from the continued-as-new event; workflow id is shared.
+        let new_execution = if new_events.is_empty() {
+            None
+        } else {
+            events
+                .iter()
+                .rev()
+                .find(|e| e.event_type == Some(EventType::WorkflowExecutionContinuedAsNew))
+                .and_then(|e| e.workflow_execution_continued_as_new_event_attributes.as_ref())
+                .map(|a| WorkflowExecution {
+                    workflow_id: execution.workflow_id.clone(),
+                    run_id: a.new_execution_run_id.clone(),
+                })
+        };
+        let now = owned.now_nanos();
+        let env = owned.task_gen_env().clone();
+        let new_typed = crate::execution::state_builder::StateBuilder::apply_events_typed_with_new_run(
+            owned.typed_mut(),
+            domain_id,
+            request_id,
+            execution,
+            events,
+            new_execution.as_ref(),
+            new_events,
+        )
+        .map_err(|e| {
+            use crate::execution::state_builder::StateBuilderError as E;
+            match e {
+                E::UnknownEventType | E::InvalidEvent { .. } => NdcError::bad_request(e.to_string()),
+                other => NdcError::internal(other.to_string()),
+            }
+        })?;
+        Ok(match (new_typed, new_execution) {
+            (Some(typed), Some(exec)) => {
+                Some(Box::new(OwnedNdcMutableState::from_typed(domain_id, &exec, typed, now, env)) as Box<dyn NdcMutableState>)
+            }
+            _ => None,
+        })
     }
 }
 
@@ -194,7 +236,7 @@ pub struct EngineNdcEnv {
     serializer: ThriftBatchDeserializer,
     cache: EngineNdcExecutionCache,
     transactions: TodoNdcTransactionManager,
-    state_builder: TodoNdcStateBuilder,
+    state_builder: TypedNdcStateBuilder,
     state_rebuilder: SqlNdcStateRebuilder,
     branch_env: SqlBranchManagerEnv,
     resetter_env: SqlWorkflowResetterEnv,
@@ -218,7 +260,7 @@ impl EngineNdcEnv {
                 core.clock.clone(),
             ),
             transactions: TodoNdcTransactionManager,
-            state_builder: TodoNdcStateBuilder,
+            state_builder: TypedNdcStateBuilder,
             state_rebuilder: new_state_rebuilder(core),
             branch_env: SqlBranchManagerEnv { history: history.clone(), domains: core.domains.clone() },
             resetter_env: SqlWorkflowResetterEnv { history, domains: core.domains.clone() },
@@ -296,6 +338,11 @@ fn to_ndc_sync_activity(r: &et::SyncActivityRequest) -> SyncActivityRequest {
         last_heartbeat_time: r.last_heartbeat_time.unwrap_or_default(),
         attempt: r.attempt,
         version_history: r.version_history.clone(),
+        details: r.details.clone(),
+        last_failure_reason: r.last_failure_reason.clone(),
+        last_worker_identity: r.last_worker_identity.clone(),
+        last_failure_details: r.last_failure_details.clone(),
+        last_failure_options: r.last_failure_options.clone(),
     }
 }
 

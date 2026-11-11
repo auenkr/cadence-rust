@@ -57,6 +57,25 @@ impl OwnedNdcMutableState {
         }
     }
 
+    /// Wraps an already replayed typed state (e.g. a continued-as-new run).
+    pub fn from_typed(
+        domain_id: impl Into<String>,
+        execution: &WorkflowExecution,
+        typed: TypedMutableState,
+        now_nanos: i64,
+        task_gen_env: TaskGenEnv,
+    ) -> Self {
+        Self {
+            domain_id: domain_id.into(),
+            workflow_id: execution.workflow_id.clone(),
+            run_id: execution.run_id.clone(),
+            update_condition: typed.condition,
+            typed,
+            now_nanos,
+            task_gen_env,
+        }
+    }
+
     pub fn typed(&self) -> &TypedMutableState { &self.typed }
     pub fn typed_mut(&mut self) -> &mut TypedMutableState { &mut self.typed }
     pub fn now_nanos(&self) -> i64 { self.now_nanos }
@@ -71,6 +90,8 @@ impl OwnedNdcMutableState {
 }
 
 impl NdcMutableState for OwnedNdcMutableState {
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> { Some(self) }
+
     fn get_execution_info(&self) -> NdcExecutionInfo {
         NdcExecutionInfo {
             domain_id: self.domain_id.clone(),
@@ -157,22 +178,50 @@ impl NdcMutableState for OwnedNdcMutableState {
     }
 
     fn get_activity_info(&self, schedule_id: i64) -> NdcResult<Option<NdcActivityInfo>> {
-        if self.typed.pending_activity_info_ids.contains_key(&schedule_id) {
-            return self.unsupported("get_activity_info (heartbeat timestamp is persistence-only)");
-        }
-        Ok(None)
+        Ok(self.typed.get_activity_info(schedule_id).map(|a| NdcActivityInfo {
+            version: a.version,
+            attempt: a.attempt,
+            last_heartbeat_updated_time_nanos: a.last_heartbeat_updated_time,
+            cancel_requested: a.cancel_requested,
+        }))
     }
 
-    fn replicate_activity_info(&mut self, _request: &SyncActivityRequest, _reset: bool) -> NdcResult<()> {
-        self.unsupported("replicate_activity_info")
+    fn replicate_activity_info(&mut self, request: &SyncActivityRequest, reset: bool) -> NdcResult<()> {
+        let engine = crate::engine::types::SyncActivityRequest {
+            domain_id: request.domain_id.clone(),
+            workflow_id: request.workflow_id.clone(),
+            run_id: request.run_id.clone(),
+            version: request.version,
+            scheduled_id: request.scheduled_id,
+            scheduled_time: Some(request.scheduled_time),
+            started_id: request.started_id,
+            started_time: Some(request.started_time),
+            last_heartbeat_time: Some(request.last_heartbeat_time),
+            details: request.details.clone(),
+            attempt: request.attempt,
+            last_failure_reason: request.last_failure_reason.clone(),
+            last_worker_identity: request.last_worker_identity.clone(),
+            last_failure_details: request.last_failure_details.clone(),
+            last_failure_options: request.last_failure_options.clone(),
+            version_history: request.version_history.clone(),
+        };
+        self.typed
+            .replicate_activity_info(&engine, reset)
+            .map_err(|e| NdcError::internal(e.to_string()))
     }
 
     fn create_next_activity_timer(&mut self) -> NdcResult<bool> {
-        self.unsupported("create_next_activity_timer")
+        self.typed
+            .run_task_generator(0, |g| {
+                crate::execution::timer_sequence::TimerSequence { state: g.state }.create_next_activity_timer()
+            })
+            .map_err(|e| NdcError::internal(e.to_string()))
     }
 
-    fn generate_activity_retry_tasks(&mut self, _schedule_id: i64) -> NdcResult<()> {
-        self.unsupported("generate_activity_retry_tasks")
+    fn generate_activity_retry_tasks(&mut self, schedule_id: i64) -> NdcResult<()> {
+        self.typed
+            .run_task_generator(0, |g| g.generate_activity_retry_tasks(schedule_id))
+            .map_err(|e| NdcError::internal(e.to_string()))
     }
 
     fn vector_clock_inputs(
@@ -259,6 +308,7 @@ impl TransactionState for OwnedNdcMutableState {
 
 #[cfg(test)]
 mod tests {
+    use cadence_api::enums::EventType;
     use cadence_api::types::{VersionHistories, VersionHistory, VersionHistoryItem, WorkflowExecution};
     use cadence_persistence::version_history::VersionHistoryExt;
 
@@ -313,12 +363,146 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_dedup_and_activity_reads_fail_explicitly() {
+    fn unsupported_dedup_reads_fail_explicitly() {
         let state = state();
         assert!(state.is_event_reapplied("run-a", 2, 7).is_err());
         assert!(state.get_activity_info(2).is_ok_and(|activity| activity.is_none()));
-        let mut state = state;
-        state.typed_mut().pending_activity_info_ids.insert(2, Default::default());
-        assert!(state.get_activity_info(2).is_err());
+    }
+
+    fn with_activity(timer_status: i32) -> OwnedNdcMutableState {
+        let mut state = state();
+        let ai = crate::mutable_state_activity::ActivityInfo {
+            version: 3,
+            schedule_id: 5,
+            scheduled_time: 1_000_000_000,
+            started_id: crate::ndc::EMPTY_EVENT_ID,
+            schedule_to_start_timeout: 10,
+            schedule_to_close_timeout: 30,
+            start_to_close_timeout: 20,
+            attempt: 1,
+            timer_task_status: timer_status,
+            task_list: "tl".into(),
+            ..Default::default()
+        };
+        state.typed_mut().pending_activity_info_ids.insert(5, ai);
+        state
+    }
+
+    fn sync(version: i64, attempt: i32, heartbeat: i64) -> SyncActivityRequest {
+        SyncActivityRequest {
+            domain_id: "domain-a".into(),
+            workflow_id: "workflow-a".into(),
+            run_id: "run-a".into(),
+            version,
+            scheduled_id: 5,
+            scheduled_time: 2_000_000_000,
+            started_id: 6,
+            started_time: 3_000_000_000,
+            last_heartbeat_time: heartbeat,
+            attempt,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn replicate_activity_info_carries_version_attempt_heartbeat_and_orders() {
+        let mut state = with_activity(0);
+        let info = state.get_activity_info(5).unwrap().unwrap();
+        assert_eq!((info.version, info.attempt), (3, 1));
+        // newer version and higher attempt replace
+        state.replicate_activity_info(&sync(4, 2, 77), false).unwrap();
+        let info = state.get_activity_info(5).unwrap().unwrap();
+        assert_eq!((info.version, info.attempt, info.last_heartbeat_updated_time_nanos), (4, 2, 77));
+        assert_eq!(state.typed().pending_activity_info_ids[&5].started_id, 6);
+        assert_eq!(state.typed().pending_activity_info_ids[&5].started_time, 3_000_000_000);
+        assert!(state.typed().update_activity_infos.contains_key(&5));
+        // equal version: the replicator policy owns ordering, the adapter simply carries the request
+        state.replicate_activity_info(&sync(4, 3, 99), false).unwrap();
+        assert_eq!(state.get_activity_info(5).unwrap().unwrap().attempt, 3);
+        // an older version/attempt request is also carried verbatim (policy lives in activity_replicator)
+        state.replicate_activity_info(&sync(2, 1, 5), false).unwrap();
+        let info = state.get_activity_info(5).unwrap().unwrap();
+        assert_eq!((info.version, info.attempt, info.last_heartbeat_updated_time_nanos), (2, 1, 5));
+    }
+
+    #[test]
+    fn replicate_activity_info_resets_timer_status_only_when_requested() {
+        let mut state = with_activity(3);
+        state.replicate_activity_info(&sync(4, 1, 1), false).unwrap();
+        assert_eq!(state.typed().pending_activity_info_ids[&5].timer_task_status, 3);
+        state.replicate_activity_info(&sync(4, 1, 1), true).unwrap();
+        assert_eq!(state.typed().pending_activity_info_ids[&5].timer_task_status, 0);
+    }
+
+    #[test]
+    fn replicate_activity_info_missing_activity_is_error() {
+        let mut state = state();
+        assert!(state.replicate_activity_info(&sync(4, 1, 1), false).is_err());
+        assert!(state.generate_activity_retry_tasks(5).is_err());
+    }
+
+    #[test]
+    fn retry_tasks_and_activity_timer_are_generated() {
+        let mut state = with_activity(0);
+        state.generate_activity_retry_tasks(5).unwrap();
+        assert_eq!(state.typed().timer_tasks.len(), 1);
+        let before = state.typed().timer_tasks.len();
+        assert!(state.create_next_activity_timer().unwrap());
+        assert!(state.typed().timer_tasks.len() > before);
+        assert_ne!(state.typed().pending_activity_info_ids[&5].timer_task_status, 0);
+    }
+
+    fn started(event_type: EventType, id: i64, version: i64) -> cadence_api::service_types::HistoryEvent {
+        cadence_api::service_types::HistoryEvent { event_id: id, version, timestamp: Some(100 + id), task_id: 10 + id, event_type: Some(event_type), ..Default::default() }
+    }
+
+    fn with_histories(mut state: OwnedNdcMutableState) -> OwnedNdcMutableState {
+        state.set_version_histories(VersionHistories {
+            current_version_history_index: 0,
+            histories: vec![VersionHistory { branch_token: vec![9], items: vec![] }],
+        }).unwrap();
+        state
+    }
+
+    #[test]
+    fn typed_builder_replays_start_and_decision_batch() {
+        use crate::ndc::history_replicator::NdcStateBuilder;
+        use crate::wiring::assembly::ndc_adapters::TypedNdcStateBuilder;
+        use cadence_api::service_types::WorkflowExecutionStartedEventAttributes;
+        use cadence_api::tasks::{DecisionTaskScheduledEventAttributes, DecisionTaskStartedEventAttributes};
+        let mut start = started(EventType::WorkflowExecutionStarted, 1, 7);
+        start.workflow_execution_started_event_attributes = Some(WorkflowExecutionStartedEventAttributes { request_id: "r".into(), ..Default::default() });
+        let mut sched = started(EventType::DecisionTaskScheduled, 2, 7);
+        sched.decision_task_scheduled_event_attributes = Some(DecisionTaskScheduledEventAttributes { start_to_close_timeout_seconds: Some(10), ..Default::default() });
+        let mut dstart = started(EventType::DecisionTaskStarted, 3, 7);
+        dstart.decision_task_started_event_attributes = Some(DecisionTaskStartedEventAttributes { scheduled_event_id: 2, request_id: "d".into(), ..Default::default() });
+        let mut st = with_histories(state());
+        let exec = WorkflowExecution { workflow_id: "workflow-a".into(), run_id: "run-a".into() };
+        let out = TypedNdcStateBuilder.apply_events(&mut st, "domain-a", "req", &exec, &[start, sched, dstart], &[]).unwrap();
+        assert!(out.is_none());
+        assert_eq!(st.get_next_event_id(), 4);
+        assert_eq!(st.typed().execution_info.decision_schedule_id, 2);
+        assert_eq!(st.typed().execution_info.decision_started_id, 3);
+        assert_eq!(st.get_current_version(), 7);
+    }
+
+    #[test]
+    fn typed_builder_continued_as_new_returns_new_run_state() {
+        use crate::ndc::history_replicator::NdcStateBuilder;
+        use crate::wiring::assembly::ndc_adapters::TypedNdcStateBuilder;
+        use cadence_api::service_types::WorkflowExecutionStartedEventAttributes;
+        use cadence_api::tasks::WorkflowExecutionContinuedAsNewEventAttributes;
+        let mut can = started(EventType::WorkflowExecutionContinuedAsNew, 1, 7);
+        can.workflow_execution_continued_as_new_event_attributes = Some(WorkflowExecutionContinuedAsNewEventAttributes { new_execution_run_id: "run-b".into(), ..Default::default() });
+        let mut new_start = started(EventType::WorkflowExecutionStarted, 1, 7);
+        new_start.workflow_execution_started_event_attributes = Some(WorkflowExecutionStartedEventAttributes { continued_execution_run_id: "run-a".into(), request_id: "r".into(), ..Default::default() });
+        let mut st = with_histories(state());
+        let exec = WorkflowExecution { workflow_id: "workflow-a".into(), run_id: "run-a".into() };
+        let out = TypedNdcStateBuilder.apply_events(&mut st, "domain-a", "req", &exec, &[can], &[new_start]).unwrap().unwrap();
+        let info = out.get_execution_info();
+        assert_eq!((info.workflow_id.as_str(), info.run_id.as_str(), info.domain_id.as_str()), ("workflow-a", "run-b", "domain-a"));
+        assert_eq!(out.get_next_event_id(), 2);
+        assert_eq!(st.get_workflow_state(), WorkflowState::Completed);
+        assert_eq!(st.get_execution_info().run_id, "run-a");
     }
 }
