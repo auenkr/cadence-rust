@@ -45,6 +45,52 @@ pub struct EngineCore {
     pub history_v2: Arc<dyn GoHistoryV2Store>,
     /// Per-domain task generation parameters (retention, failover version, config).
     pub state_params: Arc<dyn Fn(&str) -> StateParams + Send + Sync>,
+    /// Filled once the shard's `HistoryEngine` exists; used to notify the queue
+    /// processors of new tasks (Go `shard.taskNotifier.notifyTasks`).
+    pub engine_slot: Arc<std::sync::OnceLock<std::sync::Weak<crate::engine::runtime::HistoryEngine>>>,
+}
+
+impl EngineCore {
+    /// Go `taskNotifier.notifyTasks`: wakes the transfer / timer queue
+    /// processors after a successful write of `transfer` / `timer` tasks.
+    pub(super) fn notify_tasks(&self, transfer: &[pc::TransferTask], timer: &[pc::TimerTask]) {
+        use crate::engine::notify_tasks::{NotifiedTask, NotifiedTaskKind, NotifyTaskInfo};
+        tracing::debug!(transfer = transfer.len(), timer = timer.len(), has_engine = self.engine_slot.get().is_some(), "notify queues of new tasks");
+        let Some(engine) = self.engine_slot.get().and_then(std::sync::Weak::upgrade) else { return };
+        let info_of = |d: &str, w: &str, r: &str, tasks: Vec<NotifiedTask>| {
+            let mut info = NotifyTaskInfo { tasks, ..Default::default() };
+            info.execution_info.domain_id = d.to_string();
+            info.execution_info.workflow_id = w.to_string();
+            info.execution_info.run_id = r.to_string();
+            info
+        };
+        if let Some(first) = transfer.first() {
+            let tasks = transfer
+                .iter()
+                .map(|t| NotifiedTask {
+                    version: t.version,
+                    task_id: t.task_id,
+                    task_type: t.task_type as i16,
+                    visibility_timestamp: t.visibility_time_unix_nanos,
+                    kind: NotifiedTaskKind::Generic,
+                })
+                .collect();
+            engine.notify_new_transfer_tasks(&info_of(&first.domain_id, &first.workflow_id, &first.run_id, tasks));
+        }
+        if let Some(first) = timer.first() {
+            let tasks = timer
+                .iter()
+                .map(|t| NotifiedTask {
+                    version: t.version,
+                    task_id: t.task_id,
+                    task_type: t.task_type as i16,
+                    visibility_timestamp: t.visibility_timestamp_unix_nanos,
+                    kind: NotifiedTaskKind::Generic,
+                })
+                .collect();
+            engine.notify_new_timer_tasks(&info_of(&first.domain_id, &first.workflow_id, &first.run_id, tasks));
+        }
+    }
 }
 
 pub(super) fn shard_err(e: ShardContextError) -> HistoryError {
@@ -252,6 +298,7 @@ impl EngineExecutionContext {
         match core.executions.update_workflow_execution(request).await {
             Ok(()) => {
                 shard.update_max_read_level(max_read_level);
+                core.notify_tasks(&txn.transfer, &txn.timer);
                 state.finish_transaction(history_size, last_event_task_id);
                 Ok(())
             }

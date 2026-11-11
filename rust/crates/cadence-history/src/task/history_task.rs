@@ -283,6 +283,7 @@ impl Task for TaskImpl {
             let init = self.inner.lock().unwrap().initial_submit_time;
             self.time_source.now().sub(init)
         };
+        tracing::debug!("TaskImpl::execute: running filter");
         let should_process = match (self.task_filter)(self.task.as_ref()) {
             Ok(v) => v,
             Err(e) => {
@@ -300,7 +301,9 @@ impl Task for TaskImpl {
         }
 
         let execution_start_time = std::time::Instant::now();
+        tracing::debug!(should_process, "TaskImpl::execute: calling executor");
         let (execute_response, err) = self.task_executor.execute(self.arc_self()).await;
+        tracing::debug!(err = ?err, "TaskImpl::execute: executor returned");
         let task_list_tagged_scope;
         {
             let mut m = self.inner.lock().unwrap();

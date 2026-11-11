@@ -438,7 +438,8 @@ pub struct QueueExecCommon {
     pub queue_shard: Arc<dyn QueueShardContext>,
     pub task_shard: Arc<dyn t::ShardContext>,
     pub task_processor: Arc<dyn ti::Processor>,
-    pub task_allocator: Arc<dyn TaskAllocator>,
+    /// Go `NewTaskAllocator(shard)`: each queue processor owns its allocator (own lock).
+    pub task_allocator_factory: Arc<dyn Fn() -> Arc<dyn TaskAllocator> + Send + Sync>,
     pub metrics: Arc<dyn q::MetricsScope>,
     pub redispatcher_factory: TaskRedispatcherFactory,
     pub critical_retry_count: t::IntPropertyFn,
@@ -515,7 +516,7 @@ pub fn build_transfer_queue_processor(common: &QueueExecCommon, executors: Categ
     TransferQueueProcessor::new(TransferQueueDeps {
         shard: common.queue_shard.clone(),
         task_processor: p.task_processor,
-        task_allocator: common.task_allocator.clone(),
+        task_allocator: (common.task_allocator_factory)(),
         metrics: common.metrics.clone(),
         rate_limiter_factory: rate_limiter_factory(),
         redispatcher_factory: p.redispatcher_factory,
@@ -530,7 +531,7 @@ pub fn build_timer_queue_processor(common: &QueueExecCommon, executors: Category
     TimerQueueProcessor::new(TimerQueueDeps {
         shard: common.queue_shard.clone(),
         task_processor: p.task_processor,
-        task_allocator: common.task_allocator.clone(),
+        task_allocator: (common.task_allocator_factory)(),
         metrics: common.metrics.clone(),
         rate_limiter_factory: rate_limiter_factory(),
         redispatcher_factory: p.redispatcher_factory,

@@ -275,14 +275,19 @@ impl TransferActiveTaskExecutor {
   result
  }
  pub async fn process_decision_task(&self,task:&DecisionTask)->Result<()> {
-  let ctx=self.get_context(task.domain_id(),task.workflow_id(),task.run_id()).await?;
+  tracing::debug!("process_decision_task: get_context");
+  let ctx=self.get_context(task.domain_id(),task.workflow_id(),task.run_id()).await;
+  tracing::debug!(ok=ctx.is_ok(),"process_decision_task: got context");
+  let ctx=ctx?;
   let result=self.process_decision_task_locked(ctx.as_ref(),task).await;
+  tracing::debug!(result=?result,"process_decision_task: locked done");
   ctx.release(result.clone().err());result
  }
  async fn process_decision_task_locked(&self,ctx:&dyn ActiveTransferContext,task:&DecisionTask)->Result<()> {
-  let Some(ms)=ctx.load_mutable_state(task,&self.queue_scope(),&self.base.logger,task.schedule_id).await? else{return Ok(());};
-  if !ms.is_workflow_execution_running(){return Ok(());}
+  let Some(ms)=ctx.load_mutable_state(task,&self.queue_scope(),&self.base.logger,task.schedule_id).await? else{tracing::debug!("decision: no mutable state");return Ok(());};
+  if !ms.is_workflow_execution_running(){tracing::debug!("decision: workflow not running");return Ok(());}
   let Some(decision)=ms.decision_info(task.schedule_id) else{
+   tracing::debug!("decision: no decision info for schedule id");
    self.base.logger.debug("Potentially duplicate ",&[tag::task_id(task.task_data.task_id),tag::workflow_schedule_id(task.schedule_id),tag::task_type(ptask_type::TRANSFER_TASK_TYPE_DECISION_TASK)]);
    return Ok(());
   };
@@ -304,7 +309,9 @@ impl TransferActiveTaskExecutor {
   // Rate limiting task processing requests
   if !self.allow_task(task){return Err(err_workflow_rate_limited());}
   let info=PushMatchingInfo {task_list:task_list.clone(),schedule_to_start_timeout:decision_timeout,partition_config:ms.execution_info().partition_config};
+  tracing::debug!("decision: pushing to matching");
   let mut result=self.base.push_decision(task,&info).await;
+  tracing::debug!(result=?result,"decision: push result");
   if matches!(result,Err(TaskError::StickyWorkerUnavailable(_))) {
    // sticky worker is unavailable, switch to non-sticky task list
    task_list=TaskList {name:ms.execution_info().task_list,kind:TaskListKind::Normal};

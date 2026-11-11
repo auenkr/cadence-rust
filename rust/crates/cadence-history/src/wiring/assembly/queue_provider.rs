@@ -271,7 +271,11 @@ impl QueueExecProvider for HistoryQueueExecProvider {
             Arc::new(HistoryQueueDomainCache::new(env.domain_cache.clone())),
             Arc::new(HistoryQueueActiveClusterManager::new(env.domain_cache.clone())),
         );
-        let allocator = new_history_task_allocator(env.cluster.metadata().current_cluster_name.clone(), env.domain_cache.clone());
+        let allocator_factory: Arc<dyn Fn() -> Arc<dyn crate::queue::task_allocator::TaskAllocator> + Send + Sync> = {
+            let cluster = env.cluster.metadata().current_cluster_name.clone();
+            let domains = env.domain_cache.clone();
+            Arc::new(move || new_history_task_allocator(cluster.clone(), domains.clone()) as Arc<dyn crate::queue::task_allocator::TaskAllocator>)
+        };
 
         let redispatcher_factory: TaskRedispatcherFactory = {
             let processor = shared.processor.clone();
@@ -358,7 +362,7 @@ impl QueueExecProvider for HistoryQueueExecProvider {
             queue_shard,
             task_shard: task_shard_dyn,
             task_processor: shared.processor.clone(),
-            task_allocator: allocator,
+            task_allocator_factory: allocator_factory,
             metrics: Arc::new(Scope::new(env.metrics_registry.clone(), "HistoryQueueProcessor", Vec::new())) as Arc<dyn q::MetricsScope>,
             redispatcher_factory,
             critical_retry_count,

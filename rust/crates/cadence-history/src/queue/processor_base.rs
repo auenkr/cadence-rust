@@ -381,6 +381,7 @@ impl ProcessorBase {
     /// Go `submitTask`: (submitted, err). err is only set when the processor is shutting down.
     pub async fn submit_task(&self, task: TaskRef) -> Result<bool, QueueError> {
         let res = self.task_processor.try_submit(task.clone()).await;
+        tracing::debug!(submitted = ?res.as_ref().map_err(|e| e.to_string()), "submit_task result");
         let (submitted, err) = match res {
             Ok(s) => (s, None),
             Err(e) => (false, Some(e)),

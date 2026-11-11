@@ -150,6 +150,7 @@ impl HistoryEventNotifier for NotifierAdapter {
 /// queue processors so the transfer / timer executors share the engine's cache.
 pub fn build_core(env: &Arc<HistoryEnv>, shard: &Arc<ShardContext>) -> (Arc<EngineCore>, Arc<EngineExecutionCache>) {
     let core = Arc::new(EngineCore {
+        engine_slot: Arc::new(std::sync::OnceLock::new()),
         shard: shard.clone(),
         executions: env.persistence.executions.clone(),
         domains: env.domain_cache.clone() as Arc<dyn DomainCache>,

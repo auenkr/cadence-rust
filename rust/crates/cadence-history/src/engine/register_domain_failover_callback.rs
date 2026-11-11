@@ -139,7 +139,9 @@ impl HistoryEngine {
 
     /// `domainChangeCB`
     pub async fn domain_change_cb(&self, next_domains: &[FailoverDomainEntry]) {
+        tracing::debug!(n = next_domains.len(), "domain_change_cb: start");
         self.domain_change_cb_inner(next_domains).await;
+        tracing::debug!("domain_change_cb: inner done");
         // defer e.unlockProcessingForDomainUpdate()
         self.unlock_processing_for_domain_update();
     }
@@ -149,7 +151,9 @@ impl HistoryEngine {
         if next_domains.is_empty() {
             return;
         }
+        tracing::debug!("domain_change_cb_inner: reading shard notification version");
         let shard_notification_version = host.domain_notification_version();
+        tracing::debug!(shard_notification_version, "domain_change_cb_inner: got version");
         let mut failover_active_passive: HashSet<String> = HashSet::new();
         let mut failover_active_active: HashSet<String> = HashSet::new();
         // dlq partitions collect the domain and cluster-attribute pairs that were failed over.
@@ -194,6 +198,7 @@ impl HistoryEngine {
             self.notify_queues();
         }
 
+        tracing::debug!("domain_change_cb_inner: generating failover markers");
         let failover_marker_tasks = self.generate_graceful_failover_tasks_for_domain_update_callback(shard_notification_version, next_domains);
         if !failover_marker_tasks.is_empty() {
             if let Err(e) = host.replicate_failover_markers(failover_marker_tasks).await {
@@ -202,6 +207,7 @@ impl HistoryEngine {
                 return;
             }
         }
+        tracing::debug!("domain_change_cb_inner: updating notification version");
         let _ = host.update_domain_notification_version(next_domains[next_domains.len() - 1].notification_version + 1);
     }
 

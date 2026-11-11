@@ -126,7 +126,8 @@ impl HistoryEnv {
 
         let executions: Arc<dyn GoExecutionStore> =
             Arc::new(SqlWorkflowStore::new(backend.clone(), Encoding::ThriftRW, 0, 0));
-        let visibility = Arc::new(crate::wiring::persistence::visibility::SqlVisibilityWriter::new(backend.clone()));
+        let visibility_backend = stores.history_visibility_sql_backend.clone().unwrap_or_else(|| backend.clone());
+        let visibility = Arc::new(crate::wiring::persistence::visibility::SqlVisibilityWriter::new(visibility_backend));
         let history_v2: Arc<dyn GoHistoryV2Store> = Arc::new(SqlHistoryV2Store::new(backend, Encoding::ThriftRW));
         let persistence = HistoryPersistence {
             shard_store: Arc::new(SqlShardStore::new(shard_rows.clone())),

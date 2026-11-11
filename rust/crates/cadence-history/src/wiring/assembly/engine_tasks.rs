@@ -34,6 +34,10 @@ impl Inner {
             run_id: self.exec.run_id.clone(),
             task_type,
             version,
+            // Go persistence.TransferTaskTransferTargetRunID: dummy run id for
+            // tasks without a target run; the blob requires a valid UUID.
+            target_domain_id: self.exec.domain_id.clone(),
+            target_run_id: "30000000-0000-f000-f000-000000000002".to_string(),
             ..Default::default()
         }
     }
