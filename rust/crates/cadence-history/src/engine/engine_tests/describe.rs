@@ -2,8 +2,7 @@
 use std::sync::Arc;
 
 use cadence_api::enums::*;
-use cadence_api::service_types::HistoryEvent;
-use cadence_api::types::*;
+use cadence_api::service_types::{DescribeWorkflowExecutionRequest, HistoryEvent};
 
 use crate::engine::deps::*;
 use crate::engine::deps_ms::PendingChildInfo;
