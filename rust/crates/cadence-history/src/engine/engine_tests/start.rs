@@ -85,8 +85,10 @@ fn well_known_errors() {
 fn failed_close_states_and_terminate_and_start() {
     assert!(is_failed_close_state(WORKFLOW_CLOSE_STATUS_FAILED));
     assert!(!is_failed_close_state(WORKFLOW_CLOSE_STATUS_COMPLETED));
-    let mut req = HistoryStartWorkflowExecutionRequest::default();
-    req.start_request = Some(StartWorkflowExecutionRequest { workflow_id_reuse_policy: Some(WorkflowIDReusePolicy::TerminateIfRunning), ..Default::default() });
+    let mut req = HistoryStartWorkflowExecutionRequest {
+        start_request: Some(StartWorkflowExecutionRequest { workflow_id_reuse_policy: Some(WorkflowIDReusePolicy::TerminateIfRunning), ..Default::default() }),
+        ..Default::default()
+    };
     assert!(should_terminate_and_start(&req, WORKFLOW_STATE_RUNNING));
     assert!(should_terminate_and_start(&req, WORKFLOW_STATE_CREATED));
     assert!(!should_terminate_and_start(&req, WORKFLOW_STATE_COMPLETED));
