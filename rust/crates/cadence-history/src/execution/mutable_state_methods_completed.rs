@@ -37,7 +37,7 @@ impl TypedMutableState {
         Ok(event)
     }
 
-    /// Go `ReplicateWorkflowExecutionCompletedEvent` (close tasks / cache not wired).
+    /// Go `ReplicateWorkflowExecutionCompletedEvent` (close tasks generated; Go `writeEventToCache` is perf-only, the executor falls back to the history reader).
     pub fn replicate_workflow_execution_completed_event(
         &mut self,
         first_event_id: i64,
@@ -46,7 +46,7 @@ impl TypedMutableState {
         self.update_workflow_state_close_status(WORKFLOW_STATE_COMPLETED, CLOSE_STATUS_COMPLETED)?;
         self.execution_info.completion_event_batch_id = first_event_id;
         self.clear_stickyness();
-        // Go: taskGenerator.GenerateWorkflowCloseTasks (writeEventToCache not wired)
+        // Go: taskGenerator.GenerateWorkflowCloseTasks (close tasks generated; Go `writeEventToCache` is perf-only, the executor falls back to the history reader)
         self.generate_workflow_close_tasks(event)
     }
 
@@ -73,7 +73,7 @@ impl TypedMutableState {
         Ok(event)
     }
 
-    /// Go `ReplicateWorkflowExecutionTerminatedEvent` (writeEventToCache not wired).
+    /// Go `ReplicateWorkflowExecutionTerminatedEvent` (close tasks generated; Go `writeEventToCache` is perf-only, the executor falls back to the history reader).
     pub fn replicate_workflow_execution_terminated_event(
         &mut self,
         first_event_id: i64,
@@ -120,7 +120,7 @@ impl TypedMutableState {
         Ok(event)
     }
 
-    /// Go `ReplicateWorkflowExecutionFailedEvent` (close tasks / cache not wired).
+    /// Go `ReplicateWorkflowExecutionFailedEvent` (close tasks generated; Go `writeEventToCache` is perf-only, the executor falls back to the history reader).
     pub fn replicate_workflow_execution_failed_event(
         &mut self,
         first_event_id: i64,
@@ -129,7 +129,58 @@ impl TypedMutableState {
         self.update_workflow_state_close_status(WORKFLOW_STATE_COMPLETED, CLOSE_STATUS_FAILED)?;
         self.execution_info.completion_event_batch_id = first_event_id;
         self.clear_stickyness();
-        // Go: taskGenerator.GenerateWorkflowCloseTasks (writeEventToCache not wired)
+        // Go: taskGenerator.GenerateWorkflowCloseTasks (close tasks generated; Go `writeEventToCache` is perf-only, the executor falls back to the history reader)
         self.generate_workflow_close_tasks(event)
+    }
+}
+
+#[cfg(test)]
+mod close_task_tests {
+    use super::super::mutable_state_builder::TypedMutableState;
+    use super::super::mutable_state_task_generator::TaskKind;
+    use cadence_api::service_types::HistoryEvent;
+
+    fn assert_close_tasks(ms: &TypedMutableState) {
+        assert!(ms.transfer_tasks.iter().any(|t| matches!(t.kind, TaskKind::CloseExecution)));
+        assert!(ms.timer_tasks.iter().any(|t| matches!(t.kind, TaskKind::DeleteHistoryEvent)));
+    }
+
+    fn ev() -> HistoryEvent {
+        HistoryEvent { timestamp: Some(1), ..Default::default() }
+    }
+
+    #[test]
+    fn replicate_completed_generates_close_tasks() {
+        let mut ms = TypedMutableState::new();
+        ms.replicate_workflow_execution_completed_event(3, &ev()).unwrap();
+        assert_close_tasks(&ms);
+    }
+
+    #[test]
+    fn replicate_failed_generates_close_tasks() {
+        let mut ms = TypedMutableState::new();
+        ms.replicate_workflow_execution_failed_event(3, &ev()).unwrap();
+        assert_close_tasks(&ms);
+    }
+
+    #[test]
+    fn replicate_terminated_generates_close_tasks() {
+        let mut ms = TypedMutableState::new();
+        ms.replicate_workflow_execution_terminated_event(3, &ev()).unwrap();
+        assert_close_tasks(&ms);
+    }
+
+    #[test]
+    fn replicate_canceled_generates_close_tasks() {
+        let mut ms = TypedMutableState::new();
+        ms.replicate_workflow_execution_canceled_event(3, &ev()).unwrap();
+        assert_close_tasks(&ms);
+    }
+
+    #[test]
+    fn replicate_timedout_generates_close_tasks() {
+        let mut ms = TypedMutableState::new();
+        ms.replicate_workflow_execution_timedout_event(3, &ev()).unwrap();
+        assert_close_tasks(&ms);
     }
 }

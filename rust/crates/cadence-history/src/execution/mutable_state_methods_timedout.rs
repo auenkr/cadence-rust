@@ -26,9 +26,9 @@ impl TypedMutableState {
         Ok(event)
     }
 
-    /// Go `ReplicateWorkflowExecutionTimedoutEvent`. Close-task generation
-    /// (`taskGenerator.GenerateWorkflowCloseTasks`) and `writeEventToCache`
-    /// are not wired yet.
+    /// Go `ReplicateWorkflowExecutionTimedoutEvent`. Generates close tasks
+    /// (`taskGenerator.GenerateWorkflowCloseTasks`); `writeEventToCache` is
+    /// perf-only (the executor falls back to the history reader).
     pub fn replicate_workflow_execution_timedout_event(
         &mut self,
         first_event_id: i64,
@@ -37,7 +37,7 @@ impl TypedMutableState {
         self.update_workflow_state_close_status(WORKFLOW_STATE_COMPLETED, CLOSE_STATUS_TIMED_OUT)?;
         self.execution_info.completion_event_batch_id = first_event_id;
         self.clear_stickyness();
-        // Go: taskGenerator.GenerateWorkflowCloseTasks (writeEventToCache not wired)
+        // Go: taskGenerator.GenerateWorkflowCloseTasks (events cache write is perf-only)
         self.generate_workflow_close_tasks(event)
     }
 }
