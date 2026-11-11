@@ -530,6 +530,7 @@ impl ShardContext {
                 }
             }
             HistoryTaskCategory::Replication => {
+                // Go: fmt.Errorf("replication queue state is not supported")
                 return Err(ShardContextError::Other("replication queue state is not supported".into()));
             }
         }
@@ -838,6 +839,19 @@ mod tests {
                 closed.fetch_add(1, Ordering::SeqCst);
             }),
         )
+    }
+
+    #[test]
+    fn update_queue_state_replication_not_supported_like_go() {
+        let store = Arc::new(Store(Mutex::new(vec![]), false));
+        let c = ctx(store.clone(), Arc::new(AtomicUsize::new(0))).unwrap();
+        let before = store.0.lock().unwrap().len();
+        let err = c
+            .update_queue_state(HistoryTaskCategory::Replication, QueueState::default())
+            .unwrap_err();
+        assert_eq!(err.to_string(), "replication queue state is not supported");
+        // Go returns before updateShardInfoLocked: nothing persisted.
+        assert_eq!(store.0.lock().unwrap().len(), before);
     }
 
     #[test]

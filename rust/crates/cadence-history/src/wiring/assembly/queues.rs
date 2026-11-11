@@ -159,7 +159,7 @@ impl QueueProcessor for EngineQueueProcessor {
                     .map_err(|e| HistoryError::Other(format!("{e:?}")))?;
                 Ok(res
                     .get_state_action_result
-                    .map(|r| r.states.iter().map(|s| format!("{s:?}")).collect())
+                    .map(|r| r.states.iter().map(super::queue_state_string::processing_queue_state_string).collect())
                     .unwrap_or_default())
             }
         }
