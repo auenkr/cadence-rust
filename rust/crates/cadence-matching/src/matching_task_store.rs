@@ -63,6 +63,9 @@ pub struct ConfiguredMatchingStores {
     pub visibility_store: Option<Arc<dyn cadence_persistence::visibility_reader::VisibilityStore>>,
     /// History's SQL transaction backend (MySQL/PostgreSQL only; None otherwise).
     pub history_sql_backend: Option<cadence_persistence::history_sql_backend::SqlBackend>,
+    /// History's `executions_visibility` writer backend: the separate visibility store when
+    /// configured (Go `visibilityStore`), else the default store's backend.
+    pub history_visibility_sql_backend: Option<cadence_persistence::history_sql_backend::SqlBackend>,
     /// History's shard row store over the same pool (MySQL/PostgreSQL only).
     pub history_shard_store: Option<Arc<dyn cadence_persistence::history_sql::ShardStore>>,
 }
@@ -284,6 +287,7 @@ pub fn open_configured_default_store(
         );
         return Ok(ConfiguredMatchingStores {
             history_sql_backend: None,
+            history_visibility_sql_backend: None,
             history_shard_store: None,
             history_node_store: Some(Arc::new(
                 cadence_persistence::history_cassandra::CassandraHistoryNodeStore::new(driver.clone()),
@@ -329,6 +333,7 @@ pub fn open_configured_default_store(
                 metadata;
             Ok(ConfiguredMatchingStores {
                 history_sql_backend: None,
+                history_visibility_sql_backend: None,
                 history_shard_store: None,
                 history_node_store: None,
                 visibility_store: None,
@@ -405,9 +410,14 @@ pub fn open_configured_default_store(
                 active_cluster_name,
             )?;
             let store = Arc::new(store.with_encoding_source(encoding_source));
+            let mut vis_backend = cadence_persistence::history_sql_backend::SqlBackend::mysql(&store);
             let visibility: Arc<dyn cadence_persistence::visibility_reader::VisibilityStore> =
                 match visibility_config {
-                    Some(c) => Arc::new(MySqlTaskStore::connect_visibility_only(c)?),
+                    Some(c) => {
+                        let v = MySqlTaskStore::connect_visibility_only(c)?;
+                        vis_backend = cadence_persistence::history_sql_backend::SqlBackend::mysql(&v);
+                        Arc::new(v)
+                    }
                     None => store.clone(),
                 };
             let metadata = Arc::new(metadata);
@@ -416,6 +426,7 @@ pub fn open_configured_default_store(
             let domain_metadata_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence> = metadata;
             Ok(ConfiguredMatchingStores {
                 history_sql_backend: Some(cadence_persistence::history_sql_backend::SqlBackend::mysql(&store)),
+                history_visibility_sql_backend: Some(vis_backend),
                 history_shard_store: Some(Arc::new(cadence_persistence::history_shard_sql::MySqlShardStore::from_task_store(&store))),
                 history_node_store: Some(store.clone()),
                 visibility_store: Some(visibility),
@@ -499,9 +510,14 @@ pub fn open_configured_default_store(
                 active_cluster_name,
             )?;
             let store = Arc::new(store.with_encoding_source(encoding_source));
+            let mut vis_backend = cadence_persistence::history_sql_backend::SqlBackend::postgres(&store);
             let visibility: Arc<dyn cadence_persistence::visibility_reader::VisibilityStore> =
                 match visibility_config {
-                    Some(c) => Arc::new(PostgresTaskStore::connect_visibility_only(c)?),
+                    Some(c) => {
+                        let v = PostgresTaskStore::connect_visibility_only(c)?;
+                        vis_backend = cadence_persistence::history_sql_backend::SqlBackend::postgres(&v);
+                        Arc::new(v)
+                    }
                     None => store.clone(),
                 };
             let metadata = Arc::new(metadata);
@@ -510,6 +526,7 @@ pub fn open_configured_default_store(
             let domain_metadata_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence> = metadata;
             Ok(ConfiguredMatchingStores {
                 history_sql_backend: Some(cadence_persistence::history_sql_backend::SqlBackend::postgres(&store)),
+                history_visibility_sql_backend: Some(vis_backend),
                 history_shard_store: Some(Arc::new(cadence_persistence::history_shard_sql::PostgresShardStore::from_task_store(&store))),
                 history_node_store: Some(store.clone()),
                 visibility_store: Some(visibility),
