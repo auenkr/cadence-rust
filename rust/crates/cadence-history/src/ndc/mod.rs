@@ -143,6 +143,11 @@ pub struct SyncActivityRequest {
     pub last_heartbeat_time: i64,
     pub attempt: i32,
     pub version_history: Option<cadence_api::types::VersionHistory>,
+    pub details: Vec<u8>,
+    pub last_failure_reason: Option<String>,
+    pub last_worker_identity: String,
+    pub last_failure_details: Vec<u8>,
+    pub last_failure_options: Option<cadence_api::types::FailureOptions>,
 }
 
 /// Go `types.ReplicateEventsV2Request` (not yet in cadence-api; local definition).
@@ -164,6 +169,10 @@ pub trait NdcClusterMetadata {
 
 /// Go `execution.MutableState` subset used by ndc.
 pub trait NdcMutableState {
+    /// Concrete-state access for adapters (e.g. the typed state builder). `None` for mocks.
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        None
+    }
     fn get_execution_info(&self) -> NdcExecutionInfo;
     fn get_version_histories(&self) -> Option<&VersionHistories>;
     fn get_version_histories_mut(&mut self) -> Option<&mut VersionHistories>;
