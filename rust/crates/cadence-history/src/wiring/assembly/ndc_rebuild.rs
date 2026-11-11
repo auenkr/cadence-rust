@@ -468,7 +468,7 @@ impl NdcStateRebuilder for SqlNdcStateRebuilder {
                 target: &target,
                 request_id,
             },
-            || target_branch_token(),
+            target_branch_token,
         )?;
         Ok((Box::new(state), size))
     }
@@ -492,10 +492,12 @@ mod tests {
         fn is_global_domain(&self, _: &str) -> Result<bool, TypedMutableStateError> { Ok(false) }
     }
 
+    type PagerCall = (Vec<u8>, i64, i64, Vec<u8>);
+
     /// Scripted pager: page `i` is returned for token `[i]`; records every call.
     struct ScriptedPager {
         pages: Vec<(Vec<Vec<HistoryEvent>>, i64)>,
-        calls: Mutex<Vec<(Vec<u8>, i64, i64, Vec<u8>)>>,
+        calls: Mutex<Vec<PagerCall>>,
     }
     impl RebuildPager for ScriptedPager {
         fn page(&self, branch: &[u8], first: i64, next: i64, token: Vec<u8>, _: usize) -> Result<HistoryBatchPage, HistoryError> {
