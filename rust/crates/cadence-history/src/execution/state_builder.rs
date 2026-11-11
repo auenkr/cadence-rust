@@ -416,7 +416,7 @@ mod typed_replay_tests {
         let new_start = HistoryEvent { event_id: 1, version: 7, event_type: Some(EventType::WorkflowExecutionStarted),
             workflow_execution_started_event_attributes: Some(WorkflowExecutionStartedEventAttributes { continued_execution_run_id: "old-run".into(), request_id: "new-request".into(), ..Default::default() }), ..Default::default() };
         let workflow = WorkflowExecution::new("wf", "old-run");
-        let new = StateBuilder::apply_events_typed_with_new_run(&mut old, "d", "req", &workflow, &[can], &[new_start]).unwrap().unwrap();
+        let new = StateBuilder::apply_events_typed_with_new_run(&mut old, "d", "req", &workflow, &[can], &[new_start.clone()]).unwrap().unwrap();
         assert_eq!(old.execution_info.run_id, "");
         assert_eq!(old.execution_info.state, 3);
         assert_eq!(new.execution_info.run_id, "new-run");
