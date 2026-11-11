@@ -213,7 +213,11 @@ impl EngineNdcEnv {
             shard: core.shard.clone(),
             cluster: EngineNdcClusterMetadata::new(cluster.clone()),
             serializer: ThriftBatchDeserializer,
-            cache: EngineNdcExecutionCache,
+            cache: EngineNdcExecutionCache::new(
+                engine_cache,
+                Arc::new(EngineNdcClusterMetadata::new(cluster.clone())),
+                core.clock.clone(),
+            ),
             transactions: TodoNdcTransactionManager,
             state_builder: TodoNdcStateBuilder,
             state_rebuilder: TodoNdcStateRebuilder,

@@ -605,10 +605,15 @@ mod tests {
         let source = Arc::new(FakeSource::default());
         let cache = cache(source.clone());
         let c1 = cache.clone();
-        let mut first = tokio::task::spawn_blocking(move || c1.get_or_create_workflow_execution("d", &exec("r1")))
-            .await
-            .unwrap()
-            .unwrap();
+        let (first_tx, first_rx) = std::sync::mpsc::channel::<()>();
+        let (held_tx, held_rx) = std::sync::mpsc::channel::<()>();
+        let first = tokio::task::spawn_blocking(move || {
+            let mut w = c1.get_or_create_workflow_execution("d", &exec("r1")).unwrap();
+            held_tx.send(()).unwrap();
+            first_rx.recv().unwrap();
+            w.release(None);
+        });
+        tokio::task::spawn_blocking(move || held_rx.recv().unwrap()).await.unwrap();
         let got = Arc::new(AtomicBool::new(false));
         let (c2, g2) = (cache.clone(), got.clone());
         let second = tokio::task::spawn_blocking(move || {
@@ -618,7 +623,8 @@ mod tests {
         });
         tokio::time::sleep(Duration::from_millis(150)).await;
         assert!(!got.load(Ordering::SeqCst), "second acquire must wait for the first release");
-        first.release(None);
+        first_tx.send(()).unwrap();
+        first.await.unwrap();
         second.await.unwrap();
         assert!(got.load(Ordering::SeqCst));
         assert_eq!(source.releases.load(Ordering::SeqCst), 2);
