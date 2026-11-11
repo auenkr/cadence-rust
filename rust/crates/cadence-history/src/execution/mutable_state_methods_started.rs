@@ -392,9 +392,11 @@ impl TypedMutableState {
             self.execution_info.partition_config = pc.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         }
         // Not wired: ActiveClusterSelectionPolicy blob, writeEventToCache.
-        self.run_task_generator(0, |g| g.generate_workflow_start_tasks(ts, start_event))?;
-        self.run_task_generator(0, |g| g.generate_record_workflow_started_tasks(start_event))?;
-        if generate_delayed_decision_tasks && a.first_decision_task_backoff_seconds.unwrap_or_default() > 0 {
+        if !self.suppress_task_generation {
+            self.run_task_generator(0, |g| g.generate_workflow_start_tasks(ts, start_event))?;
+            self.run_task_generator(0, |g| g.generate_record_workflow_started_tasks(start_event))?;
+        }
+        if !self.suppress_task_generation && generate_delayed_decision_tasks && a.first_decision_task_backoff_seconds.unwrap_or_default() > 0 {
             self.run_task_generator(0, |g| g.generate_delayed_decision_tasks(start_event))?;
         }
         Ok(())

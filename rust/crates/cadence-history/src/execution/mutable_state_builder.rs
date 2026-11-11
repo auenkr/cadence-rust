@@ -148,6 +148,8 @@ pub struct TypedMutableState {
     pub timer_tasks: Vec<super::mutable_state_task_generator::GeneratedTask>,
     /// Go `taskGenerator` environment (domain cache, config, rand).
     pub task_gen_env: super::mutable_state_methods_common::TaskGenEnv,
+    /// Suppress active queue generation while applying passive replicated history.
+    pub suppress_task_generation: bool,
 }
 
 impl TypedMutableState {
