@@ -30,15 +30,15 @@ struct CurrentUdt {
     close_status: Option<i32>,
 }
 
-fn vis_ts() -> DateTime<Utc> {
+pub(crate) fn vis_ts() -> DateTime<Utc> {
     DateTime::<Utc>::from_timestamp_millis(DEFAULT_VISIBILITY_MS).expect("valid default visibility timestamp")
 }
 
-fn internal(error: impl std::fmt::Display) -> PersistenceError {
+pub(crate) fn internal(error: impl std::fmt::Display) -> PersistenceError {
     PersistenceError::Internal(format!("Cassandra execution: {error}"))
 }
 
-fn parse_uuid(value: &str) -> Result<Uuid, PersistenceError> {
+pub(crate) fn parse_uuid(value: &str) -> Result<Uuid, PersistenceError> {
     Uuid::parse_str(value).map_err(|e| PersistenceError::InvalidArgument(format!("invalid uuid {value}: {e}")))
 }
 
@@ -71,17 +71,17 @@ impl CassandraExecutionStore {
 
 #[async_trait]
 impl GoExecutionStore for CassandraExecutionStore {
-    async fn create_workflow_execution(&self, _r: CreateWorkflowExecutionRequest) -> Result<CurrentExecution, PersistenceError> {
-        not_ported("create_workflow_execution")
+    async fn create_workflow_execution(&self, r: CreateWorkflowExecutionRequest) -> Result<CurrentExecution, PersistenceError> {
+        self.blocking(move |d| crate::history_execution_cassandra_write::create_workflow_execution(&d, r)).await
     }
-    async fn get_workflow_execution(&self, _s: i32, _d: String, _w: String, _r: String, _range: i64) -> Result<WorkflowSnapshot, PersistenceError> {
-        not_ported("get_workflow_execution")
+    async fn get_workflow_execution(&self, s: i32, d: String, w: String, r: String, _range: i64) -> Result<WorkflowSnapshot, PersistenceError> {
+        self.blocking(move |dr| crate::history_execution_cassandra_write::get_workflow_execution(&dr, s, &d, &w, &r)).await
     }
-    async fn update_workflow_execution(&self, _r: UpdateWorkflowExecutionRequest) -> Result<(), PersistenceError> {
-        not_ported("update_workflow_execution")
+    async fn update_workflow_execution(&self, r: UpdateWorkflowExecutionRequest) -> Result<(), PersistenceError> {
+        self.blocking(move |d| crate::history_execution_cassandra_write::update_workflow_execution(&d, r)).await
     }
-    async fn conflict_resolve_workflow_execution(&self, _r: ConflictResolveWorkflowExecutionRequest) -> Result<(), PersistenceError> {
-        not_ported("conflict_resolve_workflow_execution")
+    async fn conflict_resolve_workflow_execution(&self, r: ConflictResolveWorkflowExecutionRequest) -> Result<(), PersistenceError> {
+        self.blocking(move |d| crate::history_execution_cassandra_write::conflict_resolve_workflow_execution(&d, r)).await
     }
     async fn delete_workflow_execution(&self, shard_id: i32, domain_id: String, workflow_id: String, run_id: String) -> Result<(), PersistenceError> {
         self.blocking(move |driver| {
