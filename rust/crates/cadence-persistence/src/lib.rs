@@ -17,6 +17,7 @@ pub mod history_branch;
 pub mod history_cassandra;
 pub mod history_shard_cassandra;
 pub mod history_execution_cassandra;
+pub mod history_execution_cassandra_tasks;
 pub mod history_execution_cassandra_write;
 pub mod history_reader;
 pub mod history_sql;

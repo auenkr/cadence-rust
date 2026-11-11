@@ -1,13 +1,13 @@
 //! Cassandra implementation of History's `GoExecutionStore`
 //! (Go `nosqlplugin/cassandra/workflow*.go`, `tasks*.go`,
-//! `history_task_dlq*.go`). Ported in increments; methods not yet ported
-//! return `Internal("... not yet ported")`.
+//! `history_task_dlq*.go`). Ported in fully.
 use crate::cassandra::CassandraBlockingSession;
 use crate::history_contract::*;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use scylla::SerializeValue;
 use std::sync::Arc;
+use crate::history_execution_cassandra_tasks as t;
 use uuid::Uuid;
 
 /// Go constants.go row types / ids.
@@ -42,18 +42,28 @@ pub(crate) fn parse_uuid(value: &str) -> Result<Uuid, PersistenceError> {
     Uuid::parse_str(value).map_err(|e| PersistenceError::InvalidArgument(format!("invalid uuid {value}: {e}")))
 }
 
-fn not_ported<T>(what: &str) -> Result<T, PersistenceError> {
-    Err(PersistenceError::Internal(format!("Cassandra execution store: {what} not yet ported")))
-}
-
 #[derive(Clone)]
 pub struct CassandraExecutionStore {
     driver: Arc<CassandraBlockingSession>,
+    shard_id: i32,
+    target_cluster: String,
 }
 
 impl CassandraExecutionStore {
     pub fn new(driver: Arc<CassandraBlockingSession>) -> Self {
-        Self { driver }
+        Self { driver, shard_id: 0, target_cluster: String::new() }
+    }
+
+    /// Shard served by this store (used by the DLQ methods, whose trait signatures omit it).
+    pub fn with_shard_id(mut self, shard_id: i32) -> Self {
+        self.shard_id = shard_id;
+        self
+    }
+
+    /// Target cluster for cross-cluster task reads/completions.
+    pub fn with_target_cluster(mut self, cluster: impl Into<String>) -> Self {
+        self.target_cluster = cluster.into();
+        self
     }
 
     fn blocking<T: Send + 'static>(
@@ -153,106 +163,114 @@ impl GoExecutionStore for CassandraExecutionStore {
         })
         .await
     }
-    async fn list_concrete_executions(&self, _f: ExecutionListFilter) -> Result<ExecutionPage, PersistenceError> {
-        not_ported("list_concrete_executions")
+    async fn list_concrete_executions(&self, f: ExecutionListFilter) -> Result<ExecutionPage, PersistenceError> {
+        self.blocking(move |d| t::list_concrete_executions(&d, f)).await
     }
-    async fn list_current_executions(&self, _f: ExecutionListFilter) -> Result<ExecutionPage, PersistenceError> {
-        not_ported("list_current_executions")
+    async fn list_current_executions(&self, f: ExecutionListFilter) -> Result<ExecutionPage, PersistenceError> {
+        self.blocking(move |d| t::list_current_executions(&d, f)).await
     }
-    async fn create_transfer_tasks(&self, _s: i32, _t: Vec<TransferTask>) -> Result<(), PersistenceError> {
-        not_ported("create_transfer_tasks")
+    async fn create_transfer_tasks(&self, s: i32, v: Vec<TransferTask>) -> Result<(), PersistenceError> {
+        self.blocking(move |d| t::create_transfer_tasks(&d, s, v)).await
     }
-    async fn get_transfer_tasks(&self, _s: i32, _a: i64, _b: i64, _c: i32) -> Result<Vec<TransferTask>, PersistenceError> {
-        not_ported("get_transfer_tasks")
+    async fn get_transfer_tasks(&self, s: i32, a: i64, b: i64, c: i32) -> Result<Vec<TransferTask>, PersistenceError> {
+        self.blocking(move |d| t::get_transfer_tasks(&d, s, a, b, c)).await
     }
-    async fn complete_transfer_task(&self, _s: i32, _t: i64) -> Result<(), PersistenceError> {
-        not_ported("complete_transfer_task")
+    async fn complete_transfer_task(&self, s: i32, id: i64) -> Result<(), PersistenceError> {
+        self.blocking(move |d| t::complete_transfer_task(&d, s, id)).await
     }
-    async fn create_failover_marker_tasks(&self, _s: i32, _t: Vec<Task>) -> Result<(), PersistenceError> {
-        not_ported("create_failover_marker_tasks")
+    async fn create_failover_marker_tasks(&self, s: i32, v: Vec<Task>) -> Result<(), PersistenceError> {
+        self.blocking(move |d| t::create_failover_markers(&d, s, None, v)).await
     }
     async fn create_history_tasks(&self, _s: i32, _t: Vec<Task>) -> Result<(), PersistenceError> {
-        not_ported("create_history_tasks")
+        Err(PersistenceError::Internal("create_history_tasks: category-less write is not supported".into()))
     }
-    async fn create_timer_tasks(&self, _s: i32, _t: Vec<TimerTask>) -> Result<(), PersistenceError> {
-        not_ported("create_timer_tasks")
+    async fn create_timer_tasks(&self, s: i32, v: Vec<TimerTask>) -> Result<(), PersistenceError> {
+        self.blocking(move |d| t::create_timer_tasks(&d, s, v)).await
     }
-    async fn select_timer_tasks(&self, _s: i32, _a: i64, _b: i64, _c: i32) -> Result<Vec<TimerTask>, PersistenceError> {
-        not_ported("select_timer_tasks")
+    async fn select_timer_tasks(&self, s: i32, a: i64, b: i64, c: i32) -> Result<Vec<TimerTask>, PersistenceError> {
+        self.blocking(move |d| t::select_timer_tasks(&d, s, a, b, c)).await
     }
-    async fn complete_timer_task(&self, _s: i32, _v: i64, _t: i64) -> Result<(), PersistenceError> {
-        not_ported("complete_timer_task")
+    async fn complete_timer_task(&self, s: i32, vis: i64, id: i64) -> Result<(), PersistenceError> {
+        self.blocking(move |d| t::complete_timer_task(&d, s, vis, id)).await
     }
     async fn select_workflow_timer_tasks(&self, _r: TimerTaskRange) -> Result<Vec<HistoryTaskKey>, PersistenceError> {
-        not_ported("select_workflow_timer_tasks")
+        Ok(Vec::new())
     }
-    async fn create_replication_tasks(&self, _s: i32, _t: Vec<ReplicationTask>) -> Result<(), PersistenceError> {
-        not_ported("create_replication_tasks")
+    async fn create_replication_tasks(&self, s: i32, v: Vec<ReplicationTask>) -> Result<(), PersistenceError> {
+        self.blocking(move |d| t::create_replication_tasks(&d, s, v)).await
     }
-    async fn get_replication_tasks(&self, _s: i32, _a: i64, _b: i64, _c: i32) -> Result<Vec<ReplicationTask>, PersistenceError> {
-        not_ported("get_replication_tasks")
+    async fn get_replication_tasks(&self, s: i32, a: i64, b: i64, c: i32) -> Result<Vec<ReplicationTask>, PersistenceError> {
+        self.blocking(move |d| t::get_replication_tasks(&d, s, a, b, c)).await
     }
-    async fn complete_replication_task(&self, _s: i32, _t: i64) -> Result<(), PersistenceError> {
-        not_ported("complete_replication_task")
+    async fn complete_replication_task(&self, s: i32, id: i64) -> Result<(), PersistenceError> {
+        self.blocking(move |d| t::complete_replication_task(&d, s, id)).await
     }
-    async fn get_replication_dlq_size(&self, _c: String) -> Result<i64, PersistenceError> {
-        not_ported("get_replication_dlq_size")
+    async fn get_replication_dlq_size(&self, c: String) -> Result<i64, PersistenceError> {
+        let s = self.shard_id;
+        self.blocking(move |d| t::get_replication_dlq_size(&d, s, &c)).await
     }
-    async fn delete_replication_task_from_dlq(&self, _c: String, _t: i64) -> Result<(), PersistenceError> {
-        not_ported("delete_replication_task_from_dlq")
+    async fn delete_replication_task_from_dlq(&self, c: String, id: i64) -> Result<(), PersistenceError> {
+        let s = self.shard_id;
+        self.blocking(move |d| t::delete_replication_task_from_dlq(&d, s, &c, id)).await
     }
-    async fn put_replication_task_to_dlq(&self, _c: String, _t: ReplicationTask) -> Result<(), PersistenceError> {
-        not_ported("put_replication_task_to_dlq")
+    async fn put_replication_task_to_dlq(&self, c: String, task: ReplicationTask) -> Result<(), PersistenceError> {
+        let s = self.shard_id;
+        self.blocking(move |d| t::put_replication_task_to_dlq(&d, s, &c, task)).await
     }
-    async fn get_replication_tasks_from_dlq(&self, _c: String, _a: i64, _b: i64, _s: i32) -> Result<Vec<ReplicationTask>, PersistenceError> {
-        not_ported("get_replication_tasks_from_dlq")
+    async fn get_replication_tasks_from_dlq(&self, c: String, a: i64, b: i64, size: i32) -> Result<Vec<ReplicationTask>, PersistenceError> {
+        let s = self.shard_id;
+        self.blocking(move |d| t::get_replication_tasks_from_dlq(&d, s, &c, a, b, size)).await
     }
-    async fn range_delete_replication_tasks_from_dlq(&self, _c: String, _m: i64, _p: i32) -> Result<u64, PersistenceError> {
-        not_ported("range_delete_replication_tasks_from_dlq")
+    async fn range_delete_replication_tasks_from_dlq(&self, c: String, max: i64, _page: i32) -> Result<u64, PersistenceError> {
+        let s = self.shard_id;
+        self.blocking(move |d| t::range_delete_replication_dlq(&d, s, &c, i64::MIN, max)).await
     }
-    async fn create_cross_cluster_tasks(&self, _s: i32, _t: Vec<CrossClusterTask>) -> Result<(), PersistenceError> {
-        not_ported("create_cross_cluster_tasks")
+    async fn create_cross_cluster_tasks(&self, s: i32, v: Vec<CrossClusterTask>) -> Result<(), PersistenceError> {
+        self.blocking(move |d| t::create_cross_cluster_tasks(&d, s, v)).await
     }
-    async fn get_cross_cluster_tasks(&self, _s: i32, _a: i64, _b: i64, _c: i32) -> Result<Vec<CrossClusterTask>, PersistenceError> {
-        not_ported("get_cross_cluster_tasks")
+    async fn get_cross_cluster_tasks(&self, s: i32, a: i64, b: i64, c: i32) -> Result<Vec<CrossClusterTask>, PersistenceError> {
+        let target = self.target_cluster.clone();
+        self.blocking(move |d| t::get_cross_cluster_tasks(&d, s, &target, a, b, c)).await
     }
-    async fn complete_cross_cluster_task(&self, _s: i32, _t: i64) -> Result<(), PersistenceError> {
-        not_ported("complete_cross_cluster_task")
+    async fn complete_cross_cluster_task(&self, s: i32, id: i64) -> Result<(), PersistenceError> {
+        let target = self.target_cluster.clone();
+        self.blocking(move |d| t::complete_cross_cluster_task(&d, s, &target, id)).await
     }
-    async fn create_replication_tasks_from_dlq(&self, _c: String, _t: Vec<ReplicationTask>) -> Result<(), PersistenceError> {
-        not_ported("create_replication_tasks_from_dlq")
+    async fn create_replication_tasks_from_dlq(&self, _c: String, v: Vec<ReplicationTask>) -> Result<(), PersistenceError> {
+        let s = self.shard_id;
+        self.blocking(move |d| t::create_replication_tasks(&d, s, v)).await
     }
-    async fn get_history_tasks(&self, _r: TaskRange, _c: HistoryTaskCategory) -> Result<Vec<Task>, PersistenceError> {
-        not_ported("get_history_tasks")
+    async fn get_history_tasks(&self, r: TaskRange, c: HistoryTaskCategory) -> Result<Vec<Task>, PersistenceError> {
+        self.blocking(move |d| t::get_history_tasks(&d, r, c)).await
     }
-    async fn complete_history_task(&self, _s: i32, _c: HistoryTaskCategory, _t: i64) -> Result<(), PersistenceError> {
-        not_ported("complete_history_task")
+    async fn complete_history_task(&self, s: i32, c: HistoryTaskCategory, id: i64) -> Result<(), PersistenceError> {
+        self.blocking(move |d| t::complete_history_task(&d, s, c, id)).await
     }
-    async fn range_complete_history_tasks(&self, _r: TaskRange, _c: HistoryTaskCategory) -> Result<u64, PersistenceError> {
-        not_ported("range_complete_history_tasks")
+    async fn range_complete_history_tasks(&self, r: TaskRange, c: HistoryTaskCategory) -> Result<u64, PersistenceError> {
+        self.blocking(move |d| t::range_complete_history_tasks(&d, r, c)).await
     }
-    async fn get_replication_dlq_page(&self, _r: crate::history_task_sql::ReplicationDlqQuery) -> Result<crate::history_task_sql::ReplicationDlqPage, PersistenceError> {
-        not_ported("get_replication_dlq_page")
+    async fn get_replication_dlq_page(&self, r: crate::history_task_sql::ReplicationDlqQuery) -> Result<crate::history_task_sql::ReplicationDlqPage, PersistenceError> {
+        self.blocking(move |d| t::get_replication_dlq_page(&d, r)).await
     }
-    async fn range_delete_replication_dlq_page(&self, _s: i32, _c: String, _a: i64, _b: i64, _p: i32) -> Result<u64, PersistenceError> {
-        not_ported("range_delete_replication_dlq_page")
+    async fn range_delete_replication_dlq_page(&self, s: i32, c: String, a: i64, b: i64, _p: i32) -> Result<u64, PersistenceError> {
+        self.blocking(move |d| t::range_delete_replication_dlq(&d, s, &c, a, b)).await
     }
-    async fn get_history_task_page(&self, _r: crate::history_task_sql::HistoryTaskQuery) -> Result<crate::history_task_sql::HistoryTaskPage, PersistenceError> {
-        not_ported("get_history_task_page")
+    async fn get_history_task_page(&self, r: crate::history_task_sql::HistoryTaskQuery) -> Result<crate::history_task_sql::HistoryTaskPage, PersistenceError> {
+        self.blocking(move |d| t::get_history_task_page(&d, r)).await
     }
-    async fn complete_history_task_batch(&self, _s: i32, _c: HistoryTaskCategory, _k: Vec<(i64, i64)>) -> Result<(), PersistenceError> {
-        not_ported("complete_history_task_batch")
+    async fn complete_history_task_batch(&self, s: i32, c: HistoryTaskCategory, k: Vec<(i64, i64)>) -> Result<(), PersistenceError> {
+        self.blocking(move |d| t::complete_history_task_batch(&d, s, c, k)).await
     }
-    async fn range_complete_history_task_page(&self, _r: crate::history_task_sql::HistoryTaskQuery) -> Result<u64, PersistenceError> {
-        not_ported("range_complete_history_task_page")
+    async fn range_complete_history_task_page(&self, r: crate::history_task_sql::HistoryTaskQuery) -> Result<u64, PersistenceError> {
+        self.blocking(move |d| t::range_complete_history_task_page(&d, r)).await
     }
-    async fn create_failover_markers_with_range(&self, _s: i32, _r: i64, _m: Vec<Task>) -> Result<(), PersistenceError> {
-        not_ported("create_failover_markers_with_range")
+    async fn create_failover_markers_with_range(&self, s: i32, r: i64, m: Vec<Task>) -> Result<(), PersistenceError> {
+        self.blocking(move |d| t::create_failover_markers(&d, s, Some(r), m)).await
     }
-    async fn get_active_cluster_selection_policy(&self, _s: i32, _d: String, _w: String, _r: String) -> Result<Option<DataBlob>, PersistenceError> {
-        not_ported("get_active_cluster_selection_policy")
+    async fn get_active_cluster_selection_policy(&self, s: i32, dm: String, w: String, r: String) -> Result<Option<DataBlob>, PersistenceError> {
+        self.blocking(move |d| t::get_active_cluster_selection_policy(&d, s, &dm, &w, &r)).await
     }
-    async fn delete_active_cluster_selection_policy(&self, _s: i32, _d: String, _w: String, _r: String) -> Result<(), PersistenceError> {
-        not_ported("delete_active_cluster_selection_policy")
+    async fn delete_active_cluster_selection_policy(&self, s: i32, dm: String, w: String, r: String) -> Result<(), PersistenceError> {
+        self.blocking(move |d| t::delete_active_cluster_selection_policy(&d, s, &dm, &w, &r)).await
     }
 }

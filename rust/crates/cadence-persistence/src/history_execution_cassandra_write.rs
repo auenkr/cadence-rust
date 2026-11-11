@@ -24,7 +24,7 @@ use uuid::Uuid;
 
 type E = PersistenceError;
 pub(crate) type Fields = Vec<(&'static str, Option<CqlValue>)>;
-type RowMap = HashMap<String, Option<CqlValue>>;
+pub(crate) type RowMap = HashMap<String, Option<CqlValue>>;
 
 pub(crate) const ROW_TYPE_SHARD: i32 = 0;
 pub(crate) const ROW_TYPE_TRANSFER: i32 = 2;
@@ -32,7 +32,7 @@ pub(crate) const ROW_TYPE_TIMER: i32 = 3;
 pub(crate) const ROW_TYPE_REPLICATION: i32 = 4;
 pub(crate) const ROW_TYPE_REQUEST_START: i32 = 7;
 pub(crate) const ROW_TYPE_POLICY: i32 = 11;
-const POLICY_TASK_ID: i64 = -1001;
+pub(crate) const POLICY_TASK_ID: i64 = -1001;
 const EMPTY_REQUEST_VERSION: i64 = -1000;
 const REQUEST_TTL_SECONDS: i32 = 10_800;
 const EVENT_STORE_VERSION: i32 = 2;
@@ -266,7 +266,7 @@ fn checksum_blob(version: i32, flavor: i32, value: Vec<u8>) -> Option<DataBlob> 
 
 // ---------------------------------------------------------------- map UDTs
 
-fn decode_struct(blob: &DataBlob) -> Result<cadence_thrift::value::Struct, E> {
+pub(crate) fn decode_struct(blob: &DataBlob) -> Result<cadence_thrift::value::Struct, E> {
     Encoding::parse(&blob.encoding).and_then(|e| e.decode(&blob.data)).map_err(internal)
 }
 
@@ -855,7 +855,7 @@ pub(crate) fn transfer_fields(t: &TransferTask) -> Result<Fields, E> {
     ])
 }
 
-fn timer_task_fields(t: &TimerTask) -> Result<Fields, E> {
+pub(crate) fn timer_task_fields(t: &TimerTask) -> Result<Fields, E> {
     Ok(vec![
         ("domain_id", uu(&t.domain_id)?),
         ("workflow_id", s(&t.workflow_id)),
@@ -1006,14 +1006,14 @@ pub(crate) fn run_batch(driver: &CassandraBlockingSession, st: Stmts) -> Result<
     Ok(out)
 }
 
-fn applied(rows: &[RowMap]) -> bool {
+pub(crate) fn applied(rows: &[RowMap]) -> bool {
     rows.first().and_then(|r| r.get("[applied]")).and_then(|v| v.as_ref()).is_some_and(|v| matches!(v, CqlValue::Boolean(true)))
 }
 
-fn cell<'a>(row: &'a RowMap, name: &str) -> Option<&'a CqlValue> {
+pub(crate) fn cell<'a>(row: &'a RowMap, name: &str) -> Option<&'a CqlValue> {
     row.get(name).and_then(|v| v.as_ref())
 }
-fn get_i64(v: Option<&CqlValue>) -> Option<i64> {
+pub(crate) fn get_i64(v: Option<&CqlValue>) -> Option<i64> {
     match v? {
         CqlValue::BigInt(x) => Some(*x),
         CqlValue::Int(x) => Some(i64::from(*x)),
@@ -1023,10 +1023,10 @@ fn get_i64(v: Option<&CqlValue>) -> Option<i64> {
         _ => None,
     }
 }
-fn get_i32(v: Option<&CqlValue>) -> i32 {
+pub(crate) fn get_i32(v: Option<&CqlValue>) -> i32 {
     get_i64(v).unwrap_or_default() as i32
 }
-fn get_str(v: Option<&CqlValue>) -> String {
+pub(crate) fn get_str(v: Option<&CqlValue>) -> String {
     match v {
         Some(CqlValue::Text(x) | CqlValue::Ascii(x)) => x.clone(),
         Some(CqlValue::Uuid(u)) => u.to_string(),
@@ -1034,13 +1034,13 @@ fn get_str(v: Option<&CqlValue>) -> String {
         _ => String::new(),
     }
 }
-fn get_blob(v: Option<&CqlValue>) -> Vec<u8> {
+pub(crate) fn get_blob(v: Option<&CqlValue>) -> Vec<u8> {
     match v {
         Some(CqlValue::Blob(x)) => x.clone(),
         _ => Vec::new(),
     }
 }
-fn get_bool(v: Option<&CqlValue>) -> bool {
+pub(crate) fn get_bool(v: Option<&CqlValue>) -> bool {
     matches!(v, Some(CqlValue::Boolean(true)))
 }
 fn get_f64(v: Option<&CqlValue>) -> f64 {
@@ -1050,20 +1050,20 @@ fn get_f64(v: Option<&CqlValue>) -> f64 {
         _ => 0.0,
     }
 }
-fn get_ts_nanos(v: Option<&CqlValue>) -> i64 {
+pub(crate) fn get_ts_nanos(v: Option<&CqlValue>) -> i64 {
     match v {
         Some(CqlValue::Timestamp(t)) => t.0 * 1_000_000,
         _ => 0,
     }
 }
-fn get_strs(v: Option<&CqlValue>) -> Vec<String> {
+pub(crate) fn get_strs(v: Option<&CqlValue>) -> Vec<String> {
     match v {
         Some(CqlValue::List(xs) | CqlValue::Set(xs)) => xs.iter().map(|x| get_str(Some(x))).collect(),
         _ => Vec::new(),
     }
 }
 /// UDT value -> `field name -> value` view.
-fn udt_map(v: Option<&CqlValue>) -> HashMap<&str, &CqlValue> {
+pub(crate) fn udt_map(v: Option<&CqlValue>) -> HashMap<&str, &CqlValue> {
     match v {
         Some(CqlValue::UserDefinedType { fields, .. }) => fields.iter().filter_map(|(n, x)| x.as_ref().map(|x| (n.as_str(), x))).collect(),
         _ => HashMap::new(),
