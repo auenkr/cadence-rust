@@ -561,7 +561,7 @@ impl EngineDecisionHandler {
                 }
                 let mut decisions = req.decisions.clone();
                 // Go: BadBinaries.Binaries[binChecksum] fails the decision.
-                let bad_binary = state.domain.bad_binaries.iter().any(|b| *b == req.binary_checksum);
+                let bad_binary = state.domain.bad_binaries.contains(&req.binary_checksum);
                 let (fail, cause, message, unhandled, not_started_cancelled) = if bad_binary {
                     (
                         true,
