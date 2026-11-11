@@ -59,6 +59,12 @@ pub struct FakeMs {
     pub persistence_json: serde_json::Value,
     pub terminate_err: Mutex<Option<String>>,
     pub signal_err: Mutex<Option<String>>,
+    pub last_write_version: i64,
+    pub duplicated_resources: Mutex<HashSet<String>>,
+    pub previous_started_event_id: i64,
+    pub last_first_event_id: i64,
+    pub version_histories: Option<VersionHistories>,
+    pub in_flight_decision: bool,
     /// Recorded mutating calls, e.g. `terminate:reason`, `clear_stickyness`, `signal:name`.
     pub calls: Mutex<Vec<String>>,
 }
@@ -84,6 +90,12 @@ impl Default for FakeMs {
             persistence_json: serde_json::Value::Null,
             terminate_err: Mutex::new(None),
             signal_err: Mutex::new(None),
+            last_write_version: 0,
+            duplicated_resources: Mutex::new(HashSet::new()),
+            previous_started_event_id: 0,
+            last_first_event_id: 1,
+            version_histories: None,
+            in_flight_decision: false,
             calls: Mutex::new(Vec::new()),
         }
     }
@@ -125,7 +137,7 @@ impl MutableState for FakeMs {
         self.pending_decision.is_some()
     }
     fn has_in_flight_decision(&self) -> bool {
-        unimplemented!()
+        self.in_flight_decision
     }
     fn get_query_registry(&self) -> Arc<dyn QueryRegistry> {
         unimplemented!()
@@ -152,22 +164,22 @@ impl MutableState for FakeMs {
         self.current_version
     }
     fn get_last_first_event_id(&self) -> i64 {
-        unimplemented!()
+        self.last_first_event_id
     }
     fn get_previous_started_event_id(&self) -> i64 {
-        unimplemented!()
+        self.previous_started_event_id
     }
     fn get_current_branch_token(&self) -> HResult<Vec<u8>> {
         Ok(self.branch_token.clone())
     }
     fn get_version_histories(&self) -> Option<VersionHistories> {
-        None
+        self.version_histories.clone()
     }
     fn is_sticky_task_list_enabled(&self) -> bool {
-        unimplemented!()
+        false
     }
     fn get_history_size(&self) -> i64 {
-        unimplemented!()
+        0
     }
     fn get_workflow_type(&self) -> Option<WorkflowType> {
         unimplemented!()
@@ -241,10 +253,10 @@ impl MutableState for FakeMs {
         Ok(())
     }
     fn get_last_write_version(&self) -> HResult<i64> {
-        unimplemented!()
+        Ok(self.last_write_version)
     }
-    fn is_resource_duplicated(&self, _: &str) -> bool {
-        unimplemented!()
+    fn is_resource_duplicated(&self, id: &str) -> bool {
+        self.duplicated_resources.lock().unwrap().contains(id)
     }
     fn update_duplicated_resource(&self, _: &str) {
         unimplemented!()
@@ -482,10 +494,11 @@ impl ActiveClusterManager for FixedActiveCluster {
 pub struct TestConfig {
     pub corruption_check: bool,
     pub max_signals: i32,
+    pub no_consistent_query: bool,
 }
 impl EngineConfig for TestConfig {
     fn enable_consistent_query(&self) -> bool {
-        true
+        !self.no_consistent_query
     }
     fn enable_consistent_query_by_domain(&self, _: &str) -> bool {
         true
@@ -684,6 +697,68 @@ impl ReplicationTaskStore for Nop {
 impl super::start_workflow_execution::WorkflowStartHost for Nop {
     fn shard_id(&self) -> i32 {
         unimplemented!()
+    }
+    fn start_limits(&self, _: &str) -> super::start_workflow_execution::StartLimits {
+        unimplemented!()
+    }
+    fn enable_record_workflow_execution_uninitialized(&self, _: &str) -> bool {
+        unimplemented!()
+    }
+    fn enable_cleanup_orphaned_history_branch(&self, _: &str) -> bool {
+        unimplemented!()
+    }
+    fn has_visibility(&self) -> bool {
+        unimplemented!()
+    }
+    async fn active_cluster_info_by_cluster_attribute(&self, _: &str, _: Option<&ClusterAttribute>) -> HResult<super::start_workflow_execution::ActiveClusterInfo> {
+        unimplemented!()
+    }
+    async fn active_cluster_selection_policy_for_workflow(&self, _: &str, _: &str, _: &str) -> HResult<Option<ActiveClusterSelectionPolicy>> {
+        unimplemented!()
+    }
+    fn new_mutable_state(&self, _: &DomainCacheEntry, _: i64, _: &str) -> HResult<MutableStateRef> {
+        unimplemented!()
+    }
+    fn new_execution_context(&self, _: &str, _: &WorkflowExecution) -> ExecutionContextRef {
+        unimplemented!()
+    }
+    fn close_transaction_as_snapshot(&self, _: &MutableStateRef, _: i64) -> HResult<super::start_workflow_execution::NewRunSnapshot> {
+        unimplemented!()
+    }
+    async fn persist_start_workflow_batch_events(&self, _: &ExecutionContextRef, _: &super::start_workflow_execution::NewRunSnapshot) -> HResult<super::notify_tasks::PersistedBlobRef> {
+        unimplemented!()
+    }
+    async fn create_workflow_execution(
+        &self,
+        _: &ExecutionContextRef,
+        _: &super::start_workflow_execution::NewRunSnapshot,
+        _: &super::notify_tasks::PersistedBlobRef,
+        _: CreateWorkflowMode,
+        _: &str,
+        _: i64,
+        _: CreateWorkflowRequestMode,
+    ) -> HResult<()> {
+        unimplemented!()
+    }
+    async fn update_workflow_execution_with_new_as_active(&self, _: &ExecutionContextRef, _: i64, _: &ExecutionContextRef, _: &MutableStateRef) -> HResult<()> {
+        unimplemented!()
+    }
+    async fn delete_history_branch(&self, _: &[u8], _: &str) -> HResult<()> {
+        unimplemented!()
+    }
+    async fn record_workflow_execution_uninitialized(&self, _: &str, _: &str, _: &WorkflowExecution, _: &str, _: i64) -> HResult<()> {
+        unimplemented!()
+    }
+    async fn delete_visibility_workflow_execution(&self, _: &str, _: &str, _: &WorkflowExecution) -> HResult<()> {
+        unimplemented!()
+    }
+}
+/// `WorkflowStartHost` that only knows its shard id.
+pub struct NopShard(pub i32);
+#[async_trait]
+impl super::start_workflow_execution::WorkflowStartHost for NopShard {
+    fn shard_id(&self) -> i32 {
+        self.0
     }
     fn start_limits(&self, _: &str) -> super::start_workflow_execution::StartLimits {
         unimplemented!()
