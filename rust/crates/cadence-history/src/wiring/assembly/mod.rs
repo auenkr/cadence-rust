@@ -17,6 +17,7 @@ pub mod env;
 pub mod failover;
 pub mod ndc_adapters;
 pub mod ndc_context_hooks;
+pub mod ndc_rebuild;
 pub mod ndc_state;
 pub mod ndc_workflow;
 pub mod queue_deps;
