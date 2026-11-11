@@ -177,7 +177,7 @@ impl NdcStateBuilder for TypedNdcStateBuilder {
 }
 
 /// Real `NdcStateRebuilder` over the history store (see `ndc_rebuild.rs`).
-fn new_state_rebuilder(core: &EngineCore) -> SqlNdcStateRebuilder {
+pub(super) fn new_state_rebuilder(core: &EngineCore) -> SqlNdcStateRebuilder {
     let state_params = core.state_params.clone();
     let pager: Arc<dyn RebuildPager> = match (core.state_params)("").history_nodes {
         Some(nodes) => Arc::new(SqlHistoryPager { nodes, shard_id: core.shard.shard_id() }),
