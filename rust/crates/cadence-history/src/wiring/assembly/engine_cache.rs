@@ -118,6 +118,19 @@ impl EngineExecutionContext {
         Ok(state)
     }
 
+    /// NDC checkout must happen while the caller owns this context's cache
+    /// lock. A dirty engine transaction cannot be represented by the persisted
+    /// snapshot yet, so reject it instead of exporting stale data.
+    pub(super) async fn clean_snapshot_for_ndc(&self) -> HResult<pc::WorkflowSnapshot> {
+        let state = self.load_state().await?;
+        if state.is_dirty() {
+            return Err(HistoryError::internal(
+                "cannot check out NDC state while engine mutable state is dirty",
+            ));
+        }
+        Ok(state.snapshot.clone())
+    }
+
     /// Go `UpdateWorkflowExecutionAsActive`.
     pub async fn update_as_active(&self, now: i64) -> HResult<()> {
         let state = self.load_state().await?;
@@ -298,7 +311,7 @@ impl EngineExecutionCache {
     }
 
     /// Go `validateWorkflowExecutionInfo`: fills the current run id when empty.
-    async fn validate(&self, domain_id: &str, execution: &WorkflowExecution) -> HResult<WorkflowExecution> {
+    pub(super) async fn validate(&self, domain_id: &str, execution: &WorkflowExecution) -> HResult<WorkflowExecution> {
         if execution.workflow_id.is_empty() {
             return Err(HistoryError::bad_request("Can't load workflow execution.  WorkflowId not set."));
         }
