@@ -551,7 +551,7 @@ impl TransferActiveDepsImpl {
         if owner.grpc_address.is_empty() {
             return Err(ForwardError::Task(TaskError::InternalService(format!("history host {} has no gRPC address", owner.address))));
         }
-        let channel = cadence_service_core::grpc_tls::endpoint_channel(&owner.grpc_address, None)
+        let channel = cadence_service_core::grpc_tls::endpoint_channel(&owner.grpc_address, crate::client_tls::history_client_tls().as_ref())
             .map_err(|e| ForwardError::Task(TaskError::InternalService(e.to_string())))?;
         Ok(cadence_proto::history::history_api_client::HistoryApiClient::new(channel))
     }

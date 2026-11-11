@@ -273,6 +273,11 @@ pub async fn run(bin_name: &'static str) -> anyhow::Result<()> {
         Some(m) => cadence_service_core::grpc_tls::client_tls(&m.tls)?,
         None => None,
     };
+    // Go's History client dials peer History hosts with the history rpc.tls client config.
+    crate::client_tls::set_history_client_tls(match rpc_for(&cfg, "history") {
+        Some(h) => cadence_service_core::grpc_tls::client_tls(&h.tls)?,
+        None => None,
+    });
     let env = HistoryEnv::build(HistoryEnvParams {
         config: service_config.clone(),
         persistence: cfg.persistence.clone(),
