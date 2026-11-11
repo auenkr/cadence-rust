@@ -38,6 +38,10 @@ pub trait CommonTask: Send + Sync {
     fn retry_err(&self, err: &TaskError) -> bool;
     fn ack(&self);
     fn nack(&self, err: Option<TaskError>);
+    /// Lets scheduler key functions recover the concrete task (Go type-asserts the generic task).
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        None
+    }
 }
 
 pub type TaskRef = Arc<dyn CommonTask>;
