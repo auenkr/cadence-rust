@@ -15,7 +15,7 @@ use cadence_api::service_types::HistoryEvent;
 use cadence_api::tasks::*;
 use cadence_persistence::history_contract as pc;
 use cadence_persistence::history_reader::HistoryNodeStore;
-use cadence_persistence::sqlblobs::{activity_info_from_struct, Encoding};
+use cadence_persistence::sqlblobs::Encoding;
 use cadence_thrift::FromThrift;
 
 use crate::engine::deps::{
@@ -263,14 +263,6 @@ pub struct EngineMutableState {
     pub(super) params: StateParams,
 }
 
-fn decode_events(blob: &pc::DataBlob) -> HResult<Vec<HistoryEvent>> {
-    cadence_thrift::history_blob::decode(&cadence_api::types::DataBlob {
-        encoding_type: Some(cadence_api::enums::EncodingType::ThriftRW),
-        data: blob.data.clone(),
-    })
-    .map_err(|e| HistoryError::internal(format!("decode buffered events: {e}")))
-}
-
 impl EngineMutableState {
     /// Go `mutableStateBuilder.Load`: builds the state from a persisted snapshot.
     pub fn from_snapshot(
@@ -279,6 +271,8 @@ impl EngineMutableState {
         sticky_ttl_nanos: i64,
         now_nanos: Arc<dyn Fn() -> i64 + Send + Sync>,
     ) -> HResult<Self> {
+        let envelope = crate::execution::mutable_state_bridge::snapshot_to_envelope(snapshot)?;
+        let snapshot = envelope.snapshot;
         let i = &snapshot.execution_info;
         let auto_reset_points = match &i.auto_reset_points {
             Some(b) if !b.data.is_empty() => Some(
@@ -334,48 +328,23 @@ impl EngineMutableState {
         };
         let mut activities = BTreeMap::new();
         let mut pc_acts = BTreeMap::new();
-        for kb in &snapshot.activity_infos {
-            let a = activity_info_from_struct(&decode(&kb.value)?)
-                .map_err(|e| HistoryError::internal(format!("decode activity info: {e}")))?;
-            let details = snapshot.activity_heartbeats.get(&kb.key).map(|h| h.details.clone()).unwrap_or_default();
-            activities.insert(kb.key, engine_activity(kb.key, &a, details));
-            pc_acts.insert(kb.key, a);
-        }
-        let mut timers = BTreeMap::new();
-        for kb in &snapshot.timer_infos {
-            let t = cadence_persistence::sqlblobs::timer_info_from_struct(&decode(&kb.value)?)
-                .map_err(|e| HistoryError::internal(format!("decode timer info: {e}")))?;
-            timers.insert(kb.key.clone(), t);
+        for (schedule_id, a) in &envelope.activities {
+            let details = snapshot.activity_heartbeats.get(schedule_id).map(|h| h.details.clone()).unwrap_or_default();
+            activities.insert(*schedule_id, engine_activity(*schedule_id, a, details));
+            pc_acts.insert(*schedule_id, a.clone());
         }
         let mut children = BTreeMap::new();
-        let mut pc_children = BTreeMap::new();
-        for kb in &snapshot.child_execution_infos {
-            let c = cadence_persistence::sqlblobs::child_execution_info_from_struct(&decode(&kb.value)?)
-                .map_err(|e| HistoryError::internal(format!("decode child execution info: {e}")))?;
+        for (initiated_id, c) in &envelope.children {
             children.insert(
-                kb.key,
+                *initiated_id,
                 ChildExecutionInfo { started_id: c.started_id, started_workflow_id: c.started_workflow_id.clone() },
             );
-            pc_children.insert(kb.key, c);
         }
-        let version_histories = match &snapshot.version_histories {
-            Some(b) => Some(
-                crate::wiring::server::thrift_types_g2::version_histories_from_thrift(&decode(b)?)
-                    .map_err(|e| HistoryError::internal(format!("decode version histories: {e}")))?,
-            ),
-            None => None,
-        };
-        // Go Load: currentVersion is the last item version of the current history.
-        let current_version = version_histories
-            .as_ref()
-            .and_then(|vh| vh.histories.get(vh.current_version_history_index as usize))
-            .and_then(|h| h.items.last())
-            .map(|item| item.version)
-            .unwrap_or(EMPTY_VERSION);
-        let mut buffered = Vec::new();
-        for blob in &snapshot.buffered_events {
-            buffered.extend(decode_events(blob)?);
-        }
+        let pc_children = envelope.children.clone();
+        let timers = envelope.timers.clone();
+        let version_histories = envelope.version_histories.clone();
+        let current_version = envelope.current_version;
+        let buffered = envelope.buffered_events.clone();
         let inner = Inner {
             exec,
             pc_exec: i.clone(),

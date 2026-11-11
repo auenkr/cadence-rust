@@ -15,6 +15,7 @@ pub mod state_builder;
 pub mod mutable_state_util;
 pub mod history_builder;
 pub mod context;
+pub mod mutable_state_bridge;
 
 
 pub mod integrity;
