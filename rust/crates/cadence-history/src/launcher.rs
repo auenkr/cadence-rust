@@ -20,7 +20,8 @@ use crate::config_collection::{Collection, DynamicClient};
 use crate::service::{MembershipControl, Service};
 use crate::wiring::assembly::controller::ShardRegistry;
 use crate::wiring::assembly::env::{HistoryEnv, HistoryEnvParams};
-use crate::wiring::assembly::queue_factory::{ExecQueueFactory, MissingExecutorsProvider};
+use crate::wiring::assembly::queue_factory::ExecQueueFactory;
+use crate::wiring::assembly::queue_provider::HistoryQueueExecProvider;
 use crate::wiring::assembly::replication_builders::{RegistryHistoryClient, ReplicationFactoryImpl};
 use crate::wiring::resources::dynconfig::FileDynamicClient;
 use crate::wiring::resources::membership_feed::{refresh_from_snapshot, spawn_membership_feed};
@@ -285,8 +286,10 @@ pub async fn run(bin_name: &'static str) -> anyhow::Result<()> {
 
     let history_client = RegistryHistoryClient::new();
     let replication = Arc::new(ReplicationFactoryImpl::new(history_client.clone()));
-    let registry = ShardRegistry::new(env.clone(), Arc::new(ExecQueueFactory::new(Arc::new(MissingExecutorsProvider))), replication.clone());
+    let queue_provider = HistoryQueueExecProvider::new(history_client.clone());
+    let registry = ShardRegistry::new(env.clone(), Arc::new(ExecQueueFactory::new(queue_provider.clone())), replication.clone());
     history_client.bind(&registry);
+    queue_provider.bind(&registry);
 
     let service = Arc::new(Service::new(env.clone(), registry.clone(), Arc::new(RingpopMembership(provider.clone()))));
     service.set_grpc_tls(grpc_tls);
@@ -336,6 +339,7 @@ pub async fn run(bin_name: &'static str) -> anyhow::Result<()> {
         _ = service.wait_stopped() => {}
     }
     service.stop().await;
+    queue_provider.stop().await;
     ownership_task.abort();
     feed.abort();
     replication.stop_fetchers();
