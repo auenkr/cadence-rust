@@ -28,8 +28,9 @@ use async_trait::async_trait;
 use cadence_api::service_types::HistoryEvent;
 use cadence_api::types::WorkflowExecution;
 
-use crate::engine::deps::{ClusterMetadata, HResult, HistoryError};
-use crate::engine::runtime::Replicator;
+use crate::engine::deps::{ClusterMetadata, ExecutionCache, HResult, HistoryError};
+use crate::engine::runtime::{ResetWorkflow, Replicator, WorkflowResetter};
+use crate::wiring::assembly::engine_resetter::EngineWorkflowResetter;
 use crate::engine::types as et;
 use crate::execution::context::WorkflowEvents;
 use crate::ndc::activity_replicator::{ActivityReplicator, ActivityReplicatorImpl};
@@ -49,7 +50,7 @@ use crate::ndc::{
     ReplicateEventsV2Request, SyncActivityRequest,
 };
 use crate::shard_context::ShardContext;
-use crate::wiring::assembly::engine_cache::{EngineCore, EngineExecutionCache};
+use crate::wiring::assembly::engine_cache::{EngineCore, EngineExecutionCache, EngineExecutionContext};
 use crate::wiring::assembly::ndc_workflow::EngineNdcExecutionCache;
 use crate::wiring::assembly::ndc_rebuild::{
     EngineTaskDomains, NdcRebuildEnv, RebuildPager, SqlNdcStateRebuilder, UnavailableRebuildPager,
@@ -200,6 +201,7 @@ pub(super) fn new_state_rebuilder(core: &EngineCore) -> SqlNdcStateRebuilder {
 pub struct EngineTransactionCollaborators {
     core: Arc<EngineCore>,
     cache: EngineNdcExecutionCache,
+    engine_cache: Arc<dyn ExecutionCache>,
 }
 
 impl TransactionManagerCollaborators for EngineTransactionCollaborators {
@@ -229,25 +231,51 @@ impl TransactionManagerCollaborators for EngineTransactionCollaborators {
         Ok(workflow)
     }
 
+    /// Go `reset.WorkflowResetter.ResetWorkflow` over the current run's engine
+    /// context (the NDC workflow holds its lock; its persisted state is clean).
     fn reset_workflow(
         &self,
-        _domain_id: &str,
-        _workflow_id: &str,
-        _base_run_id: &str,
-        _base_branch_token: &[u8],
-        _base_rebuild_last_event_id: i64,
-        _base_rebuild_last_event_version: i64,
-        _base_next_event_id: i64,
-        _reset_run_id: &str,
-        _reset_request_id: &str,
-        _current: &mut dyn NdcWorkflow,
-        _reset_reason: &str,
-        _additional_reapply_events: &[HistoryEvent],
-        _skip_signal_reapply: bool,
+        domain_id: &str,
+        workflow_id: &str,
+        base_run_id: &str,
+        base_branch_token: &[u8],
+        base_rebuild_last_event_id: i64,
+        base_rebuild_last_event_version: i64,
+        base_next_event_id: i64,
+        reset_run_id: &str,
+        reset_request_id: &str,
+        current: &mut dyn NdcWorkflow,
+        reset_reason: &str,
+        additional_reapply_events: &[HistoryEvent],
+        skip_signal_reapply: bool,
     ) -> NdcResult<()> {
-        Err(NdcError::internal(
-            "TODO(ndc-reset): events-reapplication workflow reset collaborator is not wired",
-        ))
+        let context = current
+            .engine_context()
+            .and_then(|c| c.downcast::<EngineExecutionContext>().ok())
+            .ok_or_else(|| NdcError::internal("reset_workflow: current workflow has no engine execution context"))?;
+        let state = block_on(context.load_state()).map_err(history_to_ndc)?;
+        let resetter = EngineWorkflowResetter::new(self.core.clone(), self.engine_cache.clone());
+        let request = ResetWorkflow {
+            domain_id: domain_id.to_string(),
+            workflow_id: workflow_id.to_string(),
+            base_run_id: base_run_id.to_string(),
+            base_branch_token: base_branch_token.to_vec(),
+            rebuild_last_event_id: base_rebuild_last_event_id,
+            rebuild_last_event_version: base_rebuild_last_event_version,
+            base_next_event_id,
+            reset_run_id: reset_run_id.to_string(),
+            request_id: reset_request_id.to_string(),
+            current_context: context,
+            current_state: state,
+            current_release: None, // execution.NoopReleaseFn
+            reason: reset_reason.to_string(),
+            events: additional_reapply_events.to_vec(),
+            skip_signal_reapply,
+        };
+        let result = block_on(resetter.reset_workflow(request)).map_err(history_to_ndc);
+        // The engine write bypassed the NDC workflow's in-memory state.
+        current.clear();
+        result
     }
 }
 
@@ -258,10 +286,10 @@ pub struct EngineNdcTransactionManager {
 }
 
 impl EngineNdcTransactionManager {
-    pub fn new(core: Arc<EngineCore>, cache: EngineNdcExecutionCache) -> Self {
+    pub fn new(core: Arc<EngineCore>, cache: EngineNdcExecutionCache, engine_cache: Arc<dyn ExecutionCache>) -> Self {
         let shard = core.shard.clone();
         let range_shard = shard.clone();
-        let collaborators = Arc::new(EngineTransactionCollaborators { core: core.clone(), cache });
+        let collaborators = Arc::new(EngineTransactionCollaborators { core: core.clone(), cache, engine_cache });
         Self {
             env: SqlTransactionManagerEnv {
                 executions: core.executions.clone(),
@@ -341,10 +369,11 @@ impl EngineNdcEnv {
             transactions: EngineNdcTransactionManager::new(
                 engine_cache.core(),
                 EngineNdcExecutionCache::new(
-                    engine_cache,
+                    engine_cache.clone(),
                     Arc::new(EngineNdcClusterMetadata::new(cluster.clone())),
                     core.clock.clone(),
                 ),
+                engine_cache,
             ),
             state_builder: TypedNdcStateBuilder,
             state_rebuilder: new_state_rebuilder(core),

@@ -158,6 +158,10 @@ pub fn build_core(env: &Arc<HistoryEnv>, shard: &Arc<ShardContext>) -> (Arc<Engi
             Arc::new(move || cfg.is_advanced_vis_config_exist && !matches!((cfg.write_visibility_store_name)().as_str(), "db" | "off"))
         },
         active_cluster_manager: Arc::new(DomainActiveClusterManager::new(env.domain_cache.clone())),
+        remote_admin_clients: Arc::new(crate::wiring::resources::replication_clients::RemoteAdminClients::new(
+            env.cluster.metadata().clone(),
+            "cadence-history",
+        )),
         shard: shard.clone(),
         executions: env.persistence.executions.clone(),
         domains: env.domain_cache.clone() as Arc<dyn DomainCache>,

@@ -21,7 +21,8 @@ use std::sync::Arc;
 
 use cadence_persistence::history_contract::{self as pc, HistoryTaskCategory, Task};
 use cadence_persistence::sqlblobs::{
-    timer_task_from_struct, timer_task_to_struct, transfer_task_from_struct, transfer_task_to_struct, Encoding,
+    replication_task_from_struct, replication_task_to_struct, timer_task_from_struct, timer_task_to_struct,
+    transfer_task_from_struct, transfer_task_to_struct, Encoding,
 };
 
 use crate::engine::deps::{HResult, HistoryError};
@@ -150,10 +151,29 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
         Ok(false)
     }
     /// Go `UpdateWorkflowExecutionAsActive` after a decision failover on load.
-    /// `start_transaction` never reports a flush need here, so this is a
-    /// defensive no-op rather than a silent partial write.
-    async fn flush_as_active(&mut self, _state: &mut NdcStateBox, _now: i64) -> Result<(), HistoryError> {
-        Err(internal("flush_as_active requested but start_transaction never fails over in the NDC path"))
+    async fn flush_as_active(&mut self, state: &mut NdcStateBox, now: i64) -> Result<(), HistoryError> {
+        let info = state.ms.get_execution_info();
+        let key = WorkflowExecutionKey::new(
+            info.domain_id.clone(),
+            &cadence_api::types::WorkflowExecution { workflow_id: info.workflow_id, run_id: info.run_id },
+        );
+        let placeholder = placeholder_state_for(&key);
+        let lent = NdcStateBox {
+            ms: std::mem::replace(&mut state.ms, placeholder),
+            history_size: state.history_size,
+        };
+        let writer = EngineNdcWriter::new(self.core.clone());
+        // Go `UpdateWorkflowExecutionAsActive`.
+        let updated = writer.write_update(
+            &key,
+            lent,
+            now,
+            pc::UpdateWorkflowMode::UpdateCurrent,
+            TransactionPolicy::Active,
+            pc::WorkflowRequestMode::New,
+        )?;
+        *state = updated;
+        Ok(())
     }
     fn notify_snapshot(&mut self, _s: Option<&pc::WorkflowSnapshot>, _h: &[PersistedBlob], _err: bool) {}
     fn notify_mutation(&mut self, _m: &pc::WorkflowMutation, _h: &[PersistedBlob], _err: bool) {}
@@ -202,11 +222,32 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
         if !has(&mutation.tasks_by_category) {
             return Ok(());
         }
-        // Replication tasks cannot be allocated/encoded here yet (see
-        // `allocate_task_ids`); merging the new-run branch token needs them.
-        Err(internal(
-            "TODO(ndc-persistence): continue-as-new replication task merge (replication task encoding) is not implemented",
-        ))
+        let new_run_task = match new_workflow {
+            Some(new) if new.tasks_by_category.get(&REPLICATION).map_or(0, |l| l.len()) == 1 => {
+                // Go: `TasksByCategory[Replication] = nil` after taking the task.
+                let task = new.tasks_by_category.remove(&REPLICATION).unwrap_or_default().remove(0);
+                let s = Encoding::ThriftRW.decode(&task.data.data).map_err(|e| internal(e.to_string()))?;
+                replication_task_from_struct(&s).map_err(|e| internal(e.to_string()))?
+            }
+            _ => {
+                return Err(internal("unable to find replication task from new workflow for continue as new replication"))
+            }
+        };
+        let mut updated = false;
+        if let Some(list) = mutation.tasks_by_category.get_mut(&REPLICATION) {
+            for task in list.iter_mut() {
+                let s = Encoding::ThriftRW.decode(&task.data.data).map_err(|e| internal(e.to_string()))?;
+                let mut decoded = replication_task_from_struct(&s).map_err(|e| internal(e.to_string()))?;
+                decoded.new_run_branch_token = new_run_task.branch_token.clone();
+                let s = replication_task_to_struct(&decoded).map_err(|e| internal(e.to_string()))?;
+                task.data = task_blob(Encoding::ThriftRW.encode(&s))?;
+                updated = true;
+            }
+        }
+        if !updated {
+            return Err(internal("unable to find replication task from current workflow for continue as new replication"));
+        }
+        Ok(())
     }
     async fn reapply_events(&mut self, batches: &[WorkflowEvents]) -> Result<(), HistoryError> {
         reapply_via_engine(&self.core, batches).await
@@ -215,7 +256,7 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
     fn allocate_task_ids(&mut self, tasks: &mut BTreeMap<HistoryTaskCategory, Vec<Task>>) -> Result<(), HistoryError> {
         let shard = &self.core.shard;
         for (category, list) in tasks.iter() {
-            if !list.is_empty() && *category != TRANSFER && *category != TIMER {
+            if !list.is_empty() && *category != TRANSFER && *category != TIMER && *category != REPLICATION {
                 return Err(internal(format!(
                     "TODO(ndc-persistence): task category {category:?} is not supported by NDC persistence"
                 )));
@@ -259,6 +300,22 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
             }
             self.pending.timer.extend(decoded);
         }
+        // Go allocates replication task ids last (after transfer and timer).
+        if let Some(list) = tasks.get_mut(&REPLICATION) {
+            let mut decoded = Vec::with_capacity(list.len());
+            for task in list.iter() {
+                let s = Encoding::ThriftRW.decode(&task.data.data).map_err(|e| internal(e.to_string()))?;
+                decoded.push(replication_task_from_struct(&s).map_err(|e| internal(e.to_string()))?);
+            }
+            let mut slots: Vec<(i64, i64)> = list.iter().map(|t| (0, t.visibility_timestamp_unix_nanos)).collect();
+            let mut max_read_level = 0i64;
+            shard.allocate_transfer_ids(&mut slots, &mut max_read_level).map_err(shard_err)?;
+            for (task, slot) in list.iter_mut().zip(slots.iter()) {
+                task.task_id = slot.0;
+                task.visibility_timestamp_unix_nanos = slot.1;
+            }
+            self.pending.max_read_level = self.pending.max_read_level.max(max_read_level);
+        }
         Ok(())
     }
 
@@ -278,7 +335,7 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
 
 /// Go `contextImpl.ReapplyEvents`: skip when the domain is pending active; when
 /// the workflow is active here call the engine, otherwise (remote active
-/// cluster) the admin client is not ported and an explicit error is returned.
+/// cluster) send the events through the remote admin client.
 pub(super) async fn reapply_via_engine(core: &EngineCore, batches: &[WorkflowEvents]) -> Result<(), HistoryError> {
     let events = select_reapply_events(batches).map_err(internal)?;
     if events.is_empty() {
@@ -294,9 +351,23 @@ pub(super) async fn reapply_via_engine(core: &EngineCore, batches: &[WorkflowEve
         .active_cluster_by_workflow(&key.domain_id, &key.workflow_id, &key.run_id)
         .await?;
     if active != core.current_cluster {
-        return Err(internal(format!(
-            "TODO(ndc-admin-client): reapply events to remote active cluster {active} (admin client) is not ported"
-        )));
+        // Go: serialize the events (ThriftRW) and send them through the remote admin client.
+        let blob = cadence_thrift::history_blob::encode(events);
+        let admin = core
+            .remote_admin_clients
+            .remote_admin_client(&active)
+            .map_err(|e| internal(e.to_string()))?;
+        return admin
+            .reapply_events(cadence_api::admin::ReapplyEventsRequest {
+                domain: domain.info.name.clone(),
+                workflow_execution: Some(cadence_api::types::WorkflowExecution {
+                    workflow_id: key.workflow_id.clone(),
+                    run_id: key.run_id.clone(),
+                }),
+                events: Some(blob),
+            })
+            .await
+            .map_err(|e| internal(e.to_string()));
     }
     let engine = core
         .engine_slot
