@@ -540,11 +540,13 @@ impl WorkflowStartHost for EngineStartHost {
     ) -> HResult<()> {
         let ctx = downcast_context(context)?;
         let new_run = downcast_txn(snapshot)?;
+        // Keep the prepared transaction in place: the start flow may call this again with the same
+        // snapshot (workflow-ID-reuse retry after an already-started failure), as Go does.
         let txn = new_run
             .txn
             .lock()
             .unwrap()
-            .take()
+            .clone()
             .ok_or_else(|| HistoryError::internal("start transaction not prepared"))?;
         let (snap, max_read_level, notify_transfer, notify_timer) = snapshot_of(&self.core, txn)?;
         let (size, last) = *new_run.history.lock().unwrap();

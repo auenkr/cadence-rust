@@ -19,7 +19,7 @@ on:
         default: grpc
 
 concurrency:
-  group: history-mixed-${{ github.ref }}-${{ inputs.database }}-${{ inputs.outbound }}-${{ inputs.two_history }}-${{ github.sha }}
+  group: history-mixed-${{ github.ref }}-${{ inputs.database }}-${{ inputs.outbound }}-${{ inputs.two_history }}-${{ github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || '' }}
   cancel-in-progress: true
 
 jobs:
