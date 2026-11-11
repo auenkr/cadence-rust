@@ -15,6 +15,7 @@ pub mod dynamic_config_keys;
 pub mod executions;
 pub mod history_branch;
 pub mod history_cassandra;
+pub mod history_shard_cassandra;
 pub mod history_reader;
 pub mod history_sql;
 pub mod history_state_maps_sql;
