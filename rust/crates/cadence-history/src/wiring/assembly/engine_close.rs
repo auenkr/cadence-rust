@@ -117,6 +117,24 @@ impl EngineMutableState {
                     .push(pc::KeyedBlob { key: *iid, value: blob(enc(&child_execution_info_to_struct(c))?) });
             }
         }
+        let mut upsert_request_cancel_infos = Vec::new();
+        for iid in &g.upsert_cancels {
+            if let Some(c) = g.pc_cancels.get(iid) {
+                upsert_request_cancel_infos.push(pc::KeyedBlob {
+                    key: *iid,
+                    value: blob(enc(&cadence_persistence::sqlblobs::request_cancel_info_to_struct(c))?),
+                });
+            }
+        }
+        let mut upsert_signal_infos = Vec::new();
+        for iid in &g.upsert_signals {
+            if let Some(s) = g.pc_signals.get(iid) {
+                upsert_signal_infos.push(pc::KeyedBlob {
+                    key: *iid,
+                    value: blob(enc(&cadence_persistence::sqlblobs::signal_info_to_struct(s))?),
+                });
+            }
+        }
         let mut upsert_timer_infos = Vec::new();
         for id in &g.upsert_timers {
             if let Some(t) = g.timers.get(id) {
@@ -142,6 +160,8 @@ impl EngineMutableState {
             delete_timer_infos: g.delete_timers.iter().cloned().collect(),
             upsert_child_execution_infos,
             delete_child_execution_infos: g.deleted_children.iter().copied().collect(),
+            upsert_request_cancel_infos,
+            upsert_signal_infos,
             delete_request_cancel_infos: g.deleted_request_cancels.iter().copied().collect(),
             delete_signal_infos: g.deleted_signals.iter().copied().collect(),
             upsert_signal_requested_ids: g.upsert_signal_requested.iter().cloned().collect(),
@@ -192,6 +212,8 @@ impl EngineMutableState {
         g.deleted_activities.clear();
         g.upsert_children.clear();
         g.deleted_children.clear();
+        g.upsert_cancels.clear();
+        g.upsert_signals.clear();
         g.deleted_request_cancels.clear();
         g.deleted_signals.clear();
         g.upsert_signal_requested.clear();
