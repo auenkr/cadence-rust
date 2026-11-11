@@ -280,7 +280,11 @@ impl TransferDependencies for TransferDepsImpl {
         self.env.visibility.record_started_async(to_row(&record, false)).await.map_err(pe)
     }
 
-    async fn upsert_workflow_execution(&self, _record: VisibilityRecord) -> TaskResult<()> {
+    async fn upsert_workflow_execution(&self, record: VisibilityRecord) -> TaskResult<()> {
+        // Go IsNopUpsertWorkflowRequest: a CadenceChangeVersion-only upsert is a no-op.
+        if record.search_attributes.contains_key("CadenceChangeVersion") {
+            return Ok(());
+        }
         // Go sql visibility store: UpsertWorkflowExecution is not supported.
         self.env.visibility.upsert().map_err(pe)
     }

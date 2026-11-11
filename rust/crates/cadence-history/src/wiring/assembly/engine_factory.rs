@@ -253,7 +253,7 @@ pub fn build_engine(
             env.config.number_of_shards as u32,
         )),
         history_event_notifier: Arc::new(NotifierAdapter::new(Notifier::new())),
-        task_refresher: Arc::new(UnwiredTaskRefresher),
+        task_refresher: Arc::new(super::engine_refresher::EngineTaskRefresher::new(env.domain_cache.clone())),
         events_reapplier: Arc::new(UnwiredEventsReapplier),
         replication_task_store: replication.task_store.clone(),
     })
