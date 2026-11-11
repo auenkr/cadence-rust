@@ -33,6 +33,7 @@ pub mod queue_factory;
 pub mod queue_policy;
 pub mod queue_provider;
 pub mod queue_allocator_adapters;
+pub mod queue_state_string;
 pub mod queues;
 pub mod replication;
 pub mod replication_builders;

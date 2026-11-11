@@ -7,7 +7,7 @@
 //! domain entry or task generator:
 //! * Go `timeSource.Now()` and config lookups are carried in [`DecisionEnv`].
 //! * Task generation is wired via `run_task_generator` (tasks land in `transfer_tasks`/`timer_tasks`).
-//! * Logging / metrics (`logger.Warn`, `DecisionAttemptTimer`) are NOT wired.
+//! * Logging / metrics go through `tracing` and `TaskGenEnv::metrics`.
 //! * `insertWorkflowRequest` stores only the request id (type/version are not
 //!   representable in the Rust `WorkflowRequest` yet).
 //! * Auto reset points are kept in `DecisionEnv::auto_reset_points` because the
@@ -137,7 +137,7 @@ impl TypedMutableState {
         self.update_decision(&reset);
     }
 
-    /// Go `FailDecision`. The critical-attempt metric/log is not wired.
+    /// Go `FailDecision`.
     pub fn fail_decision(&mut self, env: &DecisionEnv, increment_attempt: bool) {
         // Clear stickiness whenever decision fails
         self.clear_stickyness();
@@ -155,9 +155,26 @@ impl TypedMutableState {
         if increment_attempt {
             fail.attempt = self.execution_info.decision_attempt + 1;
             fail.schedule_timestamp = env.now_nanos;
-            // Go: attempt >= DecisionRetryCriticalAttempts -> metrics + warn log (not wired).
+            if fail.attempt >= env.decision_retry_critical_attempts {
+                self.emit_decision_attempt_critical(fail.attempt);
+            }
         }
         self.update_decision(&fail);
+    }
+
+    /// Go `FailDecision` critical-attempt metrics + warn log.
+    pub(crate) fn emit_decision_attempt_critical(&self, attempt: i64) {
+        let domain_id = self.execution_info.domain_id.as_str();
+        if let Some(m) = &self.task_gen_env.metrics {
+            m.record_timer("WorkflowContextScope", "DecisionAttemptTimer", domain_id, attempt);
+            m.int_exponential_histogram("WorkflowContextScope", "DecisionAttemptHistogram", domain_id, attempt);
+        }
+        tracing::warn!(
+            domain_id = domain_id,
+            workflow_id = %self.execution_info.workflow_id,
+            run_id = %self.execution_info.run_id,
+            "Critical error processing decision task, retrying."
+        );
     }
 
     /// Go `HasProcessedOrPendingDecision`.
@@ -956,6 +973,48 @@ mod decision_tests {
             .expect("start");
         assert!(ev.is_some());
         (ms, env, di.schedule_id, info.started_id)
+    }
+
+    #[derive(Default)]
+    struct Rec(std::sync::Mutex<Vec<String>>);
+    impl super::super::mutable_state_methods_common::MutableStateMetrics for Rec {
+        fn record_timer(&self, scope: &str, metric: &str, d: &str, v: i64) {
+            self.0.lock().unwrap().push(format!("timer {scope} {metric} {d} {v}"));
+        }
+        fn int_exponential_histogram(&self, scope: &str, metric: &str, d: &str, v: i64) {
+            self.0.lock().unwrap().push(format!("hist {scope} {metric} {d} {v}"));
+        }
+        fn inc_counter(&self, scope: &str, metric: &str, d: &str, _t: Option<(&str, &str)>) {
+            self.0.lock().unwrap().push(format!("count {scope} {metric} {d}"));
+        }
+    }
+
+    #[test]
+    fn fail_decision_emits_critical_attempt_metrics_at_threshold() {
+        let rec = std::sync::Arc::new(Rec::default());
+        let mut ms = TypedMutableState::new();
+        ms.task_gen_env.metrics = Some(rec.clone());
+        ms.execution_info.domain_id = "d1".into();
+        ms.execution_info.decision_attempt = 1;
+        let mut env = env();
+        env.decision_retry_critical_attempts = 2;
+        ms.fail_decision(&env, true); // attempt 2 >= 2
+        let got = rec.0.lock().unwrap().clone();
+        assert_eq!(got, vec![
+            "timer WorkflowContextScope DecisionAttemptTimer d1 2".to_string(),
+            "hist WorkflowContextScope DecisionAttemptHistogram d1 2".to_string(),
+        ]);
+    }
+
+    #[test]
+    fn fail_decision_below_threshold_emits_nothing() {
+        let rec = std::sync::Arc::new(Rec::default());
+        let mut ms = TypedMutableState::new();
+        ms.task_gen_env.metrics = Some(rec.clone());
+        let mut env = env();
+        env.decision_retry_critical_attempts = 10;
+        ms.fail_decision(&env, true);
+        assert!(rec.0.lock().unwrap().is_empty());
     }
 
     #[test]

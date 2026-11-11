@@ -191,6 +191,8 @@ pub(super) struct Inner {
     pub(super) deleted_signals: BTreeSet<i64>,
     pub(super) signal_requested: HashSet<String>,
     pub(super) upsert_signal_requested: BTreeSet<String>,
+    /// Go `appliedEvents` (in-memory duplicate-resource set).
+    pub(super) applied_events: HashSet<String>,
     pub(super) delete_signal_requested: BTreeSet<String>,
     pub(super) version_histories: Option<VersionHistories>,
     pub(super) current_version: i64,
@@ -400,6 +402,7 @@ impl EngineMutableState {
             deleted_signals: BTreeSet::new(),
             signal_requested: snapshot.signal_requested_ids.iter().cloned().collect(),
             upsert_signal_requested: BTreeSet::new(),
+            applied_events: HashSet::new(),
             delete_signal_requested: BTreeSet::new(),
             version_histories,
             current_version,
@@ -469,8 +472,11 @@ impl MutableState for EngineMutableState {
     fn get_last_write_version(&self) -> HResult<i64> {
         Ok(self.inner.lock().unwrap().pc_exec.last_write_version)
     }
-    fn is_resource_duplicated(&self, _dedup_resource_id: &str) -> bool {
-        false
+    fn is_resource_duplicated(&self, dedup_resource_id: &str) -> bool {
+        self.inner.lock().unwrap().applied_events.contains(dedup_resource_id)
+    }
+    fn update_duplicated_resource(&self, dedup_resource_id: &str) {
+        self.inner.lock().unwrap().applied_events.insert(dedup_resource_id.to_string());
     }
     fn get_pending_activity_infos(&self) -> Vec<ActivityInfo> {
         self.inner.lock().unwrap().activities.values().cloned().collect()

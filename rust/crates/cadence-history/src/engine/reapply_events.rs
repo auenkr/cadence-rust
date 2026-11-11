@@ -8,7 +8,7 @@ const EMPTY_EVENT_ID_C: i64 = EMPTY_EVENT_ID;
 pub const EVENTS_REAPPLICATION_RESET_WORKFLOW_REASON: &str = "events-reapplication";
 
 /// `definition.NewEventReappliedID(runID, eventID, version).GetID()`
-fn event_reapplied_id(run_id: &str, event_id: i64, version: i64) -> String {
+pub(crate) fn event_reapplied_id(run_id: &str, event_id: i64, version: i64) -> String {
     format!("{run_id}::{event_id}::{version}")
 }
 

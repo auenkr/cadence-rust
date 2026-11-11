@@ -50,7 +50,7 @@ impl TypedMutableState {
         self.generate_workflow_close_tasks(event)
     }
 
-    /// Go `AddWorkflowExecutionTerminatedEvent` (logging/metrics not wired).
+    /// Go `AddWorkflowExecutionTerminatedEvent` .
     pub fn add_workflow_execution_terminated_event(
         &mut self,
         timestamp_unix_nanos: i64,
@@ -70,6 +70,22 @@ impl TypedMutableState {
             );
         })?;
         self.replicate_workflow_execution_terminated_event(first_event_id, &event)?;
+        let domain_id = self.execution_info.domain_id.clone();
+        tracing::info!(
+            domain_id = %domain_id,
+            workflow_id = %self.execution_info.workflow_id,
+            run_id = %self.execution_info.run_id,
+            termination_reason = reason,
+            "Workflow execution terminated."
+        );
+        if let Some(m) = &self.task_gen_env.metrics {
+            m.inc_counter(
+                "HistoryTerminateWorkflowExecutionScope",
+                "WorkflowTerminateCounterPerDomain",
+                &domain_id,
+                Some(("termination_reason", reason)),
+            );
+        }
         Ok(event)
     }
 

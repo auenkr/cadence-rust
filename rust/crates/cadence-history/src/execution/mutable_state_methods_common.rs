@@ -169,6 +169,14 @@ impl TypedMutableState {
     }
 }
 
+/// Subset of Go `metrics.Client` used by the mutable state builder.
+/// `domain_id` stands in for Go's domain-name tag (resolved by the sink).
+pub trait MutableStateMetrics: Send + Sync {
+    fn record_timer(&self, scope: &str, metric: &str, domain_id: &str, value: i64);
+    fn int_exponential_histogram(&self, scope: &str, metric: &str, domain_id: &str, value: i64);
+    fn inc_counter(&self, scope: &str, metric: &str, domain_id: &str, tag: Option<(&str, &str)>);
+}
+
 /// Go mutable state `taskGenerator` environment: domain cache, rand and
 /// `WorkflowDeletionJitterRange(domain)` config.
 #[derive(Clone, Default)]
@@ -178,6 +186,10 @@ pub struct TaskGenEnv {
     /// Go config NormalDecisionScheduleToStartTimeout / ...MaxAttempts (domain-scoped).
     pub normal_schedule_to_start_timeout_nanos: i64,
     pub normal_schedule_to_start_max_attempts: i64,
+    /// Go `config.EnableStrongIdempotency(domain)` (gates `insertWorkflowRequest`).
+    pub enable_strong_idempotency: bool,
+    /// Go `metricsClient` of the mutable state builder (None = discard).
+    pub metrics: Option<std::sync::Arc<dyn MutableStateMetrics>>,
     rng_state: u64,
 }
 

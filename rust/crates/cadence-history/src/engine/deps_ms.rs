@@ -51,6 +51,8 @@ pub trait MutableState: Send + Sync {
     fn add_workflow_execution_cancel_requested_event(&self, cause: &str, request: &HistoryRequestCancelWorkflowExecutionRequest) -> HResult<()>;
     fn get_last_write_version(&self) -> HResult<i64>;
     fn is_resource_duplicated(&self, dedup_resource_id: &str) -> bool;
+    /// Go `UpdateDuplicatedResource`.
+    fn update_duplicated_resource(&self, dedup_resource_id: &str);
     fn get_pending_activity_infos(&self) -> Vec<ActivityInfo>;
     fn get_pending_child_execution_infos(&self) -> Vec<PendingChildInfo>;
     fn get_pending_decision(&self) -> Option<crate::mutable_state::DecisionInfo>;
