@@ -47,7 +47,7 @@ pub struct EngineCore {
     pub state_params: Arc<dyn Fn(&str) -> StateParams + Send + Sync>,
     /// Filled once the shard's `HistoryEngine` exists; used to notify the queue
     /// processors of new tasks (Go `shard.taskNotifier.notifyTasks`).
-    pub engine_slot: Arc<std::sync::OnceLock<std::sync::Weak<crate::engine::HistoryEngine>>>,
+    pub engine_slot: Arc<std::sync::OnceLock<std::sync::Weak<crate::engine::runtime::HistoryEngine>>>,
 }
 
 impl EngineCore {
