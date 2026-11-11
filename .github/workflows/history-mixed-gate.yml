@@ -19,7 +19,7 @@ on:
         default: grpc
 
 concurrency:
-  group: history-mixed-${{ github.ref }}-${{ inputs.database }}-${{ inputs.outbound }}-${{ inputs.two_history }}
+  group: history-mixed-${{ github.ref }}-${{ inputs.database }}-${{ inputs.outbound }}-${{ inputs.two_history }}-${{ github.sha }}
   cancel-in-progress: true
 
 jobs:
