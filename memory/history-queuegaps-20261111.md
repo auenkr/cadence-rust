@@ -23,8 +23,9 @@ Branch `history-queuegaps` (from master 8e0b1064c, merged with master e50090050)
 ## CI evidence
 - rust-ci (cadence-history) first run 43065928615 on 6776be11e: failed on 4 clippy lints, fixed in cbfd4f43.
 - rust-ci (cadence-history) https://github.com/auenkr/cadence-rust/actions/runs/43066745231 head cbfd4f43c3b5ad632e7c48574ad078833f5c6d6c: success.
-- Gate mysql/grpc/two_history=true: https://github.com/auenkr/cadence-rust/actions/runs/43068034385 head cbfd4f43.
-- Gate postgres/grpc/two_history=false: https://github.com/auenkr/cadence-rust/actions/runs/43068040705 head cbfd4f43.
+- Gate mysql/grpc/two_history=true: https://github.com/auenkr/cadence-rust/actions/runs/43068034385 head cbfd4f43c3b5ad632e7c48574ad078833f5c6d6c: success.
+- Gate postgres/grpc/two_history=false: https://github.com/auenkr/cadence-rust/actions/runs/43068040705 head cbfd4f43c3b5ad632e7c48574ad078833f5c6d6c: success.
+- Code head is unchanged since cbfd4f43 (only memory commits after).
 
 ## Remaining
 
