@@ -192,3 +192,195 @@ impl<'a> NdcWorkflowResetter for WorkflowResetterImpl<'a> {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::execution::context::WorkflowEvents;
+    use crate::ndc::test_support::{Calls, MockMs, MockWorkflow, SharedCalls};
+    use cadence_api::types::VersionHistories;
+    use cadence_persistence::version_history::new_history;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    const DOMAIN: &str = "domain-id";
+    const WF: &str = "some random workflow ID";
+    const BASE_RUN: &str = "base-run";
+    const NEW_RUN: &str = "new-run";
+
+    struct MockTm {
+        base: RefCell<Option<Box<MockWorkflow>>>,
+        loads: RefCell<Vec<(String, String, String)>>,
+    }
+    impl NdcTransactionManager for MockTm {
+        fn create_workflow(&self, _n: i64, _t: Box<dyn NdcWorkflow>) -> NdcResult<()> {
+            unimplemented!()
+        }
+        fn update_workflow(
+            &self,
+            _n: i64,
+            _r: bool,
+            _t: Box<dyn NdcWorkflow>,
+            _nw: Option<Box<dyn NdcWorkflow>>,
+        ) -> NdcResult<()> {
+            unimplemented!()
+        }
+        fn backfill_workflow(&self, _n: i64, _t: Box<dyn NdcWorkflow>, _e: &WorkflowEvents) -> NdcResult<()> {
+            unimplemented!()
+        }
+        fn check_workflow_exists(&self, _d: &str, _w: &str, _r: &str) -> NdcResult<bool> {
+            unimplemented!()
+        }
+        fn get_current_workflow_run_id(&self, _d: &str, _w: &str) -> NdcResult<String> {
+            unimplemented!()
+        }
+        fn load_ndc_workflow(&self, d: &str, w: &str, r: &str) -> NdcResult<Box<dyn NdcWorkflow>> {
+            self.loads.borrow_mut().push((d.into(), w.into(), r.into()));
+            Ok(self.base.borrow_mut().take().expect("loaded once"))
+        }
+    }
+
+    #[derive(Default)]
+    struct MockRebuilder {
+        calls: RefCell<Vec<(i64, Vec<u8>, i64, i64, String, Vec<u8>)>>,
+    }
+    impl NdcStateRebuilder for MockRebuilder {
+        fn rebuild(
+            &self,
+            now: i64,
+            _d: &str,
+            _w: &str,
+            _base_run: &str,
+            base_branch_token: &[u8],
+            last_event_id: i64,
+            last_event_version: i64,
+            target_run_id: &str,
+            target_branch_token: &dyn Fn() -> NdcResult<Vec<u8>>,
+            _request_id: &str,
+        ) -> NdcResult<(Box<dyn NdcMutableState>, i64)> {
+            let target = target_branch_token()?;
+            self.calls.borrow_mut().push((
+                now,
+                base_branch_token.to_vec(),
+                last_event_id,
+                last_event_version,
+                target_run_id.to_string(),
+                target,
+            ));
+            Ok((Box::new(MockMs::default()), 9999))
+        }
+    }
+
+    struct MockEnv {
+        forks: RefCell<Vec<(Vec<u8>, i64, String, String)>>,
+    }
+    impl WorkflowResetterEnv for MockEnv {
+        fn get_domain_name(&self, _d: &str) -> NdcResult<String> {
+            Ok("test-domainName".into())
+        }
+        fn fork_history_branch(&self, token: &[u8], node: i64, info: &str, name: &str) -> NdcResult<Vec<u8>> {
+            self.forks.borrow_mut().push((token.to_vec(), node, info.into(), name.into()));
+            Ok(b"other random branch token".to_vec())
+        }
+    }
+
+    fn base_workflow(calls: &SharedCalls, last_event_id: i64, version: i64) -> Box<MockWorkflow> {
+        Box::new(MockWorkflow {
+            ms: MockMs {
+                branch_token: b"some random branch token".to_vec(),
+                vh: Some(VersionHistories {
+                    current_version_history_index: 0,
+                    histories: vec![new_history(
+                        b"some random branch token".to_vec(),
+                        &[new_item(last_event_id, version)],
+                    )],
+                }),
+                ..Default::default()
+            },
+            calls: calls.clone(),
+        })
+    }
+
+    /// Go `TestResetWorkflow_NoError`.
+    #[test]
+    fn reset_workflow_no_error() {
+        let base_calls: SharedCalls = Rc::new(RefCell::new(Calls::default()));
+        let new_calls: SharedCalls = Rc::new(RefCell::new(Calls::default()));
+        let (last_event_id, version) = (500, 123);
+        let base_event_id = last_event_id - 100;
+        let tm = MockTm {
+            base: RefCell::new(Some(base_workflow(&base_calls, last_event_id, version))),
+            loads: RefCell::new(Vec::new()),
+        };
+        let rebuilder = MockRebuilder::default();
+        let env = MockEnv { forks: RefCell::new(Vec::new()) };
+        let mut new_wf = MockWorkflow { ms: MockMs::default(), calls: new_calls.clone() };
+        let mut resetter =
+            WorkflowResetterImpl::new(&env, &tm, &rebuilder, DOMAIN, WF, BASE_RUN, &mut new_wf, NEW_RUN);
+        let rebuilt = resetter
+            .reset_workflow(42, base_event_id, version, base_event_id + 12, version + 3)
+            .unwrap();
+        drop(rebuilt);
+        assert_eq!(*tm.loads.borrow(), vec![(DOMAIN.to_string(), WF.to_string(), BASE_RUN.to_string())]);
+        assert_eq!(
+            *rebuilder.calls.borrow(),
+            vec![(
+                42,
+                b"some random branch token".to_vec(),
+                base_event_id,
+                version,
+                NEW_RUN.to_string(),
+                b"other random branch token".to_vec()
+            )]
+        );
+        assert_eq!(
+            *env.forks.borrow(),
+            vec![(
+                b"some random branch token".to_vec(),
+                base_event_id + 1,
+                format!("{DOMAIN}:{WF}:{NEW_RUN}"),
+                "test-domainName".to_string()
+            )]
+        );
+        assert_eq!(new_calls.borrow().history_size, Some(9999));
+        assert_eq!(new_calls.borrow().cleared, 1);
+        assert_eq!(base_calls.borrow().released, Some(None), "base release called");
+    }
+
+    /// Go `TestResetWorkflow_Error`: base event id is past the version history.
+    #[test]
+    fn reset_workflow_error() {
+        let base_calls: SharedCalls = Rc::new(RefCell::new(Calls::default()));
+        let new_calls: SharedCalls = Rc::new(RefCell::new(Calls::default()));
+        let (last_event_id, version) = (500, 123);
+        let base_event_id = last_event_id + 100;
+        let tm = MockTm {
+            base: RefCell::new(Some(base_workflow(&base_calls, last_event_id, version))),
+            loads: RefCell::new(Vec::new()),
+        };
+        let rebuilder = MockRebuilder::default();
+        let env = MockEnv { forks: RefCell::new(Vec::new()) };
+        let mut new_wf = MockWorkflow { ms: MockMs::default(), calls: new_calls };
+        let mut resetter =
+            WorkflowResetterImpl::new(&env, &tm, &rebuilder, DOMAIN, WF, BASE_RUN, &mut new_wf, NEW_RUN);
+        let incoming_first = base_event_id + 12;
+        let incoming_version = version + 3;
+        let res = resetter.reset_workflow(0, base_event_id, version, incoming_first, incoming_version);
+        let Err(err) = res else { panic!("expected error") };
+        assert_eq!(
+            err,
+            new_ndc_retry_task_error_with_hint(
+                RESEND_ON_RESET_WORKFLOW_MESSAGE,
+                DOMAIN,
+                WF,
+                NEW_RUN,
+                None,
+                None,
+                Some(incoming_first),
+                Some(incoming_version),
+            )
+        );
+        assert!(rebuilder.calls.borrow().is_empty());
+        assert!(base_calls.borrow().released.is_some());
+    }
+}

@@ -24,6 +24,7 @@ pub struct MockMs {
     pub previous_started: i64,
     pub next_event_id: i64,
     pub vh: Option<VersionHistories>,
+    pub branch_token: Vec<u8>,
 }
 
 impl NdcMutableState for MockMs {
@@ -72,7 +73,7 @@ impl NdcMutableState for MockMs {
         self.next_event_id
     }
     fn get_current_branch_token(&self) -> NdcResult<Vec<u8>> {
-        Ok(Vec::new())
+        Ok(self.branch_token.clone())
     }
     fn is_event_reapplied(&self, run_id: &str, event_id: i64, version: i64) -> NdcResult<bool> {
         Ok(*self.duplicated.get(&(run_id.to_string(), event_id, version)).unwrap_or(&false))
@@ -125,6 +126,8 @@ pub struct Calls {
     /// `(base_run_id, branch_token, last_event_id, last_event_version, next_event_id, reason, events, skip)`
     pub resets: Vec<ResetCall>,
     pub skipped_metric: usize,
+    pub cleared: usize,
+    pub history_size: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -158,8 +161,12 @@ impl NdcWorkflow for MockWorkflow {
     fn replace_mutable_state(&mut self, _ms: Box<dyn NdcMutableState>) {
         unimplemented!()
     }
-    fn clear(&mut self) {}
-    fn set_history_size(&mut self, _size: i64) {}
+    fn clear(&mut self) {
+        self.calls.borrow_mut().cleared += 1;
+    }
+    fn set_history_size(&mut self, size: i64) {
+        self.calls.borrow_mut().history_size = Some(size);
+    }
     fn release(&mut self, err: Option<&NdcError>) {
         self.calls.borrow_mut().released = Some(err.cloned());
     }
