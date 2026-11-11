@@ -242,6 +242,14 @@ pub trait NdcMutableState {
         now_nanos: i64,
         policy: TransactionPolicy,
     ) -> NdcResult<(WorkflowSnapshot, Vec<WorkflowEvents>)>;
+    /// Go `CloseTransactionAsMutation`. Explicit error unless supported.
+    fn close_transaction_as_mutation(
+        &mut self,
+        _now_nanos: i64,
+        _policy: TransactionPolicy,
+    ) -> NdcResult<(cadence_persistence::history_contract::WorkflowMutation, Vec<WorkflowEvents>)> {
+        Err(NdcError::internal("close_transaction_as_mutation is not supported by this mutable state"))
+    }
     /// Called only after the prepared image has been durably committed.
     fn transaction_committed(&mut self) {}
 }

@@ -388,6 +388,10 @@ pub struct EngineExecutionCache {
 }
 
 impl EngineExecutionCache {
+    pub(super) fn core(&self) -> Arc<EngineCore> {
+        self.core.clone()
+    }
+
     pub fn new(core: Arc<EngineCore>) -> Arc<Self> {
         Arc::new(Self { core, entries: Mutex::new(HashMap::new()), max_size: 10_000 })
     }
