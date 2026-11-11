@@ -392,11 +392,16 @@ async fn handle_call(w: Arc<Mutex<OwnedWriteHalf>>, id: u32, call: Call, state: 
     }
     let procedure = std::str::from_utf8(&call.args[0])?.to_string();
     let mut hc = Cur(&call.args[1]);
-    let _app_headers = hc.headers16()?;
+    let app_headers = hc.headers16()?;
+    let client_headers = crate::wiring::assembly::engine_decision::ClientHeaders::from_lookup(|k| app_headers.get(k).cloned());
     let mut rd = Reader::new(&call.args[2]);
     let args = read_struct(&mut rd)?;
     let remaining = (call.started + call.ttl).saturating_duration_since(Instant::now());
-    let res = tokio::time::timeout(remaining, dispatch(&state, &procedure, &args)).await;
+    let res = tokio::time::timeout(
+        remaining,
+        crate::wiring::assembly::engine_decision::CLIENT_HEADERS.scope(client_headers, dispatch(&state, &procedure, &args)),
+    )
+    .await;
     let outcome = match res {
         Err(_) => return send_error(&w, id, 1, &call.trace, "Request timed out").await,
         Ok(Err(m)) => return send_error(&w, id, 6, &call.trace, &m).await,

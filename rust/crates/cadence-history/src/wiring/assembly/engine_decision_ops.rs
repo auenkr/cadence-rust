@@ -1034,4 +1034,84 @@ mod tests {
         assert!(h.fail_decision);
         assert_eq!(h.fail_decision_cause, Some("BAD_SCHEDULE_ACTIVITY_ATTRIBUTES"));
     }
+
+    fn schedule_activity_decision(request_local_dispatch: bool) -> Vec<Decision> {
+        vec![Decision {
+            decision_type: Some(DecisionType::ScheduleActivityTask),
+            schedule_activity_task_decision_attributes: Some(ScheduleActivityTaskDecisionAttributes {
+                activity_id: "a1".into(),
+                activity_type: Some(ActivityType { name: "act".into() }),
+                task_list: Some(TaskList { name: "tl".into(), ..Default::default() }),
+                schedule_to_close_timeout_seconds: Some(10),
+                schedule_to_start_timeout_seconds: Some(5),
+                start_to_close_timeout_seconds: Some(5),
+                request_local_dispatch,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }]
+    }
+
+    #[test]
+    fn local_dispatch_starts_activity_and_skips_transfer_task() {
+        let s = state();
+        let mut h = handler(&s);
+        let mut d = schedule_activity_decision(true);
+        let dispatch = h.handle_decisions(b"", &mut d).unwrap();
+        assert!(!h.fail_decision, "{:?}", h.fail_message);
+        assert_eq!(dispatch.len(), 1);
+        assert_eq!(dispatch[0].activity_id, "a1");
+        assert!(!dispatch[0].task_token.is_empty());
+        assert!(dispatch[0].scheduled_timestamp.is_some());
+        assert!(dispatch[0].started_timestamp.is_some_and(|t| t > 0));
+        assert_eq!(event_types(&s), vec![EventType::ActivityTaskScheduled, EventType::ActivityTaskStarted]);
+        let g = s.inner.lock().unwrap();
+        assert!(g.transfer_tasks.is_empty());
+        assert_ne!(g.pc_acts.values().next().unwrap().started_id, EMPTY_EVENT_ID);
+    }
+
+    #[test]
+    fn no_local_dispatch_without_request_flag() {
+        let s = state();
+        let mut h = handler(&s);
+        let mut d = schedule_activity_decision(false);
+        let dispatch = h.handle_decisions(b"", &mut d).unwrap();
+        assert!(dispatch.is_empty());
+        assert_eq!(event_types(&s), vec![EventType::ActivityTaskScheduled]);
+        assert!(!s.inner.lock().unwrap().transfer_tasks.is_empty());
+    }
+
+    #[test]
+    fn new_binary_checksum_generates_search_attr_task_only_with_advanced_visibility() {
+        let s = state();
+        let mut g = s.inner.lock().unwrap();
+        g.add_binary_checksum_if_not_exists("bin-1", 4, 1, 10, false).unwrap();
+        assert!(g.transfer_tasks.is_empty());
+        g.add_binary_checksum_if_not_exists("bin-2", 5, 2, 10, true).unwrap();
+        assert_eq!(g.transfer_tasks.len(), 1);
+        // an already-recorded checksum returns early without another task
+        g.add_binary_checksum_if_not_exists("bin-2", 6, 3, 10, true).unwrap();
+        assert_eq!(g.transfer_tasks.len(), 1);
+    }
+
+    #[test]
+    fn set_client_info_stores_versions_on_execution_info() {
+        let s = state();
+        s.set_client_info("1.2.3", "1.5.0", "uber-go");
+        let g = s.inner.lock().unwrap();
+        assert_eq!(g.exec.client_library_version, "1.2.3");
+        assert_eq!(g.exec.client_feature_version, "1.5.0");
+        assert_eq!(g.exec.client_impl, "uber-go");
+    }
+
+    #[test]
+    fn consistent_query_support_matches_go_version_checker() {
+        use super::super::engine_decision::supports_consistent_query as f;
+        assert!(f("uber-go", "1.5.0"));
+        assert!(f("uber-java", "v1.6"));
+        assert!(!f("uber-go", "1.4.9"));
+        assert!(!f("uber-go", ""));
+        assert!(!f("unknown", "2.0.0"));
+        assert!(!f("uber-go", "1.5.0-rc1"));
+    }
 }
