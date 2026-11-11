@@ -34,7 +34,10 @@ impl Executor for ExecutorWrapper {
     }
 
     async fn execute(&self, task: Arc<dyn Task>) -> (ExecuteResponse, Result<()>) {
-        if self.is_active_task(task.as_ref()).await {
+        tracing::debug!("ExecutorWrapper::execute: is_active_task");
+        let active = self.is_active_task(task.as_ref()).await;
+        tracing::debug!(active, "ExecutorWrapper::execute: dispatching");
+        if active {
             return self.active_executor.execute(task).await;
         }
         self.standby_executor.execute(task).await
