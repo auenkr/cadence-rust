@@ -44,9 +44,12 @@ pub trait MembershipControl: Send + Sync {
     async fn evict_self(&self);
 }
 
-/// No-op membership (single host / no Ringpop).
+/// No-op membership for tests only. Production (`launcher.rs`) always uses
+/// Ringpop (`RingpopMembership`), as Go's `membership` fx module does.
+#[cfg(test)]
 pub struct NoMembership;
 
+#[cfg(test)]
 #[async_trait]
 impl MembershipControl for NoMembership {
     async fn evict_self(&self) {}
