@@ -21,7 +21,8 @@ use std::sync::Arc;
 
 use cadence_persistence::history_contract::{self as pc, HistoryTaskCategory, Task};
 use cadence_persistence::sqlblobs::{
-    timer_task_from_struct, timer_task_to_struct, transfer_task_from_struct, transfer_task_to_struct, Encoding,
+    replication_task_from_struct, replication_task_to_struct, timer_task_from_struct, timer_task_to_struct,
+    transfer_task_from_struct, transfer_task_to_struct, Encoding,
 };
 
 use crate::engine::deps::{HResult, HistoryError};
@@ -202,11 +203,32 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
         if !has(&mutation.tasks_by_category) {
             return Ok(());
         }
-        // Replication tasks cannot be allocated/encoded here yet (see
-        // `allocate_task_ids`); merging the new-run branch token needs them.
-        Err(internal(
-            "TODO(ndc-persistence): continue-as-new replication task merge (replication task encoding) is not implemented",
-        ))
+        let new_run_task = match new_workflow {
+            Some(new) if new.tasks_by_category.get(&REPLICATION).map_or(0, |l| l.len()) == 1 => {
+                // Go: `TasksByCategory[Replication] = nil` after taking the task.
+                let task = new.tasks_by_category.remove(&REPLICATION).unwrap_or_default().remove(0);
+                let s = Encoding::ThriftRW.decode(&task.data.data).map_err(|e| internal(e.to_string()))?;
+                replication_task_from_struct(&s).map_err(|e| internal(e.to_string()))?
+            }
+            _ => {
+                return Err(internal("unable to find replication task from new workflow for continue as new replication"))
+            }
+        };
+        let mut updated = false;
+        if let Some(list) = mutation.tasks_by_category.get_mut(&REPLICATION) {
+            for task in list.iter_mut() {
+                let s = Encoding::ThriftRW.decode(&task.data.data).map_err(|e| internal(e.to_string()))?;
+                let mut decoded = replication_task_from_struct(&s).map_err(|e| internal(e.to_string()))?;
+                decoded.new_run_branch_token = new_run_task.branch_token.clone();
+                let s = replication_task_to_struct(&decoded).map_err(|e| internal(e.to_string()))?;
+                task.data = task_blob(Encoding::ThriftRW.encode(&s))?;
+                updated = true;
+            }
+        }
+        if !updated {
+            return Err(internal("unable to find replication task from current workflow for continue as new replication"));
+        }
+        Ok(())
     }
     async fn reapply_events(&mut self, batches: &[WorkflowEvents]) -> Result<(), HistoryError> {
         reapply_via_engine(&self.core, batches).await
@@ -215,7 +237,7 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
     fn allocate_task_ids(&mut self, tasks: &mut BTreeMap<HistoryTaskCategory, Vec<Task>>) -> Result<(), HistoryError> {
         let shard = &self.core.shard;
         for (category, list) in tasks.iter() {
-            if !list.is_empty() && *category != TRANSFER && *category != TIMER {
+            if !list.is_empty() && *category != TRANSFER && *category != TIMER && *category != REPLICATION {
                 return Err(internal(format!(
                     "TODO(ndc-persistence): task category {category:?} is not supported by NDC persistence"
                 )));
@@ -258,6 +280,22 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
                 task.data = task_blob(Encoding::ThriftRW.encode(&s))?;
             }
             self.pending.timer.extend(decoded);
+        }
+        // Go allocates replication task ids last (after transfer and timer).
+        if let Some(list) = tasks.get_mut(&REPLICATION) {
+            let mut decoded = Vec::with_capacity(list.len());
+            for task in list.iter() {
+                let s = Encoding::ThriftRW.decode(&task.data.data).map_err(|e| internal(e.to_string()))?;
+                decoded.push(replication_task_from_struct(&s).map_err(|e| internal(e.to_string()))?);
+            }
+            let mut slots: Vec<(i64, i64)> = list.iter().map(|t| (0, t.visibility_timestamp_unix_nanos)).collect();
+            let mut max_read_level = 0i64;
+            shard.allocate_transfer_ids(&mut slots, &mut max_read_level).map_err(shard_err)?;
+            for (task, slot) in list.iter_mut().zip(slots.iter()) {
+                task.task_id = slot.0;
+                task.visibility_timestamp_unix_nanos = slot.1;
+            }
+            self.pending.max_read_level = self.pending.max_read_level.max(max_read_level);
         }
         Ok(())
     }
