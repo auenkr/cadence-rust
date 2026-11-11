@@ -2,10 +2,10 @@
 use std::collections::HashMap;
 
 use cadence_api::enums::WorkflowIDReusePolicy;
+use cadence_api::service_types::SignalWithStartWorkflowExecutionRequest;
 use cadence_api::types::*;
 
 use crate::engine::deps::*;
-use crate::engine::runtime::*;
 use crate::engine::start_workflow_execution::*;
 use crate::engine::test_support::*;
 use crate::engine::types::*;
