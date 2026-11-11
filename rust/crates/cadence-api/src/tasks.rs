@@ -70,6 +70,8 @@ pub struct ScheduleActivityTaskDecisionAttributes {
     pub retry_policy: Option<RetryPolicy>,
     #[serde(rename = "header", default, skip_serializing_if = "Option::is_none")]
     pub header: Option<Header>,
+    #[serde(rename = "requestLocalDispatch", default, skip_serializing_if = "std::ops::Not::not")]
+    pub request_local_dispatch: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

@@ -17,6 +17,7 @@ fn schedule_activity_task_decision_attributes(v:tasks::ScheduleActivityTaskDecis
         heartbeat_timeout: v.heartbeat_timeout_seconds.map(|s|duration(s.into())),
         retry_policy: v.retry_policy.map(retry_out),
         header: v.header.map(header),
+        request_local_dispatch: v.request_local_dispatch,
         ..Default::default()
     }
 }

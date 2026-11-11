@@ -4807,6 +4807,7 @@ impl FromThrift for ScheduleActivityTaskDecisionAttributes {
             heartbeat_timeout_seconds: s.opt_i32(60)?,
             retry_policy: s.opt_struct(70)?,
             header: s.opt_struct(80)?,
+            request_local_dispatch: s.bool_or_false(90)?,
         })
     }
 }
@@ -4825,6 +4826,7 @@ impl ToThrift for ScheduleActivityTaskDecisionAttributes {
         f.oi32(60, self.heartbeat_timeout_seconds);
         f.ostruct(70, self.retry_policy.as_ref());
         f.ostruct(80, self.header.as_ref());
+        f.obool(90, self.request_local_dispatch);
         f.finish()
     }
 }

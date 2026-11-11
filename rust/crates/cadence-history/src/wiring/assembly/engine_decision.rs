@@ -527,6 +527,7 @@ impl EngineDecisionHandler {
             let now = self.core.clock.now();
             let timed_out = heartbeat && original > 0 && now > original.saturating_add(timeout.as_nanos() as i64);
             let mut has_unhandled: bool;
+            let mut local_dispatch: Vec<crate::engine::types::ActivityLocalDispatchInfo> = Vec::new();
             if timed_out {
                 state.add_decision_timed_out(d.schedule_id, d.started_id)?;
                 state.clear_sticky();
@@ -579,7 +580,8 @@ impl EngineDecisionHandler {
                         identity: req.identity.clone(),
                     };
                     let mut handler = TaskHandler::new(ops, req.identity.clone(), completed_id);
-                    handler.handle_decisions(&req.execution_context, &mut decisions).map_err(history_error)?;
+                    local_dispatch =
+                        handler.handle_decisions(&req.execution_context, &mut decisions).map_err(history_error)?;
                     (
                         handler.fail_decision,
                         handler.fail_decision_cause,
@@ -594,6 +596,7 @@ impl EngineDecisionHandler {
                     // decisions), reload and record DecisionTaskFailed.
                     context.clear();
                     state = context.load_state().await?;
+                    local_dispatch.clear();
                     let details = message.unwrap_or_default();
                     state.add_decision_task_failed(
                         d.schedule_id,
@@ -677,7 +680,13 @@ impl EngineDecisionHandler {
             if timed_out {
                 return Err(HistoryError::entity_not_exists("decision heartbeat timeout"));
             }
-            let mut resp = HistoryRespondDecisionTaskCompletedResponse::default();
+            let mut resp = HistoryRespondDecisionTaskCompletedResponse {
+                activities_to_dispatch_locally: local_dispatch
+                    .into_iter()
+                    .map(|d| (d.activity_id.clone(), d))
+                    .collect(),
+                ..Default::default()
+            };
             if let Some(started) = started {
                 resp.started_response = Some(state.record_started_response(&started, &req.identity));
             }

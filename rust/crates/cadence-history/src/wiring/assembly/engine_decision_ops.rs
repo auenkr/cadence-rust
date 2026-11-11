@@ -19,6 +19,7 @@ use crate::decision::task_handler::{Activity, ErrorKind, LocalDispatch, Operatio
 use crate::decision::{
     DecisionError, DomainReplication, DomainReplicationLookup, ParentDecisionDefaults, SearchAttributePolicy,
 };
+use crate::engine::types::ActivityLocalDispatchInfo;
 use crate::engine::deps::{
     DomainCache, EMPTY_EVENT_ID, WORKFLOW_CLOSE_STATUS_CANCELED, WORKFLOW_CLOSE_STATUS_COMPLETED,
     WORKFLOW_CLOSE_STATUS_FAILED, WORKFLOW_STATE_COMPLETED,
@@ -27,13 +28,15 @@ use crate::wiring::assembly::engine_state::EngineMutableState;
 
 const NANOS: i64 = 1_000_000_000;
 
-/// Local activity dispatch is not used by the engine (activities are always
-/// dispatched through matching), so `schedule_activity` never returns one.
-pub struct NoDispatch;
-
-impl LocalDispatch for NoDispatch {
-    fn set_task_token(&mut self, _token: Vec<u8>) {}
-    fn set_timestamps(&mut self, _scheduled: i64, _scheduled_this_attempt: i64, _started: i64) {}
+impl LocalDispatch for ActivityLocalDispatchInfo {
+    fn set_task_token(&mut self, token: Vec<u8>) {
+        self.task_token = token;
+    }
+    fn set_timestamps(&mut self, scheduled: i64, scheduled_this_attempt: i64, started: i64) {
+        self.scheduled_timestamp = Some(scheduled);
+        self.scheduled_timestamp_of_this_attempt = Some(scheduled_this_attempt);
+        self.started_timestamp = Some(started);
+    }
 }
 
 fn bad(msg: impl Into<String>) -> OperationError {
@@ -114,7 +117,7 @@ impl EngineOps<'_> {
 }
 
 impl Operations for EngineOps<'_> {
-    type Dispatch = NoDispatch;
+    type Dispatch = ActivityLocalDispatchInfo;
 
     fn workflow_identity(&self) -> WorkflowIdentity {
         let g = self.state.inner.lock().unwrap();
@@ -196,7 +199,7 @@ impl Operations for EngineOps<'_> {
         self.domains.get_domain(name).map(|_| ()).map_err(|e| internal(format!("{e:?}")))
     }
 
-    fn schedule_activity(&mut self, completed_id: i64, decision: &Decision) -> Result<(Activity, Option<NoDispatch>)> {
+    fn schedule_activity(&mut self, completed_id: i64, decision: &Decision) -> Result<(Activity, Option<ActivityLocalDispatchInfo>)> {
         let a = decision
             .schedule_activity_task_decision_attributes
             .clone()
@@ -264,7 +267,13 @@ impl Operations for EngineOps<'_> {
         }
         g.pc_acts.insert(sid, info);
         g.refresh_activity(sid);
-        g.gen_activity_transfer_task(sid);
+        // Go: local dispatch skips the matching transfer task; the worker runs the
+        // activity directly and history records ActivityTaskStarted below.
+        let local_dispatch = (self.config.enable_activity_local_dispatch_by_domain)(&self.domain_name)
+            && a.request_local_dispatch;
+        if !local_dispatch {
+            g.gen_activity_transfer_task(sid);
+        }
         let activity = Activity {
             schedule_id: sid,
             started_id: EMPTY_EVENT_ID,
@@ -273,11 +282,32 @@ impl Operations for EngineOps<'_> {
             scheduled_time_unix_nanos: now_nanos,
             started_time_unix_nanos: 0,
         };
-        Ok((activity, None))
+        let dispatch = local_dispatch.then(|| ActivityLocalDispatchInfo {
+            activity_id: activity.activity_id.clone(),
+            scheduled_timestamp: None,
+            started_timestamp: None,
+            scheduled_timestamp_of_this_attempt: None,
+            task_token: Vec::new(),
+        });
+        Ok((activity, dispatch))
     }
 
-    fn start_local_activity(&mut self, _activity: &mut Activity, _request_id: &str, _identity: &str) -> Result<()> {
-        Err(not_ported("local ScheduleActivityTask dispatch"))
+    /// Go `AddActivityTaskStartedEvent(ai, scheduleEventID, uuid, identity)` for a locally dispatched activity.
+    fn start_local_activity(&mut self, activity: &mut Activity, request_id: &str, identity: &str) -> Result<()> {
+        let info = {
+            let g = self.state.inner.lock().unwrap();
+            g.activities
+                .get(&activity.schedule_id)
+                .cloned()
+                .ok_or_else(|| internal("pending activity not found for local dispatch"))?
+        };
+        let started = self
+            .state
+            .ev_activity_started(&info, activity.schedule_id, request_id, identity)
+            .map_err(|e| internal(format!("{e:?}")))?;
+        activity.started_id = started.started_id;
+        activity.started_time_unix_nanos = started.started_time_unix_nanos;
+        Ok(())
     }
 
     fn request_cancel_activity(&mut self, completed_id: i64, id: &str, _identity: &str) -> Result<Activity> {
