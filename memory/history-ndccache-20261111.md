@@ -21,3 +21,8 @@ Branch: `history-ndccache`
 - No service completion / parity claim.
 
 ## CI
+
+- Run: https://github.com/auenkr/cadence-rust/actions/runs/42950102765
+- Code head: 99e26aee6c9b8e8946b2d2b1714861f7667a346a (package=cadence-history, clippy + tests)
+- Conclusion: success
+- Earlier run 42949536421 (head 21afb7fbd) failed: missing cache constructor call and non-Send test; fixed in 99e26aee6.
