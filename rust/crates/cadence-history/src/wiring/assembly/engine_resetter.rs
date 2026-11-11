@@ -311,6 +311,7 @@ impl EngineWorkflowResetter {
     }
 
     /// Go `prepareResetWorkflow` + `closeTransactionAsSnapshot` of `persistToDB`.
+    #[allow(clippy::result_large_err)]
     fn prepare(&self, request: &ResetWorkflow, current: &CurrentRun, reset_version: i64) -> HResult<Prepared> {
         let core = &self.core;
         let now = core.clock.now();
