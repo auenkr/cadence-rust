@@ -303,6 +303,8 @@ pub struct DomainCacheEntry {
     pub active_clusters: Vec<(Option<cadence_api::types::ClusterAttribute>, String)>,
     /// `failoverEndTime`; non-nil means the domain is pending active.
     pub failover_end_time: Option<i64>,
+    /// `GetReplicationConfig().Clusters` names.
+    pub clusters: Vec<String>,
 }
 impl DomainCacheEntry {
     /// `IsDomainPendingActive`

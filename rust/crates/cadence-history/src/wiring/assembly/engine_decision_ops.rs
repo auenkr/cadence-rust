@@ -172,7 +172,20 @@ impl Operations for EngineOps<'_> {
     }
 
     fn validate(&mut self, decision: &mut Decision) -> Result<()> {
-        let ctx = Validation::new(self);
+        let mut ctx = Validation::new(self);
+        // Go: target domain name per decision type; empty means the own domain.
+        let target_name = if let Some(a) = decision.request_cancel_external_workflow_execution_decision_attributes.as_ref() {
+            a.domain.clone()
+        } else if let Some(a) = decision.signal_external_workflow_execution_decision_attributes.as_ref() {
+            a.domain.clone()
+        } else if let Some(a) = decision.start_child_workflow_execution_decision_attributes.as_ref() {
+            a.domain.clone()
+        } else {
+            String::new()
+        };
+        if !target_name.is_empty() {
+            ctx.target_domain_id = self.target_domain_id(&target_name)?;
+        }
         let name = self.domain_name.clone();
         checker::validate(&ctx, decision, &name).map_err(Into::into)
     }
@@ -734,6 +747,8 @@ struct Validation {
     config: Arc<Config>,
     domains: Arc<dyn DomainCache>,
     defaults: ParentDecisionDefaults,
+    /// Go `targetDomainID`: resolved per decision from the decision's domain name.
+    target_domain_id: String,
 }
 
 impl Validation {
@@ -744,6 +759,7 @@ impl Validation {
             domain_name: ops.domain_name.clone(),
             config: ops.config.clone(),
             domains: ops.domains.clone(),
+            target_domain_id: g.exec.domain_id.clone(),
             defaults: ParentDecisionDefaults {
                 workflow_type_name: g.exec.workflow_type_name.clone(),
                 task_list_name: g.exec.task_list.clone(),
@@ -765,7 +781,8 @@ impl DomainReplicationLookup for Validation {
                 clusters: Vec::new(),
             });
         }
-        Err(DecisionError::internal("cross-domain decision validation is not ported on the engine mutable state yet"))
+        let e = self.domains.get_domain_by_id(domain_id).map_err(|e| DecisionError::internal(format!("{e:?}")))?;
+        Ok(DomainReplication { domain_id: e.info.id.clone(), name: e.info.name.clone(), clusters: e.clusters.clone() })
     }
 
     fn cross_cluster_operations_enabled(&self, _source_domain_name: &str) -> bool {
@@ -779,7 +796,7 @@ impl ValidationContext for Validation {
     }
 
     fn target_domain_id(&self) -> &str {
-        &self.domain_id
+        &self.target_domain_id
     }
 
     fn defaults(&self) -> ParentDecisionDefaults {
