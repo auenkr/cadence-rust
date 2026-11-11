@@ -6,7 +6,7 @@
 //! The generic `WorkflowContext` + `SqlWorkflowContextStore` machinery does the
 //! Go ordering (prepare -> write -> cleanup only after commit). These hooks add
 //! the shard-side pieces: task id allocation before the write, max read level
-//! + queue notification only after a durable write, and shard closing on
+//! and queue notification only after a durable write, and shard closing on
 //! ownership loss. Anything that depends on unported code is an explicit error.
 //!
 //! Gaps (recorded in memory/history-ndcpersist2-20261111.md): `verify_and_repair`
