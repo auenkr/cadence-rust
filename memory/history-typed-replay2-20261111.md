@@ -20,3 +20,4 @@
 - CI run URL: pending
 - Code head SHA: pending
 - Conclusion: pending
+- First CI attempt (`42947263925`) failed at compile because the child transition API takes an explicit child-domain ID and exposes separate terminal Replicate* methods. The dispatcher was corrected to use those existing method names and pass the parent domain ID as the child-domain fallback, matching the method contract. A new CI run is required for this corrected head.

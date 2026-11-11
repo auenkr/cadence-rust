@@ -150,12 +150,15 @@ impl StateBuilder {
                     Some(EventType::TimerFired) => state.replicate_timer_fired_event(event)?,
                     Some(EventType::TimerCanceled) => state.replicate_timer_canceled_event(event)?,
                     Some(EventType::StartChildWorkflowExecutionInitiated) => {
-                        state.replicate_start_child_workflow_execution_initiated_event(first.event_id, event, request_id)?;
+                        state.replicate_start_child_workflow_execution_initiated_event(first.event_id, event, request_id, domain_id)?;
                     }
-                    Some(EventType::ChildWorkflowExecutionStarted | EventType::StartChildWorkflowExecutionFailed |
-                        EventType::ChildWorkflowExecutionCompleted | EventType::ChildWorkflowExecutionFailed |
-                        EventType::ChildWorkflowExecutionCanceled | EventType::ChildWorkflowExecutionTimedOut |
-                        EventType::ChildWorkflowExecutionTerminated) => state.replicate_child_workflow_terminal_event(event)?,
+                    Some(EventType::ChildWorkflowExecutionStarted) => state.replicate_child_workflow_execution_started_event(event)?,
+                    Some(EventType::StartChildWorkflowExecutionFailed) => state.replicate_start_child_workflow_execution_failed_event(event)?,
+                    Some(EventType::ChildWorkflowExecutionCompleted) => state.replicate_child_workflow_execution_completed_event(event)?,
+                    Some(EventType::ChildWorkflowExecutionFailed) => state.replicate_child_workflow_execution_failed_event(event)?,
+                    Some(EventType::ChildWorkflowExecutionCanceled) => state.replicate_child_workflow_execution_canceled_event(event)?,
+                    Some(EventType::ChildWorkflowExecutionTimedOut) => state.replicate_child_workflow_execution_timed_out_event(event)?,
+                    Some(EventType::ChildWorkflowExecutionTerminated) => state.replicate_child_workflow_execution_terminated_event(event)?,
                     Some(EventType::RequestCancelExternalWorkflowExecutionInitiated) => {
                         state.replicate_request_cancel_external_workflow_execution_initiated_event(first.event_id, event, request_id)?;
                     }
