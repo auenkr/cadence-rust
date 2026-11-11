@@ -23,3 +23,15 @@
 | run | head | conclusion |
 |---|---|---|
 | (none yet) | | |
+
+## Execution store status (2026-11-11)
+All GoExecutionStore methods are implemented in `history_execution_cassandra*.rs` (write: create/get/update/conflict-resolve; tasks: transfer/timer/replication/cross-cluster/failover markers/history-task paging/DLQ/policy/list_*). No `not_ported` remains.
+
+CI (rust-ci, package=cadence-persistence):
+- 43045248981 success (7d75e48fd)
+- 43048349775 failure (clippy), fixed
+- 43049181082 success (clippy fixes)
+- 43050448856 success (task/DLQ/listing commit)
+
+Gaps/decisions: semaphore maps skipped; `create_history_tasks` (no category in trait) returns error; `select_workflow_timer_tasks` returns empty (as SQL); DLQ/cross-cluster use store `shard_id`/`target_cluster` (builders `with_shard_id`/`with_target_cluster`); `complete_history_task` for timers lacks scheduled time; duplicate request -> ConditionFailed; checksum opaque.
+Remaining (later pieces): history v2 writers, visibility trait + Cassandra writer, expose stores/wire env.rs, Go unit-test ports, gates.
