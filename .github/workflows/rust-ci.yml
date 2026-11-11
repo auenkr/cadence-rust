@@ -54,7 +54,8 @@ on:
     paths: ["rust/**", ".github/workflows/rust-ci.yml", "go/idls"]
 
 concurrency:
-  group: rust-ci-${{ github.ref }}
+  # Pushes cancel superseded pushes; dispatches are unique per package+SHA so parallel runs are not cancelled.
+  group: rust-ci-${{ github.ref }}-${{ github.event_name }}-${{ inputs.package || 'all' }}-${{ github.event_name == 'workflow_dispatch' && github.sha || 'push' }}
   cancel-in-progress: true
 
 jobs:
