@@ -300,7 +300,8 @@ async fn append_new_branch(
     ))
 }
 
-fn snapshot_of(core: &EngineCore, mut txn: ClosedTxn) -> HResult<(pc::WorkflowSnapshot, i64)> {
+#[allow(clippy::type_complexity)]
+fn snapshot_of(core: &EngineCore, mut txn: ClosedTxn) -> HResult<(pc::WorkflowSnapshot, i64, Vec<pc::TransferTask>, Vec<pc::TimerTask>)> {
     let shard = &core.shard;
     let mut max_read_level = 0i64;
     let mut transfer_slots: Vec<(i64, i64)> = txn.transfer.iter().map(|_| (0, 0)).collect();
@@ -355,7 +356,7 @@ fn snapshot_of(core: &EngineCore, mut txn: ClosedTxn) -> HResult<(pc::WorkflowSn
             .tasks_by_category
             .insert(pc::HistoryTaskCategory { category_type: 2, category_id: 2 }, timer_tasks);
     }
-    Ok((snapshot, max_read_level))
+    Ok((snapshot, max_read_level, txn.transfer, txn.timer))
 }
 
 fn downcast_state(state: &MutableStateRef) -> HResult<Arc<EngineMutableState>> {
@@ -516,7 +517,7 @@ impl WorkflowStartHost for EngineStartHost {
             .unwrap()
             .take()
             .ok_or_else(|| HistoryError::internal("start transaction not prepared"))?;
-        let (snap, max_read_level) = snapshot_of(&self.core, txn)?;
+        let (snap, max_read_level, notify_transfer, notify_timer) = snapshot_of(&self.core, txn)?;
         let (size, last) = *new_run.history.lock().unwrap();
         let shard = &self.core.shard;
         let request = pc::CreateWorkflowExecutionRequest {
@@ -540,6 +541,7 @@ impl WorkflowStartHost for EngineStartHost {
         match self.core.executions.create_workflow_execution(request).await {
             Ok(_) => {
                 shard.update_max_read_level(max_read_level);
+                self.core.notify_tasks(&notify_transfer, &notify_timer);
                 new_run.state.finish_transaction(size, last);
                 ctx.set_state(new_run.state.clone());
                 Ok(())
@@ -565,7 +567,7 @@ impl WorkflowStartHost for EngineStartHost {
         let state = downcast_state(new_state)?;
         let mut txn = state.close_transaction(now, true)?;
         let (size, last, _blob) = append_new_branch(&self.core, &mut txn, &execution_info_string(new_context)).await?;
-        let (snap, _) = snapshot_of(&self.core, txn)?;
+        let (snap, _, _, _) = snapshot_of(&self.core, txn)?;
         running_ctx.update_with_new_as_active(now, snap).await?;
         state.finish_transaction(size, last);
         new_ctx.set_state(state);

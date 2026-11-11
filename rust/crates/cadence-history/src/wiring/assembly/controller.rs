@@ -137,7 +137,7 @@ impl ShardRegistry {
             let ctx = ShardBuildCtx {
                 env: env.clone(),
                 shard: shard.clone(),
-                engine_slot: Arc::new(OnceLock::new()),
+                engine_slot: core.engine_slot.clone(),
                 core: core.clone(),
                 cache: cache.clone(),
             };
