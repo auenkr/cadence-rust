@@ -21,3 +21,4 @@
 - Code head SHA: pending
 - Conclusion: pending
 - First CI attempt (`42947263925`) failed at compile because the child transition API takes an explicit child-domain ID and exposes separate terminal Replicate* methods. The dispatcher was corrected to use those existing method names and pass the parent domain ID as the child-domain fallback, matching the method contract. A new CI run is required for this corrected head.
+- Second CI attempt (`42947894901`) compiled and ran 132 tests; one pre-existing unsupported-event assertion used TimerStarted (now implemented) and failed. Updated it to test MarkerRecorded and added missing timer attributes plus unknown-event type assertions. Re-run CI on this corrected test head.
