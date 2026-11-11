@@ -9,6 +9,9 @@ use crate::{
 use mysql::prelude::Queryable;
 use std::sync::Arc;
 
+struct AssertSend<T>(T);
+// SAFETY: see `SqlBackend::transaction`; the value is only used while the owning thread is blocked.
+unsafe impl<T> Send for AssertSend<T> {}
 #[derive(Clone)]
 pub struct SqlBackend(Backend);
 #[derive(Clone)]
@@ -214,13 +217,23 @@ impl SqlBackend {
                 tx.commit().map_err(mysql_error)?;
                 Ok(result)
             }
-            Backend::Postgres(pool) => crate::matching_postgres::outside_runtime(|| {
-                let mut conn = pool.checkout().map_err(internal)?;
-                let mut tx = conn.transaction().map_err(postgres_error)?;
-                let result = run(&mut tx)?;
-                tx.commit().map_err(postgres_error)?;
-                Ok(result)
-            }),
+            Backend::Postgres(pool) => {
+                // The sync client must run outside the tokio runtime context. The
+                // calling thread blocks until the scoped thread finishes, so the
+                // (possibly non-Send) closure is never used concurrently.
+                let job = AssertSend(run);
+                crate::matching_postgres::outside_runtime(move || {
+                    let job = job;
+                    AssertSend((|| {
+                        let mut conn = pool.checkout().map_err(internal)?;
+                        let mut tx = conn.transaction().map_err(postgres_error)?;
+                        let result = (job.0)(&mut tx)?;
+                        tx.commit().map_err(postgres_error)?;
+                        Ok(result)
+                    })())
+                })
+                .0
+            }
         }
     }
 }

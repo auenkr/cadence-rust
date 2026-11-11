@@ -1740,14 +1740,3 @@ mod runtime_boundary_tests {
         ));
     }
 }
-
-/// The sync `postgres` client drives its own runtime and panics when used while
-/// a tokio runtime is entered. On a multi-thread runtime `block_in_place` leaves
-/// the runtime context for the closure; elsewhere the call runs unchanged.
-pub fn outside_runtime<T>(f: impl FnOnce() -> T) -> T {
-    use tokio::runtime::{Handle, RuntimeFlavor};
-    match Handle::try_current() {
-        Ok(handle) if handle.runtime_flavor() == RuntimeFlavor::MultiThread => tokio::task::block_in_place(f),
-        _ => f(),
-    }
-}
