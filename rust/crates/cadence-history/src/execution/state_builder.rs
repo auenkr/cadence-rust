@@ -16,6 +16,8 @@ pub enum StateBuilderError {
     #[error(transparent)] Child(#[from] ChildWorkflowError),
     #[error("encounter history size being zero")] HistorySizeZero,
     #[error("version histories are missing")] MissingVersionHistories,
+    #[error("continued-as-new run does not match new-run history")] NewRunLinkage,
+    #[error("continued-as-new branch version does not match new-run history")] NewRunBranchVersion,
     #[error("invalid version history item")] VersionHistoryItem,
     #[error("Unknown event type")] UnknownEventType,
     /// Go `ErrMissingSemaphoreInfo` (InternalServiceError).
@@ -80,9 +82,22 @@ impl StateBuilder {
         workflow_execution: &WorkflowExecution,
         events: &[HistoryEvent],
     ) -> Result<(), StateBuilderError> {
+        Self::apply_events_typed_with_new_run(state, domain_id, request_id, workflow_execution, events, None, &[]).map(|_| ())
+    }
+
+    pub fn apply_events_typed_with_new_run(
+        state: &mut TypedMutableState,
+        domain_id: &str,
+        request_id: &str,
+        workflow_execution: &WorkflowExecution,
+        events: &[HistoryEvent],
+        new_run_execution: Option<&WorkflowExecution>,
+        new_run_events: &[HistoryEvent],
+    ) -> Result<Option<TypedMutableState>, StateBuilderError> {
         let (Some(first), Some(last)) = (events.first(), events.last()) else {
             return Err(StateBuilderError::HistorySizeZero);
         };
+        let requests_before_replay = state.insert_workflow_requests.len();
         state.clear_stickyness();
         let old_suppression = state.suppress_task_generation;
         state.suppress_task_generation = true;
@@ -171,11 +186,8 @@ impl StateBuilder {
                     Some(EventType::SignalExternalWorkflowExecutionFailed) => state.replicate_signal_external_workflow_execution_failed_event(event)?,
                     Some(EventType::ExternalWorkflowExecutionSignaled) => state.replicate_external_workflow_execution_signaled(event)?,
                     Some(EventType::WorkflowExecutionCancelRequested) => state.replicate_workflow_execution_cancel_requested_event(event)?,
-                    // Typed state has no marker history or search-attribute projection yet.
-                    // Refuse these events rather than acknowledge them while losing payloads.
-                    Some(EventType::MarkerRecorded | EventType::UpsertWorkflowSearchAttributes) => {
-                        return Err(StateBuilderError::TypedReplayNotYetSupported { event_type: event.event_type });
-                    }
+                    Some(EventType::MarkerRecorded) => {}
+                    Some(EventType::UpsertWorkflowSearchAttributes) => state.replicate_upsert_workflow_search_attributes_event(event)?,
                     Some(EventType::WorkflowExecutionCompleted) => state.replicate_workflow_execution_completed_event(first.event_id, event)?,
                     Some(EventType::WorkflowExecutionFailed) => state.replicate_workflow_execution_failed_event(first.event_id, event)?,
                     Some(EventType::WorkflowExecutionTimedOut) => state.replicate_workflow_execution_timedout_event(first.event_id, event)?,
@@ -191,10 +203,34 @@ impl StateBuilder {
             }
             state.execution_info.last_first_event_id = first.event_id;
             state.execution_info.next_event_id = last.event_id.saturating_add(1);
+            // Go only persists these rows when strong idempotency is enabled.
+            // This API has no domain policy input, so never retain fabricated payloads.
+            state.insert_workflow_requests.truncate(requests_before_replay);
             Ok(())
         })();
         state.suppress_task_generation = old_suppression;
-        result
+        result?;
+        let Some(continued) = events.iter().rev().find(|e| e.event_type == Some(EventType::WorkflowExecutionContinuedAsNew)) else {
+            return Ok(None);
+        };
+        if new_run_events.is_empty() { return Ok(None); }
+        let expected_run_id = continued.workflow_execution_continued_as_new_event_attributes.as_ref()
+            .map(|a| a.new_execution_run_id.as_str()).unwrap_or_default();
+        let Some(new_start) = new_run_events.first() else { return Ok(None); };
+        let Some(new_execution) = new_run_execution else { return Err(StateBuilderError::NewRunLinkage); };
+        if expected_run_id.is_empty() || new_start.event_type != Some(EventType::WorkflowExecutionStarted)
+            || new_execution.run_id != expected_run_id
+            || new_execution.workflow_id != workflow_execution.workflow_id
+            || new_start.workflow_execution_started_event_attributes.as_ref().map(|a| a.continued_execution_run_id.as_str()).unwrap_or_default() != workflow_execution.run_id
+        { return Err(StateBuilderError::NewRunLinkage); }
+        if new_start.version != continued.version { return Err(StateBuilderError::NewRunBranchVersion); }
+        let mut new_state = TypedMutableState::new();
+        new_state.version_histories = Some(cadence_api::types::VersionHistories {
+            current_version_history_index: 0,
+            histories: vec![cadence_api::types::VersionHistory { branch_token: Vec::new(), items: Vec::new() }],
+        });
+        Self::apply_events_typed(&mut new_state, domain_id, request_id, new_execution, new_run_events)?;
+        Ok(Some(new_state))
     }
     /// Go `ApplyEvents`: replicates a batch onto mutable state.
     pub fn apply_events(&mut self, events: &[HistoryEvent]) -> Result<(), StateBuilderError> {
@@ -360,9 +396,50 @@ mod typed_replay_tests {
     }
 
     #[test]
-    fn typed_replay_rejects_unimplemented_events_explicitly() {
+    fn typed_replay_marker_is_noop_and_upsert_merges_search_attributes() {
         let mut state = state();
-        let event = HistoryEvent { event_type: Some(EventType::MarkerRecorded), ..Default::default() };
+        let marker = HistoryEvent { event_id: 1, version: 1, event_type: Some(EventType::MarkerRecorded), marker_recorded_event_attributes: Some(cadence_api::tasks::MarkerRecordedEventAttributes::default()), ..Default::default() };
+        StateBuilder::apply_events_typed(&mut state, "d", "r", &WorkflowExecution::default(), &[marker]).unwrap();
+        let upsert = HistoryEvent {
+            event_id: 2, version: 1, event_type: Some(EventType::UpsertWorkflowSearchAttributes),
+            upsert_workflow_search_attributes_event_attributes: Some(cadence_api::tasks::UpsertWorkflowSearchAttributesEventAttributes {
+                search_attributes: Some(cadence_api::types::SearchAttributes { indexed_fields: Some(std::collections::HashMap::from([("CustomKeywordField".into(), b"value".to_vec())])) }), ..Default::default()
+            }), ..Default::default()
+        };
+        StateBuilder::apply_events_typed(&mut state, "d", "r", &WorkflowExecution::default(), &[upsert]).unwrap();
+        assert_eq!(state.execution_info.search_attributes.get("CustomKeywordField").unwrap(), b"value");
+        assert!(state.insert_workflow_requests.is_empty());
+    }
+
+    #[test]
+    fn typed_replay_continued_as_new_returns_independent_new_run_state() {
+        let mut old = state();
+        let can = HistoryEvent { event_id: 1, version: 7, event_type: Some(EventType::WorkflowExecutionContinuedAsNew),
+            workflow_execution_continued_as_new_event_attributes: Some(cadence_api::tasks::WorkflowExecutionContinuedAsNewEventAttributes { new_execution_run_id: "new-run".into(), ..Default::default() }), ..Default::default() };
+        let new_start = HistoryEvent { event_id: 1, version: 7, event_type: Some(EventType::WorkflowExecutionStarted),
+            workflow_execution_started_event_attributes: Some(WorkflowExecutionStartedEventAttributes { continued_execution_run_id: "old-run".into(), request_id: "new-request".into(), ..Default::default() }), ..Default::default() };
+        let workflow = WorkflowExecution::new("wf", "old-run");
+        let new_execution = WorkflowExecution::new("wf", "new-run");
+        let new = StateBuilder::apply_events_typed_with_new_run(&mut old, "d", "req", &workflow, &[can], Some(&new_execution), std::slice::from_ref(&new_start)).unwrap().unwrap();
+        assert_eq!(old.execution_info.run_id, "");
+        assert_eq!(old.execution_info.state, 2);
+        assert_eq!(new.execution_info.run_id, "new-run");
+        assert_eq!(new.execution_info.next_event_id, 2);
+        assert!(new.insert_workflow_requests.is_empty());
+        let mut changed_new = new.clone();
+        changed_new.execution_info.search_attributes.insert("only-new".into(), b"value".to_vec());
+        assert!(!old.execution_info.search_attributes.contains_key("only-new"));
+        assert!(matches!(StateBuilder::apply_events_typed_with_new_run(&mut state(), "d", "req", &workflow,
+            &[HistoryEvent { event_id: 1, version: 7, event_type: Some(EventType::WorkflowExecutionContinuedAsNew), workflow_execution_continued_as_new_event_attributes: Some(cadence_api::tasks::WorkflowExecutionContinuedAsNewEventAttributes { new_execution_run_id: "new-run".into(), ..Default::default() }), ..Default::default() }], Some(&new_execution),
+            &[HistoryEvent { event_id: 1, version: 8, event_type: Some(EventType::WorkflowExecutionStarted), workflow_execution_started_event_attributes: Some(WorkflowExecutionStartedEventAttributes { continued_execution_run_id: "old-run".into(), ..Default::default() }), ..Default::default() }]), Err(StateBuilderError::NewRunBranchVersion)));
+        assert!(matches!(StateBuilder::apply_events_typed_with_new_run(&mut state(), "d", "req", &workflow,
+            &[HistoryEvent { event_id: 1, version: 7, event_type: Some(EventType::WorkflowExecutionContinuedAsNew), workflow_execution_continued_as_new_event_attributes: Some(cadence_api::tasks::WorkflowExecutionContinuedAsNewEventAttributes { new_execution_run_id: "different".into(), ..Default::default() }), ..Default::default() }], Some(&new_execution), &[new_start]), Err(StateBuilderError::NewRunLinkage)));
+    }
+
+    #[test]
+    fn typed_replay_semaphore_events_remain_explicitly_unsupported_without_persistence_state() {
+        let mut state = state();
+        let event = HistoryEvent { event_type: Some(EventType::SemaphoreAcquireInitiated), ..Default::default() };
         assert!(matches!(StateBuilder::apply_events_typed(&mut state, "d", "r", &WorkflowExecution::default(), &[event]), Err(StateBuilderError::TypedReplayNotYetSupported { .. })));
     }
 

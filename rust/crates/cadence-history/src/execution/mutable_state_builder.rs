@@ -153,6 +153,19 @@ pub struct TypedMutableState {
 }
 
 impl TypedMutableState {
+    /// Go `ReplicateUpsertWorkflowSearchAttributesEvent`.
+    pub fn replicate_upsert_workflow_search_attributes_event(&mut self, event: &HistoryEvent) -> Result<()> {
+        if let Some(fields) = event.upsert_workflow_search_attributes_event_attributes.as_ref()
+            .and_then(|a| a.search_attributes.as_ref())
+            .and_then(|a| a.indexed_fields.as_ref()) {
+            self.execution_info.search_attributes.extend(fields.iter().map(|(k, v)| (k.clone(), v.clone())));
+        }
+        if !self.suppress_task_generation {
+            self.run_task_generator(0, |g| g.generate_workflow_search_attr_tasks())?;
+        }
+        Ok(())
+    }
+
     /// Go `newMutableStateBuilder`.
     pub fn new() -> Self {
         Self {
