@@ -151,10 +151,29 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
         Ok(false)
     }
     /// Go `UpdateWorkflowExecutionAsActive` after a decision failover on load.
-    /// `start_transaction` never reports a flush need here, so this is a
-    /// defensive no-op rather than a silent partial write.
-    async fn flush_as_active(&mut self, _state: &mut NdcStateBox, _now: i64) -> Result<(), HistoryError> {
-        Err(internal("flush_as_active requested but start_transaction never fails over in the NDC path"))
+    async fn flush_as_active(&mut self, state: &mut NdcStateBox, now: i64) -> Result<(), HistoryError> {
+        let info = state.ms.get_execution_info();
+        let key = WorkflowExecutionKey::new(
+            info.domain_id.clone(),
+            &cadence_api::types::WorkflowExecution { workflow_id: info.workflow_id, run_id: info.run_id },
+        );
+        let placeholder = placeholder_state_for(&key);
+        let lent = NdcStateBox {
+            ms: std::mem::replace(&mut state.ms, placeholder),
+            history_size: state.history_size,
+        };
+        let writer = EngineNdcWriter::new(self.core.clone());
+        // Go `UpdateWorkflowExecutionAsActive`.
+        let updated = writer.write_update(
+            &key,
+            lent,
+            now,
+            pc::UpdateWorkflowMode::UpdateCurrent,
+            TransactionPolicy::Active,
+            pc::WorkflowRequestMode::New,
+        )?;
+        *state = updated;
+        Ok(())
     }
     fn notify_snapshot(&mut self, _s: Option<&pc::WorkflowSnapshot>, _h: &[PersistedBlob], _err: bool) {}
     fn notify_mutation(&mut self, _m: &pc::WorkflowMutation, _h: &[PersistedBlob], _err: bool) {}
