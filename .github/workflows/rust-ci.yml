@@ -54,7 +54,7 @@ on:
     paths: ["rust/**", ".github/workflows/rust-ci.yml", "go/idls"]
 
 concurrency:
-  group: rust-ci-${{ github.ref }}
+  group: rust-ci-${{ github.ref }}-${{ github.event_name }}-${{ inputs.package }}
   cancel-in-progress: true
 
 jobs:
