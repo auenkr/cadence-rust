@@ -35,3 +35,11 @@ CI (rust-ci, package=cadence-persistence):
 
 Gaps/decisions: semaphore maps skipped; `create_history_tasks` (no category in trait) returns error; `select_workflow_timer_tasks` returns empty (as SQL); DLQ/cross-cluster use store `shard_id`/`target_cluster` (builders `with_shard_id`/`with_target_cluster`); `complete_history_task` for timers lacks scheduled time; duplicate request -> ConditionFailed; checksum opaque.
 Remaining (later pieces): history v2 writers, visibility trait + Cassandra writer, expose stores/wire env.rs, Go unit-test ports, gates.
+
+## Pieces 1-4 (history v2, visibility, store exposure, env wiring)
+- history_v2_cassandra.rs: CassandraHistoryV2Store (append/read/fork/delete/get_tree/all_branches). rust-ci persistence run 43051731287 success @183b376.
+- history_visibility_cassandra.rs + cadence-history visibility.rs: `VisibilityWriter` trait (SQL + Cassandra impls); HistoryEnv.visibility is Arc<dyn>. Row gained task_list/workflow_timeout_seconds/retention_seconds. TTL: open = timeout+86400, closed = retention (0 -> 86400); ttl > 157680000 uses no-TTL template (Go). Delete is a no-op (admin ctx key unsupported). Query/batch timestamp passes ms value as-is like Go.
+- ConfiguredMatchingStores.history_cassandra (executions, history_v2, visibility) + CassandraShardStore as history_shard_store; HistoryEnv::build picks Cassandra when set.
+- rust-ci @1967d791f: persistence 43054595642, matching 43054601773, history 43054609240 all success.
+- Gaps: create_history_tasks still errors (Task has no category/range id; no Rust caller; SQL also unimplemented) - not done. Semaphore maps not done.
+- Gates dispatched @1967d791f: cassandra/grpc/false 43056030102, cassandra/grpc/true 43056035699, mysql/grpc/false 43056041172 (results below).
