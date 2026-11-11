@@ -92,7 +92,7 @@ impl<V> TtlChannel<V> {
         self.tx.max_capacity()
     }
     pub fn should_cleanup(&self, now: Time, ttl: Duration) -> bool {
-        now.0 - self.last_write_time().0 > ttl.as_nanos() as i64 && self.len() == 0 && self.ref_count() == 0
+        now.0 - self.last_write_time().0 > ttl.as_nanos() as i64 && self.is_empty() && self.ref_count() == 0
     }
 }
 
@@ -176,12 +176,13 @@ pub struct WeightedKey<K> {
 type Children<K, V> = HashMap<K, (Arc<IwrrNode<K, V>>, i64)>;
 
 /// Go `iwrrNode`: node of the hierarchical IWRR tree.
+type NodeSchedule<K, V> = IwrrSchedule<Arc<IwrrNode<K, V>>>;
 pub struct IwrrNode<K, V> {
     children: RwLock<Children<K, V>>,
     c: TtlChannel<V>,
     children_item_count: AtomicI64,
     drain_self_first: AtomicBool,
-    schedule: Mutex<Arc<IwrrSchedule<Arc<IwrrNode<K, V>>>>>,
+    schedule: Mutex<Arc<NodeSchedule<K, V>>>,
     iter: Mutex<IwrrIterator<Arc<IwrrNode<K, V>>>>,
 }
 
@@ -403,9 +404,11 @@ impl<K: Hash + Eq + Clone, V> IwrrNode<K, V> {
 // ---------------------------------------------------------------------------
 
 /// Go `HierarchicalWeightedRoundRobinTaskPoolOptions`.
+/// Callback mapping a task to its weighted key path.
+pub type WeightedKeysFn<K> = Arc<dyn Fn(&TaskRef) -> Vec<WeightedKey<K>> + Send + Sync>;
 pub struct HierarchicalWeightedRoundRobinTaskPoolOptions<K> {
     pub buffer_size: usize,
-    pub task_to_weighted_keys_fn: Arc<dyn Fn(&TaskRef) -> Vec<WeightedKey<K>> + Send + Sync>,
+    pub task_to_weighted_keys_fn: WeightedKeysFn<K>,
 }
 
 struct PoolInner<K> {
@@ -828,7 +831,7 @@ mod tests {
                     if id >= 100 {
                         vec![wk("bad", 0)]
                     } else {
-                        vec![wk(if id % 2 == 0 { "even" } else { "odd" }, 1)]
+                        vec![wk(if id.is_multiple_of(2) { "even" } else { "odd" }, 1)]
                     }
                 }),
             },
