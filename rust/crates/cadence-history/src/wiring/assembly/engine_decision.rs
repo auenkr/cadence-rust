@@ -251,6 +251,7 @@ impl EngineMutableState {
         execution_context: &[u8],
         identity: &str,
         binary_checksum: &str,
+        max_reset_points: usize,
     ) -> HResult<i64> {
         let now = self.now();
         let ms = now / 1_000_000;
@@ -299,6 +300,9 @@ impl EngineMutableState {
                 binary_checksum: checksum,
             });
         });
+        // Go `addBinaryCheckSumIfNotExists` (advanced-visibility search-attr task
+        // generation is not ported here).
+        g.add_binary_checksum_if_not_exists(binary_checksum, completed.event_id, now, max_reset_points)?;
         // AfterAddDecisionTaskCompletedEvent + ReplicateDecisionTaskCompletedEvent:
         // DeleteDecision (stickiness is kept).
         g.last_processed_event = stid;
@@ -534,6 +538,7 @@ impl EngineDecisionHandler {
                     &req.execution_context,
                     &req.identity,
                     &req.binary_checksum,
+                    (self.config.max_auto_reset_points)(&domain_name).max(0) as usize,
                 )?;
                 match req.sticky_attributes.as_ref().and_then(|s| s.worker_task_list.as_ref()).filter(|t| !t.name.is_empty())
                 {
@@ -555,7 +560,17 @@ impl EngineDecisionHandler {
                     state.preload_start_event().await;
                 }
                 let mut decisions = req.decisions.clone();
-                let (fail, cause, message, unhandled, not_started_cancelled) = {
+                // Go: BadBinaries.Binaries[binChecksum] fails the decision.
+                let bad_binary = state.domain.bad_binaries.contains(&req.binary_checksum);
+                let (fail, cause, message, unhandled, not_started_cancelled) = if bad_binary {
+                    (
+                        true,
+                        Some("BAD_BINARY"),
+                        Some(format!("binary {} is already marked as bad deployment", req.binary_checksum)),
+                        false,
+                        false,
+                    )
+                } else {
                     let ops = EngineOps {
                         state: &state,
                         config: self.config.clone(),
@@ -624,6 +639,40 @@ impl EngineDecisionHandler {
                 }
                 Err(e) => return Err(e),
                 Ok(()) => {}
+            }
+            // Go handleBufferedQueries. Client headers are not carried to the engine,
+            // so the version check fails open exactly like Go with absent headers.
+            {
+                struct Obs {
+                    warn: usize,
+                    error: usize,
+                }
+                impl crate::decision::handler::QueryObserver for Obs {
+                    fn worker_not_supports_consistent_query(&self, _error: &str) {}
+                    fn invalid_query_state(&self, _id: &str, _state: crate::query::TerminationType, _error: &str) {}
+                    fn check_blob_size(&self, answer: &[u8]) -> Result<(), String> {
+                        let _ = self.warn;
+                        if answer.len() > self.error {
+                            return Err("Blob data size exceeds limit.".to_string());
+                        }
+                        Ok(())
+                    }
+                }
+                let obs = Obs {
+                    warn: (self.config.blob_size_limit_warn)(&domain_name) as usize,
+                    error: (self.config.blob_size_limit_error)(&domain_name) as usize,
+                };
+                let results = req.query_results.clone().unwrap_or_default();
+                crate::decision::handler::handle_buffered_queries(
+                    &state.queries.0,
+                    &obs,
+                    "",
+                    "",
+                    None,
+                    &results,
+                    create_new,
+                    heartbeat,
+                );
             }
             if timed_out {
                 return Err(HistoryError::entity_not_exists("decision heartbeat timeout"));
@@ -784,7 +833,22 @@ impl DecisionHandler for EngineDecisionHandler {
                 &failed.identity,
                 &failed.binary_checksum,
             )?;
-            Ok(Outcome { noop: false, create_decision: true, value: () })
+            // Go handler.go handleDecisionTaskFailed: terminate when the decision
+            // attempt exceeds DecisionRetryMaxAttempts.
+            let domain_name = state.get_domain_entry().info.name.clone();
+            let max_attempts = (self.config.decision_retry_max_attempts)(&domain_name);
+            if max_attempts > 0 && state.get_execution_info().decision_attempt > max_attempts {
+                let cause = failed.cause.map(|c| c.as_str()).unwrap_or_default();
+                let details = failed.details.iter().map(u8::to_string).collect::<Vec<_>>().join(" ");
+                let message = format!(
+                    "Decision attempt exceeds limit. Last decision failure cause and details: {cause} - [{details}]"
+                );
+                let next = state.get_next_event_id();
+                state.terminate_workflow(next, "DECISION_ATTEMPTS_EXCEEDS_LIMIT", message.as_bytes(), "history-service")?;
+            }
+            // A terminated workflow must not schedule a new decision.
+            let running = state.is_workflow_execution_running();
+            Ok(Outcome { noop: false, create_decision: running, value: () })
         })
         .await
     }
@@ -802,5 +866,58 @@ impl DecisionHandler for EngineDecisionHandler {
             Ok(Outcome { noop: false, create_decision: false, value: () })
         })
         .await
+    }
+}
+
+impl super::engine_state::Inner {
+    /// Go `CheckResettable`.
+    fn is_resettable(&self) -> bool {
+        self.pc_children.is_empty() && self.pc_cancels.is_empty() && self.pc_signals.is_empty()
+    }
+
+    /// Go `addBinaryCheckSumIfNotExists` + `trimBinaryChecksums`.
+    fn add_binary_checksum_if_not_exists(
+        &mut self,
+        bin_checksum: &str,
+        completed_event_id: i64,
+        now_nanos: i64,
+        max_reset_points: usize,
+    ) -> HResult<()> {
+        use cadence_persistence::sqlblobs::Encoding;
+        use cadence_thrift::ToThrift;
+        if bin_checksum.is_empty() {
+            return Ok(());
+        }
+        let mut curr = self.exec.auto_reset_points.clone().map(|p| p.points).unwrap_or_default();
+        let mut recent: Vec<String> = curr.iter().map(|p| p.binary_checksum.clone()).collect();
+        if recent.iter().any(|c| c == bin_checksum) {
+            return Ok(());
+        }
+        if curr.len() >= max_reset_points {
+            let start = (curr.len() - max_reset_points + 1).min(curr.len());
+            curr.drain(..start);
+            recent.drain(..start);
+        }
+        recent.push(bin_checksum.to_string());
+        curr.push(cadence_api::types::ResetPointInfo {
+            binary_checksum: bin_checksum.to_string(),
+            run_id: self.exec.run_id.clone(),
+            first_decision_completed_id: completed_event_id,
+            created_time_nano: Some(now_nanos),
+            expiring_time_nano: None,
+            resettable: self.is_resettable(),
+        });
+        let points = cadence_api::types::ResetPoints { points: curr };
+        let data = Encoding::ThriftRW
+            .encode(&points.to_thrift())
+            .map_err(|e| HistoryError::internal(format!("encode auto reset points: {e}")))?;
+        self.pc_exec.auto_reset_points =
+            Some(cadence_persistence::history_contract::DataBlob { encoding: "thriftrw".to_string(), data });
+        self.exec.auto_reset_points = Some(points);
+        let bytes = serde_json::to_vec(&recent).map_err(|e| HistoryError::internal(e.to_string()))?;
+        self.pc_exec.search_attributes.insert("BinaryChecksums".to_string(), bytes.clone());
+        self.exec.search_attributes.get_or_insert_with(Default::default).insert("BinaryChecksums".to_string(), bytes);
+        self.dirty = true;
+        Ok(())
     }
 }
