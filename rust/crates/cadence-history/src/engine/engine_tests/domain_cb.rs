@@ -8,6 +8,7 @@ use crate::engine::notify_tasks::NotifyTaskInfo;
 use crate::engine::register_domain_failover_callback::*;
 use crate::engine::runtime::*;
 use crate::engine::test_support::*;
+use crate::engine::deps::HResult;
 
 #[derive(Default)]
 struct RecQueue {
