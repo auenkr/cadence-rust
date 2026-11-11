@@ -2,6 +2,7 @@
 
 pub mod wiring;
 pub mod launcher;
+pub mod client_tls;
 pub mod lookup;
 pub mod service;
 pub mod common;
