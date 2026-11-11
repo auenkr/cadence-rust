@@ -30,6 +30,66 @@ pub struct HandlerImpl {
     rate_limiter: RateLimiter,
     shutting_down: AtomicBool,
     started: AtomicBool,
+    ratelimit_aggregator: crate::ratelimit_aggregator::RequestWeighted,
+}
+
+/// Go `commonconstants.TaskType{Transfer,Timer,Replication}`.
+const TASK_TYPE_TRANSFER: i32 = 2;
+const TASK_TYPE_TIMER: i32 = 3;
+const TASK_TYPE_REPLICATION: i32 = 4;
+
+fn map_persistence_error(e: cadence_persistence::history_contract::PersistenceError) -> HistoryError {
+    use cadence_persistence::history_contract::PersistenceError as P;
+    match e {
+        P::EntityNotExists(m) => HistoryError::entity_not_exists(m),
+        P::InvalidArgument(m) | P::InvalidPersistenceRequest(m) => HistoryError::bad_request(m),
+        other => HistoryError::internal(format!("{other:?}")),
+    }
+}
+
+/// Go `replicationShardMessages`.
+pub(crate) struct ReplicationShardMessages {
+    messages: adm::ReplicationMessages,
+    shard_id: i32,
+    size: usize,
+    earliest_creation_time: Option<i64>,
+}
+
+impl ReplicationShardMessages {
+    pub(crate) fn new(shard_id: i32, messages: adm::ReplicationMessages) -> Self {
+        use prost::Message;
+        let size = cadence_service_core::replication_convert::replication_messages_out(messages.clone()).encoded_len();
+        // Go `ReplicationMessages.GetEarliestCreationTime`: min creation time over tasks.
+        let earliest_creation_time = messages.replication_tasks.iter().filter_map(|t| t.creation_time).min();
+        Self { messages, shard_id, size, earliest_creation_time }
+    }
+}
+
+/// Go `cmpReplicationShardMessages`: nil creation times sort last, then by time, then by size.
+fn cmp_replication_shard_messages(a: &ReplicationShardMessages, b: &ReplicationShardMessages) -> std::cmp::Ordering {
+    use std::cmp::Ordering::*;
+    match (a.earliest_creation_time, b.earliest_creation_time) {
+        (None, _) => Greater,
+        (_, None) => Less,
+        (Some(x), Some(y)) => x.cmp(&y).then(a.size.cmp(&b.size)),
+    }
+}
+
+/// Go `buildGetReplicationMessagesResponse`.
+pub(crate) fn build_get_replication_messages_response(mut msgs: Vec<ReplicationShardMessages>, max_response_size: usize) -> adm::GetReplicationMessagesResponse {
+    msgs.sort_by(cmp_replication_shard_messages);
+    let mut response_size = 0usize;
+    let mut by_shard = std::collections::HashMap::with_capacity(msgs.len());
+    for m in msgs {
+        if response_size + m.size >= max_response_size {
+            tracing::warn!(shard_id = m.shard_id, size = m.size, total = response_size, max = max_response_size,
+                "Replication messages did not fit in the response (history host)");
+            continue;
+        }
+        response_size += m.size;
+        by_shard.insert(m.shard_id, m.messages);
+    }
+    adm::GetReplicationMessagesResponse { messages_by_shard: Some(by_shard) }
 }
 
 fn wf_id(e: &Option<WorkflowExecution>) -> &str {
@@ -57,10 +117,6 @@ fn deser_token(data: &[u8]) -> HResult<TaskToken> {
     })
 }
 
-fn gap(name: &str) -> HistoryError {
-    HistoryError::internal(format!("{name}: engine dependency not ported yet (see memory/history-gap-handler-20261105.md)"))
-}
-
 fn signal_with_start_retryable(error: &HistoryError) -> bool {
     matches!(
         error,
@@ -70,7 +126,16 @@ fn signal_with_start_retryable(error: &HistoryError) -> bool {
 
 impl HandlerImpl {
     pub fn new(registry: Arc<ShardRegistry>, rps: f64) -> Self {
+        let cfg = registry.env().config.clone();
+        let ratelimit_aggregator = crate::ratelimit_aggregator::RequestWeighted::new(crate::ratelimit_aggregator::Config {
+            new_data_weight: cfg.global_ratelimiter_new_data_weight.clone(),
+            update_interval: cfg.global_ratelimiter_update_interval.clone(),
+            decay_after: cfg.global_ratelimiter_decay_after.clone(),
+            gc_after: cfg.global_ratelimiter_gc_after.clone(),
+        })
+        .expect("invalid ratelimit algorithm config");
         Self {
+            ratelimit_aggregator,
             registry,
             rate_limiter: RateLimiter::new(rps),
             shutting_down: AtomicBool::new(false),
@@ -242,8 +307,30 @@ impl Handler for HandlerImpl {
         e.get_mutable_state(r, None).await
     }
 
-    async fn get_replication_messages(&self, _r: Option<&adm::GetReplicationMessagesRequest>) -> HResult<adm::GetReplicationMessagesResponse> {
-        Err(gap("GetReplicationMessages (per-token shard fan-out, size cap)"))
+    async fn get_replication_messages(&self, request: Option<&adm::GetReplicationMessagesRequest>) -> HResult<adm::GetReplicationMessagesResponse> {
+        // Go: no nil check beyond the getters (nil request == empty tokens).
+        let default = adm::GetReplicationMessagesRequest::default();
+        let r = request.unwrap_or(&default);
+        self.check_shutdown()?;
+        let futs = r.tokens.iter().map(|token| async move {
+            let engine = match self.engine_shard(token.shard_id).await {
+                Ok(e) => e,
+                Err(err) => {
+                    tracing::warn!(error = %err, "History engine not found for shard");
+                    return None;
+                }
+            };
+            match engine.get_replication_messages(&r.cluster_name, token.last_retrieved_message_id).await {
+                Ok(msgs) => Some(ReplicationShardMessages::new(token.shard_id, msgs)),
+                Err(err) => {
+                    tracing::warn!(error = %err, "Failed to get replication tasks for shard");
+                    None
+                }
+            }
+        });
+        let msgs: Vec<ReplicationShardMessages> = futures_util::future::join_all(futs).await.into_iter().flatten().collect();
+        let max = self.registry.env().config.max_response_size.max(0) as usize;
+        Ok(build_get_replication_messages_response(msgs, max))
     }
 
     async fn merge_dlq_messages(&self, request: Option<&adm::MergeDLQMessagesRequest>) -> HResult<adm::MergeDLQMessagesResponse> {
@@ -340,8 +427,27 @@ impl Handler for HandlerImpl {
         self.prep(true, &r.domain_uuid, wf_id(&r.workflow_execution)).await?.remove_signal_mutable_state(r).await
     }
 
-    async fn remove_task(&self, _r: Option<&adm::RemoveTaskRequest>) -> HResult<()> {
-        Err(gap("RemoveTask (shard-context task deletion)"))
+    async fn remove_task(&self, request: Option<&adm::RemoveTaskRequest>) -> HResult<()> {
+        // Go: no nil check, no shutdown/rate checks; straight to the execution manager.
+        let default = adm::RemoveTaskRequest::default();
+        let r = request.unwrap_or(&default);
+        let (category, ts) = match r.task_type {
+            Some(TASK_TYPE_TRANSFER) => ((1, 1), 0),
+            Some(TASK_TYPE_TIMER) => ((2, 2), r.visibility_timestamp.unwrap_or(0)),
+            Some(TASK_TYPE_REPLICATION) => ((1, 3), 0),
+            _ => return Err(constants::err_invalid_task_type().into()),
+        };
+        self.registry
+            .env()
+            .persistence
+            .executions
+            .complete_history_task_batch(
+                r.shard_id,
+                cadence_persistence::history_contract::HistoryTaskCategory { category_type: category.0, category_id: category.1 },
+                vec![(r.task_id, ts)],
+            )
+            .await
+            .map_err(map_persistence_error)
     }
 
     async fn replicate_events_v2(&self, request: Option<&ReplicateEventsV2Request>) -> HResult<()> {
@@ -496,14 +602,71 @@ impl Handler for HandlerImpl {
         }
     }
 
-    async fn ratelimit_update(&self, _r: Option<&RatelimitUpdateRequest>) -> HResult<RatelimitUpdateResponse> {
-        Err(gap("RatelimitUpdate (ratelimit aggregator not ported)"))
+    async fn ratelimit_update(&self, request: Option<&RatelimitUpdateRequest>) -> HResult<RatelimitUpdateResponse> {
+        let r = nil(request)?;
+        self.check_shutdown()?;
+        let any = r.any.as_ref().ok_or_else(|| HistoryError::internal("failed to map data to args: nil Any"))?;
+        let arg = crate::ratelimit_aggregator::any_to_aggregator_update(&any.value_type, &any.value)
+            .map_err(|e| HistoryError::internal(format!("failed to map data to args: {e}")))?;
+        self.ratelimit_aggregator
+            .update(&arg)
+            .map_err(|e| HistoryError::internal(format!("failed to update ratelimits: {e}")))?;
+        let keys: Vec<String> = arg.load.keys().cloned().collect();
+        let weights = self
+            .ratelimit_aggregator
+            .host_usage(&arg.id, &keys)
+            .map_err(|e| HistoryError::internal(format!("failed to retrieve updated weights: {e}")))?;
+        Ok(RatelimitUpdateResponse {
+            any: Some(crate::engine::types::Any {
+                value_type: crate::ratelimit_aggregator::USAGE_QUOTAS_ANY_TYPE.to_string(),
+                value: crate::ratelimit_aggregator::aggregator_weights_to_bytes(&weights),
+            }),
+        })
     }
 }
 
 #[cfg(test)]
 mod start_handler_tests {
     use super::*;
+
+    fn shard_msgs(shard: i32, creation: Option<i64>, tasks: usize) -> ReplicationShardMessages {
+        let t = cadence_api::types::ReplicationTask { creation_time: creation, ..Default::default() };
+        ReplicationShardMessages::new(shard, adm::ReplicationMessages { replication_tasks: vec![t; tasks], ..Default::default() })
+    }
+
+    #[test]
+    fn replication_messages_sorted_oldest_first_nil_last() {
+        let mut v = vec![shard_msgs(1, None, 1), shard_msgs(2, Some(20), 1), shard_msgs(3, Some(10), 1)];
+        v.sort_by(cmp_replication_shard_messages);
+        assert_eq!(v.iter().map(|m| m.shard_id).collect::<Vec<_>>(), vec![3, 2, 1]);
+    }
+
+    #[test]
+    fn replication_messages_equal_time_smaller_first() {
+        let mut v = vec![shard_msgs(1, Some(5), 3), shard_msgs(2, Some(5), 1)];
+        v.sort_by(cmp_replication_shard_messages);
+        assert_eq!(v[0].shard_id, 2);
+    }
+
+    #[test]
+    fn replication_response_skips_shards_over_max_size() {
+        let a = shard_msgs(1, Some(1), 1);
+        let b = shard_msgs(2, Some(2), 1);
+        let one = a.size;
+        // fits exactly one (check is `>=`, so max = size+1 admits the first only)
+        let resp = build_get_replication_messages_response(vec![b, a], one + 1);
+        let m = resp.messages_by_shard.unwrap();
+        assert_eq!(m.len(), 1);
+        assert!(m.contains_key(&1));
+        // `>=`: size == max is rejected
+        let resp = build_get_replication_messages_response(vec![shard_msgs(1, Some(1), 1)], one);
+        assert!(resp.messages_by_shard.unwrap().is_empty());
+    }
+
+    #[test]
+    fn task_type_constants_match_go() {
+        assert_eq!((TASK_TYPE_TRANSFER, TASK_TYPE_TIMER, TASK_TYPE_REPLICATION), (2, 3, 4));
+    }
     use crate::engine::deps::WorkflowRequestType;
 
     #[test]
