@@ -242,6 +242,7 @@ mod tests {
 
     #[derive(Default)]
     struct MockRebuilder {
+        #[allow(clippy::type_complexity)]
         calls: RefCell<Vec<(i64, Vec<u8>, i64, i64, String, Vec<u8>)>>,
     }
     impl NdcStateRebuilder for MockRebuilder {
@@ -272,6 +273,7 @@ mod tests {
     }
 
     struct MockEnv {
+        #[allow(clippy::type_complexity)]
         forks: RefCell<Vec<(Vec<u8>, i64, String, String)>>,
     }
     impl WorkflowResetterEnv for MockEnv {

@@ -115,6 +115,7 @@ struct MockHistory {
     pages: HashMap<ReadKey, (Vec<Vec<HistoryEvent>>, Vec<u8>)>,
     run_info: HashMap<String, (i64, Vec<u8>)>,
     loaded: RefCell<Vec<String>>,
+    #[allow(clippy::type_complexity)]
     forks: RefCell<Vec<(Vec<u8>, i64, String, String)>>,
     reads: RefCell<usize>,
 }

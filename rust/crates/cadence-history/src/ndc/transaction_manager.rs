@@ -431,6 +431,7 @@ mod tests {
         let s1 = event(1, EventType::WorkflowExecutionSignaled);
         let s2 = event(2, EventType::WorkflowExecutionSignaled);
         let non = event(3, EventType::DecisionTaskCompleted);
+        #[allow(clippy::type_complexity)]
         let cases: Vec<(&str, Vec<HistoryEvent>, Vec<i64>, Vec<HistoryEvent>)> = vec![
             ("nil events", vec![], vec![], vec![]),
             ("no signal events", vec![non.clone()], vec![], vec![]),
