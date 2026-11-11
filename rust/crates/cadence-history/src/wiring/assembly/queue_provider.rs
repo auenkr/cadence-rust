@@ -35,10 +35,9 @@ use super::shard_factory::{DomainActiveClusterManager, ShardClusterInfo, TaskSha
 use crate::config::Config;
 use crate::queue::deps as q;
 use crate::queue::shard_deps::QueueShardContext;
-use crate::queue::util::convert_dynamic_config_map_property_to_int_map;
+use crate::queue::processor_base::convert_dynamic_config_map_property_to_int_map;
 use crate::replication::deps::{ClientBean, DomainCache as ReplDomainCache, HistoryClient, HistoryResender};
 use crate::task::deps as t;
-use crate::task::deps::PersistenceTask;
 use crate::task::interface as ti;
 use crate::task::parallel_processor::{
     CommonProcessor, CommonTask, ParallelTaskProcessor, ParallelTaskProcessorOptions, TaskRef,
