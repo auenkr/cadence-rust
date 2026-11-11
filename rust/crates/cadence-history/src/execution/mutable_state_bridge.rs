@@ -291,7 +291,7 @@ mod tests {
             pc::ActivityHeartbeat { details: vec![0, 255, 7], ..Default::default() },
         );
         snapshot.workflow_timer_tasks.push(pc::HistoryTaskKey::default());
-        snapshot.semaphore_infos.push(pc::DataBlob { encoding: "opaque-v9".into(), data: vec![0, 1, 255] });
+        snapshot.semaphore_infos.push(pc::SemaphoreInfoRecord { version: 9, initiated_id: 3, semaphore_name: "sem".into(), owner_id: "own".into(), token_id: 2, acquire_deadline_unix_nanos: 5 });
         snapshot.checksum = Some(pc::DataBlob { encoding: "opaque-checksum".into(), data: vec![4, 5] });
         snapshot.request_cancel_infos.push(pc::KeyedBlob {
             key: 27,

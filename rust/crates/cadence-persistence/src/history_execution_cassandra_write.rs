@@ -403,6 +403,26 @@ fn signal_fields(key: i64, v: &KeyedBlob<i64>) -> Result<Fields, E> {
     ])
 }
 
+fn semaphore_fields(v: &SemaphoreInfoRecord) -> Fields {
+    vec![
+        ("version", l(v.version)),
+        ("initiated_id", l(v.initiated_id)),
+        ("semaphore_name", s(&v.semaphore_name)),
+        ("owner_id", s(&v.owner_id)),
+        ("token_id", i(v.token_id)),
+        ("acquire_deadline", ts(v.acquire_deadline_unix_nanos)),
+    ]
+}
+
+/// Go `prepareSemaphoreInfosForWorkflowTxn`: later entries with the same initiated id win.
+fn semaphore_entries(infos: &[SemaphoreInfoRecord]) -> Vec<(CqlValue, Fields)> {
+    let mut m: std::collections::BTreeMap<i64, &SemaphoreInfoRecord> = std::collections::BTreeMap::new();
+    for v in infos {
+        m.insert(v.initiated_id, v);
+    }
+    m.into_iter().map(|(k, v)| (CqlValue::BigInt(k), semaphore_fields(v))).collect()
+}
+
 #[derive(Clone, Copy)]
 enum MapKind {
     Activity,
@@ -410,6 +430,7 @@ enum MapKind {
     Child,
     RequestCancel,
     Signal,
+    Semaphore,
 }
 impl MapKind {
     fn column(self) -> &'static str {
@@ -419,6 +440,7 @@ impl MapKind {
             Self::Child => "child_executions_map",
             Self::RequestCancel => "request_cancel_map",
             Self::Signal => "signal_map",
+            Self::Semaphore => "semaphore_map",
         }
     }
 }
@@ -532,6 +554,9 @@ pub(crate) fn push_create_execution(
     }
     for g in &snapshot.signal_infos {
         push_map_upsert(st, MapKind::Signal, CqlValue::BigInt(g.key), signal_fields(g.key, g)?, keyf(), now);
+    }
+    for (k, f) in semaphore_entries(&snapshot.semaphore_infos) {
+        push_map_upsert(st, MapKind::Semaphore, k, f, keyf(), now);
     }
     push_signal_requested(st, &snapshot.signal_requested_ids, &[], &*keyf, now)?;
     push_workflow_timer_tasks(st, w.workflow_timer_tasks, &*keyf, now);
@@ -667,6 +692,12 @@ pub(crate) fn push_mutation(
     for k in &m.delete_signal_infos {
         push_map_delete(st, MapKind::Signal, CqlValue::BigInt(*k), keyf());
     }
+    for (k, f) in semaphore_entries(&m.upsert_semaphore_infos) {
+        push_map_upsert(st, MapKind::Semaphore, k, f, keyf(), now);
+    }
+    for k in &m.delete_semaphore_infos {
+        push_map_delete(st, MapKind::Semaphore, CqlValue::BigInt(*k), keyf());
+    }
     push_signal_requested(st, &m.upsert_signal_requested_ids, &m.delete_signal_requested_ids, &keyf, now)?;
     Ok(())
 }
@@ -733,6 +764,7 @@ pub(crate) fn push_reset(
         signals.push((CqlValue::BigInt(g.key), signal_fields(g.key, g)?));
     }
     push_map_reset(st, MapKind::Signal, signals, keyf(), now);
+    push_map_reset(st, MapKind::Semaphore, semaphore_entries(&snapshot.semaphore_infos), keyf(), now);
     let set: Vec<Uuid> = snapshot.signal_requested_ids.iter().map(|x| parse_uuid(x)).collect::<Result<_, _>>()?;
     let mut v: BoundValues = vec![bound(set), bound(now)];
     v.extend(keyf());
@@ -1377,6 +1409,80 @@ fn map_entries(v: Option<&CqlValue>) -> Vec<(&CqlValue, HashMap<&str, &CqlValue>
 }
 
 /// Go `SelectWorkflowExecution` + the nosql store conversion.
+/// Go `workflowTimerTaskTuple` list -> `HistoryTaskKey` (version carries the visibility time, as elsewhere in Rust).
+pub(crate) fn parse_workflow_timer_tasks(v: Option<&CqlValue>) -> Vec<HistoryTaskKey> {
+    let mut out = Vec::new();
+    if let Some(CqlValue::Set(tasks) | CqlValue::List(tasks)) = v {
+        for t in tasks {
+            if let CqlValue::Tuple(parts) = t {
+                out.push(HistoryTaskKey {
+                    task_id: get_i64(parts.get(1).and_then(|x| x.as_ref())).unwrap_or_default(),
+                    version: get_ts_nanos(parts.first().and_then(|x| x.as_ref())),
+                });
+            }
+        }
+    }
+    out
+}
+
+/// Go `SelectWorkflowTimerTasks`: reads the `workflow_timer_tasks` set of the execution row; missing row -> empty.
+pub(crate) fn select_workflow_timer_tasks(driver: &CassandraBlockingSession, req: SelectWorkflowTimerTasksRequest) -> Result<Vec<HistoryTaskKey>, E> {
+    let session = driver.session();
+    let result = driver
+        .run(session.query_unpaged(
+            "SELECT workflow_timer_tasks FROM executions WHERE shard_id = ? and type = ? and domain_id = ? and workflow_id = ? and run_id = ? and visibility_ts = ? and task_id = ?",
+            (req.shard_id, ROW_TYPE_EXECUTION, parse_uuid(&req.domain_id)?, req.workflow_id, parse_uuid(&req.run_id)?, vis_ts(), EXECUTION_TASK_ID),
+        ))
+        .map_err(internal)?;
+    let rows = result.into_rows_result().map_err(internal)?;
+    let names: Vec<String> = rows.column_specs().iter().map(|c| c.name().to_owned()).collect();
+    let Some(row) = rows.maybe_first_row::<Row>().map_err(internal)? else {
+        return Ok(Vec::new());
+    };
+    let row: RowMap = names.into_iter().zip(row.columns).collect();
+    Ok(parse_workflow_timer_tasks(cell(&row, "workflow_timer_tasks")))
+}
+
+/// Go `CreateHistoryTasks` (nosql): transfer and timer tasks only, one logged batch guarded by the shard range id.
+pub(crate) fn create_history_tasks(driver: &CassandraBlockingSession, req: CreateHistoryTasksRequest) -> Result<(), E> {
+    validate_history_task_categories(&req)?;
+    if req.tasks_by_category.values().all(|t| t.is_empty()) {
+        return Ok(());
+    }
+    let now = nanos_ts(req.current_timestamp_unix_nanos);
+    let mut st = Stmts::default();
+    push_tasks_by_category(&mut st, req.shard_id, &req.tasks_by_category, now)?;
+    push_lease(&mut st, req.shard_id, req.range_id, now);
+    let rows = run_batch(driver, st)?;
+    if applied(&rows) {
+        return Ok(());
+    }
+    Err(history_tasks_cas_error(&rows, req.shard_id, req.range_id))
+}
+
+fn validate_history_task_categories(req: &CreateHistoryTasksRequest) -> Result<(), E> {
+    for category in req.tasks_by_category.keys() {
+        if category.category_id != 1 && category.category_id != 2 {
+            return Err(E::InvalidArgument(format!(
+                "CreateHistoryTasks only supports transfer and timer tasks, got category: {}",
+                category.category_id
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Go `executeHistoryTaskBatchCAS`: an unapplied batch is always shard ownership loss (-1 when the shard row is not the cause).
+pub(crate) fn history_tasks_cas_error(rows: &[RowMap], shard: i32, range_id: i64) -> E {
+    let actual = rows
+        .first()
+        .filter(|r| get_i32(cell(r, "type")) == ROW_TYPE_SHARD)
+        .and_then(|r| get_i64(cell(r, "range_id")))
+        .filter(|a| *a != range_id)
+        .unwrap_or(-1);
+    E::ShardOwnershipLost { shard_id: shard, expected_range_id: range_id, actual_range_id: actual }
+}
+
 pub(crate) fn read_execution(
     driver: &CassandraBlockingSession,
     shard: i32,
@@ -1521,6 +1627,17 @@ pub(crate) fn read_execution(
         };
         snapshot.signal_infos.push(KeyedBlob { key: get_i64(Some(k)).unwrap_or_default(), value: encode_blob(&sqlblobs::signal_info_to_struct(&info))? });
     }
+    for (_, sm) in map_entries(cell(&row, "semaphore_map")) {
+        let g = |n: &str| sm.get(n).copied();
+        snapshot.semaphore_infos.push(SemaphoreInfoRecord {
+            version: get_i64(g("version")).unwrap_or_default(),
+            initiated_id: get_i64(g("initiated_id")).unwrap_or_default(),
+            semaphore_name: get_str(g("semaphore_name")),
+            owner_id: get_str(g("owner_id")),
+            token_id: get_i32(g("token_id")),
+            acquire_deadline_unix_nanos: get_ts_nanos(g("acquire_deadline")),
+        });
+    }
     snapshot.signal_requested_ids = get_strs(cell(&row, "signal_requested"));
     if let Some(CqlValue::List(events)) = cell(&row, "buffered_events_list") {
         for event in events {
@@ -1534,16 +1651,7 @@ pub(crate) fn read_execution(
             });
         }
     }
-    if let Some(CqlValue::Set(tasks) | CqlValue::List(tasks)) = cell(&row, "workflow_timer_tasks") {
-        for t in tasks {
-            if let CqlValue::Tuple(parts) = t {
-                snapshot.workflow_timer_tasks.push(HistoryTaskKey {
-                    task_id: get_i64(parts.get(1).and_then(|x| x.as_ref())).unwrap_or_default(),
-                    version: get_ts_nanos(parts.first().and_then(|x| x.as_ref())),
-                });
-            }
-        }
-    }
+    snapshot.workflow_timer_tasks = parse_workflow_timer_tasks(cell(&row, "workflow_timer_tasks"));
     let ck = udt_map(cell(&row, "checksum"));
     snapshot.checksum = checksum_blob(get_i32(ck.get("version").copied()), get_i32(ck.get("flavor").copied()), get_blob(ck.get("value").copied()));
     Ok(snapshot)
@@ -1744,4 +1852,56 @@ pub(crate) fn conflict_resolve_workflow_execution(driver: &CassandraBlockingSess
 
 pub(crate) fn get_workflow_execution(driver: &CassandraBlockingSession, shard: i32, domain: &str, workflow: &str, run: &str) -> Result<WorkflowSnapshot, E> {
     read_execution(driver, shard, domain, workflow, run)
+}
+
+#[cfg(test)]
+mod semaphore_and_history_task_tests {
+    use super::*;
+
+    fn rec(id: i64, name: &str) -> SemaphoreInfoRecord {
+        SemaphoreInfoRecord { version: 3, initiated_id: id, semaphore_name: name.into(), owner_id: "o".into(), token_id: 2, acquire_deadline_unix_nanos: 5_000_000 }
+    }
+
+    #[test]
+    fn semaphore_entries_last_wins_per_initiated_id() {
+        let e = semaphore_entries(&[rec(7, "a"), rec(4, "x"), rec(7, "b")]);
+        assert_eq!(e.len(), 2);
+        assert_eq!(e[0].0, CqlValue::BigInt(4));
+        assert_eq!(e[1].0, CqlValue::BigInt(7));
+        assert_eq!(e[1].1[2], ("semaphore_name", Some(CqlValue::Text("b".into()))));
+    }
+
+    #[test]
+    fn semaphore_fields_match_udt_order() {
+        let f = semaphore_fields(&rec(7, "a"));
+        let names: Vec<&str> = f.iter().map(|x| x.0).collect();
+        assert_eq!(names, ["version", "initiated_id", "semaphore_name", "owner_id", "token_id", "acquire_deadline"]);
+        assert_eq!(f[4].1, Some(CqlValue::Int(2)));
+        assert_eq!(f[5].1, Some(CqlValue::Timestamp(CqlTimestamp(5))));
+    }
+
+    #[test]
+    fn parse_workflow_timer_tasks_reads_tuples() {
+        let v = CqlValue::Set(vec![CqlValue::Tuple(vec![Some(CqlValue::Timestamp(CqlTimestamp(9))), Some(CqlValue::BigInt(11))])]);
+        assert_eq!(parse_workflow_timer_tasks(Some(&v)), vec![HistoryTaskKey { task_id: 11, version: 9_000_000 }]);
+        assert!(parse_workflow_timer_tasks(None).is_empty());
+    }
+
+    #[test]
+    fn create_history_tasks_rejects_unsupported_category() {
+        let mut req = CreateHistoryTasksRequest::default();
+        req.tasks_by_category.insert(HistoryTaskCategory { category_type: 1, category_id: 3 }, vec![]);
+        assert!(matches!(validate_history_task_categories(&req), Err(E::InvalidArgument(_))));
+        let mut ok = CreateHistoryTasksRequest::default();
+        ok.tasks_by_category.insert(HistoryTaskCategory { category_type: 1, category_id: 1 }, vec![]);
+        ok.tasks_by_category.insert(HistoryTaskCategory { category_type: 2, category_id: 2 }, vec![]);
+        assert!(validate_history_task_categories(&ok).is_ok());
+    }
+
+    #[test]
+    fn history_tasks_cas_error_reports_actual_range_or_minus_one() {
+        let shard_row: RowMap = [("type".to_owned(), Some(CqlValue::Int(ROW_TYPE_SHARD))), ("range_id".to_owned(), Some(CqlValue::BigInt(9)))].into_iter().collect();
+        assert!(matches!(history_tasks_cas_error(&[shard_row], 1, 5), E::ShardOwnershipLost { actual_range_id: 9, .. }));
+        assert!(matches!(history_tasks_cas_error(&[], 1, 5), E::ShardOwnershipLost { actual_range_id: -1, .. }));
+    }
 }

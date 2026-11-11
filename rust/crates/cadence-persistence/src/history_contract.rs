@@ -269,12 +269,38 @@ pub struct WorkflowSnapshot {
     pub child_execution_infos: Vec<KeyedBlob<i64>>,
     pub request_cancel_infos: Vec<KeyedBlob<i64>>,
     pub signal_infos: Vec<KeyedBlob<i64>>,
-    pub semaphore_infos: Vec<DataBlob>,
+    pub semaphore_infos: Vec<SemaphoreInfoRecord>,
     pub signal_requested_ids: Vec<String>,
     pub tasks_by_category: BTreeMap<HistoryTaskCategory, Vec<Task>>,
     pub workflow_requests: Vec<WorkflowRequest>,
     pub condition: i64,
     pub checksum: Option<DataBlob>,
+}
+/// Go `persistence.SemaphoreInfo`: one entry of the execution row `semaphore_map`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SemaphoreInfoRecord {
+    pub version: i64,
+    pub initiated_id: i64,
+    pub semaphore_name: String,
+    pub owner_id: String,
+    pub token_id: i32,
+    pub acquire_deadline_unix_nanos: i64,
+}
+/// Go `CreateHistoryTasksRequest`.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct CreateHistoryTasksRequest {
+    pub shard_id: i32,
+    pub range_id: i64,
+    pub current_timestamp_unix_nanos: i64,
+    pub tasks_by_category: BTreeMap<HistoryTaskCategory, Vec<Task>>,
+}
+/// Go `SelectWorkflowTimerTasksRequest`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SelectWorkflowTimerTasksRequest {
+    pub shard_id: i32,
+    pub domain_id: String,
+    pub workflow_id: String,
+    pub run_id: String,
 }
 /// A Go workflow-state map value keeps its identity in SQL key columns and
 /// serializes only the value into `data`/`data_encoding`.
@@ -304,7 +330,7 @@ pub struct WorkflowMutation {
     pub delete_request_cancel_infos: Vec<i64>,
     pub upsert_signal_infos: Vec<KeyedBlob<i64>>,
     pub delete_signal_infos: Vec<i64>,
-    pub upsert_semaphore_infos: Vec<DataBlob>,
+    pub upsert_semaphore_infos: Vec<SemaphoreInfoRecord>,
     pub delete_semaphore_infos: Vec<i64>,
     pub upsert_signal_requested_ids: Vec<String>,
     pub delete_signal_requested_ids: Vec<String>,
@@ -579,8 +605,7 @@ pub trait GoExecutionStore: Send + Sync {
     ) -> Result<(), PersistenceError>;
     async fn create_history_tasks(
         &self,
-        shard_id: i32,
-        tasks: Vec<Task>,
+        request: CreateHistoryTasksRequest,
     ) -> Result<(), PersistenceError>;
     async fn create_timer_tasks(
         &self,
@@ -602,7 +627,7 @@ pub trait GoExecutionStore: Send + Sync {
     ) -> Result<(), PersistenceError>;
     async fn select_workflow_timer_tasks(
         &self,
-        range: TimerTaskRange,
+        request: SelectWorkflowTimerTasksRequest,
     ) -> Result<Vec<HistoryTaskKey>, PersistenceError>;
     async fn create_replication_tasks(
         &self,
