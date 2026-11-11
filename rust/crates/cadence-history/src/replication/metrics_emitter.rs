@@ -92,7 +92,7 @@ impl MetricsEmitterImpl {
     }
 
     /// `determineReplicationLatency`.
-    async fn determine_replication_latency(&self, remote_cluster: &str) -> Result<Duration> {
+    pub(super) async fn determine_replication_latency(&self, remote_cluster: &str) -> Result<Duration> {
         let last_read_task_id = self.shard.get_queue_cluster_ack_level(remote_cluster);
         let (tasks, _) = match self
             .reader

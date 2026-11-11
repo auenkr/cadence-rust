@@ -13,6 +13,7 @@ pub struct TestConfig {
     pub min_batch: AtomicI32,
     pub max_batch: AtomicI32,
     pub step_count: AtomicUsize,
+    pub max_response: AtomicUsize,
 }
 
 impl Default for TestConfig {
@@ -21,6 +22,7 @@ impl Default for TestConfig {
             min_batch: AtomicI32::new(10),
             max_batch: AtomicI32::new(100),
             step_count: AtomicUsize::new(5),
+            max_response: AtomicUsize::new(1 << 20),
         }
     }
 }
@@ -31,6 +33,7 @@ impl TestConfig {
             min_batch: AtomicI32::new(min),
             max_batch: AtomicI32::new(max),
             step_count: AtomicUsize::new(steps),
+            max_response: AtomicUsize::new(1 << 20),
         })
     }
 }
@@ -42,7 +45,7 @@ impl ReplicationConfig for TestConfig {
         4
     }
     fn max_response_size(&self) -> usize {
-        1 << 20
+        self.max_response.load(Ordering::SeqCst)
     }
     fn replication_task_processor_error_retry_wait(&self, _: i32) -> Duration {
         MS
@@ -323,6 +326,164 @@ impl ExecutionManager for FakeExec {
     ) -> Result<()> {
         self.dlq_delete_calls.lock().unwrap().push((shard_id, source.to_string(), begin, end));
         match self.dlq_delete_result.lock().unwrap().clone() {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
+    }
+}
+
+/// Settable `clock.MockedTimeSource`.
+#[derive(Default)]
+pub struct MockTime(pub std::sync::atomic::AtomicI64);
+impl TimeSource for MockTime {
+    fn now_nanos(&self) -> i64 {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
+/// `fakeTaskReader`: `None` means the reader fails.
+pub struct FakeReader(pub Option<Vec<HistoryTask>>);
+
+#[async_trait]
+impl super::task_reader::TaskReaderApi for FakeReader {
+    async fn read(&self, read_level: i64, max_read_level: i64, batch_size: usize) -> Result<(Vec<HistoryTask>, bool)> {
+        let all = match &self.0 {
+            None => return Err(ReplicationError::Other("error reading replication tasks".into())),
+            Some(a) => a,
+        };
+        let mut has_more = false;
+        let mut result = vec![];
+        for t in all {
+            if t.task_id() < read_level {
+                continue;
+            }
+            if t.task_id() >= max_read_level {
+                has_more = true;
+                break;
+            }
+            result.push(t.clone());
+        }
+        if result.len() > batch_size {
+            result.truncate(batch_size);
+            return Ok((result, true));
+        }
+        Ok((result, has_more))
+    }
+}
+
+/// `fakeDynamicTaskBatchSizer`.
+pub struct FixedBatch(pub usize);
+impl super::dynamic_task_batch_sizer::DynamicTaskBatchSizer for FixedBatch {
+    fn analyse(&self, _: Option<&ReplicationError>, _: Option<&super::task_ack_manager::GetTasksResult>) {}
+    fn value(&self) -> usize {
+        self.0
+    }
+}
+
+/// `fakeAckLevelStore` / replication part of `shard.Context`.
+pub struct FakeShard {
+    pub id: i32,
+    pub current: String,
+    pub remotes: Vec<String>,
+    pub time: Arc<MockTime>,
+    pub domains: FakeDomains,
+    pub exec: Arc<FakeExec>,
+    pub bean: Arc<dyn ClientBean>,
+    pub ack: std::sync::Mutex<HashMap<String, i64>>,
+    pub read_level: std::sync::atomic::AtomicI64,
+    pub update_err: std::sync::Mutex<Option<ReplicationError>>,
+    pub markers: std::sync::Mutex<Vec<FailoverMarkerAttributes>>,
+    pub marker_err: std::sync::Mutex<Option<ReplicationError>>,
+    pub version_cluster: std::sync::Mutex<Result<String>>,
+}
+
+pub struct NoBean;
+impl ClientBean for NoBean {
+    fn history_client(&self) -> Arc<dyn HistoryClient> {
+        unimplemented!("no history client in this test")
+    }
+    fn remote_admin_client(&self, c: &str) -> Result<Arc<dyn AdminClient>> {
+        Err(ReplicationError::Other(format!("no admin client for {c}")))
+    }
+    fn remote_frontend_client(&self, c: &str) -> Result<Arc<dyn FrontendClient>> {
+        Err(ReplicationError::Other(format!("no frontend client for {c}")))
+    }
+}
+
+impl FakeShard {
+    pub fn new() -> Self {
+        Self {
+            id: 0,
+            current: CLUSTER_A.into(),
+            remotes: vec![CLUSTER_B.into()],
+            time: Arc::new(MockTime::default()),
+            domains: FakeDomains::test_domain(),
+            exec: Arc::new(FakeExec::default()),
+            bean: Arc::new(NoBean),
+            ack: Default::default(),
+            read_level: Default::default(),
+            update_err: Default::default(),
+            markers: Default::default(),
+            marker_err: Default::default(),
+            version_cluster: std::sync::Mutex::new(Ok(CLUSTER_A.into())),
+        }
+    }
+}
+
+impl super::task_ack_manager::AckLevelStore for FakeShard {
+    fn update_if_needed_and_get_queue_max_read_level(&self, _c: &str) -> i64 {
+        self.read_level.load(Ordering::SeqCst)
+    }
+    fn get_queue_cluster_ack_level(&self, c: &str) -> i64 {
+        self.ack.lock().unwrap().get(c).copied().unwrap_or(0)
+    }
+    fn update_queue_cluster_ack_level(&self, c: &str, a: i64) -> Result<()> {
+        self.ack.lock().unwrap().insert(c.to_string(), a);
+        match self.update_err.lock().unwrap().clone() {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
+    }
+}
+
+#[async_trait]
+impl ShardContext for FakeShard {
+    fn shard_id(&self) -> i32 {
+        self.id
+    }
+    fn current_cluster_name(&self) -> String {
+        self.current.clone()
+    }
+    fn remote_cluster_names(&self) -> Vec<String> {
+        self.remotes.clone()
+    }
+    fn time_source(&self) -> Arc<dyn TimeSource> {
+        self.time.clone()
+    }
+    fn domain_cache(&self) -> Arc<dyn DomainCache> {
+        Arc::new(self.domains.clone())
+    }
+    fn execution_manager(&self) -> Arc<dyn ExecutionManager> {
+        self.exec.clone()
+    }
+    fn client_bean(&self) -> Arc<dyn ClientBean> {
+        self.bean.clone()
+    }
+    fn cluster_name_for_failover_version(&self, _v: i64) -> Result<String> {
+        self.version_cluster.lock().unwrap().clone()
+    }
+    fn get_queue_cluster_ack_level(&self, c: &str) -> i64 {
+        super::task_ack_manager::AckLevelStore::get_queue_cluster_ack_level(self, c)
+    }
+    fn update_if_needed_and_get_queue_max_read_level(&self, c: &str) -> i64 {
+        super::task_ack_manager::AckLevelStore::update_if_needed_and_get_queue_max_read_level(self, c)
+    }
+    fn update_queue_cluster_ack_level(&self, c: &str, a: i64) -> Result<()> {
+        super::task_ack_manager::AckLevelStore::update_queue_cluster_ack_level(self, c, a)
+    }
+    fn adding_pending_failover_marker(&self, m: FailoverMarkerAttributes) -> Result<()> {
+        self.markers.lock().unwrap().push(m);
+        match self.marker_err.lock().unwrap().clone() {
             Some(e) => Err(e),
             None => Ok(()),
         }

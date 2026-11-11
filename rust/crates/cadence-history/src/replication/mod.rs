@@ -42,3 +42,5 @@ mod batch_sizer_tests;
 mod reader_tests;
 #[cfg(test)]
 mod dlq_tests;
+#[cfg(test)]
+mod ack_tests;
