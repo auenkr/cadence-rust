@@ -168,7 +168,6 @@ impl EngineMutableState {
             last_completion_result: a.last_completion_result.clone(),
             first_decision_task_backoff_seconds: backoff,
             partition_config,
-            ..Default::default()
         };
 
         let new_state = Arc::new(EngineMutableState::new_for_start(
