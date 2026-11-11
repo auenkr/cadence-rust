@@ -7,8 +7,8 @@
 //!   per-remote-cluster standby executors of the transfer and timer categories.
 //!
 //! Known deviations / gaps (see memory/history-queueexec-assembly-20261111.md):
-//! * The hierarchical weighted round robin scheduler (Go default) is not ported; the flat weighted
-//!   round robin scheduler (Go's non-hierarchical branch) is used and a warning is logged.
+//! * The scheduler is selected like Go `NewProcessor`: hierarchical weighted round robin when
+//!   `EnableHierarchicalWeightedRoundRobinTaskScheduler` is set (default), flat otherwise.
 //! * The shard `TaskReinjector` slot is not bound (no reinjector implementation exists yet), so
 //!   reinjection fails explicitly.
 //! * Timer standby workflow loading and other TODO dependencies keep returning explicit errors.
@@ -43,8 +43,13 @@ use crate::task::parallel_processor::{
     CommonProcessor, CommonTask, ParallelTaskProcessor, ParallelTaskProcessorOptions, TaskRef,
     WeightedRoundRobinTaskScheduler, WeightedRoundRobinTaskSchedulerOptions,
 };
+use crate::task::hierarchical_wrr::{
+    HierarchicalWeightedRoundRobinTaskPoolOptions, HierarchicalWeightedRoundRobinTaskScheduler, WeightedKey as HierarchicalWeightedKey,
+};
 use crate::task::priority_assigner::new_priority_assigner;
-use crate::task::processor::{get_domain_priority_weight, new_processor, DomainPriorityKey, SchedulerConfig};
+use crate::task::processor::{
+    get_domain_priority_weight, new_processor, task_to_weighted_keys, DomainPriorityKey, SchedulerConfig, SchedulerKey,
+};
 use crate::task::rate_limited_processor::new_rate_limited_processor;
 use crate::task::redispatcher::{new_redispatcher, RedispatcherOptions};
 use crate::task::task_rate_limiter::new_rate_limiter;
@@ -103,28 +108,48 @@ impl CommonTask for SchedTask {
     }
 }
 
-/// `task.Scheduler[Task]` (flat weighted round robin) as a history `task::Processor`.
+/// Selected `task.Scheduler[Task]` (Go `NewProcessor`: hierarchical or flat weighted round robin).
+enum SchedulerImpl {
+    Flat(WeightedRoundRobinTaskScheduler<DomainPriorityKey>),
+    Hierarchical(HierarchicalWeightedRoundRobinTaskScheduler<SchedulerKey>),
+}
+
+/// The scheduler as a history `task::Processor`.
 pub struct SchedulerProcessor {
-    scheduler: WeightedRoundRobinTaskScheduler<DomainPriorityKey>,
+    scheduler: SchedulerImpl,
 }
 
 #[async_trait]
 impl t::Daemon for SchedulerProcessor {
     async fn start(&self) {
-        t::Daemon::start(&self.scheduler).await
+        match &self.scheduler {
+            SchedulerImpl::Flat(s) => t::Daemon::start(s).await,
+            SchedulerImpl::Hierarchical(s) => t::Daemon::start(s).await,
+        }
     }
     async fn stop(&self) {
-        t::Daemon::stop(&self.scheduler).await
+        match &self.scheduler {
+            SchedulerImpl::Flat(s) => t::Daemon::stop(s).await,
+            SchedulerImpl::Hierarchical(s) => t::Daemon::stop(s).await,
+        }
     }
 }
 
 #[async_trait]
 impl ti::Processor for SchedulerProcessor {
     async fn submit(&self, task: Arc<dyn ti::Task>) -> t::Result<()> {
-        self.scheduler.submit(SchedTask::wrap(task)).await.map_err(|e| t::TaskError::Other(e.to_string()))
+        let task = SchedTask::wrap(task);
+        match &self.scheduler {
+            SchedulerImpl::Flat(s) => s.submit(task).await.map_err(|e| t::TaskError::Other(e.to_string())),
+            SchedulerImpl::Hierarchical(s) => s.submit(task).await.map_err(|e| t::TaskError::Other(e.to_string())),
+        }
     }
     async fn try_submit(&self, task: Arc<dyn ti::Task>) -> t::Result<bool> {
-        self.scheduler.try_submit(SchedTask::wrap(task)).map_err(|e| t::TaskError::Other(e.to_string()))
+        let task = SchedTask::wrap(task);
+        match &self.scheduler {
+            SchedulerImpl::Flat(s) => s.try_submit(task).map_err(|e| t::TaskError::Other(e.to_string())),
+            SchedulerImpl::Hierarchical(s) => s.try_submit(task).await.map_err(|e| t::TaskError::Other(e.to_string())),
+        }
     }
 }
 
@@ -141,10 +166,8 @@ pub fn build_scheduler(
     config: Arc<Config>,
     domains: Arc<dyn t::DomainCache>,
     logger: t::Logger,
+    time_source: Arc<dyn t::TimeSource>,
 ) -> (Arc<ParallelTaskProcessor>, Arc<SchedulerProcessor>) {
-    if (config.enable_hierarchical_weighted_round_robin_task_scheduler)() {
-        tracing::warn!("hierarchical weighted round robin task scheduler is not ported; using the flat weighted round robin scheduler");
-    }
     let workers = config.task_scheduler_worker_count.clone();
     let task_processor = Arc::new(ParallelTaskProcessor::new(ParallelTaskProcessorOptions {
         queue_size: 1,
@@ -152,18 +175,39 @@ pub fn build_scheduler(
         retry_policy: t::create_task_processing_retry_policy(),
     }));
     let cfg = Arc::new(SchedulerCfg(config.clone()));
-    let weight_logger = logger;
-    let scheduler = WeightedRoundRobinTaskScheduler::new(
-        task_processor.clone() as Arc<dyn CommonProcessor>,
-        WeightedRoundRobinTaskSchedulerOptions {
-            queue_size: (config.task_scheduler_queue_size)().max(1) as usize,
-            dispatcher_count: (config.task_scheduler_dispatcher_count)().max(1) as usize,
-            task_to_channel_key_fn: Arc::new(domain_priority_key),
-            channel_key_to_weight_fn: Arc::new(move |k: &DomainPriorityKey| {
-                get_domain_priority_weight(&weight_logger, cfg.as_ref(), domains.as_ref(), k).max(0) as usize
-            }),
-        },
-    );
+    let scheduler = if (config.enable_hierarchical_weighted_round_robin_task_scheduler)() {
+        let key_logger = logger;
+        let key_domains = domains;
+        SchedulerImpl::Hierarchical(HierarchicalWeightedRoundRobinTaskScheduler::new(
+            time_source,
+            task_processor.clone() as Arc<dyn CommonProcessor>,
+            HierarchicalWeightedRoundRobinTaskPoolOptions {
+                buffer_size: (config.task_scheduler_queue_size)().max(0) as usize,
+                task_to_weighted_keys_fn: Arc::new(move |task: &TaskRef| {
+                    match task.as_any().and_then(|a| a.downcast_ref::<SchedTask>()) {
+                        Some(s) => task_to_weighted_keys(s.0.as_ref(), cfg.as_ref(), key_domains.as_ref(), &key_logger)
+                            .into_iter()
+                            .map(|k| HierarchicalWeightedKey { key: k.key, weight: k.weight as i64 })
+                            .collect(),
+                        None => Vec::new(),
+                    }
+                }),
+            },
+        ))
+    } else {
+        let weight_logger = logger;
+        SchedulerImpl::Flat(WeightedRoundRobinTaskScheduler::new(
+            task_processor.clone() as Arc<dyn CommonProcessor>,
+            WeightedRoundRobinTaskSchedulerOptions {
+                queue_size: (config.task_scheduler_queue_size)().max(1) as usize,
+                dispatcher_count: (config.task_scheduler_dispatcher_count)().max(1) as usize,
+                task_to_channel_key_fn: Arc::new(domain_priority_key),
+                channel_key_to_weight_fn: Arc::new(move |k: &DomainPriorityKey| {
+                    get_domain_priority_weight(&weight_logger, cfg.as_ref(), domains.as_ref(), k).max(0) as usize
+                }),
+            },
+        ))
+    };
     (task_processor, Arc::new(SchedulerProcessor { scheduler }))
 }
 
@@ -216,7 +260,7 @@ impl HistoryQueueExecProvider {
             .map_err(|e| anyhow::anyhow!("starting the history task processor needs a tokio runtime: {e}"))?;
         let logger = t::Logger::new();
         let domains: Arc<dyn t::DomainCache> = env.domain_cache.clone();
-        let (task_processor, scheduler) = build_scheduler(env.config.clone(), domains.clone(), logger.clone());
+        let (task_processor, scheduler) = build_scheduler(env.config.clone(), domains.clone(), logger.clone(), env.clock.clone() as Arc<dyn t::TimeSource>);
         let assigner = new_priority_assigner(
             env.cluster.metadata().current_cluster_name.clone(),
             domains.clone(),
@@ -422,7 +466,7 @@ mod tests {
     #[tokio::test]
     async fn scheduler_constructs_and_start_stop_is_idempotent() {
         let client = Arc::new(InMemoryClient::new());
-        let (processor, scheduler) = build_scheduler(config(&client), Arc::new(NoDomains), t::Logger::new());
+        let (processor, scheduler) = build_scheduler(config(&client), Arc::new(NoDomains), t::Logger::new(), Arc::new(t::RealTimeSource));
         t::Daemon::start(processor.as_ref()).await;
         t::Daemon::start(scheduler.as_ref()).await;
         t::Daemon::start(scheduler.as_ref()).await;

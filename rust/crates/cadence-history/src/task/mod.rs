@@ -15,6 +15,7 @@ pub mod rescheduler;
 pub mod standby_task_util;
 pub mod task_rate_limiter;
 pub mod task_util;
+pub mod hierarchical_wrr;
 pub mod parallel_processor;
 pub mod processor;
 

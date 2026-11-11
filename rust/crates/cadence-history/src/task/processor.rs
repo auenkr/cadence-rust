@@ -12,7 +12,7 @@ pub trait SchedulerConfig: Send + Sync {
  fn task_list_nice_value(&self,domain:&str,task_list:&str)->i32;
  fn task_scheduler_domain_round_robin_weights(&self,domain:&str)->Result<HashMap<i32,i32>>;
 }
-#[derive(Clone,Debug,PartialEq,Eq)]
+#[derive(Clone,Debug,PartialEq,Eq,Hash)]
 pub enum SchedulerKey { DomainPriority(DomainPriorityKey), TaskList(String) }
 #[derive(Clone,Debug)]
 pub struct WeightedKey {pub key:SchedulerKey,pub weight:i32}
