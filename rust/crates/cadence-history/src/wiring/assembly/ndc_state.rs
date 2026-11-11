@@ -14,7 +14,7 @@ use crate::execution::mutable_state_methods_common::{
 };
 use crate::execution::workflow::{TransactionPolicy, WorkflowState};
 use crate::ndc::{NdcActivityInfo, NdcError, NdcExecutionInfo, NdcMutableState, NdcResult, SyncActivityRequest};
-use crate::execution::context::WorkflowEvents;
+use crate::execution::context::{TransactionState, WorkflowEvents, WorkflowExecutionKey};
 use cadence_persistence::history_contract::WorkflowSnapshot;
 
 /// Owns the typed mutable state so its version histories can be borrowed
@@ -219,9 +219,35 @@ impl NdcMutableState for OwnedNdcMutableState {
         self.typed.update_current_version(version, force).map_err(|e| NdcError::internal(e.to_string()))
     }
 
-    fn close_transaction_as_snapshot(&mut self, _now_nanos: i64, _policy: TransactionPolicy) -> NdcResult<(WorkflowSnapshot, Vec<WorkflowEvents>)> {
-        self.unsupported("close_transaction_as_snapshot")
+    fn close_transaction_as_snapshot(&mut self, now_nanos: i64, policy: TransactionPolicy) -> NdcResult<(WorkflowSnapshot, Vec<WorkflowEvents>)> {
+        let (typed, events) = self.typed.prepare_close_snapshot(now_nanos, policy)
+            .map_err(|e| NdcError::internal(e.to_string()))?;
+        let snapshot = crate::execution::mutable_state_bridge::typed_snapshot_to_persistence(&typed)
+            .map_err(|e| NdcError::internal(e.to_string()))?;
+        let batches = if events.is_empty() { Vec::new() } else { vec![WorkflowEvents {
+            key: WorkflowExecutionKey { domain_id: self.domain_id.clone(), workflow_id: self.workflow_id.clone(), run_id: self.run_id.clone() },
+            branch_token: self.get_current_branch_token()?, events,
+        }] };
+        Ok((snapshot, batches))
     }
+    fn transaction_committed(&mut self) { self.typed.cleanup_transaction(); }
+}
+
+impl TransactionState for OwnedNdcMutableState {
+    type Error = NdcError;
+    fn history_size(&self) -> i64 { self.typed.history_size }
+    fn set_history_size(&mut self, size: i64) { self.typed.history_size = size; }
+    fn next_event_id(&self) -> i64 { self.typed.execution_info.next_event_id }
+    async fn start_transaction(&mut self, _incoming_version: i64) -> NdcResult<bool> { Ok(false) }
+    fn close_mutation(&mut self, now: i64, policy: TransactionPolicy) -> NdcResult<(cadence_persistence::history_contract::WorkflowMutation, Vec<WorkflowEvents>)> {
+        let (typed, events) = self.typed.prepare_close_mutation(now, policy).map_err(|e| NdcError::internal(e.to_string()))?;
+        let envelope = crate::execution::mutable_state_bridge::snapshot_to_envelope(WorkflowSnapshot::default()).map_err(|e| NdcError::internal(e.to_string()))?;
+        let mutation = crate::execution::mutable_state_bridge::mutation_to_persistence(&typed, &envelope).map_err(|e| NdcError::internal(e.to_string()))?;
+        let batches = if events.is_empty() { Vec::new() } else { vec![WorkflowEvents { key: WorkflowExecutionKey { domain_id: self.domain_id.clone(), workflow_id: self.workflow_id.clone(), run_id: self.run_id.clone() }, branch_token: self.get_current_branch_token()?, events }] };
+        Ok((mutation, batches))
+    }
+    fn close_snapshot(&mut self, now: i64, policy: TransactionPolicy) -> NdcResult<(WorkflowSnapshot, Vec<WorkflowEvents>)> { self.close_transaction_as_snapshot(now, policy) }
+    fn transaction_committed(&mut self) { self.typed.cleanup_transaction(); }
 }
 
 #[cfg(test)]

@@ -504,6 +504,49 @@ impl TypedMutableState {
 
     // ---- close transaction ----
 
+    /// Prepare an immutable mutation from a transaction copy. The source keeps
+    /// all deltas until `cleanup_transaction` is called after durable commit.
+    pub fn prepare_close_mutation(
+        &self,
+        now_nanos: i64,
+        policy: super::workflow::TransactionPolicy,
+    ) -> Result<(TypedWorkflowMutation, Vec<HistoryEvent>)> {
+        let mut working = self.clone();
+        working.prepare_close_policy(now_nanos, policy)?;
+        let (mutation, events) = working.close_mutation_prepared()?;
+        Ok((mutation, events))
+    }
+
+    /// Prepare a snapshot without consuming the source transaction.
+    pub fn prepare_close_snapshot(
+        &self,
+        now_nanos: i64,
+        policy: super::workflow::TransactionPolicy,
+    ) -> Result<(TypedWorkflowSnapshot, Vec<HistoryEvent>)> {
+        let mut working = self.clone();
+        working.prepare_close_policy(now_nanos, policy)?;
+        let (snapshot, events) = working.close_snapshot_prepared()?;
+        Ok((snapshot, events))
+    }
+
+    fn prepare_close_policy(
+        &mut self,
+        now_nanos: i64,
+        policy: super::workflow::TransactionPolicy,
+    ) -> Result<()> {
+        if policy == super::workflow::TransactionPolicy::Active {
+            self.flush_buffered_events()?;
+            self.close_transaction_handle_activity_user_timer_tasks_at(now_nanos)?;
+        }
+        Ok(())
+    }
+
+    fn close_transaction_handle_activity_user_timer_tasks_at(&mut self, now_nanos: i64) -> Result<()> {
+        if !self.is_workflow_execution_running() { return Ok(()); }
+        self.run_task_generator(now_nanos, |g| g.generate_activity_timer_tasks())?;
+        self.run_task_generator(now_nanos, |g| g.generate_user_timer_tasks())
+    }
+
     /// Go `cleanupTransaction`.
     pub fn cleanup_transaction(&mut self) {
         self.reset_update_tracking();
@@ -548,6 +591,10 @@ impl TypedMutableState {
     /// Go `CloseTransactionAsMutation`.
     pub fn close_transaction_as_mutation(&mut self) -> Result<(TypedWorkflowMutation, Vec<HistoryEvent>)> {
         self.close_transaction_handle_activity_user_timer_tasks()?;
+        self.close_mutation_prepared()
+    }
+
+    fn close_mutation_prepared(&mut self) -> Result<(TypedWorkflowMutation, Vec<HistoryEvent>)> {
         let tasks_by_category = self.drain_encoded_tasks()?;
         let events = std::mem::take(&mut self.history_events);
         self.advance_version_history(&events)?;
@@ -555,6 +602,7 @@ impl TypedMutableState {
         let rewrite_activity = !self.delete_activity_infos.is_empty();
         let rewrite_timer = !self.delete_timer_infos.is_empty();
 
+        let workflow_requests = self.prepared_workflow_requests()?;
         let mutation = TypedWorkflowMutation {
             execution_info: self.execution_info.clone(),
             version_histories: self.version_histories.clone(),
@@ -585,7 +633,7 @@ impl TypedMutableState {
             new_buffered_events: self.update_buffered_events.clone(),
             clear_buffered_events: self.clear_buffered_events,
             tasks_by_category,
-            workflow_requests: self.workflow_requests.clone(),
+            workflow_requests,
             condition: self.next_event_id_in_db,
         };
         self.cleanup_transaction();
@@ -598,9 +646,17 @@ impl TypedMutableState {
             return internal("cannot close transaction as snapshot with buffered events");
         }
         self.close_transaction_handle_activity_user_timer_tasks()?;
+        self.close_snapshot_prepared()
+    }
+
+    fn close_snapshot_prepared(&mut self) -> Result<(TypedWorkflowSnapshot, Vec<HistoryEvent>)> {
+        if !self.update_buffered_events.is_empty() || !self.buffered_events.is_empty() {
+            return internal("cannot close transaction as snapshot with buffered events");
+        }
         let tasks_by_category = self.drain_encoded_tasks()?;
         let events = std::mem::take(&mut self.history_events);
         self.advance_version_history(&events)?;
+        let workflow_requests = self.prepared_workflow_requests()?;
         let snapshot = TypedWorkflowSnapshot {
             execution_info: self.execution_info.clone(),
             version_histories: self.version_histories.clone(),
@@ -613,11 +669,29 @@ impl TypedMutableState {
             signal_infos: self.pending_signal_info_ids.values().cloned().collect(),
             signal_requested_ids: self.pending_signal_requested_ids.iter().cloned().collect(),
             tasks_by_category,
-            workflow_requests: self.workflow_requests.clone(),
+            workflow_requests,
             condition: self.next_event_id_in_db,
         };
         self.cleanup_transaction();
         Ok((snapshot, events))
+    }
+
+    fn prepared_workflow_requests(&self) -> Result<Vec<WorkflowRequest>> {
+        let mut requests = self.workflow_requests.clone();
+        for inserted in &self.insert_workflow_requests {
+            if inserted.data.data.is_empty() || inserted.data.encoding.is_empty() {
+                return internal(format!("workflow request {} has no encoded deduplication data", inserted.request_id));
+            }
+            if let Some(existing) = requests.iter_mut().find(|request| request.request_id == inserted.request_id) {
+                if existing.data.data.is_empty() || existing.data.encoding.is_empty() { existing.data = inserted.data.clone(); }
+            } else {
+                requests.push(inserted.clone());
+            }
+        }
+        if requests.iter().any(|request| request.data.data.is_empty() || request.data.encoding.is_empty()) {
+            return internal("workflow request is missing encoded deduplication data");
+        }
+        Ok(requests)
     }
 
     // ---- pending-map mutation helpers (Go Update*/Delete*) ----
@@ -891,6 +965,33 @@ mod tests {
         let mut state = TypedMutableState::new();
         state.update_buffered_events.push(HistoryEvent::default());
         assert!(state.close_transaction_as_snapshot().is_err());
+    }
+
+    #[test]
+    fn prepared_passive_close_preserves_buffered_events_source_and_cas() {
+        let mut state = TypedMutableState::new();
+        state.next_event_id_in_db = 12;
+        state.history_events.push(HistoryEvent { event_id: 1, ..Default::default() });
+        state.update_buffered_events.push(HistoryEvent { event_id: BUFFERED_EVENT_ID, ..Default::default() });
+        let (mutation, events) = state.prepare_close_mutation(99, super::super::workflow::TransactionPolicy::Passive).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(mutation.new_buffered_events.len(), 1);
+        assert_eq!(mutation.condition, 12);
+        assert_eq!(state.history_events.len(), 1);
+        assert_eq!(state.update_buffered_events.len(), 1);
+        assert_eq!(state.next_event_id_in_db, 12);
+    }
+
+    #[test]
+    fn failed_preparation_keeps_events_tasks_and_cas_recoverable() {
+        let mut state = TypedMutableState::new();
+        state.next_event_id_in_db = 12;
+        state.history_events.push(HistoryEvent { event_id: 1, ..Default::default() });
+        state.insert_workflow_requests.push(WorkflowRequest { request_id: "req".into(), data: Default::default() });
+        assert!(state.prepare_close_mutation(99, super::super::workflow::TransactionPolicy::Passive).is_err());
+        assert_eq!(state.history_events.len(), 1);
+        assert_eq!(state.next_event_id_in_db, 12);
+        assert_eq!(state.insert_workflow_requests.len(), 1);
     }
 
     #[test]

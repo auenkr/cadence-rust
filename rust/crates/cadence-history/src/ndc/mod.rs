@@ -242,6 +242,8 @@ pub trait NdcMutableState {
         now_nanos: i64,
         policy: TransactionPolicy,
     ) -> NdcResult<(WorkflowSnapshot, Vec<WorkflowEvents>)>;
+    /// Called only after the prepared image has been durably committed.
+    fn transaction_committed(&mut self) {}
 }
 
 /// Go `execution.Workflow` joined with its `execution.Context`, mutable state and
