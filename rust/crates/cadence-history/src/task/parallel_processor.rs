@@ -143,6 +143,7 @@ impl ProcInner {
     async fn execute_task(&self, task: TaskRef, worker_shutdown: &watch::Receiver<bool>) {
         tracing::debug!("parallel processor worker executing task");
         let run = AssertUnwindSafe(self.run_with_retry(&task, worker_shutdown)).catch_unwind().await;
+        tracing::debug!(result = ?run.as_ref().map(|r| r.as_ref().map_err(|e| e.to_string())).map_err(|_| "panic"), "parallel processor task finished");
         match run {
             Ok(Ok(())) => task.ack(),
             Ok(Err(e)) => task.nack(Some(e)),
