@@ -34,7 +34,7 @@ use crate::task::transfer_task_executor_base::{
 };
 use crate::wiring::persistence::domain_dlq::SqlTaskDlqWriter;
 use crate::wiring::persistence::engine_ndc::branch_request;
-use crate::wiring::persistence::visibility::{VisibilityWriteRow, VisibilityWriter as _};
+use crate::wiring::persistence::visibility::VisibilityWriteRow;
 
 fn pe(e: PersistenceError) -> TaskError {
     match e {
