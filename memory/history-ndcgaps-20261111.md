@@ -1,6 +1,6 @@
 # history-ndcgaps (2026-11-11)
 
-Branch `history-ndcgaps` from master 95a558c16. All 5 items are implemented. CI results are not yet read: each push was dispatched, but I have not checked the conclusions.
+Branch `history-ndcgaps` from master 95a558c16. All 5 items are implemented. CI: run 43052491721 (head f15d5f482, cadence-history clippy+test) concluded SUCCESS (https://github.com/auenkr/cadence-rust/actions/runs/43052491721). Merged master e63ced4ba (concurrency fix) -> head 7673dd934; re-dispatched run 43053825646 concluded SUCCESS (https://github.com/auenkr/cadence-rust/actions/runs/43053825646).
 
 ## Done
 1. NDC `reset_workflow` collaborator (ndc_adapters.rs): runs `EngineWorkflowResetter`. The engine context comes from the new `NdcWorkflow::engine_context` / `NdcCheckoutContext::into_any`, and the engine state is loaded from it. The NDC workflow is cleared afterwards. Head 5602af413, run 43051922719 (that run was the cancelled push-triggered one; the dispatched run supersedes it).
