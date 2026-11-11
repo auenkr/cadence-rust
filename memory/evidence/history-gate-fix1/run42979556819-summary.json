@@ -1,0 +1,32 @@
+{
+  "failedSteps": [
+    "sdk-complete-echo",
+    "sdk-describe-closed",
+    "sdk-complete-child",
+    "sdk-describe-task-list",
+    "sdk-list-task-list-partitions",
+    "sdk-get-task-lists-by-domain",
+    "sdk-start-cancel",
+    "sdk-start-terminate",
+    "sdk-sched-create-grpc",
+    "sdk-start-signal-query",
+    "sdk-list-closed",
+    "sdk-api-get-cluster-info",
+    "sdk-api-get-search-attributes",
+    "sdk-api-register-a",
+    "sdk-api-register-b",
+    "sdk-api-list-domains",
+    "sdk-api-delete-domain-not-deprecated",
+    "sdk-api-deprecate-domain",
+    "sdk-api-delete-domain-with-executions",
+    "sdk-api-delete-domain-missing",
+    "sdk-api-failover-domain-empty-rejected",
+    "sdk-api-list-failover-history-no-domain-id",
+    "sdk-api-signal-with-start",
+    "sdk-api-manual-start",
+    "sdk-driver-exit",
+    "admin-probe-get-cross-cluster-tasks-deprecated",
+    "admin-probe-reapply-events-unknown-workflow"
+  ],
+  "stepCount": 144
+}
