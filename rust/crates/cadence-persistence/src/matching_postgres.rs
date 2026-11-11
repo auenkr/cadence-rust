@@ -152,14 +152,14 @@ impl PostgresConnectionPool {
     }
 
     pub(crate) fn checkout(self: &Arc<Self>) -> Result<PostgresLease> {
-        self.checkout_until(None)
+        outside_runtime(|| self.checkout_until(None))
     }
 
     pub(crate) fn checkout_with_timeout(
         self: &Arc<Self>,
         timeout: Duration,
     ) -> Result<PostgresLease> {
-        self.checkout_until(Some(Instant::now() + timeout))
+        outside_runtime(|| self.checkout_until(Some(Instant::now() + timeout)))
     }
 
     fn checkout_until(self: &Arc<Self>, deadline: Option<Instant>) -> Result<PostgresLease> {

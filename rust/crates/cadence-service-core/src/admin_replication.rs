@@ -415,27 +415,46 @@ pub async fn reapply_events(
     domain_id: &str,
     request: &api_admin::ReapplyEventsRequest,
 ) -> Result<(), ProxyError> {
-    let mut history = client(state)?;
     let execution = request.workflow_execution.clone().unwrap_or_default();
-    history
-        .reapply_events(history_admin_request(ph::ReapplyEventsRequest {
-            domain: request.domain.clone(),
-            domain_id: domain_id.to_owned(),
-            workflow_execution: Some(cadence_proto::api::WorkflowExecution {
-                workflow_id: execution.workflow_id,
-                run_id: execution.run_id,
-            }),
-            events: request.events.as_ref().map(|blob| cadence_proto::api::DataBlob {
-                encoding_type: match blob.encoding_type {
-                    Some(cadence_api::enums::EncodingType::ThriftRW) => 1,
-                    Some(cadence_api::enums::EncodingType::JSON) => 2,
-                    _ => 0,
-                },
-                data: blob.data.clone(),
-            }),
-        }))
-        .await
-        .map_err(internal)?;
+    // Go client/history routes by workflow-id shard and retries ShardOwnershipLost
+    // against the re-resolved owner.
+    let shard = (cadence_common::membership::fingerprint32(execution.workflow_id.as_bytes())
+        % crate::admin::shard_count(state).max(1) as u32) as i32;
+    let mut attempt = 0u32;
+    loop {
+        let channel = crate::admin::history_channel_for(state, shard, None)
+            .map_err(ProxyError::Internal)?
+            .ok_or_else(|| ProxyError::Internal("History client is not configured.".to_string()))?;
+        let mut history = HistoryApiClient::new(channel);
+        let result = history
+            .reapply_events(history_admin_request(ph::ReapplyEventsRequest {
+                domain: request.domain.clone(),
+                domain_id: domain_id.to_owned(),
+                workflow_execution: Some(cadence_proto::api::WorkflowExecution {
+                    workflow_id: execution.workflow_id.clone(),
+                    run_id: execution.run_id.clone(),
+                }),
+                events: request.events.as_ref().map(|blob| cadence_proto::api::DataBlob {
+                    encoding_type: match blob.encoding_type {
+                        Some(cadence_api::enums::EncodingType::ThriftRW) => 1,
+                        Some(cadence_api::enums::EncodingType::JSON) => 2,
+                        _ => 0,
+                    },
+                    data: blob.data.clone(),
+                }),
+            }))
+            .await;
+        match result {
+            Ok(_) => break,
+            Err(status)
+                if attempt < 10 && status.message().contains("is not owned by this host") =>
+            {
+                attempt += 1;
+                tokio::time::sleep(std::time::Duration::from_millis(100 * u64::from(attempt.min(8)))).await;
+            }
+            Err(status) => return Err(internal(status)),
+        }
+    }
     Ok(())
 }
 

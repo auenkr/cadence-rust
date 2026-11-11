@@ -42,21 +42,27 @@ pub struct PostgresShardStore { pool: Arc<PostgresConnectionPool> }
 impl PostgresShardStore {
     pub fn from_task_store(store: &PostgresTaskStore) -> Self { Self { pool: store.history_pool() } }
     fn error(error: impl std::fmt::Display) -> E { E::Internal(error.to_string()) }
+    /// The sync `postgres` client drives its own runtime and panics when called
+    /// from a thread inside a tokio runtime (the History shard bridge calls us
+    /// via `Handle::block_on`), so run the blocking body on a plain thread.
+    fn blocking<T: Send>(f: impl FnOnce() -> Result<T, E> + Send) -> Result<T, E> {
+        crate::matching_postgres::outside_runtime(f)
+    }
 }
 
 #[async_trait]
 impl ShardStore for PostgresShardStore {
-    async fn create_shard(&self, row: ShardRow) -> Result<(), E> {
+    async fn create_shard(&self, row: ShardRow) -> Result<(), E> { Self::blocking(move || {
         let mut client = self.pool.checkout().map_err(Self::error)?;
         client.execute(crate::history_sql_queries::Dialect::Postgres.statement(crate::history_sql_queries::Statement::CreateShard), &[&row.shard_id, &row.range_id, &row.data, &row.data_encoding]).map_err(Self::error)?;
         Ok(())
-    }
-    async fn get_shard(&self, shard_id: i32) -> Result<ShardRow, E> {
+    }) }
+    async fn get_shard(&self, shard_id: i32) -> Result<ShardRow, E> { Self::blocking(move || {
         let mut client = self.pool.checkout().map_err(Self::error)?;
         let row = client.query_opt(crate::history_sql_queries::Dialect::Postgres.statement(crate::history_sql_queries::Statement::GetShard), &[&shard_id]).map_err(Self::error)?.ok_or_else(|| E::EntityNotExists(format!("shard {shard_id} does not exist")))?;
         Ok(ShardRow { shard_id: row.get(0), range_id: row.get(1), data: row.get(2), data_encoding: row.get(3) })
-    }
-    async fn update_shard(&self, row: ShardRow, previous_range_id: i64) -> Result<(), E> {
+    }) }
+    async fn update_shard(&self, row: ShardRow, previous_range_id: i64) -> Result<(), E> { Self::blocking(move || {
         let mut client = self.pool.checkout().map_err(Self::error)?;
         let mut tx = client.transaction().map_err(Self::error)?;
         let found = tx.query_opt(crate::history_sql_queries::Dialect::Postgres.statement(crate::history_sql_queries::Statement::LockShard), &[&row.shard_id]).map_err(Self::error)?.map(|r| r.get::<_, i64>(0));
@@ -65,5 +71,5 @@ impl ShardStore for PostgresShardStore {
         let affected = tx.execute(crate::history_sql_queries::Dialect::Postgres.statement(crate::history_sql_queries::Statement::UpdateShard), &[&row.range_id, &row.data, &row.data_encoding, &row.shard_id]).map_err(Self::error)?;
         if affected != 1 { return Err(E::Internal(format!("shard {} update affected {affected} rows", row.shard_id))); }
         tx.commit().map_err(Self::error)
-    }
+    }) }
 }

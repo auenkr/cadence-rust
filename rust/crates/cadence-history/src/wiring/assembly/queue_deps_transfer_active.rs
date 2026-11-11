@@ -62,6 +62,7 @@ fn he(e: HistoryError) -> TaskError {
             CadenceError::EntityNotExists(x) => TaskError::EntityNotExists(x.message),
             CadenceError::ServiceBusy(x) => TaskError::ServiceBusy(x.message),
             CadenceError::WorkflowAlreadyCompleted(x) => TaskError::WorkflowExecutionAlreadyCompleted(x.to_string()),
+            CadenceError::WorkflowAlreadyStarted(x) => TaskError::WorkflowExecutionAlreadyStarted(x.to_string()),
             other => TaskError::InternalService(other.to_string()),
         },
         HistoryError::DeadlineExceeded => TaskError::ContextDeadlineExceeded,
@@ -69,6 +70,32 @@ fn he(e: HistoryError) -> TaskError {
         HistoryError::PersistenceShardOwnershipLost(m) => TaskError::ShardOwnershipLost(m),
         other => TaskError::InternalService(other.to_string()),
     }
+}
+
+type HistoryClientChannel = cadence_proto::history::history_api_client::HistoryApiClient<tonic::transport::Channel>;
+
+enum Route {
+    Local(Arc<HistoryEngine>),
+    Remote(HistoryClientChannel),
+}
+
+fn remote_err(s: tonic::Status) -> TaskError {
+    let m = s.message().to_string();
+    match s.code() {
+        tonic::Code::AlreadyExists => TaskError::WorkflowExecutionAlreadyStarted(m),
+        tonic::Code::NotFound => TaskError::EntityNotExists(m),
+        tonic::Code::ResourceExhausted => TaskError::ServiceBusy(m),
+        _ => TaskError::InternalService(m),
+    }
+}
+
+fn pb_exec(e: &WorkflowExecutionRef) -> Option<cadence_proto::api::WorkflowExecution> {
+    Some(cadence_proto::api::WorkflowExecution { workflow_id: e.workflow_id.clone(), run_id: e.run_id.clone() })
+}
+
+enum ForwardError {
+    NotOwned(String),
+    Task(TaskError),
 }
 
 fn pe(e: cadence_persistence::history_contract::PersistenceError) -> TaskError {
@@ -510,13 +537,79 @@ impl TransferActiveDepsImpl {
         let _ = self.registry.set(Arc::downgrade(registry));
     }
 
-    async fn engine_for(&self, workflow_id: &str) -> TaskResult<Arc<HistoryEngine>> {
+    /// gRPC client of the History host owning the workflow's shard (Go history client redirect).
+    fn owner_client(&self, registry: &Arc<ShardRegistry>, workflow_id: &str) -> Result<HistoryClientChannel, ForwardError> {
+        let shard = registry.shard_id_for_workflow(workflow_id);
+        let owner = self
+            .env
+            .membership
+            .lookup(&crate::lookup::shard_key(shard as i32))
+            .ok_or_else(|| ForwardError::Task(TaskError::InternalService("no history hosts in the membership ring".into())))?;
+        if owner.identity() == self.env.membership.who_am_i() {
+            return Err(ForwardError::NotOwned(format!("Shard {shard} ownership is changing")));
+        }
+        if owner.grpc_address.is_empty() {
+            return Err(ForwardError::Task(TaskError::InternalService(format!("history host {} has no gRPC address", owner.address))));
+        }
+        let channel = cadence_service_core::grpc_tls::endpoint_channel(&owner.grpc_address, None)
+            .map_err(|e| ForwardError::Task(TaskError::InternalService(e.to_string())))?;
+        Ok(cadence_proto::history::history_api_client::HistoryApiClient::new(channel))
+    }
+
+    /// Local engine, or the owner's client when another host owns the shard.
+    async fn route(&self, workflow_id: &str) -> TaskResult<Route> {
         let registry = self
             .registry
             .get()
             .and_then(Weak::upgrade)
             .ok_or_else(|| TaskError::InternalService("shard registry is not bound".into()))?;
-        registry.engine_for_workflow(workflow_id).await.map_err(he)
+        match registry.engine_for_workflow(workflow_id).await {
+            Ok(engine) => Ok(Route::Local(engine)),
+            Err(HistoryError::Cadence(c)) if matches!(*c, CadenceError::ShardOwnershipLost(_)) => {
+                match self.owner_client(&registry, workflow_id) {
+                    Ok(client) => Ok(Route::Remote(client)),
+                    Err(ForwardError::NotOwned(m)) => Err(TaskError::InternalService(m)),
+                    Err(ForwardError::Task(e)) => Err(e),
+                }
+            }
+            Err(e) => Err(he(e)),
+        }
+    }
+
+    /// Calls `StartWorkflowExecution` on the History host that owns the workflow's shard.
+    async fn forward_start(
+        &self,
+        registry: &Arc<ShardRegistry>,
+        workflow_id: &str,
+        r: &HistoryStartWorkflowRequest,
+        start: &api::StartWorkflowExecutionRequest,
+    ) -> Result<String, ForwardError> {
+        let mut client = self.owner_client(registry, workflow_id)?;
+        let request = cadence_proto::history::StartWorkflowExecutionRequest {
+            request: Some(cadence_proto::convert::start_out(start.clone())),
+            domain_id: r.domain_uuid.clone(),
+            parent_execution_info: r.parent_execution_info.as_ref().map(|p| cadence_proto::api::ParentExecutionInfo {
+                domain_id: p.domain_uuid.clone(),
+                domain_name: p.domain.clone(),
+                workflow_execution: Some(cadence_proto::api::WorkflowExecution { workflow_id: p.execution.workflow_id.clone(), run_id: p.execution.run_id.clone() }),
+                initiated_id: p.initiated_id,
+            }),
+            partition_config: r.partition_config.iter().map(|(k, v)| (k.clone(), String::from_utf8_lossy(v).into_owned())).collect(),
+            ..Default::default()
+        };
+        match client.start_workflow_execution(request).await {
+            Ok(resp) => Ok(resp.into_inner().run_id),
+            Err(s) => {
+                let m = s.message().to_string();
+                Err(match s.code() {
+                    tonic::Code::Aborted => ForwardError::NotOwned(m),
+                    tonic::Code::AlreadyExists => ForwardError::Task(TaskError::WorkflowExecutionAlreadyStarted(m)),
+                    tonic::Code::NotFound => ForwardError::Task(TaskError::EntityNotExists(m)),
+                    tonic::Code::ResourceExhausted => ForwardError::Task(TaskError::ServiceBusy(m)),
+                    _ => ForwardError::Task(TaskError::InternalService(m)),
+                })
+            }
+        }
     }
 
     fn partition_config(config: &BytesMap) -> std::collections::HashMap<String, String> {
@@ -583,7 +676,27 @@ impl TransferActiveDependencies for TransferActiveDepsImpl {
     }
 
     async fn record_child_execution_completed(&self, r: RecordChildExecutionCompletedRequest) -> TaskResult<()> {
-        let engine = self.engine_for(&r.workflow_execution.workflow_id).await?;
+        let engine = match self.route(&r.workflow_execution.workflow_id).await? {
+            Route::Local(e) => e,
+            Route::Remote(mut c) => {
+                let event = match r.completion_event.full_event.as_deref().cloned() {
+                    Some(ev) => Some(cadence_proto::convert::history::event(ev).map_err(|s| TaskError::InternalService(s.message().to_string()))?),
+                    None => None,
+                };
+                return c
+                    .record_child_execution_completed(cadence_proto::history::RecordChildExecutionCompletedRequest {
+                        domain_id: r.domain_uuid,
+                        workflow_execution: pb_exec(&r.workflow_execution),
+                        initiated_id: r.initiated_id,
+                        completed_execution: pb_exec(&r.completed_execution),
+                        completion_event: event,
+                        started_id: crate::engine::deps::EMPTY_EVENT_ID,
+                    })
+                    .await
+                    .map(|_| ())
+                    .map_err(remote_err);
+            }
+        };
         let event = r.completion_event.full_event.as_deref().cloned();
         engine
             .record_child_execution_completed(&et::RecordChildExecutionCompletedRequest {
@@ -599,7 +712,31 @@ impl TransferActiveDependencies for TransferActiveDepsImpl {
     }
 
     async fn request_cancel_workflow_execution(&self, r: HistoryRequestCancelRequest) -> TaskResult<()> {
-        let engine = self.engine_for(&r.workflow_execution.workflow_id).await?;
+        let engine = match self.route(&r.workflow_execution.workflow_id).await? {
+            Route::Local(e) => e,
+            Route::Remote(mut c) => {
+                return c
+                    .request_cancel_workflow_execution(cadence_proto::history::RequestCancelWorkflowExecutionRequest {
+                        domain_id: r.domain_uuid,
+                        cancel_request: Some(cadence_proto::api::RequestCancelWorkflowExecutionRequest {
+                            domain: r.domain,
+                            workflow_execution: pb_exec(&r.workflow_execution),
+                            identity: r.identity,
+                            request_id: r.request_id,
+                            first_execution_run_id: r.first_execution_run_id,
+                            ..Default::default()
+                        }),
+                        external_execution_info: r.external_workflow_execution.as_ref().map(|e| cadence_proto::api::ExternalExecutionInfo {
+                            workflow_execution: pb_exec(e),
+                            initiated_id: r.external_initiated_event_id.unwrap_or_default(),
+                        }),
+                        child_workflow_only: r.child_workflow_only,
+                    })
+                    .await
+                    .map(|_| ())
+                    .map_err(remote_err);
+            }
+        };
         engine
             .request_cancel_workflow_execution(&et::HistoryRequestCancelWorkflowExecutionRequest {
                 domain_uuid: r.domain_uuid,
@@ -619,7 +756,29 @@ impl TransferActiveDependencies for TransferActiveDepsImpl {
     }
 
     async fn signal_workflow_execution(&self, r: HistorySignalRequest) -> TaskResult<()> {
-        let engine = self.engine_for(&r.workflow_execution.workflow_id).await?;
+        let engine = match self.route(&r.workflow_execution.workflow_id).await? {
+            Route::Local(e) => e,
+            Route::Remote(mut c) => {
+                return c
+                    .signal_workflow_execution(cadence_proto::history::SignalWorkflowExecutionRequest {
+                        request: Some(cadence_proto::api::SignalWorkflowExecutionRequest {
+                            domain: r.domain,
+                            workflow_execution: pb_exec(&r.workflow_execution),
+                            identity: r.identity,
+                            request_id: r.request_id,
+                            signal_name: r.signal_name,
+                            signal_input: cadence_proto::convert::payload(r.input),
+                            control: r.control,
+                        }),
+                        domain_id: r.domain_uuid,
+                        external_workflow_execution: r.external_workflow_execution.as_ref().and_then(pb_exec),
+                        child_workflow_only: r.child_workflow_only,
+                    })
+                    .await
+                    .map(|_| ())
+                    .map_err(remote_err);
+            }
+        };
         engine
             .signal_workflow_execution(&et::HistorySignalWorkflowExecutionRequest {
                 domain_uuid: r.domain_uuid,
@@ -640,7 +799,20 @@ impl TransferActiveDependencies for TransferActiveDepsImpl {
     }
 
     async fn remove_signal_mutable_state(&self, r: RemoveSignalMutableStateRequest) -> TaskResult<()> {
-        let engine = self.engine_for(&r.workflow_execution.workflow_id).await?;
+        let engine = match self.route(&r.workflow_execution.workflow_id).await? {
+            Route::Local(e) => e,
+            Route::Remote(mut c) => {
+                return c
+                    .remove_signal_mutable_state(cadence_proto::history::RemoveSignalMutableStateRequest {
+                        domain_id: r.domain_uuid,
+                        workflow_execution: pb_exec(&r.workflow_execution),
+                        request_id: r.request_id,
+                    })
+                    .await
+                    .map(|_| ())
+                    .map_err(remote_err);
+            }
+        };
         engine
             .remove_signal_mutable_state(&et::RemoveSignalMutableStateRequest {
                 domain_uuid: r.domain_uuid,
@@ -653,8 +825,33 @@ impl TransferActiveDependencies for TransferActiveDepsImpl {
 
     async fn start_workflow_execution(&self, r: HistoryStartWorkflowRequest) -> TaskResult<String> {
         let workflow_id = r.request.attributes.workflow_id.clone();
-        let engine = self.engine_for(&workflow_id).await?;
         let start = to_api_start(&r.request.attributes, &r.request.domain, &r.request.request_id, r.request.active_cluster_selection_policy.as_ref());
+        // Go history client `executeWithRedirect`: when another host owns the target shard,
+        // forward the call to the owner and retry on ownership changes.
+        let registry = self
+            .registry
+            .get()
+            .and_then(Weak::upgrade)
+            .ok_or_else(|| TaskError::InternalService("shard registry is not bound".into()))?;
+        let mut attempt = 0u32;
+        let engine = loop {
+            match registry.engine_for_workflow(&workflow_id).await {
+                Ok(engine) => break engine,
+                Err(HistoryError::Cadence(c)) if matches!(*c, CadenceError::ShardOwnershipLost(_)) => {
+                    attempt += 1;
+                    match self.forward_start(&registry, &workflow_id, &r, &start).await {
+                        Ok(run_id) => return Ok(run_id),
+                        Err(ForwardError::NotOwned(m)) if attempt < 10 => {
+                            let _ = m;
+                            tokio::time::sleep(Duration::from_millis(100 * u64::from(attempt.min(8)))).await;
+                        }
+                        Err(ForwardError::NotOwned(m)) => return Err(TaskError::ShardOwnershipLost(m)),
+                        Err(ForwardError::Task(e)) => return Err(e),
+                    }
+                }
+                Err(e) => return Err(he(e)),
+            }
+        };
         let response = engine
             .start_workflow_execution(&et::HistoryStartWorkflowExecutionRequest {
                 domain_uuid: r.domain_uuid,
@@ -674,7 +871,20 @@ impl TransferActiveDependencies for TransferActiveDepsImpl {
     }
 
     async fn schedule_decision_task(&self, r: ScheduleDecisionTaskRequest) -> TaskResult<()> {
-        let engine = self.engine_for(&r.workflow_execution.workflow_id).await?;
+        let engine = match self.route(&r.workflow_execution.workflow_id).await? {
+            Route::Local(e) => e,
+            Route::Remote(mut c) => {
+                return c
+                    .schedule_decision_task(cadence_proto::history::ScheduleDecisionTaskRequest {
+                        domain_id: r.domain_uuid,
+                        workflow_execution: pb_exec(&r.workflow_execution),
+                        is_first_decision: r.is_first_decision,
+                    })
+                    .await
+                    .map(|_| ())
+                    .map_err(remote_err);
+            }
+        };
         engine
             .schedule_decision_task(&et::ScheduleDecisionTaskRequest {
                 domain_uuid: r.domain_uuid,
@@ -686,7 +896,28 @@ impl TransferActiveDependencies for TransferActiveDepsImpl {
     }
 
     async fn terminate_workflow_execution(&self, r: HistoryTerminateRequest) -> TaskResult<()> {
-        let engine = self.engine_for(&r.workflow_execution.workflow_id).await?;
+        let engine = match self.route(&r.workflow_execution.workflow_id).await? {
+            Route::Local(e) => e,
+            Route::Remote(mut c) => {
+                return c
+                    .terminate_workflow_execution(cadence_proto::history::TerminateWorkflowExecutionRequest {
+                        request: Some(cadence_proto::api::TerminateWorkflowExecutionRequest {
+                            domain: r.domain,
+                            workflow_execution: pb_exec(&r.workflow_execution),
+                            reason: r.reason,
+                            identity: r.identity,
+                            first_execution_run_id: r.first_execution_run_id,
+                            ..Default::default()
+                        }),
+                        domain_id: r.domain_uuid,
+                        external_workflow_execution: r.external_workflow_execution.as_ref().and_then(pb_exec),
+                        child_workflow_only: r.child_workflow_only,
+                    })
+                    .await
+                    .map(|_| ())
+                    .map_err(remote_err);
+            }
+        };
         engine
             .terminate_workflow_execution(&et::HistoryTerminateWorkflowExecutionRequest {
                 domain_uuid: r.domain_uuid,

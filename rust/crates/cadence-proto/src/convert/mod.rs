@@ -459,6 +459,41 @@ pub fn start(
         active_cluster_selection_policy: v.active_cluster_selection_policy.map(selection_policy_in),
     })
 }
+/// Go `proto.FromStartWorkflowExecutionRequest` (inverse of [`start`]).
+pub fn start_out(v: t::StartWorkflowExecutionRequest) -> p::StartWorkflowExecutionRequest {
+    let payloads = |m: Option<std::collections::HashMap<String, Vec<u8>>>| {
+        m.map(|m| m.into_iter().map(|(k, v)| (k, p::Payload { data: v })).collect())
+    };
+    p::StartWorkflowExecutionRequest {
+        domain: v.domain,
+        workflow_id: v.workflow_id,
+        workflow_type: v.workflow_type.map(|x| p::WorkflowType { name: x.name }),
+        task_list: v.task_list.map(task_list_out),
+        input: payload(v.input),
+        execution_start_to_close_timeout: v
+            .execution_start_to_close_timeout_seconds
+            .map(|s| duration(s.into())),
+        task_start_to_close_timeout: v
+            .task_start_to_close_timeout_seconds
+            .map(|s| duration(s.into())),
+        identity: v.identity,
+        request_id: v.request_id,
+        workflow_id_reuse_policy: v.workflow_id_reuse_policy.map_or(0, |s| s as i32 + 1),
+        retry_policy: v.retry_policy.map(retry_out),
+        cron_schedule: v.cron_schedule,
+        memo: payloads(v.memo.and_then(|m| m.fields)).map(|fields| p::Memo { fields }),
+        search_attributes: payloads(v.search_attributes.and_then(|m| m.indexed_fields))
+            .map(|indexed_fields| p::SearchAttributes { indexed_fields }),
+        header: payloads(v.header.and_then(|m| m.fields)).map(|fields| p::Header { fields }),
+        delay_start: v.delay_start_seconds.map(|s| duration(s.into())),
+        jitter_start: v.jitter_start_seconds.map(|s| duration(s.into())),
+        first_run_at: v.first_run_at_timestamp.map(timestamp_nanos),
+        cron_overlap_policy: v.cron_overlap_policy.map_or(0, |s| s as i32 + 1),
+        active_cluster_selection_policy: v
+            .active_cluster_selection_policy
+            .map(selection_policy_out),
+    }
+}
 pub fn info(v: st::WorkflowExecutionInfo) -> p::WorkflowExecutionInfo {
     info_with_time(v, timestamp)
 }
