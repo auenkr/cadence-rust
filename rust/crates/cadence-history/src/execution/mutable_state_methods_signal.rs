@@ -55,9 +55,30 @@ impl TypedMutableState {
     }
 
     /// Go `ReplicateWorkflowExecutionSignaled` (`insertWorkflowRequest` not wired).
-    pub fn replicate_workflow_execution_signaled(&mut self, _event: &HistoryEvent) -> Result<()> {
+    pub fn replicate_workflow_execution_signaled(&mut self, event: &HistoryEvent) -> Result<()> {
         self.execution_info.signal_count += 1;
+        let request_id = event
+            .workflow_execution_signaled_event_attributes
+            .as_ref()
+            .map(|a| a.request_id.clone())
+            .unwrap_or_default();
+        self.insert_signal_workflow_request(&request_id);
         Ok(())
+    }
+
+    /// Go `insertWorkflowRequest`: only when strong idempotency is enabled and
+    /// the request id is non-empty; duplicates are kept once.
+    pub(crate) fn insert_signal_workflow_request(&mut self, request_id: &str) {
+        if !self.task_gen_env.enable_strong_idempotency || request_id.is_empty() {
+            return;
+        }
+        if self.insert_workflow_requests.iter().any(|r| r.request_id == request_id) {
+            return;
+        }
+        self.insert_workflow_requests.push(cadence_persistence::history_contract::WorkflowRequest {
+            request_id: request_id.to_string(),
+            data: Default::default(),
+        });
     }
 
     /// Go `AddExternalWorkflowExecutionSignaled`.
@@ -215,5 +236,40 @@ impl TypedMutableState {
         self.update_signal_infos.remove(&initiated_event_id);
         self.delete_signal_info_ids.insert(initiated_event_id);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod insert_request_tests {
+    use super::*;
+
+    fn signaled(request_id: &str) -> HistoryEvent {
+        HistoryEvent {
+            workflow_execution_signaled_event_attributes: Some(WorkflowExecutionSignaledEventAttributes {
+                request_id: request_id.to_string(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn signal_request_not_recorded_when_strong_idempotency_off() {
+        let mut s = TypedMutableState::new();
+        s.replicate_workflow_execution_signaled(&signaled("r1")).unwrap();
+        assert_eq!(s.execution_info.signal_count, 1);
+        assert!(s.insert_workflow_requests.is_empty());
+    }
+
+    #[test]
+    fn signal_request_recorded_once_when_enabled() {
+        let mut s = TypedMutableState::new();
+        s.task_gen_env.enable_strong_idempotency = true;
+        s.replicate_workflow_execution_signaled(&signaled("r1")).unwrap();
+        s.replicate_workflow_execution_signaled(&signaled("r1")).unwrap();
+        s.replicate_workflow_execution_signaled(&signaled("")).unwrap();
+        assert_eq!(s.execution_info.signal_count, 3);
+        assert_eq!(s.insert_workflow_requests.len(), 1);
+        assert_eq!(s.insert_workflow_requests[0].request_id, "r1");
     }
 }

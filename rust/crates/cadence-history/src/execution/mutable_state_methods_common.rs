@@ -178,6 +178,8 @@ pub struct TaskGenEnv {
     /// Go config NormalDecisionScheduleToStartTimeout / ...MaxAttempts (domain-scoped).
     pub normal_schedule_to_start_timeout_nanos: i64,
     pub normal_schedule_to_start_max_attempts: i64,
+    /// Go `config.EnableStrongIdempotency(domain)` (gates `insertWorkflowRequest`).
+    pub enable_strong_idempotency: bool,
     rng_state: u64,
 }
 
