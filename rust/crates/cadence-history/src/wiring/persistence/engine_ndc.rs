@@ -430,6 +430,10 @@ pub trait WorkflowContextHooks<M: TransactionState> {
     /// (and visibility timestamps) to the encoded tasks of one write image
     /// before the write. The hook remembers what to publish after commit.
     fn allocate_task_ids(&mut self, tasks: &mut BTreeMap<HistoryTaskCategory, Vec<Task>>) -> Result<(), M::Error>;
+    /// Go holds the shard lock from task-id allocation until the write and the
+    /// read-level update finish: acquire it before `allocate_task_ids`; it is
+    /// released by `tasks_committed` / `write_failed`.
+    async fn begin_task_write(&mut self) {}
     /// The write is durable: advance max read level and notify queues.
     fn tasks_committed(&mut self);
     /// The write failed: drop the pending allocation (handle ownership loss).
@@ -544,6 +548,7 @@ where
     ) -> Result<(), M::Error> {
         // Go does not retry create (a timeout may have succeeded).
         let mut snapshot = snapshot.clone();
+        self.hooks.begin_task_write().await;
         if let Err(e) = self.hooks.allocate_task_ids(&mut snapshot.tasks_by_category) {
             self.hooks.write_failed(&e);
             return Err(e);
@@ -580,6 +585,7 @@ where
     ) -> Result<(), M::Error> {
         let mut mutation = mutation.clone();
         let mut new_snapshot = new_workflow.cloned();
+        self.hooks.begin_task_write().await;
         let allocated = self.hooks.allocate_task_ids(&mut mutation.tasks_by_category).and_then(|_| match new_snapshot.as_mut() {
             Some(s) => self.hooks.allocate_task_ids(&mut s.tasks_by_category),
             None => Ok(()),
@@ -660,20 +666,44 @@ where
         new: Option<&WorkflowSnapshot>,
         current: Option<&WorkflowMutation>,
     ) -> Result<(), M::Error> {
+        let mut reset = reset.clone();
+        let mut new = new.cloned();
+        let mut current = current.cloned();
+        self.hooks.begin_task_write().await;
+        let allocated = self.hooks.allocate_task_ids(&mut reset.tasks_by_category).and_then(|_| {
+            match new.as_mut() {
+                Some(s) => self.hooks.allocate_task_ids(&mut s.tasks_by_category),
+                None => Ok(()),
+            }
+        }).and_then(|_| match current.as_mut() {
+            Some(m) => self.hooks.allocate_task_ids(&mut m.tasks_by_category),
+            None => Ok(()),
+        });
+        if let Err(e) = allocated {
+            self.hooks.write_failed(&e);
+            return Err(e);
+        }
         let request = ConflictResolveWorkflowExecutionRequest {
             shard_id: self.shard_id,
             range_id: (self.range_id)(),
             mode,
-            reset_workflow_snapshot: reset.clone(),
-            new_workflow_snapshot: new.cloned(),
-            current_workflow_mutation: current.cloned(),
+            reset_workflow_snapshot: reset,
+            new_workflow_snapshot: new,
+            current_workflow_mutation: current,
             workflow_request_mode: WorkflowRequestMode::New,
             current_timestamp_unix_nanos: now_unix_nanos(),
         };
-        self.executions
-            .conflict_resolve_workflow_execution(request)
-            .await
-            .map_err(|e| M::Error::from(to_history_error(e)))
+        match self.executions.conflict_resolve_workflow_execution(request).await {
+            Ok(_) => {
+                self.hooks.tasks_committed();
+                Ok(())
+            }
+            Err(e) => {
+                let e = M::Error::from(to_history_error(e));
+                self.hooks.write_failed(&e);
+                Err(e)
+            }
+        }
     }
 }
 

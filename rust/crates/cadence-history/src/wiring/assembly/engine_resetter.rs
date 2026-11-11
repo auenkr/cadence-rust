@@ -423,6 +423,8 @@ impl EngineWorkflowResetter {
             prepared.snapshot.execution_info.last_event_task_id = *id;
         }
 
+        // Go holds the shard lock from task-id allocation until the write and read-level update finish.
+        let gate = shard.lock_task_writes().await;
         let mut hooks = EngineNdcContextHooks::new(core.clone());
         WorkflowContextHooks::<super::ndc_context_hooks::NdcStateBox>::allocate_task_ids(
             &mut hooks,
@@ -436,7 +438,7 @@ impl EngineWorkflowResetter {
                 .as_any()
                 .and_then(|a| a.downcast_ref::<EngineExecutionContext>())
                 .ok_or_else(|| HistoryError::internal("workflow resetter: current context is not an engine context"))?;
-            context.update_with_new_as_active(prepared.now, prepared.snapshot).await
+            context.update_with_new_as_active(prepared.now, prepared.snapshot, &gate).await
         } else {
             let create = pc::CreateWorkflowExecutionRequest {
                 shard_id: shard.shard_id(),
@@ -450,7 +452,7 @@ impl EngineWorkflowResetter {
             };
             core.executions.create_workflow_execution(create).await.map(|_| ()).map_err(to_history_error)
         };
-        match result {
+        let result = match result {
             Ok(()) => {
                 // Publishes the reset run's tasks (the current run's own write,
                 // if any, published its tasks itself).
@@ -461,7 +463,9 @@ impl EngineWorkflowResetter {
                 WorkflowContextHooks::<super::ndc_context_hooks::NdcStateBox>::write_failed(&mut hooks, &err);
                 Err(err)
             }
-        }
+        };
+        drop(gate);
+        result
     }
 }
 

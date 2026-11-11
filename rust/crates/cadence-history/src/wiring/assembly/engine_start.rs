@@ -599,8 +599,11 @@ impl WorkflowStartHost for EngineStartHost {
         let state = downcast_state(new_state)?;
         let mut txn = state.close_transaction(now, true)?;
         let (size, last, _blob) = append_new_branch(&self.core, &mut txn, &execution_info_string(new_context)).await?;
-        let (snap, _, _, _) = snapshot_of(&self.core, txn)?;
-        running_ctx.update_with_new_as_active(now, snap).await?;
+        let gate = self.core.shard.lock_task_writes().await;
+        let (snap, max_read_level, _, _) = snapshot_of(&self.core, txn)?;
+        running_ctx.update_with_new_as_active(now, snap, &gate).await?;
+        self.core.shard.update_max_read_level(max_read_level);
+        drop(gate);
         state.finish_transaction(size, last);
         new_ctx.set_state(state);
         Ok(())

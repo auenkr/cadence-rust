@@ -233,13 +233,13 @@ impl EngineExecutionContext {
         if !state.is_dirty() {
             return Ok(());
         }
-        self.persist(&state, now, true, None).await
+        self.persist(&state, now, true, None, None).await
     }
 
     /// Go `UpdateWorkflowExecutionAsPassive`.
     pub async fn update_as_passive(&self, now: i64) -> HResult<()> {
         let state = self.load_state().await?;
-        self.persist(&state, now, false, None).await
+        self.persist(&state, now, false, None, None).await
     }
 
     /// Go `UpdateWorkflowExecutionWithNewAsActive`: persists this (terminated)
@@ -248,9 +248,10 @@ impl EngineExecutionContext {
         &self,
         now: i64,
         new_snapshot: pc::WorkflowSnapshot,
+        held_gate: &tokio::sync::OwnedMutexGuard<()>,
     ) -> HResult<()> {
         let state = self.load_state().await?;
-        self.persist(&state, now, true, Some(new_snapshot)).await
+        self.persist(&state, now, true, Some(new_snapshot), Some(held_gate)).await
     }
 
     /// Go `UpdateWorkflowExecutionTasks`.
@@ -259,7 +260,7 @@ impl EngineExecutionContext {
         if !state.is_dirty() {
             return Ok(());
         }
-        self.persist(&state, now, false, None).await
+        self.persist(&state, now, false, None, None).await
     }
 
     /// Close the transaction, assign task ids, append the history batch and
@@ -270,6 +271,7 @@ impl EngineExecutionContext {
         now: i64,
         active: bool,
         new_snapshot: Option<pc::WorkflowSnapshot>,
+        held_gate: Option<&tokio::sync::OwnedMutexGuard<()>>,
     ) -> HResult<()> {
         let core = &self.core;
         let shard = &core.shard;
@@ -300,7 +302,11 @@ impl EngineExecutionContext {
         }
 
         // Task ids. The gate stays held until the write finished (see ShardContext::lock_task_writes).
-        let _task_write_gate = shard.lock_task_writes().await;
+        // When the caller already holds it (task ids allocated for a new run), do not lock again.
+        let _task_write_gate = match held_gate {
+            Some(_) => None,
+            None => Some(shard.lock_task_writes().await),
+        };
         let mut max_read_level = 0i64;
         let mut transfer_slots: Vec<(i64, i64)> = txn.transfer.iter().map(|_| (0, 0)).collect();
         shard.allocate_transfer_ids(&mut transfer_slots, &mut max_read_level).map_err(shard_err)?;

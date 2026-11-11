@@ -780,8 +780,13 @@ impl EngineDecisionHandler {
         let mut txn = new_run.close_transaction(now, true)?;
         let (size, last, _blob) =
             crate::wiring::assembly::engine_start::append_new_branch(&self.core, &mut txn, &info).await?;
-        let (snapshot, _, transfer, timer) = crate::wiring::assembly::engine_start::snapshot_of(&self.core, txn)?;
-        context.update_with_new_as_active(now, snapshot).await?;
+        // Go holds the shard lock from task-id allocation through the write.
+        let gate = self.core.shard.lock_task_writes().await;
+        let (snapshot, max_read_level, transfer, timer) =
+            crate::wiring::assembly::engine_start::snapshot_of(&self.core, txn)?;
+        context.update_with_new_as_active(now, snapshot, &gate).await?;
+        self.core.shard.update_max_read_level(max_read_level);
+        drop(gate);
         self.core.notify_tasks(&transfer, &timer);
         new_run.finish_transaction(size, last);
         Ok(())
