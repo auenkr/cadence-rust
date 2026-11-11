@@ -82,7 +82,7 @@ impl StateBuilder {
         workflow_execution: &WorkflowExecution,
         events: &[HistoryEvent],
     ) -> Result<(), StateBuilderError> {
-        Self::apply_events_typed_with_new_run(state, domain_id, request_id, workflow_execution, events, &[]).map(|_| ())
+        Self::apply_events_typed_with_new_run(state, domain_id, request_id, workflow_execution, events, None, &[]).map(|_| ())
     }
 
     pub fn apply_events_typed_with_new_run(
@@ -91,6 +91,7 @@ impl StateBuilder {
         request_id: &str,
         workflow_execution: &WorkflowExecution,
         events: &[HistoryEvent],
+        new_run_execution: Option<&WorkflowExecution>,
         new_run_events: &[HistoryEvent],
     ) -> Result<Option<TypedMutableState>, StateBuilderError> {
         let (Some(first), Some(last)) = (events.first(), events.last()) else {
@@ -216,17 +217,19 @@ impl StateBuilder {
         let expected_run_id = continued.workflow_execution_continued_as_new_event_attributes.as_ref()
             .map(|a| a.new_execution_run_id.as_str()).unwrap_or_default();
         let Some(new_start) = new_run_events.first() else { return Ok(None); };
+        let Some(new_execution) = new_run_execution else { return Err(StateBuilderError::NewRunLinkage); };
         if expected_run_id.is_empty() || new_start.event_type != Some(EventType::WorkflowExecutionStarted)
+            || new_execution.run_id != expected_run_id
+            || new_execution.workflow_id != workflow_execution.workflow_id
             || new_start.workflow_execution_started_event_attributes.as_ref().map(|a| a.continued_execution_run_id.as_str()).unwrap_or_default() != workflow_execution.run_id
         { return Err(StateBuilderError::NewRunLinkage); }
         if new_start.version != continued.version { return Err(StateBuilderError::NewRunBranchVersion); }
-        let new_execution = WorkflowExecution::new(&workflow_execution.workflow_id, expected_run_id);
         let mut new_state = TypedMutableState::new();
         new_state.version_histories = Some(cadence_api::types::VersionHistories {
             current_version_history_index: 0,
             histories: vec![cadence_api::types::VersionHistory { branch_token: Vec::new(), items: Vec::new() }],
         });
-        Self::apply_events_typed(&mut new_state, domain_id, request_id, &new_execution, new_run_events)?;
+        Self::apply_events_typed(&mut new_state, domain_id, request_id, new_execution, new_run_events)?;
         Ok(Some(new_state))
     }
     /// Go `ApplyEvents`: replicates a batch onto mutable state.
@@ -416,7 +419,8 @@ mod typed_replay_tests {
         let new_start = HistoryEvent { event_id: 1, version: 7, event_type: Some(EventType::WorkflowExecutionStarted),
             workflow_execution_started_event_attributes: Some(WorkflowExecutionStartedEventAttributes { continued_execution_run_id: "old-run".into(), request_id: "new-request".into(), ..Default::default() }), ..Default::default() };
         let workflow = WorkflowExecution::new("wf", "old-run");
-        let new = StateBuilder::apply_events_typed_with_new_run(&mut old, "d", "req", &workflow, &[can], std::slice::from_ref(&new_start)).unwrap().unwrap();
+        let new_execution = WorkflowExecution::new("wf", "new-run");
+        let new = StateBuilder::apply_events_typed_with_new_run(&mut old, "d", "req", &workflow, &[can], Some(&new_execution), std::slice::from_ref(&new_start)).unwrap().unwrap();
         assert_eq!(old.execution_info.run_id, "");
         assert_eq!(old.execution_info.state, 2);
         assert_eq!(new.execution_info.run_id, "new-run");
@@ -426,10 +430,10 @@ mod typed_replay_tests {
         changed_new.execution_info.search_attributes.insert("only-new".into(), b"value".to_vec());
         assert!(!old.execution_info.search_attributes.contains_key("only-new"));
         assert!(matches!(StateBuilder::apply_events_typed_with_new_run(&mut state(), "d", "req", &workflow,
-            &[HistoryEvent { event_id: 1, version: 7, event_type: Some(EventType::WorkflowExecutionContinuedAsNew), workflow_execution_continued_as_new_event_attributes: Some(cadence_api::tasks::WorkflowExecutionContinuedAsNewEventAttributes { new_execution_run_id: "new-run".into(), ..Default::default() }), ..Default::default() }],
+            &[HistoryEvent { event_id: 1, version: 7, event_type: Some(EventType::WorkflowExecutionContinuedAsNew), workflow_execution_continued_as_new_event_attributes: Some(cadence_api::tasks::WorkflowExecutionContinuedAsNewEventAttributes { new_execution_run_id: "new-run".into(), ..Default::default() }), ..Default::default() }], Some(&new_execution),
             &[HistoryEvent { event_id: 1, version: 8, event_type: Some(EventType::WorkflowExecutionStarted), workflow_execution_started_event_attributes: Some(WorkflowExecutionStartedEventAttributes { continued_execution_run_id: "old-run".into(), ..Default::default() }), ..Default::default() }]), Err(StateBuilderError::NewRunBranchVersion)));
         assert!(matches!(StateBuilder::apply_events_typed_with_new_run(&mut state(), "d", "req", &workflow,
-            &[HistoryEvent { event_id: 1, version: 7, event_type: Some(EventType::WorkflowExecutionContinuedAsNew), workflow_execution_continued_as_new_event_attributes: Some(cadence_api::tasks::WorkflowExecutionContinuedAsNewEventAttributes { new_execution_run_id: "different".into(), ..Default::default() }), ..Default::default() }], &[new_start]), Err(StateBuilderError::NewRunLinkage)));
+            &[HistoryEvent { event_id: 1, version: 7, event_type: Some(EventType::WorkflowExecutionContinuedAsNew), workflow_execution_continued_as_new_event_attributes: Some(cadence_api::tasks::WorkflowExecutionContinuedAsNewEventAttributes { new_execution_run_id: "different".into(), ..Default::default() }), ..Default::default() }], Some(&new_execution), &[new_start]), Err(StateBuilderError::NewRunLinkage)));
     }
 
     #[test]
