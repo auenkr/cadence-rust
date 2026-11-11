@@ -5,3 +5,4 @@ mod failover;
 mod handlers;
 mod reset;
 mod signal;
+mod start;
