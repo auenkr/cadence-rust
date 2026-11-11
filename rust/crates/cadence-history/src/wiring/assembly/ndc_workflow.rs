@@ -115,8 +115,8 @@ fn unsupported<T>(what: &str) -> NdcResult<T> {
     )))
 }
 
-fn lend_other(w: Option<&mut dyn NdcWorkflow>) -> NdcResult<Option<(WorkflowExecutionKey, NdcStateBox)>> {
-    match w {
+fn lend_other(w: &mut Option<&mut dyn NdcWorkflow>) -> NdcResult<Option<(WorkflowExecutionKey, NdcStateBox)>> {
+    match w.as_mut() {
         Some(w) => {
             let l = w.lend_state()?;
             let k = WorkflowExecutionKey::new(l.domain_id.clone(), &l.execution);
@@ -516,8 +516,8 @@ impl NdcWorkflow for EngineNdcWorkflow {
         }
         let mut new_workflow = new_workflow;
         let mut current_workflow = current_workflow;
-        let new_lent = lend_other(new_workflow.as_deref_mut())?;
-        let current_lent = lend_other(current_workflow.as_deref_mut())?;
+        let new_lent = lend_other(&mut new_workflow)?;
+        let current_lent = lend_other(&mut current_workflow)?;
         let key = self.write_key();
         let reset = self.take_state();
         let writer = self.writer.clone();
