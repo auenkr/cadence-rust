@@ -22,3 +22,6 @@
 - Code head SHA: pending.
 - Conclusion: pending.
 - Initial CI run URL: https://github.com/auenkr/cadence-rust/actions/runs/42947132885 — failed Clippy on redundant closure, needless struct updates and a test default-field reassignment. Corrected these findings; rerun is pending.
+- Successful CI rerun URL: https://github.com/auenkr/cadence-rust/actions/runs/42947656583
+- Code head SHA validated: `a013ea372835ce630e83bf127fc0acf84645799a`.
+- Conclusion: success (Clippy, formatting and cadence-history tests).
