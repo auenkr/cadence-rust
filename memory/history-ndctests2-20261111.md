@@ -18,3 +18,8 @@ Not changed: admin ReapplyEvents redirect lives in cadence-service-core (`admin:
 
 ## Remaining
 Cassandra port (other worker); TLS-enabled gate lane.
+
+## Final head e47bba41a (after merging origin/master e50090050)
+- rust-ci cadence-history: https://github.com/auenkr/cadence-rust/actions/runs/43067320616 success
+- mixed gate mysql/grpc/two_history=true: https://github.com/auenkr/cadence-rust/actions/runs/43067326164 success
+(The memory commit after this line does not change code.)
