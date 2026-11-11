@@ -3098,6 +3098,7 @@ impl InMemoryExecutionStore {
                 0,
                 true,
             ),
+            activities_to_dispatch_locally: Default::default(),
         }
     }
 

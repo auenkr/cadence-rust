@@ -54,6 +54,10 @@ pub trait NdcCheckoutContext: Send + Sync {
     async fn persist_history_batch(&self, events: &WorkflowEvents, new_branch: bool) -> HResult<PersistedBlob>;
     /// Go `Context.Clear`.
     fn clear(&self);
+    /// The concrete engine context (type-erased), when this is one.
+    fn into_any(self: Arc<Self>) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        None
+    }
 }
 
 /// Source of locked contexts (the shared engine cache in production).
@@ -78,6 +82,9 @@ impl NdcCheckoutContext for EngineExecutionContext {
     }
     fn clear(&self) {
         EngineExecutionContext::clear(self)
+    }
+    fn into_any(self: Arc<Self>) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        Some(self)
     }
 }
 
@@ -356,6 +363,9 @@ impl NdcWorkflow for EngineNdcWorkflow {
     }
     fn set_history_size(&mut self, size: i64) {
         self.history_size = size;
+    }
+    fn engine_context(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        self.context.clone().and_then(|c| c.into_any())
     }
     fn release(&mut self, err: Option<&NdcError>) {
         self.run_release(err);

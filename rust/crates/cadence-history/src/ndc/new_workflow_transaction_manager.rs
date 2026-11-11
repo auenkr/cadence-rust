@@ -246,3 +246,138 @@ impl<'a> TransactionManagerForNewWorkflow<'a> {
         })
     }
 }
+
+/// Port of Go `new_workflow_transaction_manager_test.go`.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ndc::test_support::{events_of, new_log, Log, LogWorkflow, MockTm};
+
+    const CREATE_BLOB: &str = "blob=12345";
+
+    fn log_of(log: &Log) -> Vec<String> {
+        log.borrow().clone()
+    }
+
+    fn setup(
+        current_run: &str,
+        first_event: EventType,
+    ) -> (Log, MockTm, Box<LogWorkflow>, Box<LogWorkflow>) {
+        let log = new_log();
+        let tm = MockTm::new(&log, current_run);
+        let mut target = Box::new(LogWorkflow::new("target", &log, "target-run"));
+        target.ms.events_seq = vec![events_of(first_event)];
+        let current = Box::new(LogWorkflow::new("current", &log, "current-run"));
+        (log, tm, target, current)
+    }
+
+    #[test]
+    fn dispatch_for_new_workflow_dup() {
+        let log = new_log();
+        let tm = MockTm::new(&log, "target-run");
+        let target = Box::new(LogWorkflow::new("target", &log, "target-run"));
+        let mgr = TransactionManagerForNewWorkflow::new(&tm);
+        mgr.dispatch_for_new_workflow(1, target).unwrap();
+        assert_eq!(log_of(&log), vec!["tm:get_current_workflow_run_id", "target:release(ok)"]);
+    }
+
+    #[test]
+    fn dispatch_for_new_workflow_brand_new() {
+        let (log, tm, target, _) = setup("", EventType::WorkflowExecutionStarted);
+        let mgr = TransactionManagerForNewWorkflow::new(&tm);
+        mgr.dispatch_for_new_workflow(1, target).unwrap();
+        assert_eq!(
+            log_of(&log),
+            vec![
+                "tm:get_current_workflow_run_id".to_string(),
+                "target:persist_start".to_string(),
+                format!("target:create(BrandNew,{CREATE_BLOB},\"\",0,Replicated)"),
+                "target:release(ok)".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn dispatch_for_new_workflow_create_as_current() {
+        let (log, tm, target, mut current) = setup("current-run", EventType::DecisionTaskScheduled);
+        current.last_write_version = 4321;
+        let mut target = target;
+        target.happens_after_result = true;
+        *tm.loaded.borrow_mut() = Some(current);
+        let mgr = TransactionManagerForNewWorkflow::new(&tm);
+        mgr.dispatch_for_new_workflow(1, target).unwrap();
+        assert_eq!(
+            log_of(&log),
+            vec![
+                "tm:get_current_workflow_run_id".to_string(),
+                "tm:load_ndc_workflow(current-run)".to_string(),
+                "target:happens_after(current-run)".to_string(),
+                "target:persist_non_start".to_string(),
+                format!("target:create(WorkflowIdReuse,{CREATE_BLOB},\"current-run\",4321,Replicated)"),
+                "current:release(ok)".to_string(),
+                "target:release(ok)".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn dispatch_for_new_workflow_create_as_zombie() {
+        let (log, tm, target, current) = setup("current-run", EventType::WorkflowExecutionStarted);
+        *tm.loaded.borrow_mut() = Some(current);
+        let mgr = TransactionManagerForNewWorkflow::new(&tm);
+        mgr.dispatch_for_new_workflow(1, target).unwrap();
+        assert_eq!(
+            log_of(&log),
+            vec![
+                "tm:get_current_workflow_run_id".to_string(),
+                "tm:load_ndc_workflow(current-run)".to_string(),
+                "target:happens_after(current-run)".to_string(),
+                "target:suppress_by(current-run)".to_string(),
+                "target:persist_start".to_string(),
+                "current:release(ok)".to_string(),
+                "target:reapply".to_string(),
+                format!("target:create(Zombie,{CREATE_BLOB},\"\",0,Replicated)"),
+                "target:release(ok)".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn dispatch_for_new_workflow_create_as_zombie_dedup() {
+        let (log, tm, mut target, current) = setup("current-run", EventType::DecisionTaskScheduled);
+        target.ms.fail_create_already_started = true;
+        *tm.loaded.borrow_mut() = Some(current);
+        let mgr = TransactionManagerForNewWorkflow::new(&tm);
+        mgr.dispatch_for_new_workflow(1, target).unwrap();
+        let l = log_of(&log);
+        assert!(l.contains(&"target:persist_non_start".to_string()));
+        assert!(l.contains(&"target:reapply".to_string()));
+        assert!(l.contains(&format!("target:create(Zombie,{CREATE_BLOB},\"\",0,Replicated)")));
+        assert!(l.contains(&"current:release(ok)".to_string()));
+        assert_eq!(l.last().unwrap(), "target:release(ok)");
+    }
+
+    #[test]
+    fn dispatch_for_new_workflow_suppress_current_and_create_as_current() {
+        let (log, tm, mut target, mut current) = setup("current-run", EventType::WorkflowExecutionStarted);
+        target.happens_after_result = true;
+        current.ms.running = true;
+        current.suppress_policy = TransactionPolicy::Active;
+        *tm.loaded.borrow_mut() = Some(current);
+        let mgr = TransactionManagerForNewWorkflow::new(&tm);
+        mgr.dispatch_for_new_workflow(1, target).unwrap();
+        assert_eq!(
+            log_of(&log),
+            vec![
+                "tm:get_current_workflow_run_id".to_string(),
+                "tm:load_ndc_workflow(current-run)".to_string(),
+                "target:happens_after(current-run)".to_string(),
+                "current:suppress_by(target-run)".to_string(),
+                "target:revive".to_string(),
+                "current:update_with_new(UpdateCurrent,new=target-run,Active,Some(Passive),Replicated)".to_string(),
+                "current:release(ok)".to_string(),
+                "target:release(ok)".to_string(),
+            ]
+        );
+    }
+}

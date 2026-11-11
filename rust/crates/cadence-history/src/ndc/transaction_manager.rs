@@ -253,3 +253,329 @@ impl<'a> NdcTransactionManager for TransactionManagerImpl<'a> {
         self.env.load_workflow(domain_id, workflow_id, run_id)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::execution::context::WorkflowExecutionKey;
+    use crate::ndc::test_support::{Calls, MockEnv, MockMs, MockWorkflow, ResetCall, SharedCalls};
+    use crate::ndc::NdcExecutionInfo;
+    use cadence_api::enums::EventType;
+    use cadence_persistence::version_history::{new_history, new_item};
+    use cadence_api::types::VersionHistories;
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+
+    const DOMAIN: &str = "some random domain ID";
+    const WF: &str = "some random workflow ID";
+    const RUN: &str = "some random run ID";
+    const FAILOVER_VERSION: i64 = 1;
+
+    struct CountingReapplier {
+        calls: Cell<usize>,
+        run_ids: RefCell<Vec<String>>,
+    }
+    impl CountingReapplier {
+        fn new() -> Self {
+            Self { calls: Cell::new(0), run_ids: RefCell::new(Vec::new()) }
+        }
+    }
+    impl EventsReapplier for CountingReapplier {
+        fn reapply_events(
+            &self,
+            _ms: &mut dyn super::super::NdcMutableState,
+            events: &[HistoryEvent],
+            run_id: &str,
+        ) -> NdcResult<Vec<HistoryEvent>> {
+            self.calls.set(self.calls.get() + 1);
+            self.run_ids.borrow_mut().push(run_id.to_string());
+            Ok(events.to_vec())
+        }
+    }
+
+    fn event(id: i64, t: EventType) -> HistoryEvent {
+        HistoryEvent { event_id: id, version: FAILOVER_VERSION, event_type: Some(t), ..Default::default() }
+    }
+
+    fn events(evs: Vec<HistoryEvent>) -> WorkflowEvents {
+        WorkflowEvents {
+            key: WorkflowExecutionKey { domain_id: DOMAIN.into(), workflow_id: WF.into(), run_id: RUN.into() },
+            branch_token: Vec::new(),
+            events: evs,
+        }
+    }
+
+    fn env(calls: &SharedCalls, active_is_current: bool, current_run: NdcResult<String>) -> MockEnv {
+        MockEnv {
+            domain_name: Ok("some random domainName".into()),
+            workflow_execution: Ok(()),
+            current_execution: current_run,
+            current_cluster: "active".into(),
+            active_cluster: if active_is_current { "active".into() } else { "standby".into() },
+            calls: calls.clone(),
+        }
+    }
+
+    fn wf(calls: &SharedCalls, running: bool, guaranteed: bool) -> Box<MockWorkflow> {
+        Box::new(MockWorkflow {
+            ms: MockMs {
+                running,
+                guaranteed,
+                info: NdcExecutionInfo {
+                    domain_id: DOMAIN.into(),
+                    workflow_id: WF.into(),
+                    run_id: RUN.into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            calls: calls.clone(),
+        })
+    }
+
+    fn shared() -> SharedCalls {
+        Rc::new(RefCell::new(Calls::default()))
+    }
+
+    fn assert_update(calls: &SharedCalls, mode: UpdateWorkflowMode, policy: TransactionPolicy) {
+        let c = calls.borrow();
+        assert_eq!(c.persisted_non_start, 1);
+        assert_eq!(c.update_with_new, vec![(mode, policy, false, WorkflowRequestMode::Replicated)]);
+        assert_eq!(c.released, Some(None), "release called without error");
+    }
+
+    /// Go `TestBackfillWorkflow_CurrentWorkflow_Active_Open`.
+    #[test]
+    fn backfill_current_workflow_active_open() {
+        let calls = shared();
+        let env = env(&calls, true, Ok(RUN.into()));
+        let reapplier = CountingReapplier::new();
+        let tm = TransactionManagerImpl::new(&env, &reapplier);
+        let evs = events(vec![event(1, EventType::WorkflowExecutionStarted)]);
+        tm.backfill_workflow(0, wf(&calls, true, true), &evs).unwrap();
+        assert_eq!(reapplier.calls.get(), 1);
+        assert_eq!(*reapplier.run_ids.borrow(), vec![RUN.to_string()]);
+        assert_update(&calls, UpdateWorkflowMode::UpdateCurrent, TransactionPolicy::Active);
+    }
+
+    /// Go `TestBackfillWorkflow_CurrentWorkflow_Active_Closed`.
+    #[test]
+    fn backfill_current_workflow_active_closed() {
+        let calls = shared();
+        let env = env(&calls, true, Ok(RUN.into()));
+        let reapplier = CountingReapplier::new();
+        let tm = TransactionManagerImpl::new(&env, &reapplier);
+        let last_started = 9999;
+        let mut w = wf(&calls, false, false);
+        w.ms.previous_started = last_started;
+        w.ms.next_event_id = last_started * 2;
+        w.ms.vh = Some(VersionHistories {
+            current_version_history_index: 0,
+            histories: vec![new_history(b"branch token".to_vec(), &[new_item(last_started, FAILOVER_VERSION)])],
+        });
+        w.ms.duplicated.insert((RUN.into(), 2, FAILOVER_VERSION), true);
+        let dup = event(2, EventType::WorkflowExecutionSignaled);
+        let new_signal = event(3, EventType::WorkflowExecutionSignaled);
+        let evs = events(vec![event(1, EventType::DecisionTaskCompleted), dup, new_signal.clone()]);
+        tm.backfill_workflow(0, w, &evs).unwrap();
+        assert_eq!(reapplier.calls.get(), 0);
+        assert_eq!(
+            calls.borrow().resets,
+            vec![ResetCall {
+                domain_id: DOMAIN.into(),
+                workflow_id: WF.into(),
+                base_run_id: RUN.into(),
+                branch_token: b"branch token".to_vec(),
+                last_event_id: last_started,
+                last_event_version: FAILOVER_VERSION,
+                next_event_id: last_started * 2,
+                reason: EVENTS_REAPPLICATION_RESET_WORKFLOW_REASON.into(),
+                events: vec![new_signal],
+                skip_signal_reapply: false,
+            }]
+        );
+        assert_update(&calls, UpdateWorkflowMode::BypassCurrent, TransactionPolicy::Passive);
+    }
+
+    /// Go `TestBackfillWorkflow_CurrentWorkflow_Active_Closed_SkipReset`.
+    #[test]
+    fn backfill_current_workflow_active_closed_skip_reset() {
+        for (name, signal_duplicated, previous_started, want_skip_metric) in [
+            ("no reapplicable events", true, 0, 0),
+            ("no decision completed", false, EMPTY_EVENT_ID, 1),
+        ] {
+            let calls = shared();
+            let env = env(&calls, true, Ok(RUN.into()));
+            let reapplier = CountingReapplier::new();
+            let tm = TransactionManagerImpl::new(&env, &reapplier);
+            let mut w = wf(&calls, false, false);
+            w.ms.previous_started = previous_started;
+            if signal_duplicated {
+                w.ms.duplicated.insert((RUN.into(), 2, FAILOVER_VERSION), true);
+            }
+            let evs = events(vec![
+                event(1, EventType::DecisionTaskCompleted),
+                event(2, EventType::WorkflowExecutionSignaled),
+            ]);
+            tm.backfill_workflow(0, w, &evs).unwrap();
+            assert!(calls.borrow().resets.is_empty(), "{name}");
+            assert_eq!(calls.borrow().skipped_metric, want_skip_metric, "{name}");
+            // no reset happened, so the target workflow is still current
+            assert_update(&calls, UpdateWorkflowMode::UpdateCurrent, TransactionPolicy::Passive);
+        }
+    }
+
+    /// Go `TestGetReapplicableEvents`.
+    #[test]
+    fn get_reapplicable_events_cases() {
+        let s1 = event(1, EventType::WorkflowExecutionSignaled);
+        let s2 = event(2, EventType::WorkflowExecutionSignaled);
+        let non = event(3, EventType::DecisionTaskCompleted);
+        #[allow(clippy::type_complexity)]
+        let cases: Vec<(&str, Vec<HistoryEvent>, Vec<i64>, Vec<HistoryEvent>)> = vec![
+            ("nil events", vec![], vec![], vec![]),
+            ("no signal events", vec![non.clone()], vec![], vec![]),
+            ("all signals duplicated", vec![s1.clone(), non.clone(), s2.clone()], vec![1, 2], vec![]),
+            ("only signals not yet applied", vec![s1.clone(), non, s2.clone()], vec![1], vec![s2]),
+        ];
+        for (name, evs, dups, want) in cases {
+            let mut ms = MockMs::default();
+            for d in dups {
+                ms.duplicated.insert((RUN.into(), d, FAILOVER_VERSION), true);
+            }
+            assert_eq!(get_reapplicable_events(&ms, &evs, RUN).unwrap(), want, "{name}");
+        }
+    }
+
+    /// Go `TestBackfillWorkflow_CurrentWorkflow_Passive_Open`.
+    #[test]
+    fn backfill_current_workflow_passive_open() {
+        let calls = shared();
+        let env = env(&calls, false, Ok(RUN.into()));
+        let reapplier = CountingReapplier::new();
+        let tm = TransactionManagerImpl::new(&env, &reapplier);
+        let evs = events(vec![event(1, EventType::WorkflowExecutionStarted)]);
+        tm.backfill_workflow(0, wf(&calls, true, true), &evs).unwrap();
+        assert_eq!(calls.borrow().reapplied, 1);
+        assert_eq!(reapplier.calls.get(), 0);
+        assert_update(&calls, UpdateWorkflowMode::UpdateCurrent, TransactionPolicy::Passive);
+    }
+
+    /// Go `TestBackfillWorkflow_CurrentWorkflow_Passive_Closed`.
+    #[test]
+    fn backfill_current_workflow_passive_closed() {
+        let calls = shared();
+        let env = env(&calls, false, Ok(RUN.into()));
+        let reapplier = CountingReapplier::new();
+        let tm = TransactionManagerImpl::new(&env, &reapplier);
+        tm.backfill_workflow(0, wf(&calls, false, false), &events(vec![])).unwrap();
+        assert_eq!(calls.borrow().reapplied, 1);
+        assert_update(&calls, UpdateWorkflowMode::UpdateCurrent, TransactionPolicy::Passive);
+    }
+
+    /// Go `TestBackfillWorkflow_NotCurrentWorkflow_Active` / `_Passive`.
+    #[test]
+    fn backfill_not_current_workflow() {
+        for active in [true, false] {
+            let calls = shared();
+            let env = env(&calls, active, Ok("other random run ID".into()));
+            let reapplier = CountingReapplier::new();
+            let tm = TransactionManagerImpl::new(&env, &reapplier);
+            let evs = events(vec![event(0, EventType::WorkflowExecutionSignaled)]);
+            tm.backfill_workflow(0, wf(&calls, false, false), &evs).unwrap();
+            assert_eq!(calls.borrow().reapplied, 1);
+            assert_update(&calls, UpdateWorkflowMode::BypassCurrent, TransactionPolicy::Passive);
+        }
+    }
+
+    /// Go `TestCheckWorkflowExists_DoesNotExists` / `_DoesExists`.
+    #[test]
+    fn check_workflow_exists() {
+        let calls = shared();
+        let reapplier = CountingReapplier::new();
+        let mut e = env(&calls, true, Ok(RUN.into()));
+        e.workflow_execution = Err(NdcError::EntityNotExists("x".into()));
+        assert!(!TransactionManagerImpl::new(&e, &reapplier).check_workflow_exists(DOMAIN, WF, RUN).unwrap());
+        e.workflow_execution = Ok(());
+        assert!(TransactionManagerImpl::new(&e, &reapplier).check_workflow_exists(DOMAIN, WF, RUN).unwrap());
+        e.workflow_execution = Err(NdcError::Other("boom".into()));
+        assert!(TransactionManagerImpl::new(&e, &reapplier).check_workflow_exists(DOMAIN, WF, RUN).is_err());
+    }
+
+    /// Go `TestGetWorkflowCurrentRunID_Missing` / `_Exists`.
+    #[test]
+    fn get_workflow_current_run_id() {
+        let calls = shared();
+        let reapplier = CountingReapplier::new();
+        let e = env(&calls, true, Err(NdcError::EntityNotExists("x".into())));
+        assert_eq!(TransactionManagerImpl::new(&e, &reapplier).get_current_workflow_run_id(DOMAIN, WF).unwrap(), "");
+        let e = env(&calls, true, Ok(RUN.into()));
+        assert_eq!(TransactionManagerImpl::new(&e, &reapplier).get_current_workflow_run_id(DOMAIN, WF).unwrap(), RUN);
+    }
+}
+
+/// Port of Go `TestCreateWorkflow` / `TestUpdateWorkflow`. Go injects mock sub-managers;
+/// Rust builds them inside `TransactionManagerImpl`, so these check the delegation
+/// end to end through the real sub-managers with a scripted env.
+#[cfg(test)]
+mod delegation_tests {
+    use super::*;
+    use crate::ndc::test_support::{new_log, Calls, LogWorkflow, MockEnv};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    fn env(current: NdcResult<String>) -> MockEnv {
+        MockEnv {
+            domain_name: Ok("some random domainName".into()),
+            workflow_execution: Ok(()),
+            current_execution: current,
+            current_cluster: "active".into(),
+            active_cluster: "active".into(),
+            calls: Rc::new(RefCell::new(Calls::default())),
+        }
+    }
+
+    struct NoReapply;
+    impl EventsReapplier for NoReapply {
+        fn reapply_events(
+            &self,
+            _ms: &mut dyn super::super::NdcMutableState,
+            _events: &[HistoryEvent],
+            _run_id: &str,
+        ) -> NdcResult<Vec<HistoryEvent>> {
+            unimplemented!()
+        }
+    }
+
+    #[test]
+    fn create_workflow_delegates_to_new_workflow_manager() {
+        let env = env(Ok("target-run".into()));
+        let reapplier = NoReapply;
+        let tm = TransactionManagerImpl::new(&env, &reapplier);
+        let log = new_log();
+        let target = Box::new(LogWorkflow::new("target", &log, "target-run"));
+        tm.create_workflow(1, target).unwrap();
+        // dispatchForNewWorkflow: the target run is already current -> released, nothing written.
+        assert_eq!(*log.borrow(), vec!["target:release(ok)".to_string()]);
+    }
+
+    #[test]
+    fn update_workflow_delegates_to_existing_workflow_manager() {
+        let env = env(Ok("target-run".into()));
+        let reapplier = NoReapply;
+        let tm = TransactionManagerImpl::new(&env, &reapplier);
+        let log = new_log();
+        let mut target = Box::new(LogWorkflow::new("target", &log, "target-run"));
+        target.ms.guaranteed = true;
+        let new = Box::new(LogWorkflow::new("new", &log, "new-run"));
+        tm.update_workflow(1, false, target, Some(new)).unwrap();
+        assert_eq!(
+            *log.borrow(),
+            vec![
+                "target:update_with_new_as_passive(new=new-run)".to_string(),
+                "target:release(ok)".to_string(),
+                "new:release(ok)".to_string(),
+            ]
+        );
+    }
+}

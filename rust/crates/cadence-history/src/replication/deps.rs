@@ -491,6 +491,10 @@ pub trait AdminClient: Send + Sync {
         &self,
         req: GetDLQReplicationMessagesRequest,
     ) -> Result<Vec<ReplicationTask>>;
+    /// `admin.Client.ReapplyEvents` (NDC reapply to the remote active cluster).
+    async fn reapply_events(&self, _req: cadence_api::admin::ReapplyEventsRequest) -> Result<()> {
+        Err(ReplicationError::Other("ReapplyEvents is not supported by this admin client".into()))
+    }
     /// `admin.Client.GetWorkflowExecutionRawHistoryV2` (used by the history resender).
     async fn get_workflow_execution_raw_history_v2(
         &self,

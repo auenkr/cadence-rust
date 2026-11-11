@@ -80,3 +80,10 @@ Other open gaps: 3b leftovers (marker/search-attr/semaphore storage in typed sta
 typed replay emits empty workflow-request payloads (4a now rejects them); task-ID allocation coverage at shard boundary;
 plan 5a/5b/6/7/8 not started; hierarchical WRR scheduler not ported; reinjector unbound; timer standby load_workflow,
 timer retry/continue-as-new TODO; NDC workflow persistence + terminate/failover/schedule_decision explicit errors.
+
+## 2026-11-11 resume progress (21:45 IST, master f3e7f821b)
+- Merged: history-ndcbuilder, history-ndctxn, history-gate-fix2, history-gate-fix3, history-gate-lanes, history-ndcgaps, history-decisiongaps (see each memory/history-*-20261111.md).
+- Mixed gate green: mysql/grpc/false+true, mysql/tchannel/false, postgres/grpc/false+true (memory/history-gate-lanes-20261111.md).
+- CI fix e63ced4ba: rust-ci/gate concurrency groups now unique per package+SHA for dispatches (parallel runs no longer cancel each other).
+- In progress (1 worker): history-cassandra (Cassandra shard + execution stores done; v2 writers, visibility writer, env.rs wiring, gates pending).
+- Open: local activity dispatch; advanced-vis search-attr task after binary checksum; replication notify_tasks; resetter/NDC unit tests; inter-host gRPC TLS; parent-close-policy worker; parity audit; final clean CI.

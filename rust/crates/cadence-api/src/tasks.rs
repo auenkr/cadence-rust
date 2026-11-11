@@ -70,6 +70,8 @@ pub struct ScheduleActivityTaskDecisionAttributes {
     pub retry_policy: Option<RetryPolicy>,
     #[serde(rename = "header", default, skip_serializing_if = "Option::is_none")]
     pub header: Option<Header>,
+    #[serde(rename = "requestLocalDispatch", default, skip_serializing_if = "std::ops::Not::not")]
+    pub request_local_dispatch: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -430,6 +432,36 @@ pub struct RespondDecisionTaskCompletedResponse {
         skip_serializing_if = "Option::is_none"
     )]
     pub decision_task: Option<PollForDecisionTaskResponse>,
+    #[serde(
+        rename = "activitiesToDispatchLocally",
+        default,
+        skip_serializing_if = "std::collections::HashMap::is_empty"
+    )]
+    pub activities_to_dispatch_locally: std::collections::HashMap<String, ActivityLocalDispatchInfo>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActivityLocalDispatchInfo {
+    #[serde(rename = "activityId", default)]
+    pub activity_id: String,
+    #[serde(rename = "scheduledTimestamp", default, skip_serializing_if = "Option::is_none")]
+    pub scheduled_timestamp: Option<i64>,
+    #[serde(rename = "startedTimestamp", default, skip_serializing_if = "Option::is_none")]
+    pub started_timestamp: Option<i64>,
+    #[serde(
+        rename = "scheduledTimestampOfThisAttempt",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub scheduled_timestamp_of_this_attempt: Option<i64>,
+    #[serde(
+        rename = "taskToken",
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "crate::b64::serialize_bytes",
+        deserialize_with = "crate::b64::deserialize_bytes"
+    )]
+    pub task_token: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

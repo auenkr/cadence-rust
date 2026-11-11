@@ -676,6 +676,22 @@ pub fn respond_decision_completed_response_in(
 ) -> Result<tk::RespondDecisionTaskCompletedResponse, Status> {
     Ok(tk::RespondDecisionTaskCompletedResponse {
         decision_task: v.decision_task.map(poll_decision_response_in).transpose()?,
+        activities_to_dispatch_locally: v
+            .activities_to_dispatch_locally
+            .into_iter()
+            .map(|(k, a)| {
+                (
+                    k,
+                    tk::ActivityLocalDispatchInfo {
+                        activity_id: a.activity_id,
+                        scheduled_timestamp: nanos(a.scheduled_time),
+                        started_timestamp: nanos(a.started_time),
+                        scheduled_timestamp_of_this_attempt: nanos(a.scheduled_time_of_this_attempt),
+                        task_token: a.task_token,
+                    },
+                )
+            })
+            .collect(),
     })
 }
 

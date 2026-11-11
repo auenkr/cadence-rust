@@ -227,6 +227,16 @@ impl EngineMutableState {
         self.inner.lock().unwrap().pc_exec.decision_schedule_id
     }
 
+    /// Go `executionInfo.ClientLibraryVersion/ClientFeatureVersion/ClientImpl = ...`
+    /// (set from the request headers in `handleDecisionTaskCompleted`).
+    pub fn set_client_info(&self, library_version: &str, feature_version: &str, client_impl: &str) {
+        let mut g = self.inner.lock().unwrap();
+        g.exec.client_library_version = library_version.to_string();
+        g.exec.client_feature_version = feature_version.to_string();
+        g.exec.client_impl = client_impl.to_string();
+        g.dirty = true;
+    }
+
     /// Go `ClearStickyness`.
     pub fn clear_sticky(&self) {
         self.inner.lock().unwrap().clear_stickyness();
@@ -244,6 +254,7 @@ impl EngineMutableState {
     /// for a transient decision, + `AfterAddDecisionTaskCompletedEvent`). Returns
     /// the id of the DecisionTaskCompleted event. Auto-reset-point handling of the
     /// binary checksum is not ported.
+    #[allow(clippy::too_many_arguments)]
     pub fn add_decision_task_completed(
         &self,
         schedule_id: i64,
@@ -251,6 +262,8 @@ impl EngineMutableState {
         execution_context: &[u8],
         identity: &str,
         binary_checksum: &str,
+        max_reset_points: usize,
+        advanced_visibility_writing: bool,
     ) -> HResult<i64> {
         let now = self.now();
         let ms = now / 1_000_000;
@@ -299,6 +312,15 @@ impl EngineMutableState {
                 binary_checksum: checksum,
             });
         });
+        // Go `addBinaryCheckSumIfNotExists` (+ GenerateWorkflowSearchAttrTasks when
+        // advanced visibility writing is enabled).
+        g.add_binary_checksum_if_not_exists(
+            binary_checksum,
+            completed.event_id,
+            now,
+            max_reset_points,
+            advanced_visibility_writing,
+        )?;
         // AfterAddDecisionTaskCompletedEvent + ReplicateDecisionTaskCompletedEvent:
         // DeleteDecision (stickiness is kept).
         g.last_processed_event = stid;
@@ -473,6 +495,54 @@ fn history_error(e: OperationError) -> HistoryError {
     }
 }
 
+/// Client SDK headers of the inbound call (Go `yarpc.CallFromContext(ctx).Header`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ClientHeaders {
+    pub library_version: String,
+    pub feature_version: String,
+    pub client_impl: String,
+}
+
+impl ClientHeaders {
+    pub const LIBRARY_VERSION: &'static str = "cadence-client-library-version";
+    pub const FEATURE_VERSION: &'static str = "cadence-client-feature-version";
+    pub const CLIENT_IMPL: &'static str = "cadence-client-implementation";
+
+    /// Build from a header lookup (missing headers are empty strings, like yarpc).
+    pub fn from_lookup(get: impl Fn(&str) -> Option<String>) -> Self {
+        Self {
+            library_version: get(Self::LIBRARY_VERSION).unwrap_or_default(),
+            feature_version: get(Self::FEATURE_VERSION).unwrap_or_default(),
+            client_impl: get(Self::CLIENT_IMPL).unwrap_or_default(),
+        }
+    }
+}
+
+tokio::task_local! {
+    /// Set by the transports around the RespondDecisionTaskCompleted call.
+    pub static CLIENT_HEADERS: ClientHeaders;
+}
+
+/// Go `versionChecker.SupportsConsistentQuery`: only uber-go / uber-java at feature
+/// version >= 1.5.0 (an unparseable or prerelease version is not supported).
+pub fn supports_consistent_query(client_impl: &str, feature_version: &str) -> bool {
+    if !matches!(client_impl, "uber-go" | "uber-java") {
+        return false;
+    }
+    let value = feature_version.strip_prefix('v').unwrap_or(feature_version);
+    let (numbers, metadata) = value.split_once('+').map_or((value, None), |(n, m)| (n, Some(m)));
+    if metadata.is_some_and(|m| {
+        m.split('.').any(|p| p.is_empty() || !p.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'~')))
+    }) {
+        return false;
+    }
+    let segments = numbers
+        .split('.')
+        .map(|p| if p.is_empty() || !p.bytes().all(|b| b.is_ascii_digit()) { None } else { p.parse::<u64>().ok() })
+        .collect::<Option<Vec<_>>>();
+    segments.is_some_and(|s| (s[0], s.get(1).copied().unwrap_or_default()) >= (1, 5))
+}
+
 /// Concrete `DecisionHandler` over the engine execution cache.
 pub struct EngineDecisionHandler {
     cache: Arc<EngineExecutionCache>,
@@ -522,7 +592,10 @@ impl EngineDecisionHandler {
             let timeout = (self.config.decision_heartbeat_timeout)(&domain_name);
             let now = self.core.clock.now();
             let timed_out = heartbeat && original > 0 && now > original.saturating_add(timeout.as_nanos() as i64);
+            let headers = CLIENT_HEADERS.try_with(|h| h.clone()).unwrap_or_default();
+            state.set_client_info(&headers.library_version, &headers.feature_version, &headers.client_impl);
             let mut has_unhandled: bool;
+            let mut local_dispatch: Vec<crate::engine::types::ActivityLocalDispatchInfo> = Vec::new();
             if timed_out {
                 state.add_decision_timed_out(d.schedule_id, d.started_id)?;
                 state.clear_sticky();
@@ -534,6 +607,8 @@ impl EngineDecisionHandler {
                     &req.execution_context,
                     &req.identity,
                     &req.binary_checksum,
+                    (self.config.max_auto_reset_points)(&domain_name).max(0) as usize,
+                    (self.core.advanced_visibility_writing)(),
                 )?;
                 match req.sticky_attributes.as_ref().and_then(|s| s.worker_task_list.as_ref()).filter(|t| !t.name.is_empty())
                 {
@@ -555,7 +630,17 @@ impl EngineDecisionHandler {
                     state.preload_start_event().await;
                 }
                 let mut decisions = req.decisions.clone();
-                let (fail, cause, message, unhandled, not_started_cancelled) = {
+                // Go: BadBinaries.Binaries[binChecksum] fails the decision.
+                let bad_binary = state.domain.bad_binaries.contains(&req.binary_checksum);
+                let (fail, cause, message, unhandled, not_started_cancelled) = if bad_binary {
+                    (
+                        true,
+                        Some("BAD_BINARY"),
+                        Some(format!("binary {} is already marked as bad deployment", req.binary_checksum)),
+                        false,
+                        false,
+                    )
+                } else {
                     let ops = EngineOps {
                         state: &state,
                         config: self.config.clone(),
@@ -564,7 +649,8 @@ impl EngineDecisionHandler {
                         identity: req.identity.clone(),
                     };
                     let mut handler = TaskHandler::new(ops, req.identity.clone(), completed_id);
-                    handler.handle_decisions(&req.execution_context, &mut decisions).map_err(history_error)?;
+                    local_dispatch =
+                        handler.handle_decisions(&req.execution_context, &mut decisions).map_err(history_error)?;
                     (
                         handler.fail_decision,
                         handler.fail_decision_cause,
@@ -579,6 +665,7 @@ impl EngineDecisionHandler {
                     // decisions), reload and record DecisionTaskFailed.
                     context.clear();
                     state = context.load_state().await?;
+                    local_dispatch.clear();
                     let details = message.unwrap_or_default();
                     state.add_decision_task_failed(
                         d.schedule_id,
@@ -625,10 +712,51 @@ impl EngineDecisionHandler {
                 Err(e) => return Err(e),
                 Ok(()) => {}
             }
+            // Go handleBufferedQueries (fail-open when the client headers are absent).
+            {
+                struct Obs {
+                    warn: usize,
+                    error: usize,
+                }
+                impl crate::decision::handler::QueryObserver for Obs {
+                    fn worker_not_supports_consistent_query(&self, _error: &str) {}
+                    fn invalid_query_state(&self, _id: &str, _state: crate::query::TerminationType, _error: &str) {}
+                    fn check_blob_size(&self, answer: &[u8]) -> Result<(), String> {
+                        let _ = self.warn;
+                        if answer.len() > self.error {
+                            return Err("Blob data size exceeds limit.".to_string());
+                        }
+                        Ok(())
+                    }
+                }
+                let obs = Obs {
+                    warn: (self.config.blob_size_limit_warn)(&domain_name) as usize,
+                    error: (self.config.blob_size_limit_error)(&domain_name) as usize,
+                };
+                let results = req.query_results.clone().unwrap_or_default();
+                let version_error = (!supports_consistent_query(&headers.client_impl, &headers.feature_version))
+                    .then_some("client version not supported");
+                crate::decision::handler::handle_buffered_queries(
+                    &state.queries.0,
+                    &obs,
+                    &headers.client_impl,
+                    &headers.feature_version,
+                    version_error,
+                    &results,
+                    create_new,
+                    heartbeat,
+                );
+            }
             if timed_out {
                 return Err(HistoryError::entity_not_exists("decision heartbeat timeout"));
             }
-            let mut resp = HistoryRespondDecisionTaskCompletedResponse::default();
+            let mut resp = HistoryRespondDecisionTaskCompletedResponse {
+                activities_to_dispatch_locally: local_dispatch
+                    .into_iter()
+                    .map(|d| (d.activity_id.clone(), d))
+                    .collect(),
+                ..Default::default()
+            };
             if let Some(started) = started {
                 resp.started_response = Some(state.record_started_response(&started, &req.identity));
             }
@@ -784,7 +912,22 @@ impl DecisionHandler for EngineDecisionHandler {
                 &failed.identity,
                 &failed.binary_checksum,
             )?;
-            Ok(Outcome { noop: false, create_decision: true, value: () })
+            // Go handler.go handleDecisionTaskFailed: terminate when the decision
+            // attempt exceeds DecisionRetryMaxAttempts.
+            let domain_name = state.get_domain_entry().info.name.clone();
+            let max_attempts = (self.config.decision_retry_max_attempts)(&domain_name);
+            if max_attempts > 0 && state.get_execution_info().decision_attempt > max_attempts {
+                let cause = failed.cause.map(|c| c.as_str()).unwrap_or_default();
+                let details = failed.details.iter().map(u8::to_string).collect::<Vec<_>>().join(" ");
+                let message = format!(
+                    "Decision attempt exceeds limit. Last decision failure cause and details: {cause} - [{details}]"
+                );
+                let next = state.get_next_event_id();
+                state.terminate_workflow(next, "DECISION_ATTEMPTS_EXCEEDS_LIMIT", message.as_bytes(), "history-service")?;
+            }
+            // A terminated workflow must not schedule a new decision.
+            let running = state.is_workflow_execution_running();
+            Ok(Outcome { noop: false, create_decision: running, value: () })
         })
         .await
     }
@@ -802,5 +945,62 @@ impl DecisionHandler for EngineDecisionHandler {
             Ok(Outcome { noop: false, create_decision: false, value: () })
         })
         .await
+    }
+}
+
+impl super::engine_state::Inner {
+    /// Go `CheckResettable`.
+    fn is_resettable(&self) -> bool {
+        self.pc_children.is_empty() && self.pc_cancels.is_empty() && self.pc_signals.is_empty()
+    }
+
+    /// Go `addBinaryCheckSumIfNotExists` + `trimBinaryChecksums`.
+    pub(super) fn add_binary_checksum_if_not_exists(
+        &mut self,
+        bin_checksum: &str,
+        completed_event_id: i64,
+        now_nanos: i64,
+        max_reset_points: usize,
+        advanced_visibility_writing: bool,
+    ) -> HResult<()> {
+        use cadence_persistence::sqlblobs::Encoding;
+        use cadence_thrift::ToThrift;
+        if bin_checksum.is_empty() {
+            return Ok(());
+        }
+        let mut curr = self.exec.auto_reset_points.clone().map(|p| p.points).unwrap_or_default();
+        let mut recent: Vec<String> = curr.iter().map(|p| p.binary_checksum.clone()).collect();
+        if recent.iter().any(|c| c == bin_checksum) {
+            return Ok(());
+        }
+        if curr.len() >= max_reset_points {
+            let start = (curr.len() - max_reset_points + 1).min(curr.len());
+            curr.drain(..start);
+            recent.drain(..start);
+        }
+        recent.push(bin_checksum.to_string());
+        curr.push(cadence_api::types::ResetPointInfo {
+            binary_checksum: bin_checksum.to_string(),
+            run_id: self.exec.run_id.clone(),
+            first_decision_completed_id: completed_event_id,
+            created_time_nano: Some(now_nanos),
+            expiring_time_nano: None,
+            resettable: self.is_resettable(),
+        });
+        let points = cadence_api::types::ResetPoints { points: curr };
+        let data = Encoding::ThriftRW
+            .encode(&points.to_thrift())
+            .map_err(|e| HistoryError::internal(format!("encode auto reset points: {e}")))?;
+        self.pc_exec.auto_reset_points =
+            Some(cadence_persistence::history_contract::DataBlob { encoding: "thriftrw".to_string(), data });
+        self.exec.auto_reset_points = Some(points);
+        let bytes = serde_json::to_vec(&recent).map_err(|e| HistoryError::internal(e.to_string()))?;
+        self.pc_exec.search_attributes.insert("BinaryChecksums".to_string(), bytes.clone());
+        self.exec.search_attributes.get_or_insert_with(Default::default).insert("BinaryChecksums".to_string(), bytes);
+        self.dirty = true;
+        if advanced_visibility_writing {
+            self.gen_search_attr_task();
+        }
+        Ok(())
     }
 }

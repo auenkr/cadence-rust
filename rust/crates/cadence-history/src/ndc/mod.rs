@@ -18,6 +18,8 @@ pub mod new_workflow_transaction_manager;
 pub mod replication_task;
 pub mod transaction_manager;
 pub mod workflow_resetter;
+#[cfg(test)]
+pub(crate) mod test_support;
 
 use cadence_api::errors::{BadRequestError, InternalServiceError, RetryTaskV2Error};
 use cadence_api::service_types::HistoryEvent;
@@ -294,6 +296,11 @@ pub trait NdcWorkflow {
     fn restore_state(&mut self, _ms: Box<dyn NdcMutableState>, _history_size: i64) {}
     /// Go `GetReleaseFn()(err)`.
     fn release(&mut self, err: Option<&NdcError>);
+    /// The engine execution context behind this workflow (type-erased), when
+    /// there is one; used by the reset collaborator to run the engine resetter.
+    fn engine_context(&self) -> Option<std::sync::Arc<dyn std::any::Any + Send + Sync>> {
+        None
+    }
 
     fn get_vector_clock(&self) -> NdcResult<WorkflowVectorClock>;
     fn happens_after(&self, other: &dyn NdcWorkflow) -> NdcResult<bool>;

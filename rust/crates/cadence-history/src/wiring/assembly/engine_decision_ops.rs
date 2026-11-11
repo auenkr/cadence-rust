@@ -19,6 +19,7 @@ use crate::decision::task_handler::{Activity, ErrorKind, LocalDispatch, Operatio
 use crate::decision::{
     DecisionError, DomainReplication, DomainReplicationLookup, ParentDecisionDefaults, SearchAttributePolicy,
 };
+use crate::engine::types::ActivityLocalDispatchInfo;
 use crate::engine::deps::{
     DomainCache, EMPTY_EVENT_ID, WORKFLOW_CLOSE_STATUS_CANCELED, WORKFLOW_CLOSE_STATUS_COMPLETED,
     WORKFLOW_CLOSE_STATUS_FAILED, WORKFLOW_STATE_COMPLETED,
@@ -27,13 +28,15 @@ use crate::wiring::assembly::engine_state::EngineMutableState;
 
 const NANOS: i64 = 1_000_000_000;
 
-/// Local activity dispatch is not used by the engine (activities are always
-/// dispatched through matching), so `schedule_activity` never returns one.
-pub struct NoDispatch;
-
-impl LocalDispatch for NoDispatch {
-    fn set_task_token(&mut self, _token: Vec<u8>) {}
-    fn set_timestamps(&mut self, _scheduled: i64, _scheduled_this_attempt: i64, _started: i64) {}
+impl LocalDispatch for ActivityLocalDispatchInfo {
+    fn set_task_token(&mut self, token: Vec<u8>) {
+        self.task_token = token;
+    }
+    fn set_timestamps(&mut self, scheduled: i64, scheduled_this_attempt: i64, started: i64) {
+        self.scheduled_timestamp = Some(scheduled);
+        self.scheduled_timestamp_of_this_attempt = Some(scheduled_this_attempt);
+        self.started_timestamp = Some(started);
+    }
 }
 
 fn bad(msg: impl Into<String>) -> OperationError {
@@ -114,7 +117,7 @@ impl EngineOps<'_> {
 }
 
 impl Operations for EngineOps<'_> {
-    type Dispatch = NoDispatch;
+    type Dispatch = ActivityLocalDispatchInfo;
 
     fn workflow_identity(&self) -> WorkflowIdentity {
         let g = self.state.inner.lock().unwrap();
@@ -172,7 +175,20 @@ impl Operations for EngineOps<'_> {
     }
 
     fn validate(&mut self, decision: &mut Decision) -> Result<()> {
-        let ctx = Validation::new(self);
+        let mut ctx = Validation::new(self);
+        // Go: target domain name per decision type; empty means the own domain.
+        let target_name = if let Some(a) = decision.request_cancel_external_workflow_execution_decision_attributes.as_ref() {
+            a.domain.clone()
+        } else if let Some(a) = decision.signal_external_workflow_execution_decision_attributes.as_ref() {
+            a.domain.clone()
+        } else if let Some(a) = decision.start_child_workflow_execution_decision_attributes.as_ref() {
+            a.domain.clone()
+        } else {
+            String::new()
+        };
+        if !target_name.is_empty() {
+            ctx.target_domain_id = self.target_domain_id(&target_name)?;
+        }
         let name = self.domain_name.clone();
         checker::validate(&ctx, decision, &name).map_err(Into::into)
     }
@@ -183,7 +199,7 @@ impl Operations for EngineOps<'_> {
         self.domains.get_domain(name).map(|_| ()).map_err(|e| internal(format!("{e:?}")))
     }
 
-    fn schedule_activity(&mut self, completed_id: i64, decision: &Decision) -> Result<(Activity, Option<NoDispatch>)> {
+    fn schedule_activity(&mut self, completed_id: i64, decision: &Decision) -> Result<(Activity, Option<ActivityLocalDispatchInfo>)> {
         let a = decision
             .schedule_activity_task_decision_attributes
             .clone()
@@ -251,7 +267,13 @@ impl Operations for EngineOps<'_> {
         }
         g.pc_acts.insert(sid, info);
         g.refresh_activity(sid);
-        g.gen_activity_transfer_task(sid);
+        // Go: local dispatch skips the matching transfer task; the worker runs the
+        // activity directly and history records ActivityTaskStarted below.
+        let local_dispatch = (self.config.enable_activity_local_dispatch_by_domain)(&self.domain_name)
+            && a.request_local_dispatch;
+        if !local_dispatch {
+            g.gen_activity_transfer_task(sid);
+        }
         let activity = Activity {
             schedule_id: sid,
             started_id: EMPTY_EVENT_ID,
@@ -260,11 +282,40 @@ impl Operations for EngineOps<'_> {
             scheduled_time_unix_nanos: now_nanos,
             started_time_unix_nanos: 0,
         };
-        Ok((activity, None))
+        let dispatch = local_dispatch.then(|| ActivityLocalDispatchInfo {
+            activity_id: activity.activity_id.clone(),
+            scheduled_timestamp: None,
+            started_timestamp: None,
+            scheduled_timestamp_of_this_attempt: None,
+            task_token: Vec::new(),
+        });
+        Ok((activity, dispatch))
     }
 
-    fn start_local_activity(&mut self, _activity: &mut Activity, _request_id: &str, _identity: &str) -> Result<()> {
-        Err(not_ported("local ScheduleActivityTask dispatch"))
+    /// Go `AddActivityTaskStartedEvent(ai, scheduleEventID, uuid, identity)` for a locally dispatched activity.
+    fn start_local_activity(&mut self, activity: &mut Activity, request_id: &str, identity: &str) -> Result<()> {
+        let info = {
+            let g = self.state.inner.lock().unwrap();
+            g.activities
+                .get(&activity.schedule_id)
+                .cloned()
+                .ok_or_else(|| internal("pending activity not found for local dispatch"))?
+        };
+        let started = self
+            .state
+            .ev_activity_started(&info, activity.schedule_id, request_id, identity)
+            .map_err(|e| internal(format!("{e:?}")))?;
+        activity.started_id = started.started_id;
+        activity.started_time_unix_nanos = self
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .pc_acts
+            .get(&activity.schedule_id)
+            .map(|a| a.started_time_unix_nanos)
+            .unwrap_or_default();
+        Ok(())
     }
 
     fn request_cancel_activity(&mut self, completed_id: i64, id: &str, _identity: &str) -> Result<Activity> {
@@ -734,6 +785,8 @@ struct Validation {
     config: Arc<Config>,
     domains: Arc<dyn DomainCache>,
     defaults: ParentDecisionDefaults,
+    /// Go `targetDomainID`: resolved per decision from the decision's domain name.
+    target_domain_id: String,
 }
 
 impl Validation {
@@ -744,6 +797,7 @@ impl Validation {
             domain_name: ops.domain_name.clone(),
             config: ops.config.clone(),
             domains: ops.domains.clone(),
+            target_domain_id: g.exec.domain_id.clone(),
             defaults: ParentDecisionDefaults {
                 workflow_type_name: g.exec.workflow_type_name.clone(),
                 task_list_name: g.exec.task_list.clone(),
@@ -765,7 +819,8 @@ impl DomainReplicationLookup for Validation {
                 clusters: Vec::new(),
             });
         }
-        Err(DecisionError::internal("cross-domain decision validation is not ported on the engine mutable state yet"))
+        let e = self.domains.get_domain_by_id(domain_id).map_err(|e| DecisionError::internal(format!("{e:?}")))?;
+        Ok(DomainReplication { domain_id: e.info.id.clone(), name: e.info.name.clone(), clusters: e.clusters.clone() })
     }
 
     fn cross_cluster_operations_enabled(&self, _source_domain_name: &str) -> bool {
@@ -779,7 +834,7 @@ impl ValidationContext for Validation {
     }
 
     fn target_domain_id(&self) -> &str {
-        &self.domain_id
+        &self.target_domain_id
     }
 
     fn defaults(&self) -> ParentDecisionDefaults {
@@ -839,7 +894,14 @@ impl ValidationContext for Validation {
         if schedule.is_empty() {
             return Ok(());
         }
-        Err(DecisionError::internal("cron schedule validation is not ported on the engine mutable state yet"))
+        // Go `backoff.ValidateSchedule`: invalid schedules are BadRequestError.
+        let now = cadence_common::cron::naive_from_nanos(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as i64)
+                .unwrap_or(0),
+        );
+        cadence_common::cron::validate_schedule(schedule, now).map(|_| ()).map_err(DecisionError::new)
     }
 
     fn id_length_observation(&self, _field: &str, _domain: &str, _value: &str) {}
@@ -979,5 +1041,85 @@ mod tests {
         h.handle_decisions(b"", &mut d).unwrap();
         assert!(h.fail_decision);
         assert_eq!(h.fail_decision_cause, Some("BAD_SCHEDULE_ACTIVITY_ATTRIBUTES"));
+    }
+
+    fn schedule_activity_decision(request_local_dispatch: bool) -> Vec<Decision> {
+        vec![Decision {
+            decision_type: Some(DecisionType::ScheduleActivityTask),
+            schedule_activity_task_decision_attributes: Some(ScheduleActivityTaskDecisionAttributes {
+                activity_id: "a1".into(),
+                activity_type: Some(ActivityType { name: "act".into() }),
+                task_list: Some(TaskList { name: "tl".into(), ..Default::default() }),
+                schedule_to_close_timeout_seconds: Some(10),
+                schedule_to_start_timeout_seconds: Some(5),
+                start_to_close_timeout_seconds: Some(5),
+                request_local_dispatch,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }]
+    }
+
+    #[test]
+    fn local_dispatch_starts_activity_and_skips_transfer_task() {
+        let s = state();
+        let mut h = handler(&s);
+        let mut d = schedule_activity_decision(true);
+        let dispatch = h.handle_decisions(b"", &mut d).unwrap();
+        assert!(!h.fail_decision, "{:?}", h.fail_message);
+        assert_eq!(dispatch.len(), 1);
+        assert_eq!(dispatch[0].activity_id, "a1");
+        assert!(!dispatch[0].task_token.is_empty());
+        assert!(dispatch[0].scheduled_timestamp.is_some());
+        assert!(dispatch[0].started_timestamp.is_some_and(|t| t > 0));
+        assert_eq!(event_types(&s), vec![EventType::ActivityTaskScheduled, EventType::ActivityTaskStarted]);
+        let g = s.inner.lock().unwrap();
+        assert!(g.transfer_tasks.is_empty());
+        assert_ne!(g.pc_acts.values().next().unwrap().started_id, EMPTY_EVENT_ID);
+    }
+
+    #[test]
+    fn no_local_dispatch_without_request_flag() {
+        let s = state();
+        let mut h = handler(&s);
+        let mut d = schedule_activity_decision(false);
+        let dispatch = h.handle_decisions(b"", &mut d).unwrap();
+        assert!(dispatch.is_empty());
+        assert_eq!(event_types(&s), vec![EventType::ActivityTaskScheduled]);
+        assert!(!s.inner.lock().unwrap().transfer_tasks.is_empty());
+    }
+
+    #[test]
+    fn new_binary_checksum_generates_search_attr_task_only_with_advanced_visibility() {
+        let s = state();
+        let mut g = s.inner.lock().unwrap();
+        g.add_binary_checksum_if_not_exists("bin-1", 4, 1, 10, false).unwrap();
+        assert!(g.transfer_tasks.is_empty());
+        g.add_binary_checksum_if_not_exists("bin-2", 5, 2, 10, true).unwrap();
+        assert_eq!(g.transfer_tasks.len(), 1);
+        // an already-recorded checksum returns early without another task
+        g.add_binary_checksum_if_not_exists("bin-2", 6, 3, 10, true).unwrap();
+        assert_eq!(g.transfer_tasks.len(), 1);
+    }
+
+    #[test]
+    fn set_client_info_stores_versions_on_execution_info() {
+        let s = state();
+        s.set_client_info("1.2.3", "1.5.0", "uber-go");
+        let g = s.inner.lock().unwrap();
+        assert_eq!(g.exec.client_library_version, "1.2.3");
+        assert_eq!(g.exec.client_feature_version, "1.5.0");
+        assert_eq!(g.exec.client_impl, "uber-go");
+    }
+
+    #[test]
+    fn consistent_query_support_matches_go_version_checker() {
+        use super::super::engine_decision::supports_consistent_query as f;
+        assert!(f("uber-go", "1.5.0"));
+        assert!(f("uber-java", "v1.6"));
+        assert!(!f("uber-go", "1.4.9"));
+        assert!(!f("uber-go", ""));
+        assert!(!f("unknown", "2.0.0"));
+        assert!(!f("uber-go", "1.5.0-rc1"));
     }
 }

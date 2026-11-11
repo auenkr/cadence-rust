@@ -57,6 +57,13 @@ fn engine_entry(m: &MatchingDomainMetadata) -> eng::DomainCacheEntry {
         is_global_domain: m.is_global_domain,
         active_clusters: vec![(None, m.replication.active_cluster_name.clone())],
         failover_end_time: m.failover_end_time_nanos,
+        clusters: m.replication.clusters.iter().map(|c| c.cluster_name.clone()).collect(),
+        bad_binaries: m
+            .decoded_bad_binaries
+            .as_ref()
+            .and_then(|b| b.binaries.as_ref())
+            .map(|b| b.keys().cloned().collect())
+            .unwrap_or_default(),
     }
 }
 

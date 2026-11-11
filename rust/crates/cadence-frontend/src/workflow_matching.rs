@@ -639,7 +639,13 @@ impl ProductionBackend {
         let reply = self
             .history("RespondDecisionTaskCompleted", envelope)
             .await?;
-        let mut response = tk::RespondDecisionTaskCompletedResponse::default();
+        let mut response = tk::RespondDecisionTaskCompletedResponse {
+            activities_to_dispatch_locally: reply
+                .opt_map_str::<tk::ActivityLocalDispatchInfo>(20)
+                .map_err(|e| thrift_err("History local dispatch response", e))?
+                .unwrap_or_default(),
+            ..Default::default()
+        };
         if complete.return_new_decision_task {
             if let Some(Value::Struct(started)) = reply.get(10) {
                 let token = cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize(
