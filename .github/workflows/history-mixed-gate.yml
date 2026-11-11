@@ -66,6 +66,7 @@ jobs:
         env:
           CADENCE_GATE_TWO_HISTORY: ${{ inputs.two_history }}
           RUST_BACKTRACE: 1
+          RUST_LOG: warn,cadence_history::task=debug,cadence_history::queue=info,cadence_history::wiring=info,cadence_history::engine=info
         run: |
           set +e
           tests/gates/run-frontend-${{ inputs.database }}-lane.sh out/gate \
