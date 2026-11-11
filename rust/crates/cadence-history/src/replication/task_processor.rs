@@ -749,3 +749,7 @@ impl Daemon for TaskProcessorImpl {
 }
 
 impl TaskProcessor for TaskProcessorImpl {}
+
+#[cfg(test)]
+#[path = "processor_tests.rs"]
+mod processor_tests;

@@ -325,3 +325,7 @@ impl TaskStore {
         Ok(None)
     }
 }
+
+#[cfg(test)]
+#[path = "store_tests.rs"]
+mod store_tests;

@@ -246,7 +246,7 @@ impl TaskFetcherImpl {
     }
 
     /// `getMessages`.
-    async fn get_messages(
+    pub(super) async fn get_messages(
         &self,
         request_by_shard: &HashMap<i32, Request>,
     ) -> Result<HashMap<i32, ReplicationMessages>> {
