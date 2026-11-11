@@ -201,6 +201,41 @@ pub trait NdcMutableState {
     fn create_next_activity_timer(&mut self) -> NdcResult<bool>;
     /// Go `execution.NewMutableStateTaskGenerator(...).GenerateActivityRetryTasks(id)`.
     fn generate_activity_retry_tasks(&mut self, schedule_id: i64) -> NdcResult<()>;
+    // ---- workflow policy operations (execution/workflow.rs). Defaults are
+    // explicit errors so an implementor can never silently skip them.
+    /// `(active cluster selection policy, last event task id)` for the vector clock.
+    fn vector_clock_inputs(
+        &self,
+    ) -> NdcResult<(Option<cadence_api::types::ActiveClusterSelectionPolicy>, i64)> {
+        Err(NdcError::internal("vector_clock_inputs is not supported by this mutable state"))
+    }
+    fn has_processed_or_pending_decision(&self) -> NdcResult<bool> {
+        Err(NdcError::internal("has_processed_or_pending_decision is not supported by this mutable state"))
+    }
+    fn has_in_flight_decision(&self) -> NdcResult<bool> {
+        Err(NdcError::internal("has_in_flight_decision is not supported by this mutable state"))
+    }
+    fn update_workflow_state(&mut self, _state: WorkflowState) -> NdcResult<()> {
+        Err(NdcError::internal("update_workflow_state is not supported by this mutable state"))
+    }
+    fn update_current_version(&mut self, _version: i64, _force: bool) -> NdcResult<()> {
+        Err(NdcError::internal("update_current_version is not supported by this mutable state"))
+    }
+    fn fail_in_flight_decision_for_failover(&mut self) -> NdcResult<()> {
+        Err(NdcError::internal("fail_in_flight_decision_for_failover is not supported by this mutable state"))
+    }
+    fn schedule_decision(&mut self) -> NdcResult<()> {
+        Err(NdcError::internal("schedule_decision is not supported by this mutable state"))
+    }
+    fn terminate_workflow_execution(
+        &mut self,
+        _batch_first_event_id: i64,
+        _reason: &str,
+        _details: Vec<u8>,
+        _identity: &str,
+    ) -> NdcResult<()> {
+        Err(NdcError::internal("terminate_workflow_execution is not supported by this mutable state"))
+    }
     /// Go `CloseTransactionAsSnapshot`.
     fn close_transaction_as_snapshot(
         &mut self,

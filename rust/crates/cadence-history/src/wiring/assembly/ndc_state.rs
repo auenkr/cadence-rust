@@ -8,7 +8,10 @@ use cadence_api::types::{VersionHistories, WorkflowExecution};
 use cadence_persistence::version_history::VersionHistoriesExt;
 
 use crate::execution::mutable_state_builder::{TypedMutableState, EMPTY_VERSION};
-use crate::execution::mutable_state_methods_common::{TaskGenEnv, WORKFLOW_STATE_COMPLETED, WORKFLOW_STATE_RUNNING, WORKFLOW_STATE_ZOMBIE};
+use crate::execution::mutable_state_methods_common::{
+    TaskGenEnv, CLOSE_STATUS_NONE, WORKFLOW_STATE_COMPLETED, WORKFLOW_STATE_CREATED, WORKFLOW_STATE_RUNNING,
+    WORKFLOW_STATE_ZOMBIE,
+};
 use crate::execution::workflow::{TransactionPolicy, WorkflowState};
 use crate::ndc::{NdcActivityInfo, NdcError, NdcExecutionInfo, NdcMutableState, NdcResult, SyncActivityRequest};
 use crate::execution::context::WorkflowEvents;
@@ -170,6 +173,50 @@ impl NdcMutableState for OwnedNdcMutableState {
 
     fn generate_activity_retry_tasks(&mut self, _schedule_id: i64) -> NdcResult<()> {
         self.unsupported("generate_activity_retry_tasks")
+    }
+
+    fn vector_clock_inputs(
+        &self,
+    ) -> NdcResult<(Option<cadence_api::types::ActiveClusterSelectionPolicy>, i64)> {
+        // Decoding the persisted policy blob is not ported: refuse rather than
+        // compare clocks as if the policy were absent.
+        if self
+            .typed
+            .execution_info
+            .active_cluster_selection_policy
+            .as_ref()
+            .is_some_and(|b| !b.data.is_empty())
+        {
+            return self.unsupported("vector_clock_inputs (active cluster selection policy decode)");
+        }
+        Ok((None, self.typed.execution_info.last_event_task_id))
+    }
+
+    fn has_processed_or_pending_decision(&self) -> NdcResult<bool> {
+        Ok(self.typed.has_pending_decision()
+            || self.typed.execution_info.last_processed_event != crate::ndc::EMPTY_EVENT_ID)
+    }
+
+    fn has_in_flight_decision(&self) -> NdcResult<bool> {
+        Ok(self.typed.has_in_flight_decision())
+    }
+
+    fn update_workflow_state(&mut self, state: WorkflowState) -> NdcResult<()> {
+        let raw = match state {
+            WorkflowState::Created => WORKFLOW_STATE_CREATED,
+            WorkflowState::Running => WORKFLOW_STATE_RUNNING,
+            WorkflowState::Zombie => WORKFLOW_STATE_ZOMBIE,
+            WorkflowState::Completed | WorkflowState::Corrupted => {
+                return self.unsupported("update_workflow_state to completed/corrupted (needs close status)")
+            }
+        };
+        self.typed
+            .update_workflow_state_close_status(raw, CLOSE_STATUS_NONE)
+            .map_err(|e| NdcError::internal(e.to_string()))
+    }
+
+    fn update_current_version(&mut self, version: i64, force: bool) -> NdcResult<()> {
+        self.typed.update_current_version(version, force).map_err(|e| NdcError::internal(e.to_string()))
     }
 
     fn close_transaction_as_snapshot(&mut self, _now_nanos: i64, _policy: TransactionPolicy) -> NdcResult<(WorkflowSnapshot, Vec<WorkflowEvents>)> {
