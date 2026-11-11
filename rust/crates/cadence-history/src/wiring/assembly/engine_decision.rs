@@ -251,6 +251,7 @@ impl EngineMutableState {
         execution_context: &[u8],
         identity: &str,
         binary_checksum: &str,
+        max_reset_points: usize,
     ) -> HResult<i64> {
         let now = self.now();
         let ms = now / 1_000_000;
@@ -299,6 +300,9 @@ impl EngineMutableState {
                 binary_checksum: checksum,
             });
         });
+        // Go `addBinaryCheckSumIfNotExists` (advanced-visibility search-attr task
+        // generation is not ported here).
+        g.add_binary_checksum_if_not_exists(binary_checksum, completed.event_id, now, max_reset_points)?;
         // AfterAddDecisionTaskCompletedEvent + ReplicateDecisionTaskCompletedEvent:
         // DeleteDecision (stickiness is kept).
         g.last_processed_event = stid;
@@ -534,6 +538,7 @@ impl EngineDecisionHandler {
                     &req.execution_context,
                     &req.identity,
                     &req.binary_checksum,
+                    (self.config.max_auto_reset_points)(&domain_name).max(0) as usize,
                 )?;
                 match req.sticky_attributes.as_ref().and_then(|s| s.worker_task_list.as_ref()).filter(|t| !t.name.is_empty())
                 {
@@ -555,7 +560,17 @@ impl EngineDecisionHandler {
                     state.preload_start_event().await;
                 }
                 let mut decisions = req.decisions.clone();
-                let (fail, cause, message, unhandled, not_started_cancelled) = {
+                // Go: BadBinaries.Binaries[binChecksum] fails the decision.
+                let bad_binary = state.domain.bad_binaries.iter().any(|b| *b == req.binary_checksum);
+                let (fail, cause, message, unhandled, not_started_cancelled) = if bad_binary {
+                    (
+                        true,
+                        Some("BAD_BINARY"),
+                        Some(format!("binary {} is already marked as bad deployment", req.binary_checksum)),
+                        false,
+                        false,
+                    )
+                } else {
                     let ops = EngineOps {
                         state: &state,
                         config: self.config.clone(),
@@ -817,5 +832,58 @@ impl DecisionHandler for EngineDecisionHandler {
             Ok(Outcome { noop: false, create_decision: false, value: () })
         })
         .await
+    }
+}
+
+impl super::engine_state::Inner {
+    /// Go `CheckResettable`.
+    fn is_resettable(&self) -> bool {
+        self.pc_children.is_empty() && self.pc_cancels.is_empty() && self.pc_signals.is_empty()
+    }
+
+    /// Go `addBinaryCheckSumIfNotExists` + `trimBinaryChecksums`.
+    fn add_binary_checksum_if_not_exists(
+        &mut self,
+        bin_checksum: &str,
+        completed_event_id: i64,
+        now_nanos: i64,
+        max_reset_points: usize,
+    ) -> HResult<()> {
+        use cadence_persistence::sqlblobs::Encoding;
+        use cadence_thrift::ToThrift;
+        if bin_checksum.is_empty() {
+            return Ok(());
+        }
+        let mut curr = self.exec.auto_reset_points.clone().map(|p| p.points).unwrap_or_default();
+        let mut recent: Vec<String> = curr.iter().map(|p| p.binary_checksum.clone()).collect();
+        if recent.iter().any(|c| c == bin_checksum) {
+            return Ok(());
+        }
+        if curr.len() >= max_reset_points {
+            let start = (curr.len() - max_reset_points + 1).min(curr.len());
+            curr.drain(..start);
+            recent.drain(..start);
+        }
+        recent.push(bin_checksum.to_string());
+        curr.push(cadence_api::types::ResetPointInfo {
+            binary_checksum: bin_checksum.to_string(),
+            run_id: self.exec.run_id.clone(),
+            first_decision_completed_id: completed_event_id,
+            created_time_nano: Some(now_nanos),
+            expiring_time_nano: None,
+            resettable: self.is_resettable(),
+        });
+        let points = cadence_api::types::ResetPoints { points: curr };
+        let data = Encoding::ThriftRW
+            .encode(&points.to_thrift())
+            .map_err(|e| HistoryError::internal(format!("encode auto reset points: {e}")))?;
+        self.pc_exec.auto_reset_points =
+            Some(cadence_persistence::history_contract::DataBlob { encoding: "thriftrw".to_string(), data });
+        self.exec.auto_reset_points = Some(points);
+        let bytes = serde_json::to_vec(&recent).map_err(|e| HistoryError::internal(e.to_string()))?;
+        self.pc_exec.search_attributes.insert("BinaryChecksums".to_string(), bytes.clone());
+        self.exec.search_attributes.get_or_insert_with(Default::default).insert("BinaryChecksums".to_string(), bytes);
+        self.dirty = true;
+        Ok(())
     }
 }

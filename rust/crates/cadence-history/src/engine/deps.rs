@@ -305,6 +305,8 @@ pub struct DomainCacheEntry {
     pub failover_end_time: Option<i64>,
     /// `GetReplicationConfig().Clusters` names.
     pub clusters: Vec<String>,
+    /// Checksums of `GetConfig().BadBinaries.Binaries`.
+    pub bad_binaries: Vec<String>,
 }
 impl DomainCacheEntry {
     /// `IsDomainPendingActive`
