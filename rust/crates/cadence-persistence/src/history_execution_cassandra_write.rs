@@ -936,7 +936,8 @@ pub(crate) fn push_one_task(st: &mut Stmts, shard: i32, category: &HistoryTaskCa
     let decoded = decode_struct(&task.data);
     match (category.category_type, category.category_id) {
         (1, 1) => {
-            let t = sqlblobs::transfer_task_from_struct(&decoded?).map_err(internal)?;
+            let mut t = sqlblobs::transfer_task_from_struct(&decoded?).map_err(internal)?;
+            t.task_id = task.task_id;
             push_task_row(
                 st,
                 shard,
@@ -951,7 +952,10 @@ pub(crate) fn push_one_task(st: &mut Stmts, shard: i32, category: &HistoryTaskCa
             );
         }
         (2, 2) => {
-            let t = sqlblobs::timer_task_from_struct(&decoded?).map_err(internal)?;
+            let mut t = sqlblobs::timer_task_from_struct(&decoded?).map_err(internal)?;
+            t.task_id = task.task_id;
+            // The thrift blob carries no visibility time: it comes from the Task (Go `GetVisibilityTimestamp`).
+            t.visibility_timestamp_unix_nanos = task.visibility_timestamp_unix_nanos;
             push_task_row(
                 st,
                 shard,
@@ -966,7 +970,8 @@ pub(crate) fn push_one_task(st: &mut Stmts, shard: i32, category: &HistoryTaskCa
             );
         }
         (1, 3) => {
-            let t = sqlblobs::replication_task_from_struct(&decoded?).map_err(internal)?;
+            let mut t = sqlblobs::replication_task_from_struct(&decoded?).map_err(internal)?;
+            t.task_id = task.task_id;
             push_task_row(
                 st,
                 shard,
