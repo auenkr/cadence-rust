@@ -18,6 +18,7 @@
 
 - Local validation: `git diff --check` only. No local Cargo, rustfmt or Go command was run.
 - CI dispatched with `gh workflow run rust-ci.yml --ref history-mscodec -f package=cadence-history`.
-- Run URL: pending.
-- Code head SHA: `349614331602e7eef7f1a403f510aa33bb0fc3cc`.
-- Conclusion: pending CI.
+- Run URL: https://github.com/auenkr/cadence-rust/actions/runs/42945698494
+- Code head SHA: `8e361e3029d8d5a8636fc0d817386b5b792a0b7e`.
+- Conclusion: success (Clippy, formatting and cadence-history tests).
+- The initial run on `89ce229c18bba0112e70be38412a3754005f4641` failed Clippy for one unused import; it was removed and the successful run above validates the corrected code head.
