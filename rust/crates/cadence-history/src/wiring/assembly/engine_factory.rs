@@ -260,23 +260,54 @@ pub fn build_engine(
         )),
         history_event_notifier: Arc::new(NotifierAdapter::new(Notifier::new())),
         task_refresher: Arc::new(super::engine_refresher::EngineTaskRefresher::new(env.domain_cache.clone())),
-        events_reapplier: Arc::new(UnwiredEventsReapplier),
+        events_reapplier: Arc::new(EngineEventsReapplier),
         replication_task_store: replication.task_store.clone(),
     })
 }
 
-struct UnwiredEventsReapplier;
+/// Go `ndc.eventsReapplierImpl` over the engine mutable state.
+struct EngineEventsReapplier;
 
 #[async_trait::async_trait]
-impl crate::engine::runtime::EventsReapplier for UnwiredEventsReapplier {
+impl crate::engine::runtime::EventsReapplier for EngineEventsReapplier {
     async fn reapply_events(
         &self,
-        _state: crate::engine::deps::MutableStateRef,
-        _events: &[cadence_api::service_types::HistoryEvent],
-        _run_id: &str,
+        state: crate::engine::deps::MutableStateRef,
+        events: &[cadence_api::service_types::HistoryEvent],
+        run_id: &str,
     ) -> HResult<Vec<cadence_api::service_types::HistoryEvent>> {
-        Err(HistoryError::internal("ndc events reapplier is not wired"))
+        reapply_signal_events(&*state, events, run_id)
     }
+}
+
+fn reapply_signal_events(
+    state: &dyn crate::engine::deps::MutableState,
+    events: &[cadence_api::service_types::HistoryEvent],
+    run_id: &str,
+) -> HResult<Vec<cadence_api::service_types::HistoryEvent>> {
+    use crate::engine::reapply_events::event_reapplied_id;
+    let mut reapplied = Vec::new();
+    for event in events {
+        if event.event_type == Some(cadence_api::enums::EventType::WorkflowExecutionSignaled) {
+            if state.is_resource_duplicated(&event_reapplied_id(run_id, event.event_id, event.version)) {
+                continue;
+            }
+            reapplied.push(event.clone());
+        }
+    }
+    if reapplied.is_empty() {
+        return Ok(Vec::new());
+    }
+    if !state.is_workflow_execution_running() {
+        return Err(HistoryError::internal("unable to reapply events to closed workflow."));
+    }
+    for event in &reapplied {
+        let signal = event.workflow_execution_signaled_event_attributes.clone().unwrap_or_default();
+        // Do not set requestID for requests reapplied, because they have already been applied previously
+        state.add_workflow_execution_signaled(&signal.signal_name, &signal.input, &signal.identity, "")?;
+        state.update_duplicated_resource(&event_reapplied_id(run_id, event.event_id, event.version));
+    }
+    Ok(reapplied)
 }
 
 /// `EngineLifecycleHost`: replication DLQ handler, metrics emitter and task processors are the
@@ -303,4 +334,59 @@ impl crate::engine::lifecycle::EngineLifecycleHost for EngineLifecycleParts {
     fn enable_graceful_failover(&self) -> bool { (self.graceful_failover)() }
     fn start_failover_marker_notifier(&self) { crate::failover::MarkerNotifier::start(self.marker_notifier.clone()); }
     fn stop_failover_marker_notifier(&self) { crate::failover::MarkerNotifier::stop(&*self.marker_notifier); }
+}
+
+#[cfg(test)]
+mod reapplier_tests {
+    use super::*;
+    use crate::engine::deps::{DomainCacheEntry, DomainInfo};
+    use crate::engine::deps_ms::MutableState;
+    use crate::wiring::assembly::engine_state::EngineMutableState;
+    use cadence_api::enums::EventType;
+    use cadence_api::service_types::{HistoryEvent, WorkflowExecutionSignaledEventAttributes};
+    use cadence_persistence::history_contract as pc;
+
+    fn state() -> EngineMutableState {
+        let domain = DomainCacheEntry {
+            info: DomainInfo { id: "d".into(), name: "n".into(), status: 0 },
+            ..Default::default()
+        };
+        let mut snapshot = pc::WorkflowSnapshot::default();
+        snapshot.execution_info.domain_id = "d".into();
+        snapshot.execution_info.workflow_id = "wf".into();
+        snapshot.execution_info.run_id = "run".into();
+        snapshot.execution_info.next_event_id = 5;
+        EngineMutableState::from_snapshot(snapshot, domain, 0, Arc::new(|| 1_700_000_000_000_000_000)).unwrap()
+    }
+
+    fn signal(id: i64) -> HistoryEvent {
+        HistoryEvent {
+            event_id: id,
+            version: 7,
+            event_type: Some(EventType::WorkflowExecutionSignaled),
+            workflow_execution_signaled_event_attributes: Some(WorkflowExecutionSignaledEventAttributes {
+                signal_name: "sig".into(),
+                identity: "i".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn reapplies_signal_once_and_dedups() {
+        let s = state();
+        let out = reapply_signal_events(&s, &[signal(2)], "run").unwrap();
+        assert_eq!(out.len(), 1);
+        assert!(s.is_resource_duplicated(&crate::engine::reapply_events::event_reapplied_id("run", 2, 7)));
+        // second delivery of the same event is skipped
+        assert!(reapply_signal_events(&s, &[signal(2)], "run").unwrap().is_empty());
+    }
+
+    #[test]
+    fn ignores_non_signal_events() {
+        let s = state();
+        let ev = HistoryEvent { event_id: 3, event_type: Some(EventType::DecisionTaskScheduled), ..Default::default() };
+        assert!(reapply_signal_events(&s, &[ev], "run").unwrap().is_empty());
+    }
 }
