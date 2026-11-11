@@ -48,9 +48,18 @@ pub struct EngineCore {
     /// Filled once the shard's `HistoryEngine` exists; used to notify the queue
     /// processors of new tasks (Go `shard.taskNotifier.notifyTasks`).
     pub engine_slot: Arc<std::sync::OnceLock<std::sync::Weak<crate::engine::runtime::HistoryEngine>>>,
+    /// `config.EnableStrongIdempotencySanityCheck(domainName)`.
+    pub strong_idempotency_sanity_check: Arc<dyn Fn(&str) -> bool + Send + Sync>,
 }
 
 impl EngineCore {
+    /// Go `shard.GetEngine().NotifyNewHistoryEvent`. No engine yet: nothing to wake.
+    pub(super) fn notify_history_event(&self, event: crate::engine::runtime::HistoryNotification) {
+        if let Some(engine) = self.engine_slot.get().and_then(std::sync::Weak::upgrade) {
+            engine.notify_new_history_event(event);
+        }
+    }
+
     /// Go `taskNotifier.notifyTasks`: wakes the transfer / timer queue
     /// processors after a successful write of `transfer` / `timer` tasks.
     pub(super) fn notify_tasks(&self, transfer: &[pc::TransferTask], timer: &[pc::TimerTask]) {

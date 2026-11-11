@@ -252,6 +252,19 @@ pub trait NdcMutableState {
     }
     /// Called only after the prepared image has been durably committed.
     fn transaction_committed(&mut self) {}
+    /// `(LastFirstEventID, workflow state, close status)` for the history
+    /// notification (Go `events.NewNotification`). Explicit error unless supported.
+    fn history_notification_inputs(&self) -> NdcResult<(i64, i32, i32)> {
+        Err(NdcError::internal("history_notification_inputs is not supported by this mutable state"))
+    }
+}
+
+/// A workflow's state lent to a persistence write (a placeholder stays behind).
+pub struct NdcLentState {
+    pub domain_id: String,
+    pub execution: WorkflowExecution,
+    pub ms: Box<dyn NdcMutableState>,
+    pub history_size: i64,
 }
 
 /// Go `execution.Workflow` joined with its `execution.Context`, mutable state and
@@ -263,6 +276,13 @@ pub trait NdcWorkflow {
     fn replace_mutable_state(&mut self, ms: Box<dyn NdcMutableState>);
     fn clear(&mut self);
     fn set_history_size(&mut self, size: i64);
+    /// Lend state to a two-run write (the other run of a continued-as-new /
+    /// conflict-resolve). Explicit error unless supported.
+    fn lend_state(&mut self) -> NdcResult<NdcLentState> {
+        Err(NdcError::internal("lend_state is not supported by this workflow"))
+    }
+    /// Takes the committed state back after a successful write.
+    fn restore_state(&mut self, _ms: Box<dyn NdcMutableState>, _history_size: i64) {}
     /// Go `GetReleaseFn()(err)`.
     fn release(&mut self, err: Option<&NdcError>);
 

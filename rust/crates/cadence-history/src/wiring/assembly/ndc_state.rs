@@ -234,6 +234,10 @@ impl NdcMutableState for OwnedNdcMutableState {
         TransactionState::close_mutation(self, now_nanos, policy)
     }
     fn transaction_committed(&mut self) { self.typed.cleanup_transaction(); self.update_condition = self.typed.next_event_id_in_db; self.typed.condition = self.update_condition; }
+    fn history_notification_inputs(&self) -> NdcResult<(i64, i32, i32)> {
+        let info = &self.typed.execution_info;
+        Ok((info.last_first_event_id, info.state, info.close_status))
+    }
 }
 
 impl TransactionState for OwnedNdcMutableState {
