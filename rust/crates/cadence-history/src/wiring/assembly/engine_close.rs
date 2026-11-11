@@ -17,6 +17,7 @@ use crate::wiring::assembly::engine_state::EngineMutableState;
 
 /// Result of closing a transaction: the events to append to the history branch,
 /// the mutation (without task ids / history size) and the generated tasks.
+#[derive(Clone)]
 pub(super) struct ClosedTxn {
     pub events: Vec<HistoryEvent>,
     pub branch_token: Vec<u8>,
