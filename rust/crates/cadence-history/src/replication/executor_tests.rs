@@ -404,7 +404,6 @@ async fn failover_replication_task() {
             domain_id: Some("test-domain-id".into()),
             failover_version: Some(101),
             creation_time: Some(111),
-            ..Default::default()
         }),
         creation_time: Some(222),
         ..Default::default()
@@ -419,7 +418,6 @@ async fn failover_replication_task() {
             domain_id: Some("test-domain-id".into()),
             failover_version: Some(101),
             creation_time: Some(222),
-            ..Default::default()
         }]
     );
 }
