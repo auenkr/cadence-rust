@@ -113,7 +113,6 @@ impl Inner {
     }
 
     /// Go `GenerateActivityTransferTasks`.
-    #[allow(dead_code)]
     pub(super) fn gen_activity_transfer_task(&mut self, schedule_id: i64) {
         if let Some(a) = self.pc_acts.get(&schedule_id) {
             let mut t = self.transfer_base(TRANSFER_ACTIVITY_TASK, a.version);

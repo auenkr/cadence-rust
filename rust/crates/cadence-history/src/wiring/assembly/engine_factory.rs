@@ -200,7 +200,7 @@ pub fn build_engine(
 ) -> Arc<HistoryEngine> {
     let start_host = super::engine_start::EngineStartHost::new(core.clone(), env.config.clone());
     let failover_host = super::engine_start::EngineFailoverHost::new(shard.clone(), env.domain_cache.clone());
-    let decision_handler = Arc::new(EngineDecisionHandler::new(cache.clone(), core.clone()));
+    let decision_handler = Arc::new(EngineDecisionHandler::new(cache.clone(), core.clone(), env.config.clone()));
     Arc::new(HistoryEngine {
         current_cluster_name: env.cluster.metadata().current_cluster_name.clone(),
         domain_cache: env.domain_cache.clone(),
