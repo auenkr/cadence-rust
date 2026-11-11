@@ -33,3 +33,10 @@ use std::time::Duration;
 
 /// `replicationTimeout` (task_processor.go).
 pub const REPLICATION_TIMEOUT: Duration = Duration::from_secs(30);
+
+#[cfg(test)]
+mod test_support;
+#[cfg(test)]
+mod batch_sizer_tests;
+#[cfg(test)]
+mod reader_tests;
