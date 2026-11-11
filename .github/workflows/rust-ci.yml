@@ -50,7 +50,7 @@ on:
         type: boolean
         default: false
   push:
-    branches: ["master", "matching-*", "history-*"]
+    branches: ["master", "matching-*"]  # history-* branches are validated by workflow_dispatch only (avoids duplicate push+dispatch runs)
     paths: ["rust/**", ".github/workflows/rust-ci.yml", "go/idls"]
 
 concurrency:
@@ -89,14 +89,14 @@ jobs:
       CARGO_TERM_COLOR: never
       PKG: ${{ github.event.inputs.package }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Init IDL submodule
         run: git submodule update --init go/idls
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.25.14"
           cache: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         if: inputs.go_sdk_compile == true
         with:
           node-version: 22
@@ -135,7 +135,7 @@ jobs:
           if [ "$node_result" != 0 ] || [ "$python_result" != 0 ]; then exit 1; fi
       - name: Upload Go SDK fixture validation evidence
         if: always() && inputs.go_sdk_compile == true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: go-sdk-fixture-validation
           retention-days: 3
@@ -160,7 +160,7 @@ jobs:
           echo "MATCHING_GO_RAW_STRING_ORACLE=$evidence/go-oracle.json" >> "$GITHUB_ENV"
       - name: Upload Go raw-byte string oracle
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: matching-raw-string-oracle
           retention-days: 3
@@ -182,7 +182,7 @@ jobs:
           exit "$result"
       - name: Upload Go sqlblobs golden fixtures
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: sqlblobs-go-golden-fixtures
           retention-days: 3
@@ -209,7 +209,7 @@ jobs:
           exit "$result"
       - name: Upload original Go oracle evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: matching-describe-tasklist-go-oracle
           retention-days: 3
@@ -237,7 +237,7 @@ jobs:
           exit "$result"
       - name: Upload original-Go domain-cache UUID oracle evidence
         if: always() && inputs.go_domain_cache_uuid_oracle == true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: domain-cache-uuid-oracle
           retention-days: 3
@@ -272,7 +272,7 @@ jobs:
           exit "$result"
       - name: Upload original-Go source-domain boundary oracle evidence
         if: always() && inputs.go_domain_cache_uuid_oracle == true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: source-domain-boundary-oracle
           retention-days: 3
@@ -302,7 +302,7 @@ jobs:
           git -C "$GITHUB_WORKSPACE" diff --binary -- rust > "$RUNNER_TEMP/format-all.patch"
       - name: Upload workspace formatting patch
         if: always() && inputs.format_all == true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: format-all-patch
           retention-days: 3
@@ -353,7 +353,7 @@ jobs:
           git diff -- "${files[@]}" > "$RUNNER_TEMP/frontend-format.patch"
       - name: Upload Frontend formatting patch
         if: inputs.format_frontend_files == true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: frontend-format-patch
           retention-days: 3
@@ -475,7 +475,7 @@ jobs:
           git diff --binary -- "${files[@]}" > "$RUNNER_TEMP/matching-format.patch"
       - name: Upload Matching parity formatting patch
         if: always() && inputs.format_matching_parity_files == true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: matching-format-patch
           retention-days: 3
@@ -532,21 +532,21 @@ jobs:
             > "$RUNNER_TEMP/frontend-persistence-format.patch"
       - name: Upload Frontend persistence formatting patch
         if: always() && inputs.format_persistence_files == true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: frontend-persistence-format-patch
           retention-days: 3
           path: ${{ runner.temp }}/frontend-persistence-format.patch
       - name: Upload query formatting patch
         if: inputs.format_query_files == true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: query-format-patch
           retention-days: 3
           path: ${{ runner.temp }}/query-format.patch
       - name: Upload TLS formatting patch
         if: inputs.format_tls_files == true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: tls-format-patch
           retention-days: 3
@@ -566,6 +566,8 @@ jobs:
         if: inputs.clean_target != true
         with:
           workspaces: rust
+          # Only master saves the cache (10GB repo quota); branches restore master's cache.
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Format check
         working-directory: rust
         run: |
@@ -673,7 +675,7 @@ jobs:
           exit "$result"
       - name: Upload Frontend async wire evidence
         if: always() && (env.PKG == 'cadence-frontend' || env.PKG == '')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: frontend-async-wire-evidence
           retention-days: 3
@@ -724,7 +726,7 @@ jobs:
           cat "$RUNNER_TEMP/frontend-runtime.log"
       - name: Upload Frontend runtime smoke evidence
         if: always() && inputs.frontend_runtime_smoke == true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: frontend-runtime-smoke
           retention-days: 3
@@ -734,7 +736,7 @@ jobs:
             ${{ runner.temp }}/frontend-search-attributes.json
       - name: Upload Go panic quote oracle evidence
         if: always() && (inputs.package == 'cadence-matching' || inputs.package == '')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: matching-panic-quote-oracle
           retention-days: 3
@@ -754,7 +756,7 @@ jobs:
           sha256sum "${CARGO_TARGET_DIR:-rust/target}/debug/examples/matching_metrics_emission_oracle" > "$evidence/rust-binary.sha256"
       - name: Upload Matching metrics comparison evidence
         if: always() && (inputs.package == '' || inputs.package == 'cadence-server')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: matching-metrics-emission-evidence
           retention-days: 3
@@ -766,7 +768,7 @@ jobs:
           printf '%s\n' "${CARGO_TARGET_DIR:-$PWD/rust/target}" > rust/target-dir.txt
       - name: Upload logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: rust-ci-logs
           retention-days: 3
