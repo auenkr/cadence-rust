@@ -1,7 +1,11 @@
 //! Event replay into mutable state, corresponding to Go's `state_builder.go`.
 
 use cadence_api::{enums::EventType, service_types::HistoryEvent};
+use cadence_api::types::WorkflowExecution;
 use crate::mutable_state::{MutableStateBuilder, MutableStateError};
+use super::mutable_state_builder::{TypedMutableState, TypedMutableStateError};
+use super::mutable_state_methods_started::StartedEnv;
+use super::mutable_state_methods_decision::DecisionEnv;
 use super::{child_workflow::ChildWorkflowError, timer::TimerError};
 
 #[derive(Debug, thiserror::Error)]
@@ -18,6 +22,9 @@ pub enum StateBuilderError {
     #[error("unable to get semaphore info")] MissingSemaphoreInfo,
     #[error("unsupported or malformed replicated event {event_type:?} ({event_id})")]
     InvalidEvent { event_type: Option<EventType>, event_id: i64 },
+    #[error("event type {event_type:?} is not yet supported in typed replay")]
+    TypedReplayNotYetSupported { event_type: Option<EventType> },
+    #[error(transparent)] Typed(#[from] TypedMutableStateError),
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -63,6 +70,81 @@ impl StateBuilder {
         Ok(())
     }
     pub fn new(mutable_state: MutableStateBuilder) -> Self { Self { mutable_state } }
+
+    /// Replay the currently supported history families into typed mutable state.
+    /// Incoming events are metadata and are never appended or assigned new IDs.
+    pub fn apply_events_typed(
+        state: &mut TypedMutableState,
+        domain_id: &str,
+        request_id: &str,
+        workflow_execution: &WorkflowExecution,
+        events: &[HistoryEvent],
+    ) -> Result<(), StateBuilderError> {
+        let (Some(first), Some(last)) = (events.first(), events.last()) else {
+            return Err(StateBuilderError::HistorySizeZero);
+        };
+        state.clear_stickyness();
+        let old_suppression = state.suppress_task_generation;
+        state.suppress_task_generation = true;
+        let result = (|| {
+            for event in events {
+                state.update_current_version(event.version, true)?;
+                let histories = state.version_histories.as_mut().ok_or(StateBuilderError::MissingVersionHistories)?;
+                let idx = histories.current_version_history_index as usize;
+                let history = histories.histories.get_mut(idx).ok_or(StateBuilderError::MissingVersionHistories)?;
+                add_or_update_version_item(&mut history.items, event.event_id, event.version)?;
+                state.execution_info.last_event_task_id = event.task_id;
+
+                match event.event_type {
+                    Some(EventType::WorkflowExecutionStarted) => {
+                        let parent_domain_id = event.workflow_execution_started_event_attributes.as_ref()
+                            .and_then(|a| a.parent_workflow_domain_id.as_deref());
+                        state.replicate_workflow_execution_started_event(
+                            &mut StartedEnv { domain_id: domain_id.to_string(), ..Default::default() },
+                            parent_domain_id,
+                            &workflow_execution.workflow_id,
+                            &workflow_execution.run_id,
+                            request_id,
+                            event,
+                            false,
+                        )?;
+                    }
+                    Some(EventType::DecisionTaskScheduled) => {
+                        let a = event.decision_task_scheduled_event_attributes.as_ref().ok_or(StateBuilderError::InvalidEvent { event_type: event.event_type, event_id: event.event_id })?;
+                        state.replicate_decision_task_scheduled_event(
+                            event.version, event.event_id,
+                            a.task_list.as_ref().map(|t| t.name.as_str()).unwrap_or_default(),
+                            a.start_to_close_timeout_seconds.unwrap_or_default(), a.attempt,
+                            event.timestamp.unwrap_or_default(), event.timestamp.unwrap_or_default(), true,
+                        )?;
+                    }
+                    Some(EventType::DecisionTaskStarted) => {
+                        let a = event.decision_task_started_event_attributes.as_ref().ok_or(StateBuilderError::InvalidEvent { event_type: event.event_type, event_id: event.event_id })?;
+                        state.replicate_decision_task_started_event(None, event.version, a.scheduled_event_id, event.event_id, &a.request_id, event.timestamp.unwrap_or_default())?;
+                    }
+                    Some(EventType::DecisionTaskCompleted) => state.replicate_decision_task_completed_event(&mut DecisionEnv::default(), event)?,
+                    Some(EventType::DecisionTaskTimedOut) => state.replicate_decision_task_timed_out_event(&DecisionEnv::default(), event)?,
+                    Some(EventType::DecisionTaskFailed) => state.replicate_decision_task_failed_event(&DecisionEnv::default(), Some(event))?,
+                    Some(EventType::ActivityTaskScheduled) => {
+                        state.replicate_activity_task_scheduled_event(first.event_id, event, domain_id)?;
+                    }
+                    Some(EventType::ActivityTaskStarted) => state.replicate_activity_task_started_event(event)?,
+                    Some(EventType::ActivityTaskCompleted) => state.replicate_activity_task_completed_event(event)?,
+                    Some(EventType::ActivityTaskFailed) => state.replicate_activity_task_failed_event(event)?,
+                    Some(EventType::ActivityTaskTimedOut) => state.replicate_activity_task_timed_out_event(event)?,
+                    Some(EventType::ActivityTaskCancelRequested) => state.replicate_activity_task_cancel_requested_event(event)?,
+                    Some(EventType::ActivityTaskCanceled) => state.replicate_activity_task_canceled_event(event)?,
+                    Some(EventType::RequestCancelActivityTaskFailed) => {}
+                    other => return Err(StateBuilderError::TypedReplayNotYetSupported { event_type: other }),
+                }
+            }
+            state.execution_info.last_first_event_id = first.event_id;
+            state.execution_info.next_event_id = last.event_id.saturating_add(1);
+            Ok(())
+        })();
+        state.suppress_task_generation = old_suppression;
+        result
+    }
     /// Go `ApplyEvents`: replicates a batch onto mutable state.
     pub fn apply_events(&mut self, events: &[HistoryEvent]) -> Result<(), StateBuilderError> {
         // Go: errMessageHistorySizeZero
@@ -161,4 +243,54 @@ fn add_or_update_version_item(items: &mut Vec<cadence_api::types::VersionHistory
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod typed_replay_tests {
+    use super::*;
+    use cadence_api::{enums::EventType, tasks::ActivityTaskStartedEventAttributes, types::{VersionHistories, VersionHistory, TaskList}};
+
+    fn state() -> TypedMutableState {
+        let mut state = TypedMutableState::new();
+        state.version_histories = Some(VersionHistories {
+            current_version_history_index: 0,
+            histories: vec![VersionHistory { branch_token: vec![1], items: vec![] }],
+        });
+        state
+    }
+
+    #[test]
+    fn typed_replay_keeps_batch_ids_indexes_and_does_not_append_or_generate_tasks() {
+        let mut state = state();
+        let workflow = WorkflowExecution::new("wf", "run");
+        let scheduled = HistoryEvent {
+            event_id: 10, timestamp: Some(100), event_type: Some(EventType::ActivityTaskScheduled), version: 3, task_id: 41,
+            activity_task_scheduled_event_attributes: Some(cadence_api::tasks::ActivityTaskScheduledEventAttributes {
+                activity_id: "activity-a".into(), task_list: Some(TaskList { name: "activities".into(), ..Default::default() }), ..Default::default()
+            }), ..Default::default()
+        };
+        StateBuilder::apply_events_typed(&mut state, "domain", "request", &workflow, &[scheduled]).unwrap();
+        let started = HistoryEvent {
+            event_id: 11, timestamp: Some(110), event_type: Some(EventType::ActivityTaskStarted), version: 3, task_id: 42,
+            activity_task_started_event_attributes: Some(ActivityTaskStartedEventAttributes { scheduled_event_id: 10, request_id: "activity-request".into(), ..Default::default() }),
+            ..Default::default()
+        };
+        StateBuilder::apply_events_typed(&mut state, "domain", "request", &workflow, &[started]).unwrap();
+        let activity = &state.pending_activity_info_ids[&10];
+        assert_eq!(activity.scheduled_event_batch_id, 10);
+        assert_eq!(activity.started_id, 11);
+        assert_eq!(state.execution_info.last_event_task_id, 42);
+        assert_eq!(state.execution_info.last_first_event_id, 11);
+        assert_eq!(state.execution_info.next_event_id, 12);
+        assert!(state.history_events.is_empty());
+        assert!(state.transfer_tasks.is_empty());
+        assert!(state.timer_tasks.is_empty());
+    }
+
+    #[test]
+    fn typed_replay_rejects_unimplemented_events_explicitly() {
+        let mut state = state();
+        let event = HistoryEvent { event_type: Some(EventType::TimerStarted), ..Default::default() };
+        assert!(matches!(StateBuilder::apply_events_typed(&mut state, "d", "r", &WorkflowExecution::default(), &[event]), Err(StateBuilderError::TypedReplayNotYetSupported { .. })));
+    }
 }

@@ -382,7 +382,7 @@ impl TypedMutableState {
             original_schedule_timestamp: original_scheduled_timestamp,
         };
         self.update_decision(&decision);
-        if !bypass_task_generation {
+        if !bypass_task_generation && !self.suppress_task_generation {
             let timeout = self.env_decision_schedule_to_start_timeout_nanos();
             self.run_task_generator(timeout, |g| g.generate_decision_schedule_tasks(decision.schedule_id))?;
         }
@@ -408,6 +408,7 @@ impl TypedMutableState {
             ..DecisionInfo::default()
         };
         self.update_decision(&decision);
+        if self.suppress_task_generation { return Ok(()); }
         let timeout = self.env_decision_schedule_to_start_timeout_nanos();
         self.run_task_generator(timeout, |g| g.generate_decision_schedule_tasks(decision.schedule_id))
     }
@@ -514,7 +515,9 @@ impl TypedMutableState {
             original_schedule_timestamp: decision.original_schedule_timestamp,
         };
         self.update_decision(&updated);
-        self.run_task_generator(0, |g| g.generate_decision_start_tasks(schedule_id))?;
+        if !self.suppress_task_generation {
+            self.run_task_generator(0, |g| g.generate_decision_start_tasks(schedule_id))?;
+        }
         Ok(updated)
     }
 
@@ -923,7 +926,7 @@ impl TypedMutableState {
         self.execution_info
             .search_attributes
             .insert(BINARY_CHECKSUMS.to_string(), bytes);
-        if env.advanced_visibility_writing {
+        if env.advanced_visibility_writing && !self.suppress_task_generation {
             self.run_task_generator(0, |g| g.generate_workflow_search_attr_tasks())?;
         }
         Ok(())
