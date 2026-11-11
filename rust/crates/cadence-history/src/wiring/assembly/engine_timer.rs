@@ -346,3 +346,46 @@ impl EngineMutableState {
         self.inner.lock().unwrap().pc_acts.get(&schedule_id).is_some_and(|a| a.started_id == TRANSIENT_EVENT_ID)
     }
 }
+
+impl EngineMutableState {
+    /// Go `timerSequence.CreateNextActivityTimer`: true when a timer task was created.
+    pub fn create_next_activity_timer_task(&self) -> bool {
+        let mut g = self.inner.lock().unwrap();
+        let before = g.timer_tasks.len();
+        g.create_next_activity_timer();
+        g.timer_tasks.len() > before
+    }
+
+    /// Go `mutableStateBuilder.UpdateCurrentVersion`.
+    pub fn update_current_version(&self, version: i64, force_update: bool) -> HResult<()> {
+        let mut g = self.inner.lock().unwrap();
+        if !g.exec.is_running() {
+            // Completed workflows always take the last write version.
+            let last = match &g.version_histories {
+                Some(vh) => vh
+                    .histories
+                    .get(vh.current_version_history_index as usize)
+                    .and_then(|h| h.items.last().map(|i| i.version))
+                    .unwrap_or(-24),
+                None => -24,
+            };
+            g.current_version = last;
+            return Ok(());
+        }
+        let Some(vh) = g.version_histories.clone() else {
+            g.current_version = -24;
+            return Ok(());
+        };
+        let current = vh
+            .histories
+            .get(vh.current_version_history_index as usize)
+            .ok_or_else(|| HistoryError::internal("current version history index out of range"))?;
+        if let Some(last) = current.items.last() {
+            g.current_version = last.version;
+        }
+        if version > g.current_version || force_update {
+            g.current_version = version;
+        }
+        Ok(())
+    }
+}

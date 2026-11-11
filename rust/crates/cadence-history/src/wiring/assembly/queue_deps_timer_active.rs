@@ -25,6 +25,8 @@ use crate::task::deps::{BytesMap, PersistenceTask, Result as TaskResult, TaskErr
 use crate::task::timer_active_task_executor::{
     TimerActiveDependencies, TimerActivityInfo, TimerDecisionInfo, TimerSequenceId, TimerType, TimerWorkflow, UserTimerInfo,
 };
+use crate::task::standby_task_util::HistoryResendInfo;
+use crate::task::timer_standby_task_executor::StandbyTimerWorkflow;
 use crate::task::transfer_task_executor_base::{AddMatchingTaskRequest, TransferDependencies};
 
 fn todo_err<T>(what: &str) -> TaskResult<T> {
@@ -71,7 +73,7 @@ fn he(e: HistoryError) -> TaskError {
 }
 
 /// `TimerWorkflow` over a locked execution context and its loaded mutable state.
-struct EngineTimerWorkflow {
+pub(super) struct EngineTimerWorkflow {
     state: Arc<EngineMutableState>,
     context: Arc<EngineExecutionContext>,
     release: ReleaseFunc,
@@ -238,6 +240,56 @@ impl TimerWorkflow for EngineTimerWorkflow {
     }
 }
 
+/// Go `StandbyTimerWorkflow` operations (mutable state `GetLastWriteVersion`, `GetVersionHistories`,
+/// `CreateNextActivityTimer`, `UpdateCurrentVersion` and context `UpdateWorkflowExecutionAsPassive`).
+#[async_trait]
+impl StandbyTimerWorkflow for EngineTimerWorkflow {
+    fn last_write_version(&self) -> TaskResult<i64> {
+        self.state.get_last_write_version().map_err(he)
+    }
+    fn history_resend_info(&self) -> TaskResult<HistoryResendInfo> {
+        let histories = self.state.get_version_histories().ok_or(TaskError::MissingVersionHistories)?;
+        let current = histories
+            .histories
+            .get(histories.current_version_history_index as usize)
+            .ok_or_else(|| TaskError::Other("current version history index out of range".into()))?;
+        let last = current.items.last().ok_or_else(|| TaskError::Other("version history is empty".into()))?;
+        Ok(HistoryResendInfo { last_event_id: Some(last.event_id), last_event_version: Some(last.version) })
+    }
+    fn create_next_activity_timer(&self) -> TaskResult<bool> {
+        Ok(self.state.create_next_activity_timer_task())
+    }
+    fn update_current_version(&self, version: i64, force: bool) -> TaskResult<()> {
+        self.state.update_current_version(version, force).map_err(he)
+    }
+    async fn update_workflow_execution_as_passive(&self, now: Time) -> TaskResult<()> {
+        self.context.update_as_passive(now.0).await.map_err(he)
+    }
+}
+
+/// Loads the workflow through the shard execution cache (Go `loadWorkflowOnce`); a missing
+/// execution yields `None`.
+pub(super) async fn load_engine_timer_workflow(
+    cache: &EngineExecutionCache,
+    task: &dyn PersistenceTask,
+) -> TaskResult<Option<Arc<EngineTimerWorkflow>>> {
+    let execution = WorkflowExecution {
+        workflow_id: task.get_workflow_id().to_string(),
+        run_id: task.get_run_id().to_string(),
+    };
+    let (context, release) = cache.get_or_create(task.get_domain_id(), &execution).await.map_err(he)?;
+    match context.load_state().await {
+        Ok(state) => Ok(Some(Arc::new(EngineTimerWorkflow { state, context, release }))),
+        Err(e) => {
+            release(Some(&e));
+            match he(e) {
+                TaskError::EntityNotExists(_) => Ok(None),
+                other => Err(other),
+            }
+        }
+    }
+}
+
 /// `TimerActiveDependencies` over the shard's execution cache, config and matching client.
 pub struct TimerActiveDepsImpl {
     env: Arc<HistoryEnv>,
@@ -255,21 +307,7 @@ impl TimerActiveDepsImpl {
 #[async_trait]
 impl TimerActiveDependencies for TimerActiveDepsImpl {
     async fn load_workflow(&self, task: &dyn PersistenceTask, _event_id: i64) -> TaskResult<Option<Arc<dyn TimerWorkflow>>> {
-        let execution = WorkflowExecution {
-            workflow_id: task.get_workflow_id().to_string(),
-            run_id: task.get_run_id().to_string(),
-        };
-        let (context, release) = self.cache.get_or_create(task.get_domain_id(), &execution).await.map_err(he)?;
-        match context.load_state().await {
-            Ok(state) => Ok(Some(Arc::new(EngineTimerWorkflow { state, context, release }))),
-            Err(e) => {
-                release(Some(&e));
-                match he(e) {
-                    TaskError::EntityNotExists(_) => Ok(None),
-                    other => Err(other),
-                }
-            }
-        }
+        Ok(load_engine_timer_workflow(&self.cache, task).await?.map(|w| w as Arc<dyn TimerWorkflow>))
     }
 
     fn resurrection_check_min_delay(&self, domain: &str) -> Duration {

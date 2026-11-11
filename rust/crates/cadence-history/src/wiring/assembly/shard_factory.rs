@@ -200,6 +200,44 @@ impl TaskReinjector for ReinjectorSlot {
     }
 }
 
+/// Port of Go `shard.Context.ReinjectHistoryTasks` for the SQL persistence
+/// backend: closed check, group by (domain, workflow), resolve domain entries
+/// before the write path, then `ExecutionManager.CreateHistoryTasks`, which
+/// SQL does not implement (Go `errHistoryTasksNotImplemented`). The task-id
+/// allocation Go performs before that call is not observable on SQL because
+/// the persistence call always fails.
+pub struct ShardTaskReinjector {
+    shard: Arc<ShardContext>,
+    domain_cache: Arc<dyn task::DomainCache>,
+}
+
+impl ShardTaskReinjector {
+    pub fn new(shard: Arc<ShardContext>, domain_cache: Arc<dyn task::DomainCache>) -> Arc<Self> {
+        Arc::new(Self { shard, domain_cache })
+    }
+}
+
+#[async_trait]
+impl TaskReinjector for ShardTaskReinjector {
+    async fn reinject_history_tasks(
+        &self,
+        _ctx: &CancellationToken,
+        tasks: Vec<Arc<dyn task::PersistenceTask>>,
+    ) -> Result<(), task::TaskError> {
+        if let Some(ShardContextError::ShardClosed { closed_at_nanos }) = self.shard.closed_error() {
+            return Err(task::TaskError::ShardClosed { closed_at: task::Time(closed_at_nanos) });
+        }
+        let mut domains = std::collections::HashSet::new();
+        for t in &tasks {
+            domains.insert(t.get_domain_id().to_owned());
+        }
+        for d in &domains {
+            self.domain_cache.get_domain_by_id(d)?;
+        }
+        Err(task::TaskError::InternalService("create history tasks not implemented for SQL".into()))
+    }
+}
+
 struct ShardService {
     scopes: Arc<dyn task::DomainMetricsScopeCache>,
     dlq: Arc<dyn crate::taskdlq::processor::HistoryTaskDLQManager>,
