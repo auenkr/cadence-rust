@@ -135,7 +135,7 @@ impl PendingActivityMutableState for TypedReset<'_> {
             .map(|ai| PendingActivityInfo {
                 schedule_id: ai.schedule_id,
                 started_id: ai.started_id,
-                scheduled_time_unix_nanos: ai.scheduled_time_unix_nanos,
+                scheduled_time_unix_nanos: ai.scheduled_time,
                 timer_task_status: ai.timer_task_status,
                 // Heartbeat details are persisted separately in the Rust model.
                 details: Vec::new(),
@@ -149,7 +149,7 @@ impl PendingActivityMutableState for TypedReset<'_> {
             .get_activity_info(activity.schedule_id)
             .cloned()
             .ok_or_else(|| ResetError("unable to get activity info".into()))?;
-        ai.scheduled_time_unix_nanos = activity.scheduled_time_unix_nanos;
+        ai.scheduled_time = activity.scheduled_time_unix_nanos;
         ai.timer_task_status = activity.timer_task_status;
         self.state.update_activity_checked(ai).map_err(typed_err)
     }
@@ -444,7 +444,7 @@ impl EngineWorkflowResetter {
                 workflow_request_mode: pc::WorkflowRequestMode::New,
                 current_timestamp_unix_nanos: prepared.now,
             };
-            core.executions.create_workflow_execution(create).await.map_err(to_history_error)
+            core.executions.create_workflow_execution(create).await.map(|_| ()).map_err(to_history_error)
         };
         match result {
             Ok(()) => {
@@ -518,7 +518,8 @@ mod tests {
     #[test]
     fn pending_children_map_to_bad_request_and_others_to_internal() {
         let err = reset_err(ResetError("Can not reset workflow with pending child workflows".into()));
-        assert!(matches!(err, HistoryError::BadRequest { .. } | HistoryError::BadRequestError(_)) || err.to_string().contains("pending child"));
+        assert_eq!(err.to_string(), HistoryError::bad_request("Can not reset workflow with pending child workflows").to_string());
+        assert!(err.to_string().contains("pending child"));
         let err = reset_err(ResetError("workflowResetter encounter version mismatch.".into()));
         assert!(err.to_string().contains("version mismatch"));
     }
