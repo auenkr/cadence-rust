@@ -122,7 +122,10 @@ impl StateBuilder {
                         let a = event.decision_task_started_event_attributes.as_ref().ok_or(StateBuilderError::InvalidEvent { event_type: event.event_type, event_id: event.event_id })?;
                         state.replicate_decision_task_started_event(None, event.version, a.scheduled_event_id, event.event_id, &a.request_id, event.timestamp.unwrap_or_default())?;
                     }
-                    Some(EventType::DecisionTaskCompleted) => state.replicate_decision_task_completed_event(&mut DecisionEnv::default(), event)?,
+                    Some(EventType::DecisionTaskCompleted) => {
+                        let mut env = DecisionEnv { now_nanos: event.timestamp.unwrap_or_default(), ..Default::default() };
+                        state.replicate_decision_task_completed_event(&mut env, event)?;
+                    }
                     Some(EventType::DecisionTaskTimedOut) => {
                         let env = DecisionEnv { now_nanos: event.timestamp.unwrap_or_default(), ..Default::default() };
                         state.replicate_decision_task_timed_out_event(&env, event)?;
@@ -271,13 +274,14 @@ mod typed_replay_tests {
     fn typed_replay_keeps_batch_ids_indexes_and_does_not_append_or_generate_tasks() {
         let mut state = state();
         let workflow = WorkflowExecution::new("wf", "run");
+        let batch_prefix = HistoryEvent { event_id: 9, timestamp: Some(90), event_type: Some(EventType::RequestCancelActivityTaskFailed), version: 3, task_id: 40, ..Default::default() };
         let scheduled = HistoryEvent {
             event_id: 10, timestamp: Some(100), event_type: Some(EventType::ActivityTaskScheduled), version: 3, task_id: 41,
             activity_task_scheduled_event_attributes: Some(cadence_api::tasks::ActivityTaskScheduledEventAttributes {
                 activity_id: "activity-a".into(), task_list: Some(TaskList { name: "activities".into(), ..Default::default() }), ..Default::default()
             }), ..Default::default()
         };
-        StateBuilder::apply_events_typed(&mut state, "domain", "request", &workflow, &[scheduled]).unwrap();
+        StateBuilder::apply_events_typed(&mut state, "domain", "request", &workflow, &[batch_prefix, scheduled]).unwrap();
         let started = HistoryEvent {
             event_id: 11, timestamp: Some(110), event_type: Some(EventType::ActivityTaskStarted), version: 3, task_id: 42,
             activity_task_started_event_attributes: Some(ActivityTaskStartedEventAttributes { scheduled_event_id: 10, request_id: "activity-request".into(), ..Default::default() }),
@@ -285,7 +289,7 @@ mod typed_replay_tests {
         };
         StateBuilder::apply_events_typed(&mut state, "domain", "request", &workflow, &[started]).unwrap();
         let activity = &state.pending_activity_info_ids[&10];
-        assert_eq!(activity.scheduled_event_batch_id, 10);
+        assert_eq!(activity.scheduled_event_batch_id, 9);
         assert_eq!(activity.started_id, 11);
         assert_eq!(state.execution_info.last_event_task_id, 42);
         assert_eq!(state.execution_info.last_first_event_id, 11);
