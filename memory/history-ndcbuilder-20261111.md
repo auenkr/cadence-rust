@@ -11,4 +11,6 @@ Branch `history-ndcbuilder` (from master f5b2c2a18).
 - Version/attempt ordering policy stays in activity_replicator; the adapter test only checks values are carried.
 
 ## CI
-- Run URL / code head SHA / conclusion: pending
+- Run: https://github.com/auenkr/cadence-rust/actions/runs/43001932124
+- Code head SHA: `b79921dab58fd2fe5c86da5f266f534d4befd7f2`
+- Conclusion: success (cadence-history clippy + 169 tests; no Cargo/rustfmt/Go run locally)
