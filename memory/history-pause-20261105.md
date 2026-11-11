@@ -63,3 +63,20 @@ Remaining gaps:
 - Archival: HistoryBatchSource over history store, s3/gcs writers, archival signal client, dynamic-config rates.
 - Replication clients to remote clusters dial without TLS. History DLQ manager. OpenFeature DC.
 - Then: mixed-cluster gate + parity audit.
+
+## 2026-11-11 pause (13:30 IST, at user request)
+Workers: hard = Sonnet 5.5 low, simple = gpt-6-luna medium, 3 parallel. All workers finished; no open worker branches.
+Merged today (each CI green on its code head; per-branch notes memory/history-*-20261111.md):
+parallel-task-processor, owned-mutstate (plan 1), mscodec (2a), typed-replay (3a), queueexec-assembly (live queue executors),
+msoverlay (2b), ndccache (4b), typed-replay2 (3b partial), mstxn (4a), gate-fix1. Latest master ccc351922, CI run 42983617639 (pending at pause).
+
+Mixed gate (Rust History+Frontend+Matching, Go Worker, MySQL/gRPC): still FAILS, run 42979556819 (27/144 steps).
+start-echo and start-child now pass. FIRST BLOCKER: RespondDecisionTaskCompleted not ported —
+engine_decision.rs handle_decision_task_completed TODO. Needs Go decision/handler.go HandleDecisionTaskCompleted,
+task_handler.go command processor, checker.go, plus engine mutable-state methods for activity/timer/child/completion events (~3k Go lines).
+Split into several worker tasks next session.
+
+Other open gaps: 3b leftovers (marker/search-attr/semaphore storage in typed state, CAN new-run state, NDC builder TODO);
+typed replay emits empty workflow-request payloads (4a now rejects them); task-ID allocation coverage at shard boundary;
+plan 5a/5b/6/7/8 not started; hierarchical WRR scheduler not ported; reinjector unbound; timer standby load_workflow,
+timer retry/continue-as-new TODO; NDC workflow persistence + terminate/failover/schedule_decision explicit errors.
