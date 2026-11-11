@@ -75,7 +75,7 @@ impl SchedulerConfig for SchedulerCfg {
 pub struct SchedTask(Arc<dyn ti::Task>);
 
 impl SchedTask {
-    pub fn new(task: Arc<dyn ti::Task>) -> TaskRef {
+    pub fn wrap(task: Arc<dyn ti::Task>) -> TaskRef {
         Arc::new(Self(task))
     }
 }
@@ -121,10 +121,10 @@ impl t::Daemon for SchedulerProcessor {
 #[async_trait]
 impl ti::Processor for SchedulerProcessor {
     async fn submit(&self, task: Arc<dyn ti::Task>) -> t::Result<()> {
-        self.scheduler.submit(SchedTask::new(task)).await.map_err(|e| t::TaskError::Other(e.to_string()))
+        self.scheduler.submit(SchedTask::wrap(task)).await.map_err(|e| t::TaskError::Other(e.to_string()))
     }
     async fn try_submit(&self, task: Arc<dyn ti::Task>) -> t::Result<bool> {
-        self.scheduler.try_submit(SchedTask::new(task)).map_err(|e| t::TaskError::Other(e.to_string()))
+        self.scheduler.try_submit(SchedTask::wrap(task)).map_err(|e| t::TaskError::Other(e.to_string()))
     }
 }
 
