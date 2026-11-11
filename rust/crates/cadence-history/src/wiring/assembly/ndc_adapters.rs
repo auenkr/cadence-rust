@@ -9,11 +9,10 @@
 //! validation, duplicate detection, retry-task hints run before the first call
 //! into the pieces below).
 //!
+//! `NdcExecutionCache` / `NdcWorkflow` are real (ndc_workflow.rs, shared engine
+//! cache lock; persistence methods are explicit errors until plan item 5a).
+//!
 //! NOT yet backed by the real mutable state (each returns a `TODO(...)` error):
-//! * `NdcExecutionCache` / `NdcWorkflow` / `NdcMutableState` over
-//!   `EngineExecutionCache` + the replay-capable mutable state. The engine uses
-//!   `EngineMutableState` (snapshot-backed) while `StateBuilder` replays onto
-//!   `mutable_state::MutableStateBuilder`; no bridge between them exists.
 //! * `NdcStateBuilder`, `NdcStateRebuilder` (need that bridge).
 //! * `NdcTransactionManager` (needs `TransactionManagerCollaborators`).
 //!
@@ -45,7 +44,8 @@ use crate::ndc::{
     ReplicateEventsV2Request, SyncActivityRequest,
 };
 use crate::shard_context::ShardContext;
-use crate::wiring::assembly::engine_cache::EngineCore;
+use crate::wiring::assembly::engine_cache::{EngineCore, EngineExecutionCache};
+use crate::wiring::assembly::ndc_workflow::EngineNdcExecutionCache;
 use crate::wiring::assembly::ndc_state::OwnedNdcMutableState;
 use crate::wiring::persistence::engine_ndc::{
     SqlBranchManagerEnv, SqlHistoryManager, SqlWorkflowResetterEnv,
@@ -112,28 +112,6 @@ impl HistoryBatchDeserializer for ThriftBatchDeserializer {
 }
 
 // ---------------------------------------------------------------- TODO components
-
-/// `NdcExecutionCache` placeholder (see module docs).
-pub struct TodoNdcExecutionCache;
-
-impl NdcExecutionCache for TodoNdcExecutionCache {
-    fn get_or_create_workflow_execution(
-        &self,
-        _domain_id: &str,
-        _execution: &WorkflowExecution,
-    ) -> NdcResult<Box<dyn NdcWorkflow>> {
-        Err(todo_error("NdcExecutionCache::get_or_create_workflow_execution"))
-    }
-    fn new_workflow(
-        &self,
-        domain_id: &str,
-        execution: &WorkflowExecution,
-        _mutable_state: Box<dyn NdcMutableState>,
-        _release_noop: bool,
-    ) -> NdcResult<Box<dyn NdcWorkflow>> {
-        Err(todo_error(&format!("NdcExecutionCache::new_workflow for domain {domain_id} run {}", execution.run_id)))
-    }
-}
 
 /// `NdcStateBuilder` placeholder.
 pub struct TodoNdcStateBuilder;
@@ -215,7 +193,7 @@ pub struct EngineNdcEnv {
     shard: Arc<ShardContext>,
     cluster: EngineNdcClusterMetadata,
     serializer: ThriftBatchDeserializer,
-    cache: TodoNdcExecutionCache,
+    cache: EngineNdcExecutionCache,
     transactions: TodoNdcTransactionManager,
     state_builder: TodoNdcStateBuilder,
     state_rebuilder: TodoNdcStateRebuilder,
@@ -227,14 +205,15 @@ pub struct EngineNdcEnv {
 impl EngineNdcEnv {
     pub fn new(
         core: &EngineCore,
+        engine_cache: Arc<EngineExecutionCache>,
         cluster: Arc<dyn ClusterMetadata>,
     ) -> Self {
         let history = SqlHistoryManager::new(core.history_v2.clone(), core.shard.shard_id());
         Self {
             shard: core.shard.clone(),
-            cluster: EngineNdcClusterMetadata::new(cluster),
+            cluster: EngineNdcClusterMetadata::new(cluster.clone()),
             serializer: ThriftBatchDeserializer,
-            cache: TodoNdcExecutionCache,
+            cache: EngineNdcExecutionCache,
             transactions: TodoNdcTransactionManager,
             state_builder: TodoNdcStateBuilder,
             state_rebuilder: TodoNdcStateRebuilder,
@@ -335,8 +314,12 @@ pub struct NdcReplicator {
 }
 
 impl NdcReplicator {
-    pub fn new(core: &EngineCore, cluster: Arc<dyn ClusterMetadata>) -> Self {
-        Self { env: Arc::new(EngineNdcEnv::new(core, cluster)) }
+    pub fn new(
+        core: &EngineCore,
+        engine_cache: Arc<EngineExecutionCache>,
+        cluster: Arc<dyn ClusterMetadata>,
+    ) -> Self {
+        Self { env: Arc::new(EngineNdcEnv::new(core, engine_cache, cluster)) }
     }
 }
 

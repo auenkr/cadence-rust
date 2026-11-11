@@ -526,6 +526,7 @@ impl ReplicationFactory for ReplicationFactoryImpl {
             hydrator: Arc::new(EngineHydrator { inner: hydrator }),
             replicator: Arc::new(crate::wiring::assembly::ndc_adapters::NdcReplicator::new(
                 &ctx.core,
+                ctx.cache.clone(),
                 env.cluster.clone(),
             )),
             dlq_daemon,
