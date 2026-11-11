@@ -18,6 +18,10 @@ use crate::matching_cassandra_exec::{bound, BoundValues};
 use crate::sqlblobs::{self, Encoding};
 use chrono::{DateTime, Utc};
 use scylla::statement::batch::{Batch, BatchType};
+use scylla::cluster::metadata::{CollectionType, ColumnType};
+use scylla::serialize::value::SerializeValue;
+use scylla::serialize::writers::{CellWriter, WrittenCellProof};
+use scylla::serialize::SerializationError;
 use scylla::value::{CqlTimestamp, CqlValue, Row};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -119,6 +123,37 @@ pub(crate) fn bind_fields(v: &mut BoundValues, f: Fields) {
         v.push(bound(x));
     }
 }
+/// A `CqlValue` tree whose UDT keyspace/name are filled in from the destination column type at
+/// serialization time (the driver rejects a `CqlValue` UDT whose name does not match).
+#[derive(Debug, Clone)]
+pub(crate) struct Filled(pub CqlValue);
+
+fn fill(v: CqlValue, typ: &ColumnType) -> CqlValue {
+    match (v, typ) {
+        (CqlValue::UserDefinedType { fields, .. }, ColumnType::UserDefinedType { definition, .. }) => CqlValue::UserDefinedType {
+            keyspace: definition.keyspace.to_string(),
+            name: definition.name.to_string(),
+            fields,
+        },
+        (CqlValue::List(xs), ColumnType::Collection { typ: CollectionType::List(e), .. }) => {
+            CqlValue::List(xs.into_iter().map(|x| fill(x, e)).collect())
+        }
+        (CqlValue::Set(xs), ColumnType::Collection { typ: CollectionType::Set(e), .. }) => {
+            CqlValue::Set(xs.into_iter().map(|x| fill(x, e)).collect())
+        }
+        (CqlValue::Map(xs), ColumnType::Collection { typ: CollectionType::Map(k, e), .. }) => {
+            CqlValue::Map(xs.into_iter().map(|(a, b)| (fill(a, k), fill(b, e))).collect())
+        }
+        (other, _) => other,
+    }
+}
+
+impl SerializeValue for Filled {
+    fn serialize<'b>(&self, typ: &ColumnType, writer: CellWriter<'b>) -> Result<WrittenCellProof<'b>, SerializationError> {
+        fill(self.0.clone(), typ).serialize(typ, writer)
+    }
+}
+
 pub(crate) fn udt_value(f: Fields) -> CqlValue {
     CqlValue::UserDefinedType {
         keyspace: String::new(),
@@ -407,7 +442,7 @@ fn push_map_delete(st: &mut Stmts, kind: MapKind, map_key: CqlValue, key: BoundV
 fn push_map_reset(st: &mut Stmts, kind: MapKind, entries: Vec<(CqlValue, Fields)>, key: BoundValues, now: DateTime<Utc>) {
     let text = format!("UPDATE executions SET {} = ?, last_updated_time = ? {}", kind.column(), KEY_WHERE);
     let map = CqlValue::Map(entries.into_iter().map(|(k, f)| (k, udt_value(f))).collect());
-    let mut v: BoundValues = vec![bound(map), bound(now)];
+    let mut v: BoundValues = vec![bound(Filled(map)), bound(now)];
     v.extend(key);
     st.push(text, v);
 }
@@ -571,7 +606,7 @@ pub(crate) fn push_mutation(
                 ("data".to_owned(), b(&events.data)),
             ],
         };
-        let mut v: BoundValues = vec![bound(CqlValue::List(vec![item])), bound(now)];
+        let mut v: BoundValues = vec![bound(Filled(CqlValue::List(vec![item]))), bound(now)];
         v.extend(keyf());
         st.push(format!("UPDATE executions SET buffered_events_list = buffered_events_list + ?, last_updated_time = ? {KEY_WHERE}"), v);
     }

@@ -4,7 +4,7 @@
 use crate::cassandra::CassandraBlockingSession;
 use crate::history_contract::*;
 use crate::history_execution_cassandra::{internal, parse_uuid};
-use crate::history_execution_cassandra_write::{cell, get_i64, get_str, get_ts_nanos, ms_ts, udt_map, RowMap};
+use crate::history_execution_cassandra_write::{cell, Filled, get_i64, get_str, get_ts_nanos, ms_ts, udt_map, RowMap};
 use crate::matching_cassandra_exec::{bound, BoundValues};
 use async_trait::async_trait;
 use scylla::frame::types::Consistency;
@@ -50,25 +50,30 @@ fn ts(nanos: i64) -> chrono::DateTime<chrono::Utc> {
     ms_ts(nanos.div_euclid(1_000_000))
 }
 
-/// `[{branch_id: ?, end_node_id: ?}, ...]` literal and its bound values.
-fn ancestors_literal(ancestors: &[HistoryBranchRange], values: &mut BoundValues) -> Result<String, E> {
-    let mut parts = Vec::with_capacity(ancestors.len());
+/// Bound `list<frozen<branch_range>>` value (bind variables are not allowed inside list literals).
+fn ancestors_value(ancestors: &[HistoryBranchRange]) -> Result<Filled, E> {
+    let mut items = Vec::with_capacity(ancestors.len());
     for a in ancestors {
-        parts.push("{branch_id: ?, end_node_id: ?}");
-        values.push(bound(parse_uuid(&a.branch_id)?));
-        values.push(bound(a.end_node_id));
+        items.push(CqlValue::UserDefinedType {
+            keyspace: String::new(),
+            name: String::new(),
+            fields: vec![
+                ("branch_id".to_owned(), Some(CqlValue::Uuid(parse_uuid(&a.branch_id)?))),
+                ("end_node_id".to_owned(), Some(CqlValue::BigInt(a.end_node_id))),
+            ],
+        });
     }
-    Ok(format!("[{}]", parts.join(", ")))
+    Ok(Filled(CqlValue::List(items)))
 }
 
 fn tree_insert(request: &HistoryBranchRequest) -> Result<(String, BoundValues), E> {
     let mut v: BoundValues = vec![bound(parse_uuid(&request.tree_id)?), bound(parse_uuid(&request.branch_id)?)];
-    let ancestors = ancestors_literal(&request.ancestors, &mut v)?;
+    v.push(bound(ancestors_value(&request.ancestors)?));
     v.push(bound(ts(request.current_timestamp_unix_nanos)));
     v.push(bound(request.info.clone()));
     v.push(bound(ts(request.current_timestamp_unix_nanos)));
     Ok((
-        format!("INSERT INTO history_tree (tree_id, branch_id, ancestors, fork_time, info, created_time) VALUES (?, ?, {ancestors}, ?, ?, ?) "),
+        format!("INSERT INTO history_tree (tree_id, branch_id, ancestors, fork_time, info, created_time) VALUES (?, ?, ?, ?, ?, ?) "),
         v,
     ))
 }
