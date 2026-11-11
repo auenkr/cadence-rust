@@ -256,7 +256,7 @@ fn add_or_update_version_item(items: &mut Vec<cadence_api::types::VersionHistory
 #[cfg(test)]
 mod typed_replay_tests {
     use super::*;
-    use cadence_api::{enums::EventType, tasks::ActivityTaskStartedEventAttributes, types::{VersionHistories, VersionHistory, TaskList}};
+    use cadence_api::{enums::EventType, service_types::WorkflowExecutionStartedEventAttributes, tasks::{ActivityTaskStartedEventAttributes, DecisionTaskScheduledEventAttributes, DecisionTaskStartedEventAttributes, DecisionTaskTimedOutEventAttributes}, types::{VersionHistories, VersionHistory, TaskList}};
 
     fn state() -> TypedMutableState {
         let mut state = TypedMutableState::new();
@@ -300,5 +300,49 @@ mod typed_replay_tests {
         let mut state = state();
         let event = HistoryEvent { event_type: Some(EventType::TimerStarted), ..Default::default() };
         assert!(matches!(StateBuilder::apply_events_typed(&mut state, "d", "r", &WorkflowExecution::default(), &[event]), Err(StateBuilderError::TypedReplayNotYetSupported { .. })));
+    }
+
+    #[test]
+    fn typed_replay_start_decision_timeout_retry_spans_batches_without_active_tasks() {
+        let mut state = state();
+        let workflow = WorkflowExecution::new("wf", "run");
+        let start = HistoryEvent {
+            event_id: 1, timestamp: Some(100), event_type: Some(EventType::WorkflowExecutionStarted), version: 7, task_id: 90,
+            workflow_execution_started_event_attributes: Some(WorkflowExecutionStartedEventAttributes { request_id: "from-history".into(), ..Default::default() }),
+            ..Default::default()
+        };
+        StateBuilder::apply_events_typed(&mut state, "domain-id", "request", &workflow, &[start]).unwrap();
+        assert_eq!(state.execution_info.domain_id, "domain-id");
+        assert_eq!(state.execution_info.create_request_id, "from-history");
+        assert_eq!(state.execution_info.run_id, "run");
+
+        let scheduled = HistoryEvent {
+            event_id: 2, timestamp: Some(110), event_type: Some(EventType::DecisionTaskScheduled), version: 7, task_id: 91,
+            decision_task_scheduled_event_attributes: Some(DecisionTaskScheduledEventAttributes {
+                task_list: Some(TaskList { name: "decisions".into(), ..Default::default() }),
+                start_to_close_timeout_seconds: Some(30), attempt: 2,
+            }), ..Default::default()
+        };
+        let started = HistoryEvent {
+            event_id: 3, timestamp: Some(120), event_type: Some(EventType::DecisionTaskStarted), version: 7, task_id: 92,
+            decision_task_started_event_attributes: Some(DecisionTaskStartedEventAttributes { scheduled_event_id: 2, request_id: "decision-request".into(), ..Default::default() }),
+            ..Default::default()
+        };
+        StateBuilder::apply_events_typed(&mut state, "domain-id", "request", &workflow, &[scheduled, started]).unwrap();
+        assert_eq!(state.execution_info.decision_schedule_id, 2);
+        assert_eq!(state.execution_info.decision_started_id, 3);
+        assert_eq!(state.execution_info.decision_attempt, 0);
+
+        let timeout = HistoryEvent {
+            event_id: 4, timestamp: Some(130), event_type: Some(EventType::DecisionTaskTimedOut), version: 7, task_id: 93,
+            decision_task_timed_out_event_attributes: Some(DecisionTaskTimedOutEventAttributes::default()),
+            ..Default::default()
+        };
+        StateBuilder::apply_events_typed(&mut state, "domain-id", "request", &workflow, &[timeout]).unwrap();
+        assert_eq!(state.execution_info.decision_attempt, 1);
+        assert_eq!(state.execution_info.decision_schedule_id, 4); // transient retry uses the current next event ID
+        assert!(state.history_events.is_empty());
+        assert!(state.transfer_tasks.is_empty());
+        assert!(state.timer_tasks.is_empty());
     }
 }
