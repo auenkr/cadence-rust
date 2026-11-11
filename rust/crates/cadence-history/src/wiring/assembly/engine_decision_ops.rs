@@ -839,7 +839,14 @@ impl ValidationContext for Validation {
         if schedule.is_empty() {
             return Ok(());
         }
-        Err(DecisionError::internal("cron schedule validation is not ported on the engine mutable state yet"))
+        // Go `backoff.ValidateSchedule`: invalid schedules are BadRequestError.
+        let now = cadence_common::cron::naive_from_nanos(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as i64)
+                .unwrap_or(0),
+        );
+        cadence_common::cron::validate_schedule(schedule, now).map(|_| ()).map_err(DecisionError::new)
     }
 
     fn id_length_observation(&self, _field: &str, _domain: &str, _value: &str) {}
