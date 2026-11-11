@@ -5,7 +5,10 @@ use super::dlq_handler::*;
 use super::task_executor::TaskExecutor;
 use super::test_support::*;
 use async_trait::async_trait;
-use cadence_api::admin::{GetDLQReplicationMessagesRequest, ReplicationTaskInfo};
+use cadence_api::admin::{
+    GetDLQReplicationMessagesRequest, GetReplicationMessagesRequest, GetReplicationMessagesResponse,
+    ReplicationTaskInfo,
+};
 use cadence_api::types::ReplicationTask;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

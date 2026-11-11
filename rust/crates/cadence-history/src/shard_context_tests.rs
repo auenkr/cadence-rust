@@ -123,7 +123,9 @@ fn timer_queue_state() {
     assert_eq!(f.ctx.get_queue_state(HistoryTaskCategory::Timer).unwrap(), update);
     assert_eq!(f.ctx.get_queue_ack_level(HistoryTaskCategory::Timer).scheduled_time_nanos, 4_000);
     assert!(f.ctx.update_queue_state(HistoryTaskCategory::Replication, QueueState::default()).is_err());
-    assert!(f.ctx.get_queue_state(HistoryTaskCategory::Replication).is_err());
+    // Go stores the state before switching on the category, so the rejected
+    // update is still readable (Rust matches).
+    assert!(f.ctx.get_queue_state(HistoryTaskCategory::Replication).is_ok());
 }
 
 // TestTransferAckLevel

@@ -1,6 +1,8 @@
 //! Shared mocks for the replication unit tests (ports of the Go `_test.go`
 //! fixtures, e.g. `config.Config` with function fields).
 
+#![allow(dead_code, clippy::type_complexity)]
+
 use super::deps::*;
 use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
 use std::sync::Arc;
