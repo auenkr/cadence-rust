@@ -259,7 +259,7 @@ fn add_or_update_version_item(items: &mut Vec<cadence_api::types::VersionHistory
 #[cfg(test)]
 mod typed_replay_tests {
     use super::*;
-    use cadence_api::{enums::EventType, service_types::WorkflowExecutionStartedEventAttributes, tasks::{ActivityTaskStartedEventAttributes, DecisionTaskScheduledEventAttributes, DecisionTaskStartedEventAttributes, DecisionTaskTimedOutEventAttributes}, types::{VersionHistories, VersionHistory, TaskList}};
+    use cadence_api::{enums::EventType, service_types::WorkflowExecutionStartedEventAttributes, tasks::{ActivityTaskFailedEventAttributes, ActivityTaskStartedEventAttributes, DecisionTaskScheduledEventAttributes, DecisionTaskStartedEventAttributes, DecisionTaskTimedOutEventAttributes}, types::{VersionHistories, VersionHistory, TaskList}};
 
     fn state() -> TypedMutableState {
         let mut state = TypedMutableState::new();
@@ -294,6 +294,26 @@ mod typed_replay_tests {
         assert_eq!(state.execution_info.last_event_task_id, 42);
         assert_eq!(state.execution_info.last_first_event_id, 11);
         assert_eq!(state.execution_info.next_event_id, 12);
+
+        let failed = HistoryEvent {
+            event_id: 12, timestamp: Some(120), event_type: Some(EventType::ActivityTaskFailed), version: 3, task_id: 43,
+            activity_task_failed_event_attributes: Some(ActivityTaskFailedEventAttributes { scheduled_event_id: 10, started_event_id: 11, ..Default::default() }),
+            ..Default::default()
+        };
+        StateBuilder::apply_events_typed(&mut state, "domain", "request", &workflow, &[failed]).unwrap();
+        assert!(!state.pending_activity_info_ids.contains_key(&10));
+
+        let retry_prefix = HistoryEvent { event_id: 13, timestamp: Some(130), event_type: Some(EventType::RequestCancelActivityTaskFailed), version: 3, task_id: 44, ..Default::default() };
+        let retry_schedule = HistoryEvent {
+            event_id: 14, timestamp: Some(140), event_type: Some(EventType::ActivityTaskScheduled), version: 3, task_id: 45,
+            activity_task_scheduled_event_attributes: Some(cadence_api::tasks::ActivityTaskScheduledEventAttributes {
+                activity_id: "activity-a".into(), task_list: Some(TaskList { name: "activities".into(), ..Default::default() }), ..Default::default()
+            }), ..Default::default()
+        };
+        StateBuilder::apply_events_typed(&mut state, "domain", "request", &workflow, &[retry_prefix, retry_schedule]).unwrap();
+        assert!(state.pending_activity_info_ids.contains_key(&14));
+        assert_eq!(state.pending_activity_id_to_event_id.get("activity-a"), Some(&14));
+        assert_eq!(state.pending_activity_info_ids[&14].scheduled_event_batch_id, 13);
         assert!(state.history_events.is_empty());
         assert!(state.transfer_tasks.is_empty());
         assert!(state.timer_tasks.is_empty());
