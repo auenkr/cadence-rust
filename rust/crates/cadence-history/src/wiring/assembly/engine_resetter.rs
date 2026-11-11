@@ -379,6 +379,9 @@ impl EngineWorkflowResetter {
             )
             .map_err(reset_err)?;
         }
+        // Go insertWorkflowRequest only records requests when
+        // EnableStrongIdempotency is on (default off); drop un-encoded ones.
+        owned.typed_mut().insert_workflow_requests.clear();
 
         let (snapshot, mut batches) = owned
             .close_transaction_as_snapshot(now, TransactionPolicy::Active)
