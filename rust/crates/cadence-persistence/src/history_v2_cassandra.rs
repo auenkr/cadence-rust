@@ -73,7 +73,7 @@ fn tree_insert(request: &HistoryBranchRequest) -> Result<(String, BoundValues), 
     v.push(bound(request.info.clone()));
     v.push(bound(ts(request.current_timestamp_unix_nanos)));
     Ok((
-        format!("INSERT INTO history_tree (tree_id, branch_id, ancestors, fork_time, info, created_time) VALUES (?, ?, ?, ?, ?, ?) "),
+        "INSERT INTO history_tree (tree_id, branch_id, ancestors, fork_time, info, created_time) VALUES (?, ?, ?, ?, ?, ?) ".to_string(),
         v,
     ))
 }
