@@ -15,7 +15,6 @@ const TRANSFER_CLOSE_EXECUTION: i32 = 2;
 const TRANSFER_CANCEL_EXECUTION: i32 = 3;
 const TRANSFER_START_CHILD_EXECUTION: i32 = 4;
 const TRANSFER_SIGNAL_EXECUTION: i32 = 5;
-const TRANSFER_UPSERT_SEARCH_ATTRIBUTES: i32 = 8;
 
 const TIMER_DECISION_TIMEOUT: i32 = 0;
 const TIMER_ACTIVITY_TIMEOUT: i32 = 1;
@@ -163,16 +162,6 @@ impl Inner {
         }
         t.target_child_workflow_only = child_only;
         t.schedule_id = initiated_id;
-        t.task_list = self.exec.task_list.clone();
-        self.transfer_tasks.push(t);
-        self.dirty = true;
-    }
-
-    /// Go `GenerateWorkflowSearchAttrTasks`.
-    pub(super) fn gen_search_attr_task(&mut self) {
-        let version = self.current_version;
-        let mut t = self.transfer_base(TRANSFER_UPSERT_SEARCH_ATTRIBUTES, version);
-        t.target_domain_id = self.exec.domain_id.clone();
         t.task_list = self.exec.task_list.clone();
         self.transfer_tasks.push(t);
         self.dirty = true;
