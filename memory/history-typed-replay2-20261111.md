@@ -17,10 +17,11 @@
 
 - Local `git diff --check` passed. No Cargo, rustfmt, or Go command was run locally, per repository instructions.
 - CI command: `gh workflow run rust-ci.yml --ref history-typed-replay2 -f package=cadence-history`
-- CI run URL: pending
-- Code head SHA: pending
-- Conclusion: pending
+- CI run URL: https://github.com/auenkr/cadence-rust/actions/runs/42949910858
+- Code head SHA: `b34bc29c44c8bdc9d37e9672e4bc4c0048dcb207`
+- Conclusion: success; cadence-history Clippy and tests passed.
 - First CI attempt (`42947263925`) failed at compile because the child transition API takes an explicit child-domain ID and exposes separate terminal Replicate* methods. The dispatcher was corrected to use those existing method names and pass the parent domain ID as the child-domain fallback, matching the method contract. A new CI run is required for this corrected head.
 - Second CI attempt (`42947894901`) compiled and ran 132 tests; one pre-existing unsupported-event assertion used TimerStarted (now implemented) and failed. Updated it to test MarkerRecorded and added missing timer attributes plus unknown-event type assertions. Re-run CI on this corrected test head.
 - Third CI attempt (`42948588814`) found a test helper name shadowing issue (`state` local binding shadowed `state()` before the second fixture setup). Renamed the local bindings; re-run CI on the corrected head.
 - Fourth CI attempt (`42949118307`) passed Clippy and ran 133 tests; the missing timer-attributes assertion expected the wrong wrapper error. Typed timer replication reports `TypedMutableStateError`, and the assertion was corrected accordingly. Re-run CI on this final correction.
+- Fifth CI run (`42949910858`) passed at `b34bc29c44c8bdc9d37e9672e4bc4c0048dcb207`.
