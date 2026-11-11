@@ -369,3 +369,7 @@ impl MutableStateView for ImmediateMutableState {
         self.version_histories.clone()
     }
 }
+
+#[cfg(test)]
+#[path = "hydrator_tests.rs"]
+mod hydrator_tests;
