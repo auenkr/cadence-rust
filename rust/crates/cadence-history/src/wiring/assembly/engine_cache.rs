@@ -236,6 +236,12 @@ impl EngineExecutionContext {
         self.persist(&state, now, true, None).await
     }
 
+    /// Go `UpdateWorkflowExecutionAsPassive`.
+    pub async fn update_as_passive(&self, now: i64) -> HResult<()> {
+        let state = self.load_state().await?;
+        self.persist(&state, now, false, None).await
+    }
+
     /// Go `UpdateWorkflowExecutionWithNewAsActive`: persists this (terminated)
     /// run together with the snapshot of the new run.
     pub(super) async fn update_with_new_as_active(

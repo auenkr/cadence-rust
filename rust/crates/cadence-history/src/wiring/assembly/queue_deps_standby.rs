@@ -4,10 +4,9 @@
 //! Done here: `TransferStandbyDependencies` (`TransferStandbyDepsImpl`) with the
 //! `TransferWorkflow` adapter (`EngineTransferWorkflow`) over `EngineMutableState`.
 //!
-//! `TimerStandbyDependencies` (`TimerStandbyDepsImpl`): config, clock, history resend and DLQ are
-//! real; `load_workflow` returns an explicit error because `EngineMutableState` does not track
-//! user timer infos nor implement the timer sequence / `update_as_passive` (TODO(link): needs
-//! timer state in engine_state.rs, shared with TimerActiveDependencies).
+//! `TimerStandbyDependencies` (`TimerStandbyDepsImpl`): config, clock, history resend, DLQ and
+//! `load_workflow` are real (the `StandbyTimerWorkflow` impl lives next to `EngineTimerWorkflow`
+//! in queue_deps_timer_active.rs).
 //!
 //! Known deviations (TODO(link)):
 //! - request-cancel / signal infos are read from the loaded snapshot, which is what
@@ -401,20 +400,27 @@ impl TransferStandbyDependencies for TransferStandbyDepsImpl {
 pub struct TimerStandbyDepsImpl {
     env: Arc<HistoryEnv>,
     shard: Arc<ShardContext>,
+    cache: Arc<EngineExecutionCache>,
     resender: Arc<dyn HistoryResender>,
 }
 
 impl TimerStandbyDepsImpl {
-    pub fn new(env: Arc<HistoryEnv>, shard: Arc<ShardContext>, resender: Arc<dyn HistoryResender>) -> Arc<Self> {
-        Arc::new(Self { env, shard, resender })
+    pub fn new(
+        env: Arc<HistoryEnv>,
+        shard: Arc<ShardContext>,
+        cache: Arc<EngineExecutionCache>,
+        resender: Arc<dyn HistoryResender>,
+    ) -> Arc<Self> {
+        Arc::new(Self { env, shard, cache, resender })
     }
 }
 
 #[async_trait]
 impl TimerStandbyDependencies for TimerStandbyDepsImpl {
-    async fn load_workflow(&self, _task: &dyn PersistenceTask, _event_id: i64) -> TaskResult<Option<Arc<dyn StandbyTimerWorkflow>>> {
-        // TODO(link): EngineMutableState has no user timer infos, timer sequence or update_as_passive yet.
-        Err(TaskError::Other("timer standby workflow is not supported yet: timer state is not ported to EngineMutableState".into()))
+    async fn load_workflow(&self, task: &dyn PersistenceTask, _event_id: i64) -> TaskResult<Option<Arc<dyn StandbyTimerWorkflow>>> {
+        Ok(super::queue_deps_timer_active::load_engine_timer_workflow(&self.cache, task)
+            .await?
+            .map(|w| w as Arc<dyn StandbyTimerWorkflow>))
     }
     fn standby_cluster_delay(&self) -> Duration {
         (self.env.config.standby_cluster_delay)()

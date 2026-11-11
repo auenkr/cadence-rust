@@ -9,9 +9,9 @@
 //! Known deviations / gaps (see memory/history-queueexec-assembly-20261111.md):
 //! * The scheduler is selected like Go `NewProcessor`: hierarchical weighted round robin when
 //!   `EnableHierarchicalWeightedRoundRobinTaskScheduler` is set (default), flat otherwise.
-//! * The shard `TaskReinjector` slot is not bound (no reinjector implementation exists yet), so
-//!   reinjection fails explicitly.
-//! * Timer standby workflow loading and other TODO dependencies keep returning explicit errors.
+//! * The shard `TaskReinjector` is bound to `ShardTaskReinjector`; on SQL it fails with Go's
+//!   "create history tasks not implemented for SQL" after the closed/domain checks.
+//! * Timer standby workflow loading is real (`EngineTimerWorkflow` as `StandbyTimerWorkflow`).
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
@@ -299,6 +299,10 @@ impl QueueExecProvider for HistoryQueueExecProvider {
         let registry = self.registry.get().and_then(Weak::upgrade);
 
         let task_shard = TaskShardContext::new(env.clone(), ctx.shard.clone());
+        task_shard.reinjector.bind(crate::wiring::assembly::shard_factory::ShardTaskReinjector::new(
+            ctx.shard.clone(),
+            env.domain_cache.clone(),
+        ));
         let task_shard_dyn: Arc<dyn t::ShardContext> = task_shard;
         let tasks = Arc::new(SqlQueueShardContext::new(
             env.persistence.executions.clone(),
@@ -397,7 +401,7 @@ impl QueueExecProvider for HistoryQueueExecProvider {
                 crate::task::timer_standby_task_executor::new_timer_standby_task_executor(
                     timer_base(),
                     cluster.clone(),
-                    TimerStandbyDepsImpl::new(env.clone(), ctx.shard.clone(), shared.resender.clone()),
+                    TimerStandbyDepsImpl::new(env.clone(), ctx.shard.clone(), ctx.cache.clone(), shared.resender.clone()),
                 ),
             );
         }
