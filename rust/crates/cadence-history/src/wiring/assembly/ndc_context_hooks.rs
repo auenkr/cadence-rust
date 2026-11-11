@@ -104,11 +104,12 @@ struct PendingTasks {
 pub struct EngineNdcContextHooks {
     core: Arc<EngineCore>,
     pending: PendingTasks,
+    task_write_gate: Option<tokio::sync::OwnedMutexGuard<()>>,
 }
 
 impl EngineNdcContextHooks {
     pub fn new(core: Arc<EngineCore>) -> Self {
-        Self { core, pending: PendingTasks::default() }
+        Self { core, pending: PendingTasks::default(), task_write_gate: None }
     }
 }
 
@@ -319,14 +320,22 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
         Ok(())
     }
 
+    async fn begin_task_write(&mut self) {
+        if self.task_write_gate.is_none() {
+            self.task_write_gate = Some(self.core.shard.lock_task_writes().await);
+        }
+    }
+
     fn tasks_committed(&mut self) {
         let pending = std::mem::take(&mut self.pending);
         self.core.shard.update_max_read_level(pending.max_read_level);
+        self.task_write_gate = None;
         self.core.notify_tasks(&pending.transfer, &pending.timer);
     }
 
     fn write_failed(&mut self, error: &HistoryError) {
         self.pending = PendingTasks::default();
+        self.task_write_gate = None;
         if matches!(error, HistoryError::PersistenceShardOwnershipLost(_)) {
             self.core.shard.close_shard(None);
         }
