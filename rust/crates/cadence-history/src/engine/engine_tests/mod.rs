@@ -2,4 +2,5 @@
 mod describe;
 mod dlq;
 mod handlers;
+mod reset;
 mod signal;
