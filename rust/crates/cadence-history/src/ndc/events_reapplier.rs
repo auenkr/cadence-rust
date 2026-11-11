@@ -34,7 +34,7 @@ impl EventsReapplier for EventsReapplierImpl {
         let mut reapplied: Vec<HistoryEvent> = Vec::new();
         for event in history_events {
             if event.event_type == Some(EventType::WorkflowExecutionSignaled) {
-                if ms_builder.is_event_reapplied(run_id, event.event_id, event.version) {
+                if ms_builder.is_event_reapplied(run_id, event.event_id, event.version)? {
                     continue;
                 }
                 reapplied.push(event.clone());
@@ -57,7 +57,7 @@ impl EventsReapplier for EventsReapplierImpl {
                 &signal.identity,
                 "",
             )?;
-            ms_builder.update_event_reapplied(run_id, event.event_id, event.version);
+            ms_builder.update_event_reapplied(run_id, event.event_id, event.version)?;
         }
         Ok(reapplied)
     }

@@ -57,7 +57,7 @@ impl<'a> ActivityReplicatorImpl<'a> {
         if !should_apply {
             return Ok(());
         }
-        let ai = match workflow.mutable_state().get_activity_info(schedule_id) {
+        let ai = match workflow.mutable_state().get_activity_info(schedule_id)? {
             Some(ai) => ai,
             None => return Ok(()),
         };

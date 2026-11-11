@@ -15,6 +15,7 @@ pub mod engine_timer;
 pub mod env;
 pub mod failover;
 pub mod ndc_adapters;
+pub mod ndc_state;
 pub mod queue_deps;
 pub mod queue_deps_standby;
 pub mod queue_deps_timer_active;
