@@ -256,9 +256,10 @@ impl TypedMutableState {
 
     // ---- builder wrappers + manager bodies --------------------------------
 
-    /// Go `AddFirstDecisionTaskScheduled`. Delayed decision task generation
-    /// (`GenerateDelayedDecisionTasks`) is not wired; returns `Ok(false)` when
-    /// the caller must generate it, `Ok(true)` when a decision was scheduled.
+    /// Go `AddFirstDecisionTaskScheduled`. A non-zero first-decision backoff
+    /// generates the delayed-decision (`WorkflowBackoff`) timer task via
+    /// `GenerateDelayedDecisionTasks` and returns `Ok(false)`; otherwise the
+    /// decision is scheduled and `Ok(true)` is returned.
     pub fn add_first_decision_task_scheduled(
         &mut self,
         env: &DecisionEnv,
@@ -1049,5 +1050,67 @@ mod decision_tests {
             .expect("s2s timeout");
         assert!(ev.is_some());
         assert_eq!(ms.execution_info.decision_schedule_id, EMPTY_EVENT_ID);
+    }
+}
+
+#[cfg(test)]
+mod first_decision_tests {
+    use super::*;
+    use cadence_api::enums::ContinueAsNewInitiator;
+    use cadence_api::service_types::WorkflowExecutionStartedEventAttributes;
+    use super::super::mutable_state_task_generator::TaskKind;
+
+    fn start(backoff: i32, initiator: Option<ContinueAsNewInitiator>) -> HistoryEvent {
+        HistoryEvent {
+            timestamp: Some(5_000_000_000),
+            workflow_execution_started_event_attributes: Some(WorkflowExecutionStartedEventAttributes {
+                first_decision_task_backoff_seconds: Some(backoff),
+                initiator,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    fn backoff_type(ms: &TypedMutableState) -> Vec<(i32, Option<i64>)> {
+        ms.timer_tasks
+            .iter()
+            .filter_map(|t| match t.kind {
+                TaskKind::WorkflowBackoff { timeout_type } => Some((timeout_type, t.visibility_timestamp_unix_nanos)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn zero_backoff_schedules_decision() {
+        let mut ms = TypedMutableState::new();
+        let env = DecisionEnv { now_nanos: 1_000_000_000, ..Default::default() };
+        assert!(ms.add_first_decision_task_scheduled(&env, &start(0, None)).unwrap());
+        assert!(ms.has_pending_decision());
+        assert!(backoff_type(&ms).is_empty());
+    }
+
+    #[test]
+    fn backoff_generates_timer_task() {
+        for (init, ty) in [
+            (None, 1),
+            (Some(ContinueAsNewInitiator::CronSchedule), 1),
+            (Some(ContinueAsNewInitiator::RetryPolicy), 0),
+        ] {
+            let mut ms = TypedMutableState::new();
+            let env = DecisionEnv { now_nanos: 1_000_000_000, ..Default::default() };
+            assert!(!ms.add_first_decision_task_scheduled(&env, &start(10, init)).unwrap());
+            assert!(!ms.has_pending_decision());
+            assert_eq!(backoff_type(&ms), vec![(ty, Some(15_000_000_000))]);
+        }
+    }
+
+    #[test]
+    fn backoff_with_decider_initiator_errors() {
+        let mut ms = TypedMutableState::new();
+        let env = DecisionEnv::default();
+        let ev = start(10, Some(ContinueAsNewInitiator::Decider));
+        assert!(ms.add_first_decision_task_scheduled(&env, &ev).is_err());
     }
 }

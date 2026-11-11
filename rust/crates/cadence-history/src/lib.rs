@@ -136,6 +136,7 @@ mod rpc_tests {
 pub mod task;
 pub mod taskdlq;
 pub mod handler;
+pub mod ratelimit_aggregator;
 pub mod wrappers;
 pub mod decision;
 pub mod events;
