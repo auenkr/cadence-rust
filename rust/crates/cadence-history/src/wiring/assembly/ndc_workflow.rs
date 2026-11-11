@@ -48,6 +48,7 @@ use crate::wiring::persistence::engine_ndc::block_on;
 pub trait NdcCheckoutContext: Send + Sync {
     /// Clean persisted snapshot (caller owns the lock). Dirty state is an error.
     async fn clean_snapshot(&self) -> HResult<pc::WorkflowSnapshot>;
+    async fn persist_history_batch(&self, events: &WorkflowEvents, new_branch: bool) -> HResult<PersistedBlob>;
     /// Go `Context.Clear`.
     fn clear(&self);
 }
@@ -66,6 +67,9 @@ pub trait NdcCheckoutSource: Send + Sync {
 impl NdcCheckoutContext for EngineExecutionContext {
     async fn clean_snapshot(&self) -> HResult<pc::WorkflowSnapshot> {
         self.clean_snapshot_for_ndc().await
+    }
+    async fn persist_history_batch(&self, events: &WorkflowEvents, new_branch: bool) -> HResult<PersistedBlob> {
+        self.persist_ndc_history_batch(events, new_branch).await
     }
     fn clear(&self) {
         EngineExecutionContext::clear(self)
@@ -376,11 +380,13 @@ impl NdcWorkflow for EngineNdcWorkflow {
     ) -> NdcResult<()> {
         unsupported("conflict_resolve_workflow_execution")
     }
-    fn persist_start_workflow_batch_events(&mut self, _events: &WorkflowEvents) -> NdcResult<PersistedBlob> {
-        unsupported("persist_start_workflow_batch_events")
+    fn persist_start_workflow_batch_events(&mut self, events: &WorkflowEvents) -> NdcResult<PersistedBlob> {
+        let context = self.context.as_ref().ok_or_else(|| NdcError::internal("ndc workflow has no persistence context"))?;
+        block_on(context.persist_history_batch(events, true)).map_err(history_to_ndc)
     }
-    fn persist_non_start_workflow_batch_events(&mut self, _events: &WorkflowEvents) -> NdcResult<PersistedBlob> {
-        unsupported("persist_non_start_workflow_batch_events")
+    fn persist_non_start_workflow_batch_events(&mut self, events: &WorkflowEvents) -> NdcResult<PersistedBlob> {
+        let context = self.context.as_ref().ok_or_else(|| NdcError::internal("ndc workflow has no persistence context"))?;
+        block_on(context.persist_history_batch(events, false)).map_err(history_to_ndc)
     }
     fn create_workflow_execution(
         &mut self,
@@ -509,6 +515,9 @@ mod tests {
     impl NdcCheckoutContext for FakeContext {
         async fn clean_snapshot(&self) -> HResult<pc::WorkflowSnapshot> {
             Ok(self.persisted.lock().unwrap().clone())
+        }
+        async fn persist_history_batch(&self, _events: &WorkflowEvents, _new_branch: bool) -> HResult<PersistedBlob> {
+            Err(HistoryError::internal("fake history append is not configured"))
         }
         fn clear(&self) {
             self.clears.fetch_add(1, Ordering::SeqCst);
