@@ -181,8 +181,8 @@ impl GoExecutionStore for CassandraExecutionStore {
     async fn create_failover_marker_tasks(&self, s: i32, v: Vec<Task>) -> Result<(), PersistenceError> {
         self.blocking(move |d| t::create_failover_markers(&d, s, None, v)).await
     }
-    async fn create_history_tasks(&self, _s: i32, _t: Vec<Task>) -> Result<(), PersistenceError> {
-        Err(PersistenceError::Internal("create_history_tasks: category-less write is not supported".into()))
+    async fn create_history_tasks(&self, r: CreateHistoryTasksRequest) -> Result<(), PersistenceError> {
+        self.blocking(move |d| crate::history_execution_cassandra_write::create_history_tasks(&d, r)).await
     }
     async fn create_timer_tasks(&self, s: i32, v: Vec<TimerTask>) -> Result<(), PersistenceError> {
         self.blocking(move |d| t::create_timer_tasks(&d, s, v)).await
@@ -193,8 +193,8 @@ impl GoExecutionStore for CassandraExecutionStore {
     async fn complete_timer_task(&self, s: i32, vis: i64, id: i64) -> Result<(), PersistenceError> {
         self.blocking(move |d| t::complete_timer_task(&d, s, vis, id)).await
     }
-    async fn select_workflow_timer_tasks(&self, _r: TimerTaskRange) -> Result<Vec<HistoryTaskKey>, PersistenceError> {
-        Ok(Vec::new())
+    async fn select_workflow_timer_tasks(&self, r: SelectWorkflowTimerTasksRequest) -> Result<Vec<HistoryTaskKey>, PersistenceError> {
+        self.blocking(move |d| crate::history_execution_cassandra_write::select_workflow_timer_tasks(&d, r)).await
     }
     async fn create_replication_tasks(&self, s: i32, v: Vec<ReplicationTask>) -> Result<(), PersistenceError> {
         self.blocking(move |d| t::create_replication_tasks(&d, s, v)).await

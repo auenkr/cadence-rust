@@ -1366,14 +1366,13 @@ impl GoExecutionStore for SqlWorkflowStore {
     }
     async fn select_workflow_timer_tasks(
         &self,
-        _range: TimerTaskRange,
+        _request: SelectWorkflowTimerTasksRequest,
     ) -> Result<Vec<HistoryTaskKey>, PersistenceError> {
         Ok(Vec::new())
     }
     async fn create_history_tasks(
         &self,
-        _shard_id: i32,
-        _tasks: Vec<Task>,
+        _request: CreateHistoryTasksRequest,
     ) -> Result<(), PersistenceError> {
         self.task_store().create_history_tasks()
     }
