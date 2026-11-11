@@ -306,7 +306,15 @@ impl Operations for EngineOps<'_> {
             .ev_activity_started(&info, activity.schedule_id, request_id, identity)
             .map_err(|e| internal(format!("{e:?}")))?;
         activity.started_id = started.started_id;
-        activity.started_time_unix_nanos = started.started_time_unix_nanos;
+        activity.started_time_unix_nanos = self
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .pc_acts
+            .get(&activity.schedule_id)
+            .map(|a| a.started_time_unix_nanos)
+            .unwrap_or_default();
         Ok(())
     }
 
