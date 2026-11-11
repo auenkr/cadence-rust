@@ -204,7 +204,10 @@ pub async fn record_activity_task_started(
         request_id: req.request_id,
         poll_request: req.poll_request.map(cv::poll_for_activity_task_request_in).transpose()?,
     };
-    let r = state.handler.record_activity_task_started(Some(&r)).await.map_err(err)?;
+    let r = state.handler.record_activity_task_started(Some(&r)).await.map_err(|e| {
+        tracing::warn!(error = %e, "RecordActivityTaskStarted failed");
+        err(e)
+    })?;
     Ok(pb::RecordActivityTaskStartedResponse {
         scheduled_event: event_out(r.scheduled_event)?,
         started_time: r.started_timestamp.map(cv::timestamp_from_nanos),
