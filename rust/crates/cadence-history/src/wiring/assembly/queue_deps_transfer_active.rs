@@ -62,6 +62,7 @@ fn he(e: HistoryError) -> TaskError {
             CadenceError::EntityNotExists(x) => TaskError::EntityNotExists(x.message),
             CadenceError::ServiceBusy(x) => TaskError::ServiceBusy(x.message),
             CadenceError::WorkflowAlreadyCompleted(x) => TaskError::WorkflowExecutionAlreadyCompleted(x.to_string()),
+            CadenceError::WorkflowAlreadyStarted(x) => TaskError::WorkflowExecutionAlreadyStarted(x.to_string()),
             other => TaskError::InternalService(other.to_string()),
         },
         HistoryError::DeadlineExceeded => TaskError::ContextDeadlineExceeded,
@@ -69,6 +70,11 @@ fn he(e: HistoryError) -> TaskError {
         HistoryError::PersistenceShardOwnershipLost(m) => TaskError::ShardOwnershipLost(m),
         other => TaskError::InternalService(other.to_string()),
     }
+}
+
+enum ForwardError {
+    NotOwned(String),
+    Task(TaskError),
 }
 
 fn pe(e: cadence_persistence::history_contract::PersistenceError) -> TaskError {
@@ -519,6 +525,56 @@ impl TransferActiveDepsImpl {
         registry.engine_for_workflow(workflow_id).await.map_err(he)
     }
 
+    /// Calls `StartWorkflowExecution` on the History host that owns the workflow's shard.
+    async fn forward_start(
+        &self,
+        registry: &Arc<ShardRegistry>,
+        workflow_id: &str,
+        r: &HistoryStartWorkflowRequest,
+        start: &api::StartWorkflowExecutionRequest,
+    ) -> Result<String, ForwardError> {
+        let shard = registry.shard_id_for_workflow(workflow_id);
+        let owner = self
+            .env
+            .membership
+            .lookup(&crate::lookup::shard_key(shard as i32))
+            .ok_or_else(|| ForwardError::Task(TaskError::InternalService("no history hosts in the membership ring".into())))?;
+        if owner.identity() == self.env.membership.who_am_i() {
+            return Err(ForwardError::NotOwned(format!("Shard {shard} ownership is changing")));
+        }
+        if owner.grpc_address.is_empty() {
+            return Err(ForwardError::Task(TaskError::InternalService(format!("history host {} has no gRPC address", owner.address))));
+        }
+        let channel = cadence_service_core::grpc_tls::endpoint_channel(&owner.grpc_address, None)
+            .map_err(|e| ForwardError::Task(TaskError::InternalService(e.to_string())))?;
+        let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
+        let request = cadence_proto::history::StartWorkflowExecutionRequest {
+            request: Some(cadence_proto::convert::start_out(start.clone())),
+            domain_id: r.domain_uuid.clone(),
+            parent_execution_info: r.parent_execution_info.as_ref().map(|p| cadence_proto::api::ParentExecutionInfo {
+                domain_id: p.domain_uuid.clone(),
+                domain_name: p.domain.clone(),
+                workflow_execution: Some(cadence_proto::api::WorkflowExecution { workflow_id: p.execution.workflow_id.clone(), run_id: p.execution.run_id.clone() }),
+                initiated_id: p.initiated_id,
+            }),
+            partition_config: r.partition_config.iter().map(|(k, v)| (k.clone(), String::from_utf8_lossy(v).into_owned())).collect(),
+            ..Default::default()
+        };
+        match client.start_workflow_execution(request).await {
+            Ok(resp) => Ok(resp.into_inner().run_id),
+            Err(s) => {
+                let m = s.message().to_string();
+                Err(match s.code() {
+                    tonic::Code::Aborted => ForwardError::NotOwned(m),
+                    tonic::Code::AlreadyExists => ForwardError::Task(TaskError::WorkflowExecutionAlreadyStarted(m)),
+                    tonic::Code::NotFound => ForwardError::Task(TaskError::EntityNotExists(m)),
+                    tonic::Code::ResourceExhausted => ForwardError::Task(TaskError::ServiceBusy(m)),
+                    _ => ForwardError::Task(TaskError::InternalService(m)),
+                })
+            }
+        }
+    }
+
     fn partition_config(config: &BytesMap) -> std::collections::HashMap<String, String> {
         config.iter().map(|(k, v)| (k.clone(), String::from_utf8_lossy(v).into_owned())).collect()
     }
@@ -653,8 +709,33 @@ impl TransferActiveDependencies for TransferActiveDepsImpl {
 
     async fn start_workflow_execution(&self, r: HistoryStartWorkflowRequest) -> TaskResult<String> {
         let workflow_id = r.request.attributes.workflow_id.clone();
-        let engine = self.engine_for(&workflow_id).await?;
         let start = to_api_start(&r.request.attributes, &r.request.domain, &r.request.request_id, r.request.active_cluster_selection_policy.as_ref());
+        // Go history client `executeWithRedirect`: when another host owns the target shard,
+        // forward the call to the owner and retry on ownership changes.
+        let registry = self
+            .registry
+            .get()
+            .and_then(Weak::upgrade)
+            .ok_or_else(|| TaskError::InternalService("shard registry is not bound".into()))?;
+        let mut attempt = 0u32;
+        let engine = loop {
+            match registry.engine_for_workflow(&workflow_id).await {
+                Ok(engine) => break engine,
+                Err(HistoryError::Cadence(c)) if matches!(*c, CadenceError::ShardOwnershipLost(_)) => {
+                    attempt += 1;
+                    match self.forward_start(&registry, &workflow_id, &r, &start).await {
+                        Ok(run_id) => return Ok(run_id),
+                        Err(ForwardError::NotOwned(m)) if attempt < 10 => {
+                            let _ = m;
+                            tokio::time::sleep(Duration::from_millis(100 * u64::from(attempt.min(8)))).await;
+                        }
+                        Err(ForwardError::NotOwned(m)) => return Err(TaskError::ShardOwnershipLost(m)),
+                        Err(ForwardError::Task(e)) => return Err(e),
+                    }
+                }
+                Err(e) => return Err(he(e)),
+            }
+        };
         let response = engine
             .start_workflow_execution(&et::HistoryStartWorkflowExecutionRequest {
                 domain_uuid: r.domain_uuid,
