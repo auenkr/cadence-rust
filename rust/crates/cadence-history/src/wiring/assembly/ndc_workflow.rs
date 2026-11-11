@@ -10,10 +10,10 @@
 //! exclusively owned `OwnedNdcMutableState` built from the clean persisted
 //! snapshot while the lock is held; a dirty engine transaction is rejected.
 //!
-//! Single-run create / update-as-passive persistence goes through the shared
-//! `WorkflowContext` machinery (`ndc_context_hooks`). Active update, two-run
-//! (continued-as-new) writes, conflict-resolve and reapply are explicit errors
-//! until plan item 5a; they are never success no-ops.
+//! Create, active/passive update, two-run (continued-as-new) update and
+//! conflict-resolve persistence go through the shared `WorkflowContext`
+//! machinery (`ndc_context_hooks`). `reapply_events` is an explicit error until
+//! it is ported; it is never a success no-op.
 //! Not ported here: `StartTransaction` (active-cluster `UpdateCurrentVersion`
 //! and decision failover on load), pending activity/timer/child/cancel/signal
 //! maps in the loaded snapshot (explicit error), and event-generating policy
@@ -36,7 +36,7 @@ use crate::execution::workflow::{
     workflow_happens_after, TransactionPolicy, Workflow, WorkflowState, WorkflowStateAccess, WorkflowVectorClock,
 };
 use crate::ndc::{
-    NdcClusterMetadata, NdcError, NdcExecutionCache, NdcMutableState, NdcResult, NdcWorkflow,
+    NdcClusterMetadata, NdcError, NdcExecutionCache, NdcLentState, NdcMutableState, NdcResult, NdcWorkflow,
 };
 use crate::wiring::assembly::engine_cache::{EngineExecutionCache, EngineExecutionContext};
 use crate::wiring::assembly::ndc_adapters::EngineNdcClusterMetadata;
@@ -113,6 +113,17 @@ fn unsupported<T>(what: &str) -> NdcResult<T> {
     Err(NdcError::internal(format!(
         "TODO(ndc-persistence): NdcWorkflow::{what} is not implemented until plan item 5a"
     )))
+}
+
+fn lend_other(w: &mut Option<&mut dyn NdcWorkflow>) -> NdcResult<Option<(WorkflowExecutionKey, NdcStateBox)>> {
+    match w.as_mut() {
+        Some(w) => {
+            let l = w.lend_state()?;
+            let k = WorkflowExecutionKey::new(l.domain_id.clone(), &l.execution);
+            Ok(Some((k, NdcStateBox { ms: l.ms, history_size: l.history_size })))
+        }
+        None => Ok(None),
+    }
 }
 
 // ------------------------------------------------------------------ state loading
@@ -389,8 +400,29 @@ impl NdcWorkflow for EngineNdcWorkflow {
         wf.state.check(r)
     }
 
-    fn update_workflow_execution_as_active(&mut self, _now_nanos: i64) -> NdcResult<()> {
-        unsupported("update_workflow_execution_as_active")
+    /// Go `UpdateWorkflowExecutionAsActive`.
+    fn update_workflow_execution_as_active(&mut self, now_nanos: i64) -> NdcResult<()> {
+        self.update_workflow_execution_with_new(
+            now_nanos,
+            pc::UpdateWorkflowMode::UpdateCurrent,
+            None,
+            TransactionPolicy::Active,
+            None,
+            pc::WorkflowRequestMode::New,
+        )
+    }
+    fn lend_state(&mut self) -> NdcResult<NdcLentState> {
+        let key = self.write_key();
+        let state = self.take_state();
+        Ok(NdcLentState {
+            domain_id: key.domain_id,
+            execution: self.execution.clone(),
+            ms: state.ms,
+            history_size: state.history_size,
+        })
+    }
+    fn restore_state(&mut self, ms: Box<dyn NdcMutableState>, history_size: i64) {
+        self.finish_write(Ok(NdcStateBox { ms, history_size })).ok();
     }
     fn update_workflow_execution_as_passive(&mut self, now_nanos: i64) -> NdcResult<()> {
         self.update_workflow_execution_with_new(
@@ -404,10 +436,17 @@ impl NdcWorkflow for EngineNdcWorkflow {
     }
     fn update_workflow_execution_with_new_as_passive(
         &mut self,
-        _now_nanos: i64,
-        _new_workflow: &mut dyn NdcWorkflow,
+        now_nanos: i64,
+        new_workflow: &mut dyn NdcWorkflow,
     ) -> NdcResult<()> {
-        unsupported("update_workflow_execution_with_new_as_passive")
+        self.update_workflow_execution_with_new(
+            now_nanos,
+            pc::UpdateWorkflowMode::UpdateCurrent,
+            Some(new_workflow),
+            TransactionPolicy::Passive,
+            Some(TransactionPolicy::Passive),
+            pc::WorkflowRequestMode::Replicated,
+        )
     }
     fn update_workflow_execution_with_new(
         &mut self,
@@ -418,24 +457,91 @@ impl NdcWorkflow for EngineNdcWorkflow {
         new_policy: Option<TransactionPolicy>,
         request_mode: pc::WorkflowRequestMode,
     ) -> NdcResult<()> {
-        if new_workflow.is_some() || new_policy.is_some() {
-            return unsupported("update_workflow_execution_with_new (continued-as-new two-run write)");
-        }
+        let (new_workflow, new_policy) = match (new_workflow, new_policy) {
+            (Some(n), Some(p)) => (n, p),
+            (None, None) => {
+                let key = self.write_key();
+                let state = self.take_state();
+                let writer = self.writer.clone();
+                let result = writer.write_update(&key, state, now_nanos, mode, current_policy, request_mode);
+                return self.finish_write(result);
+            }
+            _ => {
+                return Err(NdcError::internal(
+                    "update_workflow_execution_with_new: new workflow and new policy must be given together",
+                ))
+            }
+        };
+        let new_lent = new_workflow.lend_state()?;
+        let new_key = WorkflowExecutionKey::new(new_lent.domain_id.clone(), &new_lent.execution);
+        let new_state = NdcStateBox { ms: new_lent.ms, history_size: new_lent.history_size };
         let key = self.write_key();
         let state = self.take_state();
         let writer = self.writer.clone();
-        let result = writer.write_update(&key, state, now_nanos, mode, current_policy, request_mode);
-        self.finish_write(result)
+        let result = writer.write_update_with_new(
+            &key,
+            state,
+            &new_key,
+            new_state,
+            now_nanos,
+            mode,
+            current_policy,
+            new_policy,
+            request_mode,
+        );
+        match result {
+            Ok((current, new)) => {
+                new_workflow.restore_state(new.ms, new.history_size);
+                self.finish_write(Ok(current))
+            }
+            Err(err) => {
+                // Go clears both contexts on failure.
+                new_workflow.clear();
+                self.finish_write(Err(err))
+            }
+        }
     }
     fn conflict_resolve_workflow_execution(
         &mut self,
-        _now_nanos: i64,
-        _mode: pc::ConflictResolveWorkflowMode,
-        _new_workflow: Option<&mut dyn NdcWorkflow>,
-        _current_workflow: Option<&mut dyn NdcWorkflow>,
-        _current_policy: Option<TransactionPolicy>,
+        now_nanos: i64,
+        mode: pc::ConflictResolveWorkflowMode,
+        new_workflow: Option<&mut dyn NdcWorkflow>,
+        current_workflow: Option<&mut dyn NdcWorkflow>,
+        current_policy: Option<TransactionPolicy>,
     ) -> NdcResult<()> {
-        unsupported("conflict_resolve_workflow_execution")
+        if current_workflow.is_some() != current_policy.is_some() {
+            return Err(NdcError::internal(
+                "conflict_resolve_workflow_execution: current workflow and current policy must be given together",
+            ));
+        }
+        let mut new_workflow = new_workflow;
+        let mut current_workflow = current_workflow;
+        let new_lent = lend_other(&mut new_workflow)?;
+        let current_lent = lend_other(&mut current_workflow)?;
+        let key = self.write_key();
+        let reset = self.take_state();
+        let writer = self.writer.clone();
+        let result = writer.write_conflict_resolve(&key, reset, new_lent, current_lent, now_nanos, mode, current_policy);
+        match result {
+            Ok((reset, new, current)) => {
+                if let (Some(w), Some(s)) = (new_workflow, new) {
+                    w.restore_state(s.ms, s.history_size);
+                }
+                if let (Some(w), Some(s)) = (current_workflow, current) {
+                    w.restore_state(s.ms, s.history_size);
+                }
+                self.finish_write(Ok(reset))
+            }
+            Err(err) => {
+                if let Some(w) = new_workflow {
+                    w.clear();
+                }
+                if let Some(w) = current_workflow {
+                    w.clear();
+                }
+                self.finish_write(Err(err))
+            }
+        }
     }
     fn persist_start_workflow_batch_events(&mut self, events: &WorkflowEvents) -> NdcResult<PersistedBlob> {
         let context = self.context.as_ref().ok_or_else(|| NdcError::internal("ndc workflow has no persistence context"))?;
@@ -647,6 +753,53 @@ mod tests {
             }
             Ok(state)
         }
+
+        fn write_update_with_new(
+            &self,
+            key: &WorkflowExecutionKey,
+            state: NdcStateBox,
+            new_key: &WorkflowExecutionKey,
+            new_state: NdcStateBox,
+            now_nanos: i64,
+            mode: pc::UpdateWorkflowMode,
+            policy: TransactionPolicy,
+            _new_policy: TransactionPolicy,
+            request_mode: pc::WorkflowRequestMode,
+        ) -> HResult<(NdcStateBox, NdcStateBox)> {
+            // Atomic: validate the new run first so a failure writes nothing.
+            if self.contexts.lock().unwrap().contains_key(&new_key.run_id) {
+                return Err(HistoryError::ConditionFailed("new run already exists".into()));
+            }
+            let state = self.write_update(key, state, now_nanos, mode, policy, request_mode)?;
+            self.contexts.lock().unwrap().insert(
+                new_key.run_id.clone(),
+                Arc::new(FakeContext {
+                    persisted: Mutex::new(snapshot(new_state.ms.get_next_event_id())),
+                    clears: AtomicUsize::new(0),
+                }),
+            );
+            Ok((state, new_state))
+        }
+
+        fn write_conflict_resolve(
+            &self,
+            key: &WorkflowExecutionKey,
+            reset: NdcStateBox,
+            _new: Option<(WorkflowExecutionKey, NdcStateBox)>,
+            _current: Option<(WorkflowExecutionKey, NdcStateBox)>,
+            _now_nanos: i64,
+            _mode: pc::ConflictResolveWorkflowMode,
+            _current_policy: Option<TransactionPolicy>,
+        ) -> HResult<(NdcStateBox, Option<NdcStateBox>, Option<NdcStateBox>)> {
+            let ctx = self.contexts.lock().unwrap().get(&key.run_id).cloned();
+            let Some(ctx) = ctx else { return Err(HistoryError::entity_not_exists("no such run")) };
+            let mut db = ctx.persisted.lock().unwrap();
+            if db.execution_info.next_event_id != reset.ms.get_update_condition() {
+                return Err(HistoryError::ConditionFailed("next event id mismatch".into()));
+            }
+            db.execution_info.next_event_id = reset.ms.get_next_event_id();
+            Ok((reset, None, None))
+        }
     }
 
     struct FakeSource {
@@ -837,7 +990,6 @@ mod tests {
         let cache = cache(source);
         tokio::task::spawn_blocking(move || {
             let mut w = cache.get_or_create_workflow_execution("d", &exec("r5")).unwrap();
-            assert!(w.update_workflow_execution_as_active(1).is_err());
             assert!(w
                 .update_workflow_execution_with_new(
                     1,
@@ -920,6 +1072,89 @@ mod tests {
             w.load_workflow_execution(None).unwrap();
             assert_eq!(w.mutable_state().get_next_event_id(), 9);
             assert_eq!(w.mutable_state().get_update_condition(), 9);
+            w.release(None);
+        })
+        .await
+        .unwrap();
+    }
+
+    fn owned(run: &str, next_event_id: i64) -> OwnedNdcMutableState {
+        let mut state = OwnedNdcMutableState::new("d", &exec(run), 1, TaskGenEnv::default());
+        state.set_update_condition(5);
+        state.typed_mut().execution_info.next_event_id = next_event_id;
+        state
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn continued_as_new_writes_both_runs_and_reloads_both() {
+        let source = Arc::new(FakeSource::default());
+        let cache = cache(source.clone());
+        tokio::task::spawn_blocking(move || {
+            let mut w = cache.get_or_create_workflow_execution("d", &exec("rcan")).unwrap();
+            w.load_workflow_execution(None).unwrap();
+            let mut new = cache.new_workflow("d", &exec("rcan2"), Box::new(owned("rcan2", 3)), true).unwrap();
+            w.update_workflow_execution_with_new_as_passive(1, new.as_mut()).unwrap();
+            assert_eq!(new.mutable_state().get_next_event_id(), 3);
+            w.clear();
+            w.load_workflow_execution(None).unwrap();
+            assert_eq!(w.mutable_state().get_next_event_id(), 5);
+            w.release(None);
+            let mut r = cache.get_or_create_workflow_execution("d", &exec("rcan2")).unwrap();
+            r.load_workflow_execution(None).unwrap();
+            assert_eq!(r.mutable_state().get_next_event_id(), 3);
+            r.release(None);
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn continued_as_new_failure_writes_nothing_and_clears_both() {
+        let source = Arc::new(FakeSource::default());
+        let cache = cache(source.clone());
+        let ctx = source.context("rcf");
+        source.context("rcf2");
+        tokio::task::spawn_blocking(move || {
+            let mut w = cache.get_or_create_workflow_execution("d", &exec("rcf")).unwrap();
+            w.load_workflow_execution(None).unwrap();
+            // The new run already exists: the whole write fails.
+            let mut new = cache.new_workflow("d", &exec("rcf2"), Box::new(owned("rcf2", 3)), true).unwrap();
+            assert!(w.update_workflow_execution_with_new_as_passive(1, new.as_mut()).is_err());
+            assert_eq!(ctx.persisted.lock().unwrap().execution_info.next_event_id, 5);
+            // Both are cleared; the current run reloads from the database.
+            w.load_workflow_execution(None).unwrap();
+            assert_eq!(w.mutable_state().get_next_event_id(), 5);
+            w.release(None);
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn conflict_resolve_replaces_state_and_cas_mismatch_is_recoverable() {
+        let source = Arc::new(FakeSource::default());
+        let cache = cache(source.clone());
+        let ctx = source.context("rcr");
+        tokio::task::spawn_blocking(move || {
+            let mut w = cache.get_or_create_workflow_execution("d", &exec("rcr")).unwrap();
+            w.load_workflow_execution(None).unwrap();
+            w.replace_mutable_state(Box::new(owned("rcr", 8)));
+            w.conflict_resolve_workflow_execution(1, pc::ConflictResolveWorkflowMode::UpdateCurrent, None, None, None)
+                .unwrap();
+            assert_eq!(ctx.persisted.lock().unwrap().execution_info.next_event_id, 8);
+            w.clear();
+            w.load_workflow_execution(None).unwrap();
+            assert_eq!(w.mutable_state().get_next_event_id(), 8);
+            // Another writer moved the row: CAS mismatch, then recover by reload.
+            ctx.persisted.lock().unwrap().execution_info.next_event_id = 9;
+            w.replace_mutable_state(Box::new(owned("rcr", 12)));
+            let err = w
+                .conflict_resolve_workflow_execution(1, pc::ConflictResolveWorkflowMode::UpdateCurrent, None, None, None)
+                .unwrap_err();
+            assert!(err.to_string().contains("next event id mismatch"), "{err}");
+            assert_eq!(ctx.persisted.lock().unwrap().execution_info.next_event_id, 9);
+            w.load_workflow_execution(None).unwrap();
+            assert_eq!(w.mutable_state().get_next_event_id(), 9);
             w.release(None);
         })
         .await

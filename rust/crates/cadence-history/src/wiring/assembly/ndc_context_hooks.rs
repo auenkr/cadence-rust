@@ -39,6 +39,8 @@ use crate::wiring::persistence::engine_ndc::{
 
 const TRANSFER: HistoryTaskCategory = HistoryTaskCategory { category_type: 1, category_id: 1 };
 const TIMER: HistoryTaskCategory = HistoryTaskCategory { category_type: 2, category_id: 2 };
+const REPLICATION: HistoryTaskCategory = HistoryTaskCategory { category_type: 1, category_id: 3 };
+const CLOSE_STATUS_CONTINUED_AS_NEW: i32 = crate::execution::mutable_state_methods_common::CLOSE_STATUS_CONTINUED_AS_NEW;
 
 pub(super) fn ndc_err(err: NdcError) -> HistoryError {
     match err {
@@ -117,11 +119,13 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
     fn now_nanos(&self) -> i64 {
         self.core.clock.now()
     }
-    /// Go default (`EnableStrongIdempotency` is off); config is not reachable here.
-    fn strong_idempotency_check(&self, _domain: &str) -> bool {
-        false
+    /// Go `EnableStrongIdempotencySanityCheck(domain)` (dynamic config).
+    fn strong_idempotency_check(&self, domain: &str) -> bool {
+        (self.core.strong_idempotency_sanity_check)(domain)
     }
-    /// GAP: no decoder for the `WorkflowRequest` blob yet.
+    /// GAP: the Rust `WorkflowRequest` carries no type/version (the mutable
+    /// state does not encode them yet), so there is nothing to decode; -1 makes
+    /// request/mode validation fail loudly instead of passing silently.
     fn request_type(&self, _request: &pc::WorkflowRequest) -> i32 {
         -1
     }
@@ -147,8 +151,29 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
     }
     fn notify_snapshot(&mut self, _s: Option<&pc::WorkflowSnapshot>, _h: &[PersistedBlob], _err: bool) {}
     fn notify_mutation(&mut self, _m: &pc::WorkflowMutation, _h: &[PersistedBlob], _err: bool) {}
-    /// GAP: no history notifier wiring (long-poll wakeups).
-    fn notify_history(&mut self, _state: &NdcStateBox) {}
+    /// Go `shard.GetEngine().NotifyNewHistoryEvent(events.NewNotification(...))`.
+    fn notify_history(&mut self, state: &NdcStateBox) {
+        let ms = &state.ms;
+        let (last_first_event_id, workflow_state, workflow_close_state) = match ms.history_notification_inputs() {
+            Ok(v) => v,
+            Err(err) => {
+                tracing::error!(%err, "unable to build history notification");
+                return;
+            }
+        };
+        let info = ms.get_execution_info();
+        self.core.notify_history_event(crate::engine::runtime::HistoryNotification {
+            domain_id: info.domain_id,
+            workflow_id: info.workflow_id,
+            run_id: info.run_id,
+            last_first_event_id,
+            next_event_id: ms.get_next_event_id(),
+            previous_started_event_id: ms.get_previous_started_event_id(),
+            workflow_state,
+            workflow_close_state,
+            version_histories: ms.get_version_histories().cloned().unwrap_or_default(),
+        });
+    }
     fn emit_loaded_stats(&mut self, _domain: &str, _state: &NdcStateBox) {}
     fn emit_session_stats(&mut self, _domain: &str) {}
     fn emit_history_stats(&mut self, _domain: &str, _size: i64, _count: i64) {}
@@ -156,14 +181,26 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
     fn emit_completion_stats(&mut self, _domain: &str, _state: &NdcStateBox) {}
     fn merge_continue_as_new_replication_tasks(
         &mut self,
-        _mode: pc::UpdateWorkflowMode,
-        _mutation: &mut pc::WorkflowMutation,
+        mode: pc::UpdateWorkflowMode,
+        mutation: &mut pc::WorkflowMutation,
         new_workflow: Option<&mut pc::WorkflowSnapshot>,
     ) -> Result<(), HistoryError> {
-        if new_workflow.is_some() {
-            return Err(internal("TODO(ndc-persistence): continued-as-new two-run writes are not implemented"));
+        // Go `mergeContinueAsNewReplicationTasks`.
+        if mutation.execution_info.close_status != CLOSE_STATUS_CONTINUED_AS_NEW {
+            return Ok(());
         }
-        Ok(())
+        if mode == pc::UpdateWorkflowMode::BypassCurrent && new_workflow.is_none() {
+            return Ok(());
+        }
+        let has = |tasks: &BTreeMap<HistoryTaskCategory, Vec<Task>>| tasks.get(&REPLICATION).is_some_and(|l| !l.is_empty());
+        if !has(&mutation.tasks_by_category) {
+            return Ok(());
+        }
+        // Replication tasks cannot be allocated/encoded here yet (see
+        // `allocate_task_ids`); merging the new-run branch token needs them.
+        Err(internal(
+            "TODO(ndc-persistence): continue-as-new replication task merge (replication task encoding) is not implemented",
+        ))
     }
     async fn reapply_events(&mut self, batches: &[WorkflowEvents]) -> Result<(), HistoryError> {
         let events = select_reapply_events(batches).map_err(internal)?;
@@ -199,7 +236,7 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
                 task.visibility_timestamp_unix_nanos = slot.1;
                 task.data = task_blob(Encoding::ThriftRW.encode(&s))?;
             }
-            self.pending.max_read_level = max_read_level;
+            self.pending.max_read_level = self.pending.max_read_level.max(max_read_level);
             self.pending.transfer.extend(decoded);
         }
         if let Some(list) = tasks.get_mut(&TIMER) {
@@ -265,6 +302,37 @@ pub trait NdcWriter: Send + Sync {
         policy: TransactionPolicy,
         request_mode: pc::WorkflowRequestMode,
     ) -> HResult<NdcStateBox>;
+
+    /// Go `UpdateWorkflowExecutionWithNew` with a new run: one atomic write of
+    /// the mutation, the new-run snapshot and the current-run update. Both
+    /// states are consumed; on error the caller clears both workflows.
+    #[allow(clippy::too_many_arguments)]
+    fn write_update_with_new(
+        &self,
+        key: &WorkflowExecutionKey,
+        state: NdcStateBox,
+        new_key: &WorkflowExecutionKey,
+        new_state: NdcStateBox,
+        now_nanos: i64,
+        mode: pc::UpdateWorkflowMode,
+        policy: TransactionPolicy,
+        new_policy: TransactionPolicy,
+        request_mode: pc::WorkflowRequestMode,
+    ) -> HResult<(NdcStateBox, NdcStateBox)>;
+
+    /// Go `ConflictResolveWorkflowExecution`: `reset` is the rebuilt state of
+    /// the workflow being resolved; `new` / `current` are optional other runs.
+    #[allow(clippy::too_many_arguments)]
+    fn write_conflict_resolve(
+        &self,
+        key: &WorkflowExecutionKey,
+        reset: NdcStateBox,
+        new: Option<(WorkflowExecutionKey, NdcStateBox)>,
+        current: Option<(WorkflowExecutionKey, NdcStateBox)>,
+        now_nanos: i64,
+        mode: pc::ConflictResolveWorkflowMode,
+        current_policy: Option<TransactionPolicy>,
+    ) -> HResult<(NdcStateBox, Option<NdcStateBox>, Option<NdcStateBox>)>;
 }
 
 pub struct EngineNdcWriter {
@@ -347,6 +415,70 @@ impl NdcWriter for EngineNdcWriter {
         block_on(ctx.update_workflow_execution_with_new(now_nanos, mode, None, policy, None, request_mode))?;
         Self::finish(&mut ctx)
     }
+
+    fn write_update_with_new(
+        &self,
+        key: &WorkflowExecutionKey,
+        state: NdcStateBox,
+        new_key: &WorkflowExecutionKey,
+        new_state: NdcStateBox,
+        now_nanos: i64,
+        mode: pc::UpdateWorkflowMode,
+        policy: TransactionPolicy,
+        new_policy: TransactionPolicy,
+        request_mode: pc::WorkflowRequestMode,
+    ) -> HResult<(NdcStateBox, NdcStateBox)> {
+        let mut ctx = self.context(key, state);
+        let mut new_ctx = self.context(new_key, new_state);
+        block_on(ctx.update_workflow_execution_with_new(
+            now_nanos,
+            mode,
+            Some(&mut new_ctx),
+            policy,
+            Some(new_policy),
+            request_mode,
+        ))?;
+        Ok((Self::finish(&mut ctx)?, Self::finish(&mut new_ctx)?))
+    }
+
+    fn write_conflict_resolve(
+        &self,
+        key: &WorkflowExecutionKey,
+        reset: NdcStateBox,
+        new: Option<(WorkflowExecutionKey, NdcStateBox)>,
+        current: Option<(WorkflowExecutionKey, NdcStateBox)>,
+        now_nanos: i64,
+        mode: pc::ConflictResolveWorkflowMode,
+        current_policy: Option<TransactionPolicy>,
+    ) -> HResult<(NdcStateBox, Option<NdcStateBox>, Option<NdcStateBox>)> {
+        let mut reset = reset;
+        // The reset workflow's state is passed separately (Go passes
+        // `resetMutableState`); the context only supplies the history size.
+        let mut ctx = self.context(key, NdcStateBox { ms: placeholder_state_for(key), history_size: reset.history_size });
+        ctx.mutable_state = None;
+        let mut new_ctx = new.map(|(k, s)| self.context(&k, s));
+        let mut current_ctx = current.map(|(k, s)| self.context(&k, s));
+        block_on(ctx.conflict_resolve_workflow_execution(
+            now_nanos,
+            mode,
+            &mut reset,
+            new_ctx.as_mut(),
+            current_ctx.as_mut(),
+            current_policy,
+        ))?;
+        reset.history_size = ctx.history_size;
+        let new_state = new_ctx.as_mut().map(Self::finish).transpose()?;
+        let current_state = current_ctx.as_mut().map(Self::finish).transpose()?;
+        Ok((reset, new_state, current_state))
+    }
+}
+
+fn placeholder_state_for(key: &WorkflowExecutionKey) -> Box<dyn NdcMutableState> {
+    placeholder_state(
+        &key.domain_id,
+        &cadence_api::types::WorkflowExecution { workflow_id: key.workflow_id.clone(), run_id: key.run_id.clone() },
+        0,
+    )
 }
 
 /// Placeholder state used while the real state is lent to a write.

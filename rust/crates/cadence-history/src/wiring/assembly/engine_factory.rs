@@ -151,6 +151,7 @@ impl HistoryEventNotifier for NotifierAdapter {
 pub fn build_core(env: &Arc<HistoryEnv>, shard: &Arc<ShardContext>) -> (Arc<EngineCore>, Arc<EngineExecutionCache>) {
     let core = Arc::new(EngineCore {
         engine_slot: Arc::new(std::sync::OnceLock::new()),
+        strong_idempotency_sanity_check: env.config.enable_strong_idempotency_sanity_check.clone(),
         shard: shard.clone(),
         executions: env.persistence.executions.clone(),
         domains: env.domain_cache.clone() as Arc<dyn DomainCache>,
