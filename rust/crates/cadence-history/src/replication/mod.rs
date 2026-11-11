@@ -44,3 +44,5 @@ mod reader_tests;
 mod dlq_tests;
 #[cfg(test)]
 mod ack_tests;
+#[cfg(test)]
+mod fetcher_tests;

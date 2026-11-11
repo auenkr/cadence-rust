@@ -14,6 +14,8 @@ pub struct TestConfig {
     pub max_batch: AtomicI32,
     pub step_count: AtomicUsize,
     pub max_response: AtomicUsize,
+    pub aggregation_ms: std::sync::atomic::AtomicU64,
+    pub parallelism: AtomicUsize,
 }
 
 impl Default for TestConfig {
@@ -23,6 +25,8 @@ impl Default for TestConfig {
             max_batch: AtomicI32::new(100),
             step_count: AtomicUsize::new(5),
             max_response: AtomicUsize::new(1 << 20),
+            aggregation_ms: std::sync::atomic::AtomicU64::new(1),
+            parallelism: AtomicUsize::new(1),
         }
     }
 }
@@ -34,6 +38,8 @@ impl TestConfig {
             max_batch: AtomicI32::new(max),
             step_count: AtomicUsize::new(steps),
             max_response: AtomicUsize::new(1 << 20),
+            aggregation_ms: std::sync::atomic::AtomicU64::new(1),
+            parallelism: AtomicUsize::new(1),
         })
     }
 }
@@ -96,10 +102,10 @@ impl ReplicationConfig for TestConfig {
         0.0
     }
     fn replication_task_fetcher_parallelism(&self) -> usize {
-        1
+        self.parallelism.load(Ordering::SeqCst)
     }
     fn replication_task_fetcher_aggregation_interval(&self) -> Duration {
-        MS
+        MS * self.aggregation_ms.load(Ordering::SeqCst) as u32
     }
     fn replication_task_fetcher_timer_jitter_coefficient(&self) -> f64 {
         0.0
