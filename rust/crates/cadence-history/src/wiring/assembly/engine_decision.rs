@@ -254,6 +254,7 @@ impl EngineMutableState {
     /// for a transient decision, + `AfterAddDecisionTaskCompletedEvent`). Returns
     /// the id of the DecisionTaskCompleted event. Auto-reset-point handling of the
     /// binary checksum is not ported.
+    #[allow(clippy::too_many_arguments)]
     pub fn add_decision_task_completed(
         &self,
         schedule_id: i64,
