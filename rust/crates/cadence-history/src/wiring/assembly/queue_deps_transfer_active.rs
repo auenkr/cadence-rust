@@ -952,9 +952,8 @@ impl TransferActiveDependencies for TransferActiveDepsImpl {
         })
     }
 
-    async fn send_parent_close_policy_request(&self, _request: ParentClosePolicyRequest) -> TaskResult<()> {
-        // TODO(link): parent close policy worker client (sys-worker batcher workflow signal-with-start).
-        Err(todo_err("parent close policy worker request"))
+    async fn send_parent_close_policy_request(&self, request: ParentClosePolicyRequest) -> TaskResult<()> {
+        crate::wiring::assembly::parent_close_policy_client::send(&self.env, request).await
     }
 
     async fn reset_workflow(&self, _request: WorkflowResetRequest) -> TaskResult<()> {
