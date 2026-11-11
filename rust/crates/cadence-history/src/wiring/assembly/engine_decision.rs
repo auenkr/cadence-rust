@@ -797,7 +797,9 @@ impl DecisionHandler for EngineDecisionHandler {
                 let next = state.get_next_event_id();
                 state.terminate_workflow(next, "DECISION_ATTEMPTS_EXCEEDS_LIMIT", message.as_bytes(), "history-service")?;
             }
-            Ok(Outcome { noop: false, create_decision: true, value: () })
+            // A terminated workflow must not schedule a new decision.
+            let running = state.is_workflow_execution_running();
+            Ok(Outcome { noop: false, create_decision: running, value: () })
         })
         .await
     }
