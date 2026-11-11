@@ -14,6 +14,7 @@
 //!
 //! NOT yet backed by the real mutable state (each returns a `TODO(...)` error):
 //! * `NdcStateBuilder` (needs that bridge). `NdcStateRebuilder` is real (ndc_rebuild.rs).
+//!
 //! `NdcTransactionManager` is real (`EngineNdcTransactionManager`); only the
 //! events-reapplication reset collaborator is an explicit gap.
 //!

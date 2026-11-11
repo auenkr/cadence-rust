@@ -109,11 +109,6 @@ pub(super) fn history_to_ndc(err: HistoryError) -> NdcError {
     NdcError::Other(err.to_string())
 }
 
-fn unsupported<T>(what: &str) -> NdcResult<T> {
-    Err(NdcError::internal(format!(
-        "TODO(ndc-persistence): NdcWorkflow::{what} is not implemented until plan item 5a"
-    )))
-}
 
 fn lend_other(w: &mut Option<&mut dyn NdcWorkflow>) -> NdcResult<Option<(WorkflowExecutionKey, NdcStateBox)>> {
     match w.as_mut() {
