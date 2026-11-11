@@ -15,3 +15,8 @@ Gate logs (run 43065888204) show the failing tasks are `UpsertWorkflowSearchAttr
 - rust-ci (cadence-history) dispatch https://github.com/auenkr/cadence-rust/actions/runs/43065880019 success (head 60ad497).
 - Gate mysql/grpc/false https://github.com/auenkr/cadence-rust/actions/runs/43065888204 success (head 60ad497, includes diagnostic log).
 - Final head: see git log; final runs recorded below.
+
+## Final (code head d52193c270bebbca7559620a12b117e4c122ce77, includes master e50090050 merge)
+- rust-ci (cadence-history): https://github.com/auenkr/cadence-rust/actions/runs/43067963814 success
+- Gate mysql/grpc/false: https://github.com/auenkr/cadence-rust/actions/runs/43067971890 success
+Remaining: parent-close client has no TLS/publicClient.hostPort; no gate coverage for the >= threshold path.
