@@ -55,6 +55,7 @@ impl EngineCore {
     /// processors after a successful write of `transfer` / `timer` tasks.
     pub(super) fn notify_tasks(&self, transfer: &[pc::TransferTask], timer: &[pc::TimerTask]) {
         use crate::engine::notify_tasks::{NotifiedTask, NotifiedTaskKind, NotifyTaskInfo};
+        tracing::debug!(transfer = transfer.len(), timer = timer.len(), has_engine = self.engine_slot.get().is_some(), "notify queues of new tasks");
         let Some(engine) = self.engine_slot.get().and_then(std::sync::Weak::upgrade) else { return };
         let info_of = |d: &str, w: &str, r: &str, tasks: Vec<NotifiedTask>| {
             let mut info = NotifyTaskInfo { tasks, ..Default::default() };
