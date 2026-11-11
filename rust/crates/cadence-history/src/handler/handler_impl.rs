@@ -202,7 +202,7 @@ impl Handler for HandlerImpl {
     }
 
     async fn get_cross_cluster_tasks(&self, _r: Option<&adm::GetCrossClusterTasksRequest>) -> HResult<adm::GetCrossClusterTasksResponse> {
-        Err(gap("GetCrossClusterTasks (deprecated cross-cluster queue)"))
+        Err(HistoryError::internal("The cross-cluster feature has been deprecated."))
     }
 
     async fn count_dlq_messages(&self, request: Option<&adm::CountDLQMessagesRequest>) -> HResult<HistoryCountDLQMessagesResponse> {
@@ -296,10 +296,15 @@ impl Handler for HandlerImpl {
         let inner = r.request.as_ref().ok_or_else(|| HistoryError::internal("nil request"))?;
         let wf = wf_id(&inner.workflow_execution);
         let run = inner.workflow_execution.as_ref().map(|w| w.run_id.clone()).unwrap_or_default();
-        let _e = self.prep(true, &r.domain_uuid, wf).await?;
-        let events = inner.events.as_ref().map(|b| b.data.clone()).unwrap_or_default();
-        let _ = (run, events);
-        Err(gap("ReapplyEvents (DataBlob deserialisation of events)"))
+        let engine = self.prep(true, &r.domain_uuid, wf).await?;
+        // Go `GetPayloadSerializer().DeserializeBatchEvents` (ThriftRW) before the engine call.
+        let blob = cadence_api::types::DataBlob {
+            encoding_type: Some(cadence_api::enums::EncodingType::ThriftRW),
+            data: inner.events.as_ref().map(|b| b.data.clone()).unwrap_or_default(),
+        };
+        let events = cadence_thrift::history_blob::decode(&blob)
+            .map_err(|e| HistoryError::internal(format!("DeserializeBatchEvents encoding: \"thriftrw\", error: {e}")))?;
+        engine.reapply_events(&r.domain_uuid, wf, &run, &events).await
     }
 
     async fn record_activity_task_heartbeat(&self, request: Option<&HistoryRecordActivityTaskHeartbeatRequest>) -> HResult<cadence_api::tasks::RecordActivityTaskHeartbeatResponse> {
@@ -395,7 +400,7 @@ impl Handler for HandlerImpl {
     }
 
     async fn respond_cross_cluster_tasks_completed(&self, _r: Option<&adm::RespondCrossClusterTasksCompletedRequest>) -> HResult<adm::RespondCrossClusterTasksCompletedResponse> {
-        Err(gap("RespondCrossClusterTasksCompleted (deprecated cross-cluster queue)"))
+        Err(HistoryError::internal("The cross-cluster feature has been deprecated"))
     }
 
     async fn respond_decision_task_completed(&self, request: Option<&HistoryRespondDecisionTaskCompletedRequest>) -> HResult<HistoryRespondDecisionTaskCompletedResponse> {
