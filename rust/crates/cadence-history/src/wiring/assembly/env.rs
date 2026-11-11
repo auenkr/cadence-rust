@@ -80,7 +80,7 @@ pub struct HistoryEnv {
     pub client_checker: Arc<VersionChecker>,
     pub query_matching: Arc<GrpcQueryMatchingClient>,
     /// Visibility (`executions_visibility`) writer shared by the transfer / timer executors.
-    pub visibility: Arc<crate::wiring::persistence::visibility::SqlVisibilityWriter>,
+    pub visibility: Arc<dyn crate::wiring::persistence::visibility::VisibilityWriter>,
     /// Matching channel resolver (add-task RPCs of the transfer executors).
     pub matching_resolver: ChannelResolver,
     pub dynamic_client: Option<Arc<dyn DynamicClient>>,

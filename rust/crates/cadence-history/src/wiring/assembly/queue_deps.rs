@@ -34,7 +34,7 @@ use crate::task::transfer_task_executor_base::{
 };
 use crate::wiring::persistence::domain_dlq::SqlTaskDlqWriter;
 use crate::wiring::persistence::engine_ndc::branch_request;
-use crate::wiring::persistence::visibility::VisibilityWriteRow;
+use crate::wiring::persistence::visibility::{VisibilityWriteRow, VisibilityWriter as _};
 
 fn pe(e: PersistenceError) -> TaskError {
     match e {
@@ -129,6 +129,9 @@ fn to_row(record: &VisibilityRecord, closed: bool) -> VisibilityWriteRow {
         execution_status,
         scheduled_execution_time: record.scheduled_execution_timestamp,
         closed: closed.then(|| (record.close_timestamp, thrift_close_status(record.close_status), record.history_length)),
+        task_list: record.task_list.clone(),
+        workflow_timeout_seconds: record.workflow_timeout,
+        retention_seconds: record.retention_seconds,
     }
 }
 

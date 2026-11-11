@@ -31,6 +31,124 @@ pub struct VisibilityWriteRow {
     pub scheduled_execution_time: i64,
     /// closed rows only: (close_time nanos, close_status, history_length)
     pub closed: Option<(i64, i32, i64)>,
+    /// Cassandra only (Go `TaskList`).
+    pub task_list: String,
+    /// Cassandra only: workflow timeout seconds (open row TTL base).
+    pub workflow_timeout_seconds: i64,
+    /// Cassandra only: closed row retention seconds (`0` = Go default one day).
+    pub retention_seconds: i64,
+}
+
+/// Visibility writes used by the transfer / timer executors (SQL or Cassandra store).
+#[async_trait::async_trait]
+pub trait VisibilityWriter: Send + Sync {
+    async fn record_started_async(&self, row: VisibilityWriteRow) -> Result<(), PersistenceError>;
+    async fn record_closed_async(&self, row: VisibilityWriteRow) -> Result<(), PersistenceError>;
+    fn record_uninitialized(&self) -> Result<(), PersistenceError>;
+    fn upsert(&self) -> Result<(), PersistenceError>;
+    async fn delete_async(&self, domain_id: String, run_id: String) -> Result<(), PersistenceError>;
+}
+
+#[async_trait::async_trait]
+impl VisibilityWriter for SqlVisibilityWriter {
+    async fn record_started_async(&self, row: VisibilityWriteRow) -> Result<(), PersistenceError> {
+        SqlVisibilityWriter::record_started_async(self, row).await
+    }
+    async fn record_closed_async(&self, row: VisibilityWriteRow) -> Result<(), PersistenceError> {
+        SqlVisibilityWriter::record_closed_async(self, row).await
+    }
+    fn record_uninitialized(&self) -> Result<(), PersistenceError> {
+        SqlVisibilityWriter::record_uninitialized(self)
+    }
+    fn upsert(&self) -> Result<(), PersistenceError> {
+        SqlVisibilityWriter::upsert(self)
+    }
+    async fn delete_async(&self, domain_id: String, run_id: String) -> Result<(), PersistenceError> {
+        SqlVisibilityWriter::delete_async(self, domain_id, run_id).await
+    }
+}
+
+/// Go `nosqlVisibilityStore` write half over the Cassandra visibility keyspace.
+#[derive(Clone)]
+pub struct CassandraVisibilityWriter {
+    store: cadence_persistence::history_visibility_cassandra::CassandraVisibilityStore,
+}
+
+impl CassandraVisibilityWriter {
+    pub fn new(store: cadence_persistence::history_visibility_cassandra::CassandraVisibilityStore) -> Self {
+        Self { store }
+    }
+}
+
+/// Go `openExecutionTTLBuffer` / `defaultCloseTTLSeconds` (seconds).
+const OPEN_EXECUTION_TTL_BUFFER: i64 = 86_400;
+const DEFAULT_CLOSE_TTL_SECONDS: i64 = 86_400;
+
+fn cassandra_row(row: &VisibilityWriteRow) -> cadence_persistence::history_visibility_cassandra::CassandraVisibilityRow {
+    let (close_time, status, history_length) = row.closed.unwrap_or((0, 0, 0));
+    cadence_persistence::history_visibility_cassandra::CassandraVisibilityRow {
+        domain_id: row.domain_id.clone(),
+        workflow_id: row.workflow_id.clone(),
+        run_id: row.run_id.clone(),
+        type_name: row.workflow_type_name.clone(),
+        start_time: row.start_time,
+        execution_time: row.execution_time,
+        memo: row.memo.clone(),
+        encoding: row.encoding.clone(),
+        task_list: row.task_list.clone(),
+        is_cron: row.is_cron,
+        num_clusters: row.num_clusters as i32,
+        update_time: row.update_time,
+        shard_id: row.shard_id as i32,
+        execution_status: row.execution_status,
+        cron_schedule: row.cron_schedule.clone(),
+        scheduled_execution_time: row.scheduled_execution_time,
+        close_time,
+        status,
+        history_length,
+    }
+}
+
+fn join_err(e: tokio::task::JoinError) -> PersistenceError {
+    PersistenceError::Internal(e.to_string())
+}
+
+#[async_trait::async_trait]
+impl VisibilityWriter for CassandraVisibilityWriter {
+    async fn record_started_async(&self, row: VisibilityWriteRow) -> Result<(), PersistenceError> {
+        let store = self.store.clone();
+        tokio::task::spawn_blocking(move || {
+            store.insert_visibility(row.workflow_timeout_seconds + OPEN_EXECUTION_TTL_BUFFER, &cassandra_row(&row))
+        })
+        .await
+        .map_err(join_err)?
+    }
+    async fn record_closed_async(&self, row: VisibilityWriteRow) -> Result<(), PersistenceError> {
+        if row.closed.is_none() {
+            return Err(PersistenceError::InvalidPersistenceRequest(
+                "missing one of {closeStatus, closeTime, historyLength} params".into(),
+            ));
+        }
+        let store = self.store.clone();
+        tokio::task::spawn_blocking(move || {
+            let retention = if row.retention_seconds == 0 { DEFAULT_CLOSE_TTL_SECONDS } else { row.retention_seconds };
+            store.update_visibility(retention, &cassandra_row(&row))
+        })
+        .await
+        .map_err(join_err)?
+    }
+    /// Go nosql store: not implemented (ES only), returns nil.
+    fn record_uninitialized(&self) -> Result<(), PersistenceError> {
+        Ok(())
+    }
+    /// Go nosql store: `ErrVisibilityOperationNotSupported`.
+    fn upsert(&self) -> Result<(), PersistenceError> {
+        Err(PersistenceError::Internal(VISIBILITY_OPERATION_NOT_SUPPORTED.into()))
+    }
+    async fn delete_async(&self, domain_id: String, run_id: String) -> Result<(), PersistenceError> {
+        let store = self.store.clone();
+        tokio::task::spawn_blocking(move || store.delete_visibility(&domain_id, &run_id)).await.map_err(join_err)?
+    }
 }
 
 /// Go `minMySQLDateTime`.
