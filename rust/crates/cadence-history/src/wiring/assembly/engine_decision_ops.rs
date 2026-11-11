@@ -70,6 +70,19 @@ impl EngineOps<'_> {
         self.domains.get_domain(domain).map(|d| d.info.id.clone()).map_err(|e| internal(format!("{e:?}")))
     }
 
+    /// Attributes of this run's start event (Go `GetStartEvent`), preloaded by the
+    /// decision handler.
+    fn start_attributes(&self) -> Result<cadence_api::service_types::WorkflowExecutionStartedEventAttributes> {
+        self.state
+            .inner
+            .lock()
+            .unwrap()
+            .prev_start_event
+            .clone()
+            .and_then(|e| e.workflow_execution_started_event_attributes)
+            .ok_or_else(|| internal("workflow start event is missing"))
+    }
+
     /// Close-event common path (Go `AddCompletedWorkflowEvent` & co.).
     fn close_workflow(
         &self,
@@ -436,18 +449,36 @@ impl Operations for EngineOps<'_> {
 
     fn retry_cron_continue_as_new(
         &mut self,
-        _completed_id: i64,
-        _seconds: i32,
-        _retry: bool,
-        _reason: Option<&str>,
-        _details: &[u8],
-        _completion_result: Option<&[u8]>,
+        completed_id: i64,
+        seconds: i32,
+        retry: bool,
+        reason: Option<&str>,
+        details: &[u8],
+        completion_result: Option<&[u8]>,
     ) -> Result<()> {
-        Err(not_ported("retry/cron ContinueAsNew"))
+        let start = self.start_attributes()?;
+        let initiator = if retry {
+            cadence_api::enums::ContinueAsNewInitiator::RetryPolicy
+        } else {
+            cadence_api::enums::ContinueAsNewInitiator::CronSchedule
+        };
+        let attrs = crate::decision::task_handler::retry_cron_continue_as_new_attributes(
+            &start,
+            seconds,
+            initiator,
+            reason.map(str::to_string),
+            details.to_vec(),
+            completion_result.map(<[u8]>::to_vec).unwrap_or_default(),
+            start.active_cluster_selection_policy.clone(),
+        );
+        let parent_domain = start.parent_workflow_domain.clone().unwrap_or_default();
+        self.state
+            .add_continue_as_new_event(completed_id, completed_id, &parent_domain, &attrs)
+            .map_err(|e| internal(format!("{e:?}")))
     }
 
     fn start_last_completion_result(&mut self) -> Result<Vec<u8>> {
-        Err(not_ported("cron last completion result"))
+        Ok(self.start_attributes()?.last_completion_result)
     }
 
     fn parent_domain_name(&mut self) -> Result<String> {
@@ -465,8 +496,14 @@ impl Operations for EngineOps<'_> {
         Ok(self.state.domain.info.name.clone())
     }
 
-    fn continue_as_new(&mut self, _completed_id: i64, _decision: &Decision, _parent_domain_name: &str) -> Result<()> {
-        Err(not_ported("ContinueAsNewWorkflowExecution"))
+    fn continue_as_new(&mut self, completed_id: i64, decision: &Decision, parent_domain_name: &str) -> Result<()> {
+        let a = decision
+            .continue_as_new_workflow_execution_decision_attributes
+            .clone()
+            .ok_or_else(|| bad("ContinueAsNewWorkflowExecutionDecisionAttributes is not set on decision."))?;
+        self.state
+            .add_continue_as_new_event(completed_id, completed_id, parent_domain_name, &a)
+            .map_err(|e| internal(format!("{e:?}")))
     }
 
     fn max_semaphore_name_length(&self) -> usize {

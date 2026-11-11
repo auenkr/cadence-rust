@@ -149,6 +149,11 @@ pub(super) fn engine_activity(schedule_id: i64, a: &pc::ActivityInfo, details: V
 }
 
 pub(super) struct Inner {
+    /// Start event of this run, preloaded before the decisions run (the sync
+    /// decision handler cannot read history); used by ContinueAsNew / cron / retry.
+    pub(super) prev_start_event: Option<HistoryEvent>,
+    /// New run created by a ContinueAsNew decision (Go `continueAsNewBuilder`).
+    pub(super) new_run: Option<Arc<EngineMutableState>>,
     /// Engine view of the execution info (state, close status, sticky, decision ids).
     pub(super) exec: WorkflowExecutionInfo,
     /// Persistence view; the source of truth for the decision_* fields.
@@ -364,6 +369,8 @@ impl EngineMutableState {
             pc_signals.insert(k.key, info);
         }
         let inner = Inner {
+            prev_start_event: None,
+            new_run: None,
             exec,
             pc_exec: i.clone(),
             next_event_id: i.next_event_id,
