@@ -333,11 +333,18 @@ impl EngineNdcEnv {
             cluster: EngineNdcClusterMetadata::new(cluster.clone()),
             serializer: ThriftBatchDeserializer,
             cache: EngineNdcExecutionCache::new(
-                engine_cache,
+                engine_cache.clone(),
                 Arc::new(EngineNdcClusterMetadata::new(cluster.clone())),
                 core.clock.clone(),
             ),
-            transactions: EngineNdcTransactionManager,
+            transactions: EngineNdcTransactionManager::new(
+                engine_cache.core(),
+                EngineNdcExecutionCache::new(
+                    engine_cache,
+                    Arc::new(EngineNdcClusterMetadata::new(cluster.clone())),
+                    core.clock.clone(),
+                ),
+            ),
             state_builder: TypedNdcStateBuilder,
             state_rebuilder: new_state_rebuilder(core),
             branch_env: SqlBranchManagerEnv { history: history.clone(), domains: core.domains.clone() },
