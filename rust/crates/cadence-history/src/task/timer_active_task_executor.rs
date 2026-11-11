@@ -109,11 +109,11 @@ impl TimerActiveTaskExecutor {
   }.await;w.release(result.clone().err());result
  }
  pub async fn execute_decision_timeout_task(&self,task:&DecisionTimeoutTask)->Result<()> {
-  let Some(w)=self.load(task,task.event_id).await? else{tracing::warn!(event_id=task.event_id,"restartsig-diag: decision timeout: load none");return Ok(());};let result=async {
-   let domain=self.base.shard.get_domain_cache().get_domain_name(task.get_domain_id())?;if !w.running(){tracing::warn!("restartsig-diag: decision timeout: not running");return Ok(());}
+  let Some(w)=self.load(task,task.event_id).await? else{return Ok(());};let result=async {
+   let domain=self.base.shard.get_domain_cache().get_domain_name(task.get_domain_id())?;if !w.running(){return Ok(());}
    let workflow_type=w.workflow_type().ok_or_else(||TaskError::Other("unable to find workflow type".into()))?;
-   let Some(decision)=w.decision_info(task.event_id) else{tracing::warn!(event_id=task.event_id,"restartsig-diag: decision timeout: no decision info");return Ok(());};
-   if !verify_task_version(&self.base.shard,&self.base.logger,task.get_domain_id(),decision.version,task.get_version(),task)?||decision.attempt!=task.schedule_attempt{tracing::warn!("restartsig-diag: decision timeout: version/attempt mismatch");return Ok(());}
+   let Some(decision)=w.decision_info(task.event_id) else{return Ok(());};
+   if !verify_task_version(&self.base.shard,&self.base.logger,task.get_domain_id(),decision.version,task.get_version(),task)?||decision.attempt!=task.schedule_attempt{return Ok(());}
    let mut schedule=false;
    let timer_type=match task.timeout_type {0=>Some(TimerType::StartToClose),1=>Some(TimerType::ScheduleToStart),_=>None};
    if let Some(kind)=timer_type {

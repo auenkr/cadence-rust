@@ -13,11 +13,7 @@ impl HistoryEngine {
                 if !request.request_id.is_empty() && state.is_signal_requested(&request.request_id) {
                     return Ok(UpdateAction { noop: true, ..Default::default() });
                 }
-                if !state.is_workflow_execution_running() {
-                    let i = state.get_execution_info();
-                    tracing::warn!(workflow_id = %i.workflow_id, run_id = %i.run_id, state = i.state, close_status = i.close_status, next_event_id = state.get_next_event_id(), "restartsig-diag: signal on non-running state");
-                    return Err(already_completed());
-                }
+                if !state.is_workflow_execution_running() { return Err(already_completed()); }
                 if self.check_for_history_corruptions(&*state).await? {
                     return Err(HistoryError::entity_not_exists("Workflow execution corrupted."));
                 }

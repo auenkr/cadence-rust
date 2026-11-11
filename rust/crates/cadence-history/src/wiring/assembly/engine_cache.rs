@@ -145,7 +145,6 @@ impl EngineExecutionContext {
 
     /// Go `Context.Clear`.
     pub fn clear(&self) {
-        tracing::info!(workflow_id = %self.execution.workflow_id, run_id = %self.execution.run_id, "restartsig-diag: context cleared");
         *self.state.lock().unwrap() = None;
     }
 
@@ -176,15 +175,6 @@ impl EngineExecutionContext {
             Arc::new(move || clock.now()),
         )?
         .with_params((core.state_params)(&self.domain_id)));
-        {
-            use crate::engine::deps::MutableState;
-            let info = state.get_execution_info();
-            tracing::info!(
-                workflow_id = %self.execution.workflow_id, run_id = %self.execution.run_id, shard_id = core.shard.shard_id(),
-                state = info.state, close_status = info.close_status, next_event_id = state.get_next_event_id(),
-                "restartsig-diag: loaded mutable state from persistence"
-            );
-        }
         *self.state.lock().unwrap() = Some(state.clone());
         Ok(state)
     }
