@@ -221,7 +221,7 @@ impl Operations for EngineOps<'_> {
             version: ev.version,
             // Go ReplicateActivityTaskScheduledEvent(firstEventID, ..): the first event of
             // the history batch (a transient decision's scheduled event precedes the completion).
-            scheduled_event_batch_id: self
+            scheduled_event_batch_id: g
                 .hist
                 .iter()
                 .find(|e| e.event_id > 0)
