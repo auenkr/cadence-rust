@@ -218,7 +218,7 @@ async fn failover_marker_task() {
 #[tokio::test]
 async fn sync_activity_task() {
     let acts = || HashMap::from([(SCHEDULE, activity())]);
-    type Case = (&'static str, Option<Option<Ms>>, Result<Option<ReplicationTask>, &'static str>);
+    type Case = (&'static str, Option<Option<Ms>>, std::result::Result<Option<ReplicationTask>, &'static str>);
     let cases: Vec<Case> = vec![
         (
             "hydrates sync activity task",
