@@ -640,6 +640,40 @@ impl EngineDecisionHandler {
                 Err(e) => return Err(e),
                 Ok(()) => {}
             }
+            // Go handleBufferedQueries. Client headers are not carried to the engine,
+            // so the version check fails open exactly like Go with absent headers.
+            {
+                struct Obs {
+                    warn: usize,
+                    error: usize,
+                }
+                impl crate::decision::handler::QueryObserver for Obs {
+                    fn worker_not_supports_consistent_query(&self, _error: &str) {}
+                    fn invalid_query_state(&self, _id: &str, _state: crate::query::TerminationType, _error: &str) {}
+                    fn check_blob_size(&self, answer: &[u8]) -> Result<(), String> {
+                        let _ = self.warn;
+                        if answer.len() > self.error {
+                            return Err("Blob data size exceeds limit.".to_string());
+                        }
+                        Ok(())
+                    }
+                }
+                let obs = Obs {
+                    warn: (self.config.blob_size_limit_warn)(&domain_name) as usize,
+                    error: (self.config.blob_size_limit_error)(&domain_name) as usize,
+                };
+                let results = req.query_results.clone().unwrap_or_default();
+                crate::decision::handler::handle_buffered_queries(
+                    &state.queries.0,
+                    &obs,
+                    "",
+                    "",
+                    None,
+                    &results,
+                    create_new,
+                    heartbeat,
+                );
+            }
             if timed_out {
                 return Err(HistoryError::entity_not_exists("decision heartbeat timeout"));
             }
