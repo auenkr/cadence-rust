@@ -46,3 +46,5 @@ mod dlq_tests;
 mod ack_tests;
 #[cfg(test)]
 mod fetcher_tests;
+#[cfg(test)]
+mod executor_tests;
