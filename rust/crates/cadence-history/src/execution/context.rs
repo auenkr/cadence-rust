@@ -254,7 +254,7 @@ impl<M: TransactionState, S: WorkflowContextStore<M>> WorkflowContext<M, S> {
             if self.store.possibly_successful(&err) { self.store.notify_mutation(&mutation, &blobs, true); self.store.notify_snapshot(snapshot.as_ref(), &blobs, true); } return Err(err);
         }
         if let Some(state) = &mut self.mutable_state { state.transaction_committed(); }
-        if let Some(context) = new.as_deref_mut() { if let Some(state) = &mut context.mutable_state { state.transaction_committed(); } }
+        if let Some(context) = new { if let Some(state) = &mut context.mutable_state { state.transaction_committed(); } }
         let state = self.mutable_state.as_ref().expect("loaded state");
         self.store.notify_history(state);
         self.store.notify_mutation(&mutation, &blobs, false); self.store.notify_snapshot(snapshot.as_ref(), &blobs, false);
