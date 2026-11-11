@@ -54,6 +54,8 @@ pub struct EngineCore {
     pub advanced_visibility_writing: Arc<dyn Fn() -> bool + Send + Sync>,
     /// Go `shard.GetActiveClusterManager()`.
     pub active_cluster_manager: Arc<dyn crate::engine::runtime::ActiveClusterManager>,
+    /// Go `clientBean.GetRemoteAdminClient`.
+    pub remote_admin_clients: Arc<crate::wiring::resources::replication_clients::RemoteAdminClients>,
 }
 
 impl EngineCore {

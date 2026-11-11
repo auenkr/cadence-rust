@@ -335,7 +335,7 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
 
 /// Go `contextImpl.ReapplyEvents`: skip when the domain is pending active; when
 /// the workflow is active here call the engine, otherwise (remote active
-/// cluster) the admin client is not ported and an explicit error is returned.
+/// cluster) send the events through the remote admin client.
 pub(super) async fn reapply_via_engine(core: &EngineCore, batches: &[WorkflowEvents]) -> Result<(), HistoryError> {
     let events = select_reapply_events(batches).map_err(internal)?;
     if events.is_empty() {
@@ -351,9 +351,23 @@ pub(super) async fn reapply_via_engine(core: &EngineCore, batches: &[WorkflowEve
         .active_cluster_by_workflow(&key.domain_id, &key.workflow_id, &key.run_id)
         .await?;
     if active != core.current_cluster {
-        return Err(internal(format!(
-            "TODO(ndc-admin-client): reapply events to remote active cluster {active} (admin client) is not ported"
-        )));
+        // Go: serialize the events (ThriftRW) and send them through the remote admin client.
+        let blob = cadence_thrift::history_blob::encode(events);
+        let admin = core
+            .remote_admin_clients
+            .remote_admin_client(&active)
+            .map_err(|e| internal(e.to_string()))?;
+        return admin
+            .reapply_events(cadence_api::admin::ReapplyEventsRequest {
+                domain: domain.info.name.clone(),
+                workflow_execution: Some(cadence_api::types::WorkflowExecution {
+                    workflow_id: key.workflow_id.clone(),
+                    run_id: key.run_id.clone(),
+                }),
+                events: Some(blob),
+            })
+            .await
+            .map_err(|e| internal(e.to_string()));
     }
     let engine = core
         .engine_slot

@@ -114,6 +114,22 @@ impl AdminClient for GrpcAdminClient {
         rc::replication_tasks_in(resp.replication_tasks).map_err(ReplicationError::Other)
     }
 
+    async fn reapply_events(&self, req: cadence_api::admin::ReapplyEventsRequest) -> Result<()> {
+        let mut c = cadence_proto::admin::admin_api_client::AdminApiClient::new(self.channel.clone());
+        let proto = cadence_proto::admin::ReapplyEventsRequest {
+            domain: req.domain,
+            workflow_execution: req.workflow_execution.map(|e| cadence_proto::api::WorkflowExecution {
+                workflow_id: e.workflow_id,
+                run_id: e.run_id,
+            }),
+            events: req.events.map(rc::data_blob_out),
+        };
+        c.reapply_events(decorate(proto, &self.info, &self.caller, DEFAULT_RPC_TIMEOUT))
+            .await
+            .map_err(status_error)?;
+        Ok(())
+    }
+
     async fn get_workflow_execution_raw_history_v2(
         &self,
         req: cadence_api::admin::GetWorkflowExecutionRawHistoryV2Request,
@@ -227,6 +243,46 @@ impl ReplicationClientBean {
             .map_err(|e| ReplicationError::Other(e.to_string()))?;
         map.insert(cluster.to_string(), channel.clone());
         Ok((channel, info.clone()))
+    }
+}
+
+/// Go `clientBean.GetRemoteAdminClient` for callers that have no history client
+/// (the NDC reapply path): lazy per-cluster gRPC channels.
+pub struct RemoteAdminClients {
+    clusters: Metadata,
+    caller: String,
+    channels: Mutex<HashMap<String, Channel>>,
+}
+
+impl RemoteAdminClients {
+    pub fn new(clusters: Metadata, caller: impl Into<String>) -> Self {
+        Self { clusters, caller: caller.into(), channels: Mutex::new(HashMap::new()) }
+    }
+
+    #[allow(clippy::result_large_err)]
+    pub fn remote_admin_client(&self, cluster: &str) -> Result<Arc<dyn AdminClient>> {
+        let info = self
+            .clusters
+            .clusters
+            .get(cluster)
+            .filter(|_| cluster != self.clusters.current_cluster_name)
+            .ok_or(ReplicationError::UnknownCluster)?;
+        if info.rpc_transport == "tchannel" {
+            return Err(ReplicationError::Other(format!(
+                "remote cluster {cluster:?} uses tchannel; only grpc remotes are supported"
+            )));
+        }
+        let mut map = self.channels.lock().expect("channel map");
+        let channel = match map.get(cluster) {
+            Some(c) => c.clone(),
+            None => {
+                let c = cadence_service_core::grpc_tls::endpoint_channel(&info.rpc_address, None)
+                    .map_err(|e| ReplicationError::Other(e.to_string()))?;
+                map.insert(cluster.to_string(), c.clone());
+                c
+            }
+        };
+        Ok(Arc::new(GrpcAdminClient { channel, info: info.clone(), caller: self.caller.clone() }))
     }
 }
 
