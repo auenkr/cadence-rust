@@ -24,8 +24,9 @@ impl EventsReapplier for Reapplier {
     }
 }
 
+type ResetCall = (i64, i64, String, usize, Vec<u8>, i64);
 #[derive(Default)]
-struct Resetter(Mutex<Vec<(i64, i64, String, usize, Vec<u8>, i64)>>);
+struct Resetter(Mutex<Vec<ResetCall>>);
 #[async_trait]
 impl WorkflowResetter for Resetter {
     async fn reset_workflow(&self, r: ResetWorkflow) -> HResult<()> {
