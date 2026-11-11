@@ -214,13 +214,13 @@ impl SqlBackend {
                 tx.commit().map_err(mysql_error)?;
                 Ok(result)
             }
-            Backend::Postgres(pool) => {
+            Backend::Postgres(pool) => crate::matching_postgres::outside_runtime(|| {
                 let mut conn = pool.checkout().map_err(internal)?;
                 let mut tx = conn.transaction().map_err(postgres_error)?;
                 let result = run(&mut tx)?;
                 tx.commit().map_err(postgres_error)?;
                 Ok(result)
-            }
+            }),
         }
     }
 }

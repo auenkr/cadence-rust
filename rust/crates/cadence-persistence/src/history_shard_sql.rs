@@ -45,8 +45,8 @@ impl PostgresShardStore {
     /// The sync `postgres` client drives its own runtime and panics when called
     /// from a thread inside a tokio runtime (the History shard bridge calls us
     /// via `Handle::block_on`), so run the blocking body on a plain thread.
-    fn blocking<T: Send>(f: impl FnOnce() -> Result<T, E> + Send) -> Result<T, E> {
-        std::thread::scope(|scope| scope.spawn(f).join().unwrap_or_else(|_| Err(E::Internal("postgres shard store thread panicked".into()))))
+    fn blocking<T>(f: impl FnOnce() -> Result<T, E>) -> Result<T, E> {
+        crate::matching_postgres::outside_runtime(f)
     }
 }
 

@@ -152,14 +152,14 @@ impl PostgresConnectionPool {
     }
 
     pub(crate) fn checkout(self: &Arc<Self>) -> Result<PostgresLease> {
-        self.checkout_until(None)
+        outside_runtime(|| self.checkout_until(None))
     }
 
     pub(crate) fn checkout_with_timeout(
         self: &Arc<Self>,
         timeout: Duration,
     ) -> Result<PostgresLease> {
-        self.checkout_until(Some(Instant::now() + timeout))
+        outside_runtime(|| self.checkout_until(Some(Instant::now() + timeout)))
     }
 
     fn checkout_until(self: &Arc<Self>, deadline: Option<Instant>) -> Result<PostgresLease> {
@@ -1738,5 +1738,16 @@ mod runtime_boundary_tests {
         assert!(outside_runtime(
             || tokio::runtime::Handle::try_current().is_err()
         ));
+    }
+}
+
+/// The sync `postgres` client drives its own runtime and panics when used while
+/// a tokio runtime is entered. On a multi-thread runtime `block_in_place` leaves
+/// the runtime context for the closure; elsewhere the call runs unchanged.
+pub fn outside_runtime<T>(f: impl FnOnce() -> T) -> T {
+    use tokio::runtime::{Handle, RuntimeFlavor};
+    match Handle::try_current() {
+        Ok(handle) if handle.runtime_flavor() == RuntimeFlavor::MultiThread => tokio::task::block_in_place(f),
+        _ => f(),
     }
 }
