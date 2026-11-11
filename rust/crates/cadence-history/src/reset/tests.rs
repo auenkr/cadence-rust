@@ -2,9 +2,8 @@
 use super::history::*;
 use super::*;
 use cadence_api::enums::EventType;
-use cadence_api::service_types::{
-    HistoryEvent, WorkflowExecutionContinuedAsNewEventAttributes, WorkflowExecutionSignaledEventAttributes,
-};
+use cadence_api::service_types::{HistoryEvent, WorkflowExecutionSignaledEventAttributes};
+use cadence_api::tasks::WorkflowExecutionContinuedAsNewEventAttributes;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
