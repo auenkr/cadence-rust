@@ -19,6 +19,7 @@ pub mod engine_timer;
 pub mod env;
 pub mod failover;
 pub mod ndc_adapters;
+pub mod parent_close_policy_client;
 pub mod ndc_context_hooks;
 pub mod ndc_rebuild;
 pub mod ndc_state;
