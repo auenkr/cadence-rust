@@ -25,7 +25,7 @@ const DELETE_CURRENT: &str = "DELETE FROM executions WHERE shard_id = ? and type
 #[derive(Debug, Clone, Default, scylla::DeserializeValue, SerializeValue)]
 struct CurrentUdt {
     run_id: Option<Uuid>,
-    create_request_id: Option<String>,
+    create_request_id: Option<Uuid>,
     state: Option<i32>,
     close_status: Option<i32>,
 }
@@ -140,7 +140,7 @@ impl GoExecutionStore for CassandraExecutionStore {
             let last_write_version = version.unwrap_or(-24);
             Ok(CurrentExecution {
                 run_id: run.map(|u| u.to_string()).unwrap_or_default(),
-                create_request_id: udt.create_request_id.unwrap_or_default(),
+                create_request_id: udt.create_request_id.map(|u| u.to_string()).unwrap_or_default(),
                 state: udt.state.unwrap_or_default(),
                 close_status: udt.close_status.unwrap_or_default(),
                 start_version: last_write_version,
