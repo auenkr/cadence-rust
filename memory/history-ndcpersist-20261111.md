@@ -17,6 +17,6 @@ Base: `df60d4dfcabf08645b62f05eff175a949304816b` (`origin/master`)
 
 ## CI
 
-- Run URL: pending
-- Code head SHA: pending
-- Conclusion: pending
+- Run URL: https://github.com/auenkr/cadence-rust/actions/runs/42990603078
+- Code head SHA: `899302a332291a7df146eb02894eb74c696e2f50`
+- Conclusion: success (cadence-history CI workflow).
