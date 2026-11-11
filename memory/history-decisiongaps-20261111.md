@@ -10,7 +10,9 @@ Branch `history-decisiongaps`.
 - 3 cron validation (validate_cron, cadence_common::cron::validate_schedule)
 - 4 cross-domain lookup (per-decision target domain id, DomainCacheEntry.clusters)
 
-## Item 5 buffered queries (CI pending)
+## Item 5 buffered queries (CI green)
+- rust-ci cadence-history, head f5f220d45: success
+  https://github.com/auenkr/cadence-rust/actions/runs/43054574423
 - completed_run calls decision::handler::handle_buffered_queries after the update. Client impl/feature headers are not carried into the engine, so the version check is fail-open (Go behavior with absent headers). Go also stores client version on execution info: not ported.
 
 ## Remaining
