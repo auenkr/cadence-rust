@@ -80,7 +80,7 @@ pub struct HistoryEnv {
     pub client_checker: Arc<VersionChecker>,
     pub query_matching: Arc<GrpcQueryMatchingClient>,
     /// Visibility (`executions_visibility`) writer shared by the transfer / timer executors.
-    pub visibility: Arc<crate::wiring::persistence::visibility::SqlVisibilityWriter>,
+    pub visibility: Arc<dyn crate::wiring::persistence::visibility::VisibilityWriter>,
     /// Matching channel resolver (add-task RPCs of the transfer executors).
     pub matching_resolver: ChannelResolver,
     pub dynamic_client: Option<Arc<dyn DynamicClient>>,
@@ -107,14 +107,10 @@ impl HistoryEnv {
         })
         .await??;
 
-        let backend = stores
-            .history_sql_backend
-            .clone()
-            .ok_or_else(|| anyhow::anyhow!("History requires a MySQL or PostgreSQL default store"))?;
         let shard_rows = stores
             .history_shard_store
             .clone()
-            .ok_or_else(|| anyhow::anyhow!("History requires a SQL shard store"))?;
+            .ok_or_else(|| anyhow::anyhow!("History requires a shard store"))?;
         let history_nodes = stores
             .history_node_store
             .clone()
@@ -124,11 +120,28 @@ impl HistoryEnv {
             .clone()
             .ok_or_else(|| anyhow::anyhow!("configured default store has no domain metadata source"))?;
 
-        let executions: Arc<dyn GoExecutionStore> =
-            Arc::new(SqlWorkflowStore::new(backend.clone(), Encoding::ThriftRW, 0, 0));
-        let visibility_backend = stores.history_visibility_sql_backend.clone().unwrap_or_else(|| backend.clone());
-        let visibility = Arc::new(crate::wiring::persistence::visibility::SqlVisibilityWriter::new(visibility_backend));
-        let history_v2: Arc<dyn GoHistoryV2Store> = Arc::new(SqlHistoryV2Store::new(backend, Encoding::ThriftRW));
+        let (executions, history_v2, visibility): (
+            Arc<dyn GoExecutionStore>,
+            Arc<dyn GoHistoryV2Store>,
+            Arc<dyn crate::wiring::persistence::visibility::VisibilityWriter>,
+        ) = if let Some(c) = stores.history_cassandra.clone() {
+            (
+                c.executions,
+                c.history_v2,
+                Arc::new(crate::wiring::persistence::visibility::CassandraVisibilityWriter::new(c.visibility)),
+            )
+        } else {
+            let backend = stores
+                .history_sql_backend
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("History requires a MySQL, PostgreSQL or Cassandra default store"))?;
+            let visibility_backend = stores.history_visibility_sql_backend.clone().unwrap_or_else(|| backend.clone());
+            (
+                Arc::new(SqlWorkflowStore::new(backend.clone(), Encoding::ThriftRW, 0, 0)),
+                Arc::new(SqlHistoryV2Store::new(backend, Encoding::ThriftRW)),
+                Arc::new(crate::wiring::persistence::visibility::SqlVisibilityWriter::new(visibility_backend)),
+            )
+        };
         let persistence = HistoryPersistence {
             shard_store: Arc::new(SqlShardStore::new(shard_rows.clone())),
             shard_persistence: Arc::new(SqlShardPersistence::new(shard_rows.clone())),

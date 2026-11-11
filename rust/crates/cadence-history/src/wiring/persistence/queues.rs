@@ -72,10 +72,14 @@ impl SqlHistoryTask {
                     domain_id: t.domain_id.clone(),
                     workflow_id: t.workflow_id.clone(),
                     run_id: t.run_id.clone(),
-                    task_id: task.task_id,
+                    task_id: if task.task_id != 0 { task.task_id } else { t.task_id },
                     task_type: t.task_type,
                     version: t.version,
-                    visibility_nanos: task.visibility_timestamp_unix_nanos,
+                    visibility_nanos: if task.visibility_timestamp_unix_nanos != 0 {
+                        task.visibility_timestamp_unix_nanos
+                    } else {
+                        t.visibility_timestamp_unix_nanos
+                    },
                     transfer: None,
                     timer: Some(t),
                 })

@@ -129,6 +129,9 @@ fn to_row(record: &VisibilityRecord, closed: bool) -> VisibilityWriteRow {
         execution_status,
         scheduled_execution_time: record.scheduled_execution_timestamp,
         closed: closed.then(|| (record.close_timestamp, thrift_close_status(record.close_status), record.history_length)),
+        task_list: record.task_list.clone(),
+        workflow_timeout_seconds: record.workflow_timeout,
+        retention_seconds: record.retention_seconds,
     }
 }
 
