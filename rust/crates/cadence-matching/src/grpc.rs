@@ -2374,7 +2374,24 @@ impl p::worker_api_server::WorkerApi for Frontend {
             .await?;
         Ok(Response::new(p::RespondDecisionTaskCompletedResponse {
             decision_task: v.decision_task.map(cv::decision_task).transpose()?,
-            activities_to_dispatch_locally: Default::default(),
+            activities_to_dispatch_locally: v
+                .activities_to_dispatch_locally
+                .into_iter()
+                .map(|(k, a)| {
+                    (
+                        k,
+                        p::ActivityLocalDispatchInfo {
+                            activity_id: a.activity_id,
+                            scheduled_time: a.scheduled_timestamp.map(cv::timestamp_from_nanos),
+                            started_time: a.started_timestamp.map(cv::timestamp_from_nanos),
+                            scheduled_time_of_this_attempt: a
+                                .scheduled_timestamp_of_this_attempt
+                                .map(cv::timestamp_from_nanos),
+                            task_token: a.task_token,
+                        },
+                    )
+                })
+                .collect(),
         }))
     }
     async fn respond_activity_task_failed(
