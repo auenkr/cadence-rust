@@ -214,7 +214,8 @@ fn map_pending_activity_info_heartbeat_and_retry() {
 fn map_pending_child_uses_domain_name_or_falls_back_to_id() {
     let entry = domain_entry("dom-id", "dom-name");
     let mut dc = FakeDomainCache::default();
-    dc.by_id.insert("child-id".into(), Arc::new(domain_entry("child-id", "child-name")));
+    dc.names.insert("child-id".into(), "child-name".into());
+    dc.not_exists.insert("gone".into());
     // child in a known domain
     let known = PendingChildInfo { domain_id: "child-id".into(), initiated_id: 3, ..Default::default() };
     assert_eq!(map_pending_child_execution_info(&known, &entry, &dc).unwrap().domain, "child-name");
@@ -239,7 +240,7 @@ fn map_pending_decision_info_states() {
 #[tokio::test]
 async fn map_workflow_execution_info_parent_and_cron() {
     let mut dc = FakeDomainCache::default();
-    dc.by_id.insert("pd".into(), Arc::new(domain_entry("pd", "parent-domain")));
+    dc.names.insert("pd".into(), "parent-domain".into());
     let info = WorkflowExecutionInfo {
         parent_run_id: "pr".into(),
         parent_workflow_id: "pw".into(),
