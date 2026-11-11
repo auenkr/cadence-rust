@@ -548,6 +548,7 @@ impl WorkflowStartHost for EngineStartHost {
             .unwrap()
             .clone()
             .ok_or_else(|| HistoryError::internal("start transaction not prepared"))?;
+        let _task_write_gate = self.core.shard.lock_task_writes().await;
         let (snap, max_read_level, notify_transfer, notify_timer) = snapshot_of(&self.core, txn)?;
         let (size, last) = *new_run.history.lock().unwrap();
         let shard = &self.core.shard;

@@ -169,6 +169,8 @@ pub struct ShardContext {
     range_id: AtomicI64,
     closed_at: Mutex<Option<i64>>,
     closed: AtomicBool,
+    /// Serialises task-id allocation -> DB write -> max-read-level update (Go holds the shard lock across all three).
+    task_write_gate: Arc<tokio::sync::Mutex<()>>,
     inner: Mutex<Inner>,
     previous_shard_owner_was_different: bool,
 }
@@ -223,6 +225,7 @@ impl ShardContext {
             range_id: AtomicI64::new(updated.range_id),
             closed_at: Mutex::new(None),
             closed: AtomicBool::new(false),
+            task_write_gate: Arc::new(tokio::sync::Mutex::new(())),
             inner: Mutex::new(Inner {
                 shard_info: updated,
                 task_sequence_number: 0,
@@ -344,6 +347,12 @@ impl ShardContext {
         self.range_id.store(updated.range_id, Ordering::SeqCst);
         g.shard_info = updated;
         Ok(())
+    }
+
+    /// Held by a writer from transfer-id allocation until the write result and read-level update are done, so a higher
+    /// read level never overtakes a lower, not yet committed task id (Go does this under the shard lock).
+    pub async fn lock_task_writes(&self) -> tokio::sync::OwnedMutexGuard<()> {
+        self.task_write_gate.clone().lock_owned().await
     }
 
     /// Go `updateMaxReadLevelLocked`, called after a successful write.
@@ -852,6 +861,38 @@ mod tests {
         assert_eq!(err.to_string(), "replication queue state is not supported");
         // Go returns before updateShardInfoLocked: nothing persisted.
         assert_eq!(store.0.lock().unwrap().len(), before);
+    }
+
+    #[tokio::test]
+    async fn task_write_gate_keeps_read_level_behind_uncommitted_ids() {
+        let store = Arc::new(Store(Mutex::new(vec![]), false));
+        let c = Arc::new(ctx(store, Arc::new(AtomicUsize::new(0))).unwrap());
+        let read = |c: &ShardContext| match c.update_if_needed_and_get_queue_max_read_level(HistoryTaskCategory::Transfer, "") {
+            k => k,
+        };
+        // Writer A allocates id 80 and has not committed yet.
+        let gate_a = c.lock_task_writes().await;
+        let mut slots_a = vec![(0, 0)];
+        let mut level_a = 0;
+        c.allocate_transfer_ids(&mut slots_a, &mut level_a).unwrap();
+        // Writer B must not be able to allocate (and so cannot raise the read level to 81) while A is in flight.
+        let c2 = c.clone();
+        let b = tokio::spawn(async move {
+            let _gate_b = c2.lock_task_writes().await;
+            let mut slots_b = vec![(0, 0)];
+            let mut level_b = 0;
+            c2.allocate_transfer_ids(&mut slots_b, &mut level_b).unwrap();
+            c2.update_max_read_level(level_b);
+            slots_b[0].0
+        });
+        tokio::task::yield_now().await;
+        assert!(!b.is_finished(), "second writer ran before the first committed");
+        assert_eq!(read(&c), HistoryTaskKey::immediate(79));
+        c.update_max_read_level(level_a);
+        drop(gate_a);
+        assert_eq!(b.await.unwrap(), 81);
+        assert_eq!(read(&c), HistoryTaskKey::immediate(81));
+        assert_eq!(slots_a[0].0, 80);
     }
 
     #[test]

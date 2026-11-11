@@ -309,7 +309,8 @@ impl EngineExecutionContext {
                 txn.events.last().map(|e| e.version).unwrap_or(txn.mutation.last_write_version);
         }
 
-        // Task ids.
+        // Task ids. The gate stays held until the write finished (see ShardContext::lock_task_writes).
+        let _task_write_gate = shard.lock_task_writes().await;
         let mut max_read_level = 0i64;
         let mut transfer_slots: Vec<(i64, i64)> = txn.transfer.iter().map(|_| (0, 0)).collect();
         shard.allocate_transfer_ids(&mut transfer_slots, &mut max_read_level).map_err(shard_err)?;
