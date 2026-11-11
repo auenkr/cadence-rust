@@ -25,6 +25,14 @@ pub struct MockMs {
     pub next_event_id: i64,
     pub vh: Option<VersionHistories>,
     pub branch_token: Vec<u8>,
+    /// Scripted result of `close_transaction_as_snapshot` (Go `CloseTransactionAsSnapshot`).
+    pub snapshot: WorkflowSnapshot,
+    pub events_seq: Vec<WorkflowEvents>,
+    /// Policies `close_transaction_as_snapshot` was called with.
+    pub closed_with: Vec<TransactionPolicy>,
+    pub committed: usize,
+    /// `create_workflow_execution` on a `LogWorkflow` returns `WorkflowExecutionAlreadyStarted`.
+    pub fail_create_already_started: bool,
 }
 
 impl NdcMutableState for MockMs {
@@ -110,9 +118,13 @@ impl NdcMutableState for MockMs {
     fn close_transaction_as_snapshot(
         &mut self,
         _now_nanos: i64,
-        _policy: TransactionPolicy,
+        policy: TransactionPolicy,
     ) -> NdcResult<(WorkflowSnapshot, Vec<WorkflowEvents>)> {
-        unimplemented!()
+        self.closed_with.push(policy);
+        Ok((self.snapshot.clone(), self.events_seq.clone()))
+    }
+    fn transaction_committed(&mut self) {
+        self.committed += 1;
     }
 }
 
@@ -314,5 +326,244 @@ impl super::transaction_manager::TransactionManagerEnv for MockEnv {
     }
     fn inc_reapply_events_skipped(&self) {
         self.calls.borrow_mut().skipped_metric += 1;
+    }
+}
+
+pub type Log = std::rc::Rc<std::cell::RefCell<Vec<String>>>;
+
+fn run_of(w: &dyn NdcWorkflow) -> String {
+    w.mutable_state().get_execution_info().run_id
+}
+
+/// Scriptable workflow that records every call as `"<name>:<call>"` in a shared log
+/// (stands in for `execution.MockWorkflow` + `MockContext` in the Go transaction-manager tests).
+pub struct LogWorkflow {
+    pub name: &'static str,
+    pub ms: MockMs,
+    pub log: Log,
+    pub happens_after_result: bool,
+    pub suppress_policy: TransactionPolicy,
+    pub last_write_version: i64,
+}
+
+impl LogWorkflow {
+    pub fn new(name: &'static str, log: &Log, run_id: &str) -> Self {
+        Self {
+            name,
+            ms: MockMs {
+                info: NdcExecutionInfo {
+                    domain_id: "some random domain ID".into(),
+                    workflow_id: "some random workflow ID".into(),
+                    run_id: run_id.into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            log: log.clone(),
+            happens_after_result: false,
+            suppress_policy: TransactionPolicy::Passive,
+            last_write_version: 0,
+        }
+    }
+    fn rec(&self, s: String) {
+        self.log.borrow_mut().push(format!("{}:{}", self.name, s));
+    }
+}
+
+fn opt_run(w: &Option<&mut dyn NdcWorkflow>) -> String {
+    match w {
+        Some(w) => run_of(&**w),
+        None => "none".into(),
+    }
+}
+
+impl NdcWorkflow for LogWorkflow {
+    fn mutable_state(&self) -> &dyn NdcMutableState {
+        &self.ms
+    }
+    fn mutable_state_mut(&mut self) -> &mut dyn NdcMutableState {
+        &mut self.ms
+    }
+    fn replace_mutable_state(&mut self, _ms: Box<dyn NdcMutableState>) {
+        unimplemented!()
+    }
+    fn clear(&mut self) {}
+    fn set_history_size(&mut self, _size: i64) {}
+    fn release(&mut self, err: Option<&NdcError>) {
+        self.rec(format!("release({})", if err.is_some() { "err" } else { "ok" }));
+    }
+    fn get_vector_clock(&self) -> NdcResult<WorkflowVectorClock> {
+        Ok(WorkflowVectorClock {
+            active_cluster_selection_policy: None,
+            last_write_version: self.last_write_version,
+            last_event_task_id: 0,
+            start_timestamp_unix_nanos: 0,
+            run_id: String::new(),
+        })
+    }
+    fn happens_after(&self, other: &dyn NdcWorkflow) -> NdcResult<bool> {
+        self.rec(format!("happens_after({})", run_of(other)));
+        Ok(self.happens_after_result)
+    }
+    fn suppress_by(&mut self, other: &dyn NdcWorkflow) -> NdcResult<TransactionPolicy> {
+        self.rec(format!("suppress_by({})", run_of(other)));
+        Ok(self.suppress_policy)
+    }
+    fn revive(&mut self) -> NdcResult<()> {
+        self.rec("revive".into());
+        Ok(())
+    }
+    fn flush_buffered_events(&mut self) -> NdcResult<()> {
+        unimplemented!()
+    }
+    fn update_workflow_execution_as_active(&mut self, _now: i64) -> NdcResult<()> {
+        unimplemented!()
+    }
+    fn update_workflow_execution_as_passive(&mut self, _now: i64) -> NdcResult<()> {
+        self.rec("update_as_passive".into());
+        Ok(())
+    }
+    fn update_workflow_execution_with_new_as_passive(
+        &mut self,
+        _now: i64,
+        new_workflow: &mut dyn NdcWorkflow,
+    ) -> NdcResult<()> {
+        self.rec(format!("update_with_new_as_passive(new={})", run_of(new_workflow)));
+        Ok(())
+    }
+    fn update_workflow_execution_with_new(
+        &mut self,
+        _now: i64,
+        mode: UpdateWorkflowMode,
+        new_workflow: Option<&mut dyn NdcWorkflow>,
+        current_policy: TransactionPolicy,
+        new_policy: Option<TransactionPolicy>,
+        request_mode: WorkflowRequestMode,
+    ) -> NdcResult<()> {
+        self.rec(format!(
+            "update_with_new({:?},new={},{:?},{:?},{:?})",
+            mode,
+            opt_run(&new_workflow),
+            current_policy,
+            new_policy,
+            request_mode
+        ));
+        Ok(())
+    }
+    fn conflict_resolve_workflow_execution(
+        &mut self,
+        _now: i64,
+        mode: ConflictResolveWorkflowMode,
+        new_workflow: Option<&mut dyn NdcWorkflow>,
+        current_workflow: Option<&mut dyn NdcWorkflow>,
+        current_policy: Option<TransactionPolicy>,
+    ) -> NdcResult<()> {
+        self.rec(format!(
+            "conflict_resolve({:?},new={},current={},{:?})",
+            mode,
+            opt_run(&new_workflow),
+            opt_run(&current_workflow),
+            current_policy
+        ));
+        Ok(())
+    }
+    fn persist_start_workflow_batch_events(&mut self, _e: &WorkflowEvents) -> NdcResult<PersistedBlob> {
+        self.rec("persist_start".into());
+        Ok(PersistedBlob { first_event_id: 12345, ..Default::default() })
+    }
+    fn persist_non_start_workflow_batch_events(&mut self, _e: &WorkflowEvents) -> NdcResult<PersistedBlob> {
+        self.rec("persist_non_start".into());
+        Ok(PersistedBlob { first_event_id: 12345, ..Default::default() })
+    }
+    fn create_workflow_execution(
+        &mut self,
+        _snapshot: WorkflowSnapshot,
+        blob: PersistedBlob,
+        mode: CreateWorkflowMode,
+        prev_run_id: &str,
+        prev_last_write_version: i64,
+        request_mode: WorkflowRequestMode,
+    ) -> NdcResult<()> {
+        self.rec(format!(
+            "create({:?},blob={},{:?},{},{:?})",
+            mode, blob.first_event_id, prev_run_id, prev_last_write_version, request_mode
+        ));
+        if self.ms.fail_create_already_started {
+            return Err(NdcError::WorkflowExecutionAlreadyStarted(String::new()));
+        }
+        Ok(())
+    }
+    fn reapply_events(&mut self, _events: &[WorkflowEvents]) -> NdcResult<()> {
+        self.rec("reapply".into());
+        Ok(())
+    }
+    fn load_workflow_execution(&mut self, _task_version: Option<i64>) -> NdcResult<()> {
+        unimplemented!()
+    }
+}
+
+/// Scriptable `NdcTransactionManager` (Go `MocktransactionManager`).
+pub struct MockTm {
+    pub log: Log,
+    pub current_run_id: NdcResult<String>,
+    pub exists: bool,
+    pub loaded: std::cell::RefCell<Option<Box<dyn NdcWorkflow>>>,
+}
+
+impl MockTm {
+    pub fn new(log: &Log, current_run_id: &str) -> Self {
+        Self {
+            log: log.clone(),
+            current_run_id: Ok(current_run_id.into()),
+            exists: false,
+            loaded: std::cell::RefCell::new(None),
+        }
+    }
+}
+
+impl super::transaction_manager::NdcTransactionManager for MockTm {
+    fn create_workflow(&self, _now: i64, _t: Box<dyn NdcWorkflow>) -> NdcResult<()> {
+        unimplemented!()
+    }
+    fn update_workflow(
+        &self,
+        _now: i64,
+        _rebuilt: bool,
+        _t: Box<dyn NdcWorkflow>,
+        _n: Option<Box<dyn NdcWorkflow>>,
+    ) -> NdcResult<()> {
+        unimplemented!()
+    }
+    fn backfill_workflow(&self, _now: i64, _t: Box<dyn NdcWorkflow>, _e: &WorkflowEvents) -> NdcResult<()> {
+        unimplemented!()
+    }
+    fn check_workflow_exists(&self, _d: &str, _w: &str, run_id: &str) -> NdcResult<bool> {
+        self.log.borrow_mut().push(format!("tm:check_workflow_exists({run_id})"));
+        Ok(self.exists)
+    }
+    fn get_current_workflow_run_id(&self, _d: &str, _w: &str) -> NdcResult<String> {
+        self.log.borrow_mut().push("tm:get_current_workflow_run_id".into());
+        self.current_run_id.clone()
+    }
+    fn load_ndc_workflow(&self, _d: &str, _w: &str, run_id: &str) -> NdcResult<Box<dyn NdcWorkflow>> {
+        self.log.borrow_mut().push(format!("tm:load_ndc_workflow({run_id})"));
+        Ok(self.loaded.borrow_mut().take().expect("loaded workflow scripted"))
+    }
+}
+
+pub fn new_log() -> Log {
+    Default::default()
+}
+
+/// A `WorkflowEvents` whose first event has `event_type`.
+pub fn events_of(event_type: cadence_api::enums::EventType) -> WorkflowEvents {
+    WorkflowEvents {
+        key: crate::execution::context::WorkflowExecutionKey {
+            domain_id: String::new(),
+            workflow_id: String::new(),
+            run_id: String::new(),
+        },
+        branch_token: Vec::new(),
+        events: vec![cadence_api::service_types::HistoryEvent { event_type: Some(event_type), ..Default::default() }],
     }
 }

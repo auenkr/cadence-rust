@@ -333,3 +333,200 @@ impl<'a> TransactionManagerForExistingWorkflow<'a> {
         })
     }
 }
+
+/// Port of Go `existing_workflow_transaction_manager_test.go`.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ndc::test_support::{new_log, Log, LogWorkflow, MockTm};
+
+    fn s(v: &[&str]) -> Vec<String> {
+        v.iter().map(|x| x.to_string()).collect()
+    }
+
+    struct Fx {
+        log: Log,
+        tm: MockTm,
+        target: Box<LogWorkflow>,
+        new: Box<LogWorkflow>,
+        current: Box<LogWorkflow>,
+    }
+
+    fn fx(current_run: &str) -> Fx {
+        let log = new_log();
+        let tm = MockTm::new(&log, current_run);
+        Fx {
+            tm,
+            target: Box::new(LogWorkflow::new("target", &log, "target-run")),
+            new: Box::new(LogWorkflow::new("new", &log, "new-run")),
+            current: Box::new(LogWorkflow::new("current", &log, "current-run")),
+            log,
+        }
+    }
+
+    fn run(f: Fx, rebuilt: bool, with_new: bool, load_current: bool) -> (NdcResult<()>, Vec<String>) {
+        if load_current {
+            *f.tm.loaded.borrow_mut() = Some(f.current);
+        }
+        let mgr = TransactionManagerForExistingWorkflow::new(&f.tm);
+        let new: OptWorkflow = if with_new { Some(f.new) } else { None };
+        let r = mgr.dispatch_for_existing_workflow(1, rebuilt, f.target, new);
+        let l = f.log.borrow().clone();
+        (r, l)
+    }
+
+    #[test]
+    fn no_rebuild_current_workflow_guaranteed() {
+        let mut f = fx("");
+        f.target.ms.guaranteed = true;
+        let (r, l) = run(f, false, true, false);
+        r.unwrap();
+        assert_eq!(
+            l,
+            s(&[
+                "target:update_with_new_as_passive(new=new-run)",
+                "target:release(ok)",
+                "new:release(ok)",
+            ])
+        );
+    }
+
+    #[test]
+    fn no_rebuild_not_guaranteed_is_current() {
+        let f = fx("target-run");
+        let (r, l) = run(f, false, true, false);
+        assert!(r.is_err());
+        assert_eq!(l[0], "tm:get_current_workflow_run_id");
+    }
+
+    #[test]
+    fn no_rebuild_not_current_current_running_update_as_current() {
+        let mut f = fx("current-run");
+        f.target.happens_after_result = true;
+        f.current.ms.running = true;
+        let (r, l) = run(f, false, true, true);
+        r.unwrap();
+        assert_eq!(
+            l,
+            s(&[
+                "tm:get_current_workflow_run_id",
+                "tm:load_ndc_workflow(current-run)",
+                "target:happens_after(current-run)",
+                "current:suppress_by(target-run)",
+                "target:revive",
+                "new:revive",
+                "target:conflict_resolve(UpdateCurrent,new=new-run,current=current-run,Some(Passive))",
+                "current:release(ok)",
+                "target:release(ok)",
+                "new:release(ok)",
+            ])
+        );
+    }
+
+    #[test]
+    fn no_rebuild_not_current_current_complete_update_as_current() {
+        let mut f = fx("current-run");
+        f.target.happens_after_result = true;
+        f.current.ms.running = false;
+        let (r, l) = run(f, false, true, true);
+        r.unwrap();
+        // current is not running: SuppressBy is never called (Go Times(0))
+        assert!(!l.iter().any(|e| e.starts_with("current:suppress_by")));
+        assert!(l.contains(&"target:conflict_resolve(UpdateCurrent,new=new-run,current=current-run,Some(Passive))".to_string()));
+        assert!(l.contains(&"current:release(ok)".to_string()));
+        assert!(l.contains(&"target:release(ok)".to_string()));
+        assert!(l.contains(&"new:release(ok)".to_string()));
+    }
+
+    #[test]
+    fn no_rebuild_not_current_update_as_zombie_new_run_does_not_exist() {
+        let f = fx("current-run");
+        let (r, l) = run(f, false, true, true);
+        r.unwrap();
+        assert_eq!(
+            l,
+            s(&[
+                "tm:get_current_workflow_run_id",
+                "tm:load_ndc_workflow(current-run)",
+                "target:happens_after(current-run)",
+                "target:suppress_by(current-run)",
+                "new:suppress_by(current-run)",
+                "tm:check_workflow_exists(new-run)",
+                "current:release(ok)",
+                "target:update_with_new(BypassCurrent,new=new-run,Passive,Some(Passive),Replicated)",
+                "target:release(ok)",
+                "new:release(ok)",
+            ])
+        );
+    }
+
+    #[test]
+    fn no_rebuild_not_current_update_as_zombie_new_run_exists() {
+        let mut f = fx("current-run");
+        f.tm.exists = true;
+        let (r, l) = run(f, false, true, true);
+        r.unwrap();
+        assert!(l.contains(&"target:update_with_new(BypassCurrent,new=none,Passive,None,Replicated)".to_string()));
+        assert!(l.contains(&"current:release(ok)".to_string()));
+        assert!(l.contains(&"target:release(ok)".to_string()));
+        assert!(l.contains(&"new:release(ok)".to_string()));
+    }
+
+    #[test]
+    fn rebuild_is_current() {
+        let f = fx("target-run");
+        let (r, l) = run(f, true, true, false);
+        r.unwrap();
+        assert_eq!(
+            l,
+            s(&[
+                "tm:get_current_workflow_run_id",
+                "target:conflict_resolve(UpdateCurrent,new=new-run,current=none,None)",
+                "target:release(ok)",
+                "new:release(ok)",
+            ])
+        );
+    }
+
+    #[test]
+    fn rebuild_not_current_update_as_current() {
+        let mut f = fx("current-run");
+        f.target.happens_after_result = true;
+        f.current.ms.running = true;
+        f.current.suppress_policy = TransactionPolicy::Active;
+        let (r, l) = run(f, true, true, true);
+        r.unwrap();
+        assert!(l.contains(&"current:suppress_by(target-run)".to_string()));
+        assert!(l.contains(&"target:revive".to_string()));
+        assert!(l.contains(&"new:revive".to_string()));
+        assert!(l.contains(
+            &"target:conflict_resolve(UpdateCurrent,new=new-run,current=current-run,Some(Active))".to_string()
+        ));
+        assert!(l.contains(&"current:release(ok)".to_string()));
+        assert!(l.contains(&"target:release(ok)".to_string()));
+        assert!(l.contains(&"new:release(ok)".to_string()));
+    }
+
+    #[test]
+    fn rebuild_not_current_update_as_zombie_new_run_does_not_exist() {
+        let f = fx("current-run");
+        let (r, l) = run(f, true, true, true);
+        r.unwrap();
+        assert!(l.contains(&"target:conflict_resolve(BypassCurrent,new=new-run,current=none,None)".to_string()));
+        assert!(l.contains(&"current:release(ok)".to_string()));
+        assert!(l.contains(&"target:release(ok)".to_string()));
+        assert!(l.contains(&"new:release(ok)".to_string()));
+    }
+
+    #[test]
+    fn rebuild_not_current_update_as_zombie_new_run_exists() {
+        let mut f = fx("current-run");
+        f.tm.exists = true;
+        let (r, l) = run(f, true, true, true);
+        r.unwrap();
+        assert!(l.contains(&"target:conflict_resolve(BypassCurrent,new=none,current=none,None)".to_string()));
+        assert!(l.contains(&"current:release(ok)".to_string()));
+        assert!(l.contains(&"target:release(ok)".to_string()));
+        assert!(l.contains(&"new:release(ok)".to_string()));
+    }
+}

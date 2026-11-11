@@ -513,3 +513,69 @@ mod tests {
         assert_eq!(TransactionManagerImpl::new(&e, &reapplier).get_current_workflow_run_id(DOMAIN, WF).unwrap(), RUN);
     }
 }
+
+/// Port of Go `TestCreateWorkflow` / `TestUpdateWorkflow`. Go injects mock sub-managers;
+/// Rust builds them inside `TransactionManagerImpl`, so these check the delegation
+/// end to end through the real sub-managers with a scripted env.
+#[cfg(test)]
+mod delegation_tests {
+    use super::*;
+    use crate::ndc::test_support::{new_log, Calls, LogWorkflow, MockEnv};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    fn env(current: NdcResult<String>) -> MockEnv {
+        MockEnv {
+            domain_name: Ok("some random domainName".into()),
+            workflow_execution: Ok(()),
+            current_execution: current,
+            current_cluster: "active".into(),
+            active_cluster: "active".into(),
+            calls: Rc::new(RefCell::new(Calls::default())),
+        }
+    }
+
+    struct NoReapply;
+    impl EventsReapplier for NoReapply {
+        fn reapply_events(
+            &self,
+            _ms: &mut dyn super::super::NdcMutableState,
+            _events: &[HistoryEvent],
+            _run_id: &str,
+        ) -> NdcResult<Vec<HistoryEvent>> {
+            unimplemented!()
+        }
+    }
+
+    #[test]
+    fn create_workflow_delegates_to_new_workflow_manager() {
+        let env = env(Ok("target-run".into()));
+        let reapplier = NoReapply;
+        let tm = TransactionManagerImpl::new(&env, &reapplier);
+        let log = new_log();
+        let target = Box::new(LogWorkflow::new("target", &log, "target-run"));
+        tm.create_workflow(1, target).unwrap();
+        // dispatchForNewWorkflow: the target run is already current -> released, nothing written.
+        assert_eq!(*log.borrow(), vec!["target:release(ok)".to_string()]);
+    }
+
+    #[test]
+    fn update_workflow_delegates_to_existing_workflow_manager() {
+        let env = env(Ok("target-run".into()));
+        let reapplier = NoReapply;
+        let tm = TransactionManagerImpl::new(&env, &reapplier);
+        let log = new_log();
+        let mut target = Box::new(LogWorkflow::new("target", &log, "target-run"));
+        target.ms.guaranteed = true;
+        let new = Box::new(LogWorkflow::new("new", &log, "new-run"));
+        tm.update_workflow(1, false, target, Some(new)).unwrap();
+        assert_eq!(
+            *log.borrow(),
+            vec![
+                "target:update_with_new_as_passive(new=new-run)".to_string(),
+                "target:release(ok)".to_string(),
+                "new:release(ok)".to_string(),
+            ]
+        );
+    }
+}
