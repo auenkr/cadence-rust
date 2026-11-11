@@ -149,6 +149,11 @@ pub(super) fn engine_activity(schedule_id: i64, a: &pc::ActivityInfo, details: V
 }
 
 pub(super) struct Inner {
+    /// Start event of this run, preloaded before the decisions run (the sync
+    /// decision handler cannot read history); used by ContinueAsNew / cron / retry.
+    pub(super) prev_start_event: Option<HistoryEvent>,
+    /// New run created by a ContinueAsNew decision (Go `continueAsNewBuilder`).
+    pub(super) new_run: Option<Arc<EngineMutableState>>,
     /// Engine view of the execution info (state, close status, sticky, decision ids).
     pub(super) exec: WorkflowExecutionInfo,
     /// Persistence view; the source of truth for the decision_* fields.
@@ -174,6 +179,12 @@ pub(super) struct Inner {
     pub(super) pc_children: BTreeMap<i64, pc::ChildExecutionInfo>,
     pub(super) upsert_children: BTreeSet<i64>,
     pub(super) deleted_children: BTreeSet<i64>,
+    /// Pending request-cancel infos (Go `pendingRequestCancelInfoIDs`).
+    pub(super) pc_cancels: BTreeMap<i64, pc::RequestCancelInfo>,
+    pub(super) upsert_cancels: BTreeSet<i64>,
+    /// Pending signal infos (Go `pendingSignalInfoIDs`).
+    pub(super) pc_signals: BTreeMap<i64, pc::SignalInfo>,
+    pub(super) upsert_signals: BTreeSet<i64>,
     /// Initiated ids of request-cancel infos completed in this transaction.
     pub(super) deleted_request_cancels: BTreeSet<i64>,
     /// Initiated ids of signal infos completed in this transaction.
@@ -345,7 +356,21 @@ impl EngineMutableState {
         let version_histories = envelope.version_histories.clone();
         let current_version = envelope.current_version;
         let buffered = envelope.buffered_events.clone();
+        let mut pc_cancels = BTreeMap::new();
+        for k in &snapshot.request_cancel_infos {
+            let info = cadence_persistence::sqlblobs::request_cancel_info_from_struct(&decode(&k.value)?)
+                .map_err(|e| HistoryError::internal(format!("decode request cancel info: {e}")))?;
+            pc_cancels.insert(k.key, info);
+        }
+        let mut pc_signals = BTreeMap::new();
+        for k in &snapshot.signal_infos {
+            let info = cadence_persistence::sqlblobs::signal_info_from_struct(&decode(&k.value)?)
+                .map_err(|e| HistoryError::internal(format!("decode signal info: {e}")))?;
+            pc_signals.insert(k.key, info);
+        }
         let inner = Inner {
+            prev_start_event: None,
+            new_run: None,
             exec,
             pc_exec: i.clone(),
             next_event_id: i.next_event_id,
@@ -367,6 +392,10 @@ impl EngineMutableState {
             pc_children,
             upsert_children: BTreeSet::new(),
             deleted_children: BTreeSet::new(),
+            pc_cancels,
+            upsert_cancels: BTreeSet::new(),
+            pc_signals,
+            upsert_signals: BTreeSet::new(),
             deleted_request_cancels: BTreeSet::new(),
             deleted_signals: BTreeSet::new(),
             signal_requested: snapshot.signal_requested_ids.iter().cloned().collect(),

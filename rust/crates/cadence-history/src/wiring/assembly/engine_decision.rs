@@ -543,6 +543,17 @@ impl EngineDecisionHandler {
                     }
                     None => state.clear_sticky(),
                 }
+                if req.decisions.iter().any(|d| {
+                    matches!(
+                        d.decision_type,
+                        Some(cadence_api::enums::DecisionType::ContinueAsNewWorkflowExecution)
+                            | Some(cadence_api::enums::DecisionType::CompleteWorkflowExecution)
+                            | Some(cadence_api::enums::DecisionType::FailWorkflowExecution)
+                    )
+                }) {
+                    // Go `GetStartEvent`; the decision handler is synchronous.
+                    state.preload_start_event().await;
+                }
                 let mut decisions = req.decisions.clone();
                 let (fail, cause, message, unhandled, not_started_cancelled) = {
                     let ops = EngineOps {
@@ -599,7 +610,11 @@ impl EngineDecisionHandler {
             } else {
                 None
             };
-            match context.update_as_active(self.core.clock.now()).await {
+            let updated = match state.take_new_run() {
+                Some(new_run) => self.update_with_new_run(context, &new_run).await,
+                None => context.update_as_active(self.core.clock.now()).await,
+            };
+            match updated {
                 Err(HistoryError::DuplicateRequest { .. }) => {}
                 Err(e) if e.is_conflict_error() => {
                     if attempt != CONDITIONAL_RETRY_COUNT - 1 {
@@ -620,6 +635,28 @@ impl EngineDecisionHandler {
             return Ok(resp);
         }
         Err(HistoryError::MaxAttemptsExceeded)
+    }
+
+    /// Go `UpdateWorkflowExecutionWithNewAsActive` for a ContinueAsNew decision:
+    /// the closed current run and the new run are written in one update.
+    async fn update_with_new_run(
+        &self,
+        context: &Arc<EngineExecutionContext>,
+        new_run: &Arc<EngineMutableState>,
+    ) -> HResult<()> {
+        let now = self.core.clock.now();
+        let info = {
+            let g = new_run.inner.lock().unwrap();
+            format!("{}:{}", g.pc_exec.workflow_id, g.pc_exec.run_id)
+        };
+        let mut txn = new_run.close_transaction(now, true)?;
+        let (size, last, _blob) =
+            crate::wiring::assembly::engine_start::append_new_branch(&self.core, &mut txn, &info).await?;
+        let (snapshot, _, transfer, timer) = crate::wiring::assembly::engine_start::snapshot_of(&self.core, txn)?;
+        context.update_with_new_as_active(now, snapshot).await?;
+        self.core.notify_tasks(&transfer, &timer);
+        new_run.finish_transaction(size, last);
+        Ok(())
     }
 
     /// Go `workflow.UpdateWithAction` (the closure here is synchronous).

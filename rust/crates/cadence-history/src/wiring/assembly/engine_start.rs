@@ -85,6 +85,18 @@ impl EngineMutableState {
         execution: &WorkflowExecution,
         request: &HistoryStartWorkflowExecutionRequest,
     ) -> HResult<HistoryEvent> {
+        self.start_event_with(execution, request, None)
+    }
+
+    /// `start_event` for a run created by ContinueAsNew (Go
+    /// `addWorkflowExecutionStartedEventForContinueAsNew` -> `AddWorkflowExecutionStartedEvent`
+    /// with the previous execution info).
+    pub(super) fn start_event_with(
+        &self,
+        execution: &WorkflowExecution,
+        request: &HistoryStartWorkflowExecutionRequest,
+        prev: Option<&ContinuedFrom>,
+    ) -> HResult<HistoryEvent> {
         let start = request
             .start_request
             .as_ref()
@@ -116,8 +128,14 @@ impl EngineMutableState {
             last_completion_result: request.last_completion_result.clone(),
             original_execution_run_id: run_id.clone(),
             identity: start.identity.clone(),
-            first_execution_run_id: run_id.clone(),
-            first_scheduled_time_nano: Some(now + backoff.unwrap_or(0) as i64 * NANOS),
+            first_execution_run_id: prev.map(|p| p.first_run_id.clone()).unwrap_or_else(|| run_id.clone()),
+            continued_execution_run_id: prev.map(|p| p.prev_run_id.clone()).unwrap_or_default(),
+            parent_workflow_domain_id: parent.as_ref().map(|p| p.domain_uuid.clone()),
+            first_scheduled_time_nano: match prev {
+                Some(_) if start.cron_schedule.is_empty() => None,
+                Some(p) => Some(p.first_scheduled_time_nano),
+                None => Some(now + backoff.unwrap_or(0) as i64 * NANOS),
+            },
             retry_policy: start.retry_policy.clone(),
             attempt: request.attempt,
             expiration_timestamp: request.expiration_timestamp,
@@ -147,7 +165,7 @@ impl EngineMutableState {
             i.domain_id = domain_id;
             i.workflow_id = execution.workflow_id.clone();
             i.run_id = run_id.clone();
-            i.first_execution_run_id = run_id;
+            i.first_execution_run_id = prev.map(|p| p.first_run_id.clone()).unwrap_or(run_id);
             i.task_list = task_list;
             i.workflow_type_name = type_name;
             i.workflow_timeout_nanos = timeout_secs * NANOS;
@@ -200,6 +218,10 @@ impl EngineMutableState {
             }
             i.partition_config = request.partition_config.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         }
+        // The close transaction copies `last_processed_event` back into the
+        // execution info; a run without a first decision (child workflow) must keep
+        // EmptyEventID or ScheduleDecisionTask would see a "processed" decision.
+        g.last_processed_event = EMPTY_EVENT_ID;
         let p = g.pc_exec.clone();
         {
             let e = &mut g.exec;
@@ -263,6 +285,13 @@ impl EngineMutableState {
     }
 }
 
+/// Previous-run facts a ContinueAsNew start event needs.
+pub(super) struct ContinuedFrom {
+    pub prev_run_id: String,
+    pub first_run_id: String,
+    pub first_scheduled_time_nano: i64,
+}
+
 /// The closed transaction of a state that is created (start / continue-as-new).
 pub(super) struct NewRunTxn {
     state: Arc<EngineMutableState>,
@@ -270,7 +299,7 @@ pub(super) struct NewRunTxn {
     history: Mutex<(i64, Option<i64>)>,
 }
 
-async fn append_new_branch(
+pub(super) async fn append_new_branch(
     core: &EngineCore,
     txn: &mut ClosedTxn,
     info: &str,
@@ -301,7 +330,7 @@ async fn append_new_branch(
 }
 
 #[allow(clippy::type_complexity)]
-fn snapshot_of(core: &EngineCore, mut txn: ClosedTxn) -> HResult<(pc::WorkflowSnapshot, i64, Vec<pc::TransferTask>, Vec<pc::TimerTask>)> {
+pub(super) fn snapshot_of(core: &EngineCore, mut txn: ClosedTxn) -> HResult<(pc::WorkflowSnapshot, i64, Vec<pc::TransferTask>, Vec<pc::TimerTask>)> {
     let shard = &core.shard;
     let mut max_read_level = 0i64;
     let mut transfer_slots: Vec<(i64, i64)> = txn.transfer.iter().map(|_| (0, 0)).collect();

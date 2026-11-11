@@ -12,6 +12,9 @@ use crate::wiring::assembly::engine_state::{Inner, StateParams};
 const TRANSFER_DECISION_TASK: i32 = 0;
 const TRANSFER_ACTIVITY_TASK: i32 = 1;
 const TRANSFER_CLOSE_EXECUTION: i32 = 2;
+const TRANSFER_CANCEL_EXECUTION: i32 = 3;
+const TRANSFER_START_CHILD_EXECUTION: i32 = 4;
+const TRANSFER_SIGNAL_EXECUTION: i32 = 5;
 
 const TIMER_DECISION_TIMEOUT: i32 = 0;
 const TIMER_ACTIVITY_TIMEOUT: i32 = 1;
@@ -122,6 +125,46 @@ impl Inner {
             self.transfer_tasks.push(t);
             self.dirty = true;
         }
+    }
+
+    /// Go `GenerateChildWorkflowTasks`.
+    pub(super) fn gen_child_workflow_task(&mut self, initiated_id: i64, target_domain_id: &str) {
+        if let Some(c) = self.pc_children.get(&initiated_id) {
+            let mut t = self.transfer_base(TRANSFER_START_CHILD_EXECUTION, c.version);
+            t.target_domain_id = target_domain_id.to_string();
+            t.target_workflow_id = c.started_workflow_id.clone();
+            t.schedule_id = initiated_id;
+            t.task_list = self.exec.task_list.clone();
+            self.transfer_tasks.push(t);
+            self.dirty = true;
+        }
+    }
+
+    /// Go `GenerateRequestCancelExternalTasks` / `GenerateSignalExternalTasks`.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn gen_external_task(
+        &mut self,
+        cancel: bool,
+        initiated_id: i64,
+        version: i64,
+        target_domain_id: &str,
+        workflow_id: &str,
+        run_id: &str,
+        child_only: bool,
+    ) {
+        let ty = if cancel { TRANSFER_CANCEL_EXECUTION } else { TRANSFER_SIGNAL_EXECUTION };
+        let mut t = self.transfer_base(ty, version);
+        t.target_domain_id = target_domain_id.to_string();
+        t.target_workflow_id = workflow_id.to_string();
+        // An empty target run id keeps the dummy default (the persisted blob requires a UUID).
+        if !run_id.is_empty() {
+            t.target_run_id = run_id.to_string();
+        }
+        t.target_child_workflow_only = child_only;
+        t.schedule_id = initiated_id;
+        t.task_list = self.exec.task_list.clone();
+        self.transfer_tasks.push(t);
+        self.dirty = true;
     }
 
     /// Go `GenerateActivityRetryTasks`.

@@ -61,6 +61,28 @@ pub struct EngineOps<'a> {
 }
 
 impl EngineOps<'_> {
+    /// Target domain id of an external/child decision; an empty name means the
+    /// execution's own domain.
+    fn target_domain_id(&self, domain: &str) -> Result<String> {
+        if domain.is_empty() {
+            return Ok(self.state.inner.lock().unwrap().exec.domain_id.clone());
+        }
+        self.domains.get_domain(domain).map(|d| d.info.id.clone()).map_err(|e| internal(format!("{e:?}")))
+    }
+
+    /// Attributes of this run's start event (Go `GetStartEvent`), preloaded by the
+    /// decision handler.
+    fn start_attributes(&self) -> Result<cadence_api::service_types::WorkflowExecutionStartedEventAttributes> {
+        self.state
+            .inner
+            .lock()
+            .unwrap()
+            .prev_start_event
+            .clone()
+            .and_then(|e| e.workflow_execution_started_event_attributes)
+            .ok_or_else(|| internal("workflow start event is missing"))
+    }
+
     /// Close-event common path (Go `AddCompletedWorkflowEvent` & co.).
     fn close_workflow(
         &self,
@@ -427,18 +449,36 @@ impl Operations for EngineOps<'_> {
 
     fn retry_cron_continue_as_new(
         &mut self,
-        _completed_id: i64,
-        _seconds: i32,
-        _retry: bool,
-        _reason: Option<&str>,
-        _details: &[u8],
-        _completion_result: Option<&[u8]>,
+        completed_id: i64,
+        seconds: i32,
+        retry: bool,
+        reason: Option<&str>,
+        details: &[u8],
+        completion_result: Option<&[u8]>,
     ) -> Result<()> {
-        Err(not_ported("retry/cron ContinueAsNew"))
+        let start = self.start_attributes()?;
+        let initiator = if retry {
+            cadence_api::enums::ContinueAsNewInitiator::RetryPolicy
+        } else {
+            cadence_api::enums::ContinueAsNewInitiator::CronSchedule
+        };
+        let attrs = crate::decision::task_handler::retry_cron_continue_as_new_attributes(
+            &start,
+            seconds,
+            initiator,
+            reason.map(str::to_string),
+            details.to_vec(),
+            completion_result.map(<[u8]>::to_vec).unwrap_or_default(),
+            start.active_cluster_selection_policy.clone(),
+        );
+        let parent_domain = start.parent_workflow_domain.clone().unwrap_or_default();
+        self.state
+            .add_continue_as_new_event(completed_id, completed_id, &parent_domain, &attrs)
+            .map_err(|e| internal(format!("{e:?}")))
     }
 
     fn start_last_completion_result(&mut self) -> Result<Vec<u8>> {
-        Err(not_ported("cron last completion result"))
+        Ok(self.start_attributes()?.last_completion_result)
     }
 
     fn parent_domain_name(&mut self) -> Result<String> {
@@ -456,8 +496,14 @@ impl Operations for EngineOps<'_> {
         Ok(self.state.domain.info.name.clone())
     }
 
-    fn continue_as_new(&mut self, _completed_id: i64, _decision: &Decision, _parent_domain_name: &str) -> Result<()> {
-        Err(not_ported("ContinueAsNewWorkflowExecution"))
+    fn continue_as_new(&mut self, completed_id: i64, decision: &Decision, parent_domain_name: &str) -> Result<()> {
+        let a = decision
+            .continue_as_new_workflow_execution_decision_attributes
+            .clone()
+            .ok_or_else(|| bad("ContinueAsNewWorkflowExecutionDecisionAttributes is not set on decision."))?;
+        self.state
+            .add_continue_as_new_event(completed_id, completed_id, parent_domain_name, &a)
+            .map_err(|e| internal(format!("{e:?}")))
     }
 
     fn max_semaphore_name_length(&self) -> usize {
@@ -482,24 +528,172 @@ impl Operations for EngineOps<'_> {
         Ok(())
     }
 
-    fn initiate_cancel_external(&mut self, _completed_id: i64, _request_id: &str, _decision: &Decision) -> Result<()> {
-        Err(not_ported("RequestCancelExternalWorkflowExecution"))
+    fn initiate_cancel_external(&mut self, completed_id: i64, request_id: &str, decision: &Decision) -> Result<()> {
+        let a = decision
+            .request_cancel_external_workflow_execution_decision_attributes
+            .clone()
+            .ok_or_else(|| bad("RequestCancelExternalWorkflowExecutionDecisionAttributes is not set on decision."))?;
+        let target_domain_id = self.target_domain_id(&a.domain)?;
+        let ms = self.state.now_millis();
+        let mut g = self.state.inner.lock().unwrap();
+        let attrs = a.clone();
+        let ev = g.push_event(EventType::RequestCancelExternalWorkflowExecutionInitiated, ms, |e| {
+            e.request_cancel_external_workflow_execution_initiated_event_attributes =
+                Some(RequestCancelExternalWorkflowExecutionInitiatedEventAttributes {
+                    decision_task_completed_event_id: completed_id,
+                    domain: attrs.domain,
+                    workflow_execution: Some(cadence_api::types::WorkflowExecution {
+                        workflow_id: attrs.workflow_id,
+                        run_id: attrs.run_id,
+                    }),
+                    control: attrs.control,
+                    child_workflow_only: attrs.child_workflow_only,
+                });
+        });
+        g.pc_cancels.insert(
+            ev.event_id,
+            pc::RequestCancelInfo {
+                version: ev.version,
+                initiated_event_batch_id: completed_id,
+                cancel_request_id: request_id.to_string(),
+            },
+        );
+        g.upsert_cancels.insert(ev.event_id);
+        g.gen_external_task(true, ev.event_id, ev.version, &target_domain_id, &a.workflow_id, &a.run_id, a.child_workflow_only);
+        Ok(())
     }
 
-    fn initiate_signal_external(&mut self, _completed_id: i64, _request_id: &str, _decision: &Decision) -> Result<()> {
-        Err(not_ported("SignalExternalWorkflowExecution"))
+    fn initiate_signal_external(&mut self, completed_id: i64, request_id: &str, decision: &Decision) -> Result<()> {
+        let a = decision
+            .signal_external_workflow_execution_decision_attributes
+            .clone()
+            .ok_or_else(|| bad("SignalExternalWorkflowExecutionDecisionAttributes is not set on decision."))?;
+        let target_domain_id = self.target_domain_id(&a.domain)?;
+        let exec = a.execution.clone().unwrap_or_default();
+        let ms = self.state.now_millis();
+        let mut g = self.state.inner.lock().unwrap();
+        let attrs = a.clone();
+        let ev = g.push_event(EventType::SignalExternalWorkflowExecutionInitiated, ms, |e| {
+            e.signal_external_workflow_execution_initiated_event_attributes =
+                Some(SignalExternalWorkflowExecutionInitiatedEventAttributes {
+                    decision_task_completed_event_id: completed_id,
+                    domain: attrs.domain,
+                    workflow_execution: attrs.execution,
+                    signal_name: attrs.signal_name,
+                    input: attrs.input,
+                    control: attrs.control,
+                });
+        });
+        g.pc_signals.insert(
+            ev.event_id,
+            pc::SignalInfo {
+                version: ev.version,
+                initiated_event_batch_id: completed_id,
+                request_id: request_id.to_string(),
+                name: a.signal_name.clone(),
+                input: a.input.clone(),
+                control: a.control.clone(),
+            },
+        );
+        g.upsert_signals.insert(ev.event_id);
+        g.gen_external_task(false, ev.event_id, ev.version, &target_domain_id, &exec.workflow_id, &exec.run_id, a.child_workflow_only);
+        Ok(())
     }
 
-    fn initiate_child(&mut self, _completed_id: i64, _request_id: &str, _decision: &Decision) -> Result<()> {
-        Err(not_ported("StartChildWorkflowExecution"))
+    fn initiate_child(&mut self, completed_id: i64, request_id: &str, decision: &Decision) -> Result<()> {
+        let a = decision
+            .start_child_workflow_execution_decision_attributes
+            .clone()
+            .ok_or_else(|| bad("StartChildWorkflowExecutionDecisionAttributes is not set on decision."))?;
+        let target_domain_id = self.target_domain_id(&a.domain)?;
+        let ms = self.state.now_millis();
+        let mut g = self.state.inner.lock().unwrap();
+        let attrs = a.clone();
+        let ev = g.push_event(EventType::StartChildWorkflowExecutionInitiated, ms, |e| {
+            e.start_child_workflow_execution_initiated_event_attributes =
+                Some(StartChildWorkflowExecutionInitiatedEventAttributes {
+                    domain: attrs.domain,
+                    workflow_id: attrs.workflow_id,
+                    workflow_type: attrs.workflow_type,
+                    task_list: attrs.task_list,
+                    input: attrs.input,
+                    execution_start_to_close_timeout_seconds: attrs.execution_start_to_close_timeout_seconds,
+                    task_start_to_close_timeout_seconds: attrs.task_start_to_close_timeout_seconds,
+                    parent_close_policy: attrs.parent_close_policy,
+                    control: attrs.control,
+                    decision_task_completed_event_id: completed_id,
+                    workflow_id_reuse_policy: attrs.workflow_id_reuse_policy,
+                    header: attrs.header,
+                    retry_policy: attrs.retry_policy,
+                    cron_schedule: attrs.cron_schedule,
+                    memo: attrs.memo,
+                    search_attributes: attrs.search_attributes,
+                    cron_overlap_policy: attrs.cron_overlap_policy,
+                    ..Default::default()
+                });
+        });
+        let blob = {
+            use cadence_thrift::ToThrift;
+            cadence_persistence::sqlblobs::Encoding::ThriftRW
+                .encode(&ev.to_thrift())
+                .map_err(|e| internal(format!("encode child initiated event: {e}")))?
+        };
+        g.pc_children.insert(
+            ev.event_id,
+            pc::ChildExecutionInfo {
+                version: ev.version,
+                initiated_event_batch_id: completed_id,
+                started_id: EMPTY_EVENT_ID,
+                initiated_event: blob,
+                initiated_event_encoding: "thriftrw".to_string(),
+                started_workflow_id: a.workflow_id.clone(),
+                create_request_id: request_id.to_string(),
+                domain_id: target_domain_id.clone(),
+                workflow_type_name: a.workflow_type.as_ref().map(|t| t.name.clone()).unwrap_or_default(),
+                parent_close_policy: a.parent_close_policy.map(|p| p as i32).unwrap_or(0),
+                ..Default::default()
+            },
+        );
+        g.children.insert(
+            ev.event_id,
+            crate::engine::deps_ms::ChildExecutionInfo {
+                started_id: EMPTY_EVENT_ID,
+                started_workflow_id: a.workflow_id.clone(),
+            },
+        );
+        g.upsert_children.insert(ev.event_id);
+        g.gen_child_workflow_task(ev.event_id, &target_domain_id);
+        Ok(())
     }
 
     fn parent_close_policy_enabled(&self) -> bool {
         (self.config.enable_parent_close_policy)(&self.domain_name)
     }
 
-    fn upsert_search_attributes(&mut self, _completed_id: i64, _decision: &Decision) -> Result<()> {
-        Err(not_ported("UpsertWorkflowSearchAttributes"))
+    fn upsert_search_attributes(&mut self, completed_id: i64, decision: &Decision) -> Result<()> {
+        let a = decision
+            .upsert_workflow_search_attributes_decision_attributes
+            .clone()
+            .ok_or_else(|| bad("UpsertWorkflowSearchAttributesDecisionAttributes is not set on decision."))?;
+        let fields = a.search_attributes.as_ref().and_then(|s| s.indexed_fields.clone()).unwrap_or_default();
+        let ms = self.state.now_millis();
+        let mut g = self.state.inner.lock().unwrap();
+        g.push_event(EventType::UpsertWorkflowSearchAttributes, ms, |e| {
+            e.upsert_workflow_search_attributes_event_attributes = Some(UpsertWorkflowSearchAttributesEventAttributes {
+                decision_task_completed_event_id: completed_id,
+                search_attributes: a.search_attributes,
+            });
+        });
+        // Go ReplicateUpsertWorkflowSearchAttributesEvent: merge into the execution info.
+        for (k, v) in &fields {
+            g.pc_exec.search_attributes.insert(k.clone(), v.clone());
+        }
+        let merged = g.exec.search_attributes.get_or_insert_with(Default::default);
+        for (k, v) in fields {
+            merged.insert(k, v);
+        }
+        g.gen_search_attr_task();
+        Ok(())
     }
 
     fn domain_name(&self) -> &str {
@@ -608,8 +802,27 @@ impl ValidationContext for Validation {
         "/__cadence_sys/"
     }
 
-    fn search_policy(&self, _domain: &str) -> std::result::Result<SearchAttributePolicy, DecisionError> {
-        Err(DecisionError::internal("search attribute validation is not ported on the engine mutable state yet"))
+    fn search_policy(&self, domain: &str) -> std::result::Result<SearchAttributePolicy, DecisionError> {
+        // Go `searchAttributesValidator`: dynamic config driven key whitelist + limits.
+        use cadence_api::enums::IndexedValueType as T;
+        let c = &self.config;
+        let mut valid_types = std::collections::HashMap::new();
+        for (k, v) in (c.valid_search_attributes)() {
+            let t = match &v {
+                serde_json::Value::Number(n) => n.as_f64().and_then(|f| T::from_i32(f as i32)),
+                serde_json::Value::String(s) => T::parse(s),
+                _ => None,
+            };
+            let t = t.ok_or_else(|| DecisionError::internal(format!("unknown index value type for key {k}")))?;
+            valid_types.insert(k, t);
+        }
+        Ok(SearchAttributePolicy {
+            enabled: (c.enable_query_attribute_validation)(),
+            valid_types,
+            number_of_keys_limit: (c.search_attributes_number_of_keys_limit)(domain).max(0) as usize,
+            value_size_limit: (c.search_attributes_size_of_value_limit)(domain).max(0) as usize,
+            total_size_limit: (c.search_attributes_total_size_limit)(domain).max(0) as usize,
+        })
     }
 
     fn validate_cron(&self, schedule: &str) -> std::result::Result<(), DecisionError> {

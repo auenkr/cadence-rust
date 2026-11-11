@@ -28,12 +28,11 @@ fn execution(workflow_id: &str, run_id: &str) -> WorkflowExecution {
 
 impl EngineMutableState {
     fn has_request_cancel(&self, g: &Inner, initiated_id: i64) -> bool {
-        !g.deleted_request_cancels.contains(&initiated_id)
-            && self.snapshot.request_cancel_infos.iter().any(|k| k.key == initiated_id)
+        g.pc_cancels.contains_key(&initiated_id)
     }
 
     fn has_signal(&self, g: &Inner, initiated_id: i64) -> bool {
-        !g.deleted_signals.contains(&initiated_id) && self.snapshot.signal_infos.iter().any(|k| k.key == initiated_id)
+        g.pc_signals.contains_key(&initiated_id)
     }
 
     /// Decodes the `StartChildWorkflowExecutionInitiated` event persisted in the
@@ -149,6 +148,8 @@ impl EngineMutableState {
                     workflow_execution: Some(exec),
                 });
         });
+        g.pc_cancels.remove(&initiated_id);
+        g.upsert_cancels.remove(&initiated_id);
         g.deleted_request_cancels.insert(initiated_id);
         g.dirty = true;
         Ok(())
@@ -178,6 +179,8 @@ impl EngineMutableState {
                     control: c,
                 });
         });
+        g.pc_signals.remove(&initiated_id);
+        g.upsert_signals.remove(&initiated_id);
         g.deleted_signals.insert(initiated_id);
         g.dirty = true;
         Ok(())
@@ -209,6 +212,8 @@ impl EngineMutableState {
                     control: Vec::new(),
                 });
         });
+        g.pc_cancels.remove(&initiated_id);
+        g.upsert_cancels.remove(&initiated_id);
         g.deleted_request_cancels.insert(initiated_id);
         g.dirty = true;
         Ok(())
@@ -241,6 +246,8 @@ impl EngineMutableState {
                     control: c,
                 });
         });
+        g.pc_signals.remove(&initiated_id);
+        g.upsert_signals.remove(&initiated_id);
         g.deleted_signals.insert(initiated_id);
         g.dirty = true;
         Ok(())
