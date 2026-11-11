@@ -27,6 +27,13 @@ pub struct OwnedNdcMutableState {
     update_condition: i64,
     now_nanos: i64,
     task_gen_env: TaskGenEnv,
+    /// Go `appliedEvents` (in-memory duplicate-resource set).
+    applied_events: std::collections::BTreeSet<String>,
+}
+
+/// Go `definition.NewEventReappliedID(runID, eventID, version).GetID()`.
+fn event_reapplied_id(run_id: &str, event_id: i64, version: i64) -> String {
+    format!("{run_id}::{event_id}::{version}")
 }
 
 impl OwnedNdcMutableState {
@@ -54,6 +61,7 @@ impl OwnedNdcMutableState {
             update_condition: 0,
             now_nanos,
             task_gen_env,
+            applied_events: Default::default(),
         }
     }
 
@@ -73,6 +81,7 @@ impl OwnedNdcMutableState {
             typed,
             now_nanos,
             task_gen_env,
+            applied_events: Default::default(),
         }
     }
 
@@ -165,16 +174,22 @@ impl NdcMutableState for OwnedNdcMutableState {
         Ok(self.typed.execution_info.branch_token.clone())
     }
 
-    fn is_event_reapplied(&self, _run_id: &str, _event_id: i64, _version: i64) -> NdcResult<bool> {
-        self.unsupported("is_event_reapplied")
+    /// Go `IsResourceDuplicated(definition.NewEventReappliedID(...))`: the Go
+    /// `appliedEvents` set is in-memory only (never persisted).
+    fn is_event_reapplied(&self, run_id: &str, event_id: i64, version: i64) -> NdcResult<bool> {
+        Ok(self.applied_events.contains(&event_reapplied_id(run_id, event_id, version)))
     }
 
-    fn update_event_reapplied(&mut self, _run_id: &str, _event_id: i64, _version: i64) -> NdcResult<()> {
-        self.unsupported("update_event_reapplied")
+    fn update_event_reapplied(&mut self, run_id: &str, event_id: i64, version: i64) -> NdcResult<()> {
+        self.applied_events.insert(event_reapplied_id(run_id, event_id, version));
+        Ok(())
     }
 
-    fn add_workflow_execution_signaled(&mut self, _signal_name: &str, _input: &[u8], _identity: &str, _request_id: &str) -> NdcResult<()> {
-        self.unsupported("add_workflow_execution_signaled")
+    fn add_workflow_execution_signaled(&mut self, signal_name: &str, input: &[u8], identity: &str, request_id: &str) -> NdcResult<()> {
+        self.typed
+            .add_workflow_execution_signaled(self.now_nanos, signal_name, input, identity, request_id)
+            .map(|_| ())
+            .map_err(|e| NdcError::internal(e.to_string()))
     }
 
     fn get_activity_info(&self, schedule_id: i64) -> NdcResult<Option<NdcActivityInfo>> {
@@ -363,9 +378,13 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_dedup_reads_fail_explicitly() {
-        let state = state();
-        assert!(state.is_event_reapplied("run-a", 2, 7).is_err());
+    fn event_reapplied_dedup_is_tracked_in_memory_like_go_applied_events() {
+        let mut state = state();
+        assert!(!state.is_event_reapplied("run-a", 2, 7).unwrap());
+        state.update_event_reapplied("run-a", 2, 7).unwrap();
+        assert!(state.is_event_reapplied("run-a", 2, 7).unwrap());
+        assert!(!state.is_event_reapplied("run-a", 2, 8).unwrap());
+        assert!(!state.is_event_reapplied("run-b", 2, 7).unwrap());
         assert!(state.get_activity_info(2).is_ok_and(|activity| activity.is_none()));
     }
 

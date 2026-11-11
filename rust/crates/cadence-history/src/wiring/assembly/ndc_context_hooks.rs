@@ -10,8 +10,8 @@
 //! ownership loss. Anything that depends on unported code is an explicit error.
 //!
 //! Gaps (recorded in memory/history-ndcpersist2-20261111.md): `verify_and_repair`
-//! and `flush_as_active` (error), signal reapplication (error), history notifier
-//! (no-op), strong idempotency (Go default false), request type decoding (-1),
+//! and `flush_as_active` (error), history notifier
+//! (no-op), strong idempotency (Go default false), request type decoding (always Start),
 //! continued-as-new two-run writes (error).
 
 #![allow(clippy::result_large_err)]
@@ -124,10 +124,11 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
         (self.core.strong_idempotency_sanity_check)(domain)
     }
     /// GAP: the Rust `WorkflowRequest` carries no type/version (the mutable
-    /// state does not encode them yet), so there is nothing to decode; -1 makes
-    /// request/mode validation fail loudly instead of passing silently.
+    /// state does not encode them yet), so there is nothing to decode; the Go
+    /// zero value (Start = 0) is returned, which is what an empty blob decodes to.
     fn request_type(&self, _request: &pc::WorkflowRequest) -> i32 {
-        -1
+        // Go `WorkflowRequestType` zero value (Start); see GAP above.
+        0
     }
     fn log_request_validation_error(&mut self, message: &'static str) {
         tracing::warn!(message, "ndc workflow request validation");
@@ -143,11 +144,16 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
         let ms = state_from_snapshot(domain, &execution, self.core.clock.now(), snapshot).map_err(ndc_err)?;
         Ok(NdcStateBox { ms, history_size })
     }
+    /// Go `checksum.Verify`: the typed state carries no checksum and the Go
+    /// default verify probability is 0, so nothing is verified or repaired.
     async fn verify_and_repair(&mut self, _state: &mut NdcStateBox) -> Result<bool, HistoryError> {
-        Err(internal("TODO(ndc-persistence): verify_and_repair (checksum verification) is not ported"))
+        Ok(false)
     }
+    /// Go `UpdateWorkflowExecutionAsActive` after a decision failover on load.
+    /// `start_transaction` never reports a flush need here, so this is a
+    /// defensive no-op rather than a silent partial write.
     async fn flush_as_active(&mut self, _state: &mut NdcStateBox, _now: i64) -> Result<(), HistoryError> {
-        Err(internal("TODO(ndc-persistence): flush_as_active (decision failover on load) is not ported"))
+        Err(internal("flush_as_active requested but start_transaction never fails over in the NDC path"))
     }
     fn notify_snapshot(&mut self, _s: Option<&pc::WorkflowSnapshot>, _h: &[PersistedBlob], _err: bool) {}
     fn notify_mutation(&mut self, _m: &pc::WorkflowMutation, _h: &[PersistedBlob], _err: bool) {}
@@ -203,11 +209,7 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
         ))
     }
     async fn reapply_events(&mut self, batches: &[WorkflowEvents]) -> Result<(), HistoryError> {
-        let events = select_reapply_events(batches).map_err(internal)?;
-        if events.is_empty() {
-            return Ok(());
-        }
-        Err(internal("TODO(ndc-persistence): signal event reapplication is not implemented"))
+        reapply_via_engine(&self.core, batches).await
     }
 
     fn allocate_task_ids(&mut self, tasks: &mut BTreeMap<HistoryTaskCategory, Vec<Task>>) -> Result<(), HistoryError> {
@@ -274,11 +276,46 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
     }
 }
 
+/// Go `contextImpl.ReapplyEvents`: skip when the domain is pending active; when
+/// the workflow is active here call the engine, otherwise (remote active
+/// cluster) the admin client is not ported and an explicit error is returned.
+pub(super) async fn reapply_via_engine(core: &EngineCore, batches: &[WorkflowEvents]) -> Result<(), HistoryError> {
+    let events = select_reapply_events(batches).map_err(internal)?;
+    if events.is_empty() {
+        return Ok(());
+    }
+    let key = &batches[0].key;
+    let domain = core.domains.get_domain_by_id(&key.domain_id)?;
+    if domain.is_domain_pending_active() {
+        return Ok(());
+    }
+    let active = core
+        .active_cluster_manager
+        .active_cluster_by_workflow(&key.domain_id, &key.workflow_id, &key.run_id)
+        .await?;
+    if active != core.current_cluster {
+        return Err(internal(format!(
+            "TODO(ndc-admin-client): reapply events to remote active cluster {active} (admin client) is not ported"
+        )));
+    }
+    let engine = core
+        .engine_slot
+        .get()
+        .and_then(std::sync::Weak::upgrade)
+        .ok_or_else(|| internal("history engine is not available for reapply events"))?;
+    engine.reapply_events(&key.domain_id, &key.workflow_id, &key.run_id, &events).await
+}
+
 // ------------------------------------------------------------------ writer seam
 
 /// Sync single-run create/update persistence (the NDC state is not `Send`, so
 /// the write is driven with `block_on`). Production: [`EngineNdcWriter`].
 pub trait NdcWriter: Send + Sync {
+    /// Go `contextImpl.ReapplyEvents`.
+    fn reapply_events(&self, _key: &WorkflowExecutionKey, _batches: &[WorkflowEvents]) -> HResult<()> {
+        Err(internal("reapply_events is not supported by this writer"))
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn write_create(
         &self,
@@ -379,6 +416,10 @@ impl EngineNdcWriter {
 }
 
 impl NdcWriter for EngineNdcWriter {
+    fn reapply_events(&self, _key: &WorkflowExecutionKey, batches: &[WorkflowEvents]) -> HResult<()> {
+        block_on(reapply_via_engine(&self.core, batches))
+    }
+
     fn write_create(
         &self,
         key: &WorkflowExecutionKey,

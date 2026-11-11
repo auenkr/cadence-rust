@@ -50,6 +50,10 @@ pub struct EngineCore {
     pub engine_slot: Arc<std::sync::OnceLock<std::sync::Weak<crate::engine::runtime::HistoryEngine>>>,
     /// `config.EnableStrongIdempotencySanityCheck(domainName)`.
     pub strong_idempotency_sanity_check: Arc<dyn Fn(&str) -> bool + Send + Sync>,
+    /// Go `config.IsAdvancedVisibilityWritingEnabled()` (evaluated per use).
+    pub advanced_visibility_writing: Arc<dyn Fn() -> bool + Send + Sync>,
+    /// Go `shard.GetActiveClusterManager()`.
+    pub active_cluster_manager: Arc<dyn crate::engine::runtime::ActiveClusterManager>,
 }
 
 impl EngineCore {
