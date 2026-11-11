@@ -12,8 +12,8 @@
 //!
 //! Create, active/passive update, two-run (continued-as-new) update and
 //! conflict-resolve persistence go through the shared `WorkflowContext`
-//! machinery (`ndc_context_hooks`). `reapply_events` is an explicit error until
-//! it is ported; it is never a success no-op.
+//! machinery (`ndc_context_hooks`). `reapply_events` goes through the engine (Go
+//! `contextImpl.ReapplyEvents`).
 //! Not ported here: `StartTransaction` (active-cluster `UpdateCurrentVersion`
 //! and decision failover on load), pending activity/timer/child/cancel/signal
 //! maps in the loaded snapshot (explicit error), and event-generating policy
@@ -99,7 +99,7 @@ impl NdcCheckoutSource for EngineExecutionCache {
     }
 }
 
-fn history_to_ndc(err: HistoryError) -> NdcError {
+pub(super) fn history_to_ndc(err: HistoryError) -> NdcError {
     if err.is_entity_not_exists() {
         return NdcError::EntityNotExists(err.to_string());
     }
@@ -575,8 +575,9 @@ impl NdcWorkflow for EngineNdcWorkflow {
         );
         self.finish_write(result)
     }
-    fn reapply_events(&mut self, _events: &[WorkflowEvents]) -> NdcResult<()> {
-        unsupported("reapply_events")
+    fn reapply_events(&mut self, events: &[WorkflowEvents]) -> NdcResult<()> {
+        let key = WorkflowExecutionKey::new(self.domain_id.clone(), &self.execution);
+        self.writer.reapply_events(&key, events).map_err(history_to_ndc)
     }
 
     /// Go `LoadWorkflowExecution`. Requires the lock-owning context; a loaded

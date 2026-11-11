@@ -152,6 +152,12 @@ pub fn build_core(env: &Arc<HistoryEnv>, shard: &Arc<ShardContext>) -> (Arc<Engi
     let core = Arc::new(EngineCore {
         engine_slot: Arc::new(std::sync::OnceLock::new()),
         strong_idempotency_sanity_check: env.config.enable_strong_idempotency_sanity_check.clone(),
+        advanced_visibility_writing: {
+            // Go `AdvancedVisibilityWritingMode() != "off"`: advanced store configured and written to.
+            let cfg = env.config.clone();
+            Arc::new(move || cfg.is_advanced_vis_config_exist && !matches!((cfg.write_visibility_store_name)().as_str(), "db" | "off"))
+        },
+        active_cluster_manager: Arc::new(DomainActiveClusterManager::new(env.domain_cache.clone())),
         shard: shard.clone(),
         executions: env.persistence.executions.clone(),
         domains: env.domain_cache.clone() as Arc<dyn DomainCache>,

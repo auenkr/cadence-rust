@@ -14,7 +14,8 @@
 //!
 //! NOT yet backed by the real mutable state (each returns a `TODO(...)` error):
 //! * `NdcStateBuilder` (needs that bridge). `NdcStateRebuilder` is real (ndc_rebuild.rs).
-//! * `NdcTransactionManager` (needs `TransactionManagerCollaborators`).
+//! `NdcTransactionManager` is real (`EngineNdcTransactionManager`); only the
+//! events-reapplication reset collaborator is an explicit gap.
 //!
 //! See memory/history-gap-ndcadapters-20261107.md for the follow-up task list.
 
@@ -37,7 +38,10 @@ use crate::ndc::history_replicator::{
     HistoryReplicator, HistoryReplicatorEnv, HistoryReplicatorImpl, NdcStateBuilder,
 };
 use crate::ndc::replication_task::HistoryBatchDeserializer;
-use crate::ndc::transaction_manager::NdcTransactionManager;
+use crate::ndc::events_reapplier::EventsReapplierImpl;
+use crate::ndc::transaction_manager::{NdcTransactionManager, TransactionManagerImpl};
+use crate::wiring::assembly::ndc_workflow::history_to_ndc;
+use crate::wiring::persistence::engine_ndc::{block_on, SqlTransactionManagerEnv, TransactionManagerCollaborators};
 use crate::ndc::workflow_resetter::WorkflowResetterEnv;
 use crate::ndc::{
     NdcClusterMetadata, NdcError, NdcExecutionCache, NdcMutableState, NdcResult, NdcWorkflow,
@@ -57,10 +61,6 @@ use crate::wiring::persistence::engine_ndc::{
 /// Go `config.StandbyClusterDelay` default (5 minutes) in nanoseconds.
 // TODO(ndc-config): read the dynamic config `StandbyClusterDelay`.
 const DEFAULT_STANDBY_CLUSTER_DELAY_NANOS: i64 = 5 * 60 * 1_000_000_000;
-
-fn todo_error(what: &str) -> NdcError {
-    NdcError::internal(format!("TODO(ndc-adapters): {what} is not implemented over the real mutable state yet"))
-}
 
 // ---------------------------------------------------------------- cluster metadata
 
@@ -187,43 +187,121 @@ fn new_state_rebuilder(core: &EngineCore) -> SqlNdcStateRebuilder {
         domains: core.domains.clone(),
         task_domains: Arc::new(EngineTaskDomains { domains: core.domains.clone(), state_params: state_params.clone() }),
         state_params,
-        // TODO(ndc-config): `IsAdvancedVisibilityWritingEnabled` is not exposed to EngineCore yet.
-        advanced_visibility_writing: Arc::new(|| false),
+        advanced_visibility_writing: core.advanced_visibility_writing.clone(),
     })
 }
 
-/// `NdcTransactionManager` placeholder.
-pub struct TodoNdcTransactionManager;
+/// Non-persistence collaborators of Go `transactionManagerImpl`.
+///
+/// Gap: the Go `reset.WorkflowResetter` (events-reapplication reset of a closed
+/// current workflow) is a separate collaborator; `reset_workflow` stays an
+/// explicit error until it is wired (follow-up).
+pub struct EngineTransactionCollaborators {
+    core: Arc<EngineCore>,
+    cache: EngineNdcExecutionCache,
+}
 
-impl NdcTransactionManager for TodoNdcTransactionManager {
-    fn create_workflow(&self, _now_nanos: i64, _target: Box<dyn NdcWorkflow>) -> NdcResult<()> {
-        Err(todo_error("NdcTransactionManager::create_workflow"))
+impl TransactionManagerCollaborators for EngineTransactionCollaborators {
+    fn current_cluster_name(&self) -> String {
+        self.core.current_cluster.clone()
+    }
+
+    /// `activeClusterManager.GetActiveClusterInfoByWorkflow(...).ActiveClusterName`.
+    fn active_cluster_name(&self, ms: &dyn NdcMutableState) -> NdcResult<String> {
+        let info = ms.get_execution_info();
+        block_on(self.core.active_cluster_manager.active_cluster_by_workflow(
+            &info.domain_id,
+            &info.workflow_id,
+            &info.run_id,
+        ))
+        .map_err(history_to_ndc)
+    }
+
+    /// Go `GetOrCreateWorkflowExecution` + `LoadWorkflowExecution` (release on failure).
+    fn load_workflow(&self, domain_id: &str, workflow_id: &str, run_id: &str) -> NdcResult<Box<dyn NdcWorkflow>> {
+        let execution = WorkflowExecution { workflow_id: workflow_id.to_string(), run_id: run_id.to_string() };
+        let mut workflow = self.cache.get_or_create_workflow_execution(domain_id, &execution)?;
+        if let Err(err) = workflow.load_workflow_execution(None) {
+            workflow.release(Some(&err));
+            return Err(err);
+        }
+        Ok(workflow)
+    }
+
+    fn reset_workflow(
+        &self,
+        _domain_id: &str,
+        _workflow_id: &str,
+        _base_run_id: &str,
+        _base_branch_token: &[u8],
+        _base_rebuild_last_event_id: i64,
+        _base_rebuild_last_event_version: i64,
+        _base_next_event_id: i64,
+        _reset_run_id: &str,
+        _reset_request_id: &str,
+        _current: &mut dyn NdcWorkflow,
+        _reset_reason: &str,
+        _additional_reapply_events: &[HistoryEvent],
+        _skip_signal_reapply: bool,
+    ) -> NdcResult<()> {
+        Err(NdcError::internal(
+            "TODO(ndc-reset): events-reapplication workflow reset collaborator is not wired",
+        ))
+    }
+}
+
+/// Go `transactionManagerImpl` over the SQL stores and the shared engine cache.
+pub struct EngineNdcTransactionManager {
+    env: SqlTransactionManagerEnv,
+    reapplier: EventsReapplierImpl,
+}
+
+impl EngineNdcTransactionManager {
+    pub fn new(core: Arc<EngineCore>, cache: EngineNdcExecutionCache) -> Self {
+        let shard = core.shard.clone();
+        let range_shard = shard.clone();
+        let collaborators = Arc::new(EngineTransactionCollaborators { core: core.clone(), cache });
+        Self {
+            env: SqlTransactionManagerEnv {
+                executions: core.executions.clone(),
+                domains: core.domains.clone(),
+                shard_id: shard.shard_id(),
+                range_id: Arc::new(move || range_shard.range_id()),
+                collaborators,
+            },
+            reapplier: EventsReapplierImpl::new(),
+        }
+    }
+
+    fn inner(&self) -> TransactionManagerImpl<'_> {
+        TransactionManagerImpl::new(&self.env, &self.reapplier)
+    }
+}
+
+impl NdcTransactionManager for EngineNdcTransactionManager {
+    fn create_workflow(&self, now_nanos: i64, target: Box<dyn NdcWorkflow>) -> NdcResult<()> {
+        self.inner().create_workflow(now_nanos, target)
     }
     fn update_workflow(
         &self,
-        _now_nanos: i64,
-        _is_workflow_rebuilt: bool,
-        _target: Box<dyn NdcWorkflow>,
-        _new_workflow: Option<Box<dyn NdcWorkflow>>,
+        now_nanos: i64,
+        is_workflow_rebuilt: bool,
+        target: Box<dyn NdcWorkflow>,
+        new_workflow: Option<Box<dyn NdcWorkflow>>,
     ) -> NdcResult<()> {
-        Err(todo_error("NdcTransactionManager::update_workflow"))
+        self.inner().update_workflow(now_nanos, is_workflow_rebuilt, target, new_workflow)
     }
-    fn backfill_workflow(
-        &self,
-        _now_nanos: i64,
-        _target: Box<dyn NdcWorkflow>,
-        _events: &WorkflowEvents,
-    ) -> NdcResult<()> {
-        Err(todo_error("NdcTransactionManager::backfill_workflow"))
+    fn backfill_workflow(&self, now_nanos: i64, target: Box<dyn NdcWorkflow>, events: &WorkflowEvents) -> NdcResult<()> {
+        self.inner().backfill_workflow(now_nanos, target, events)
     }
-    fn check_workflow_exists(&self, _domain_id: &str, _workflow_id: &str, _run_id: &str) -> NdcResult<bool> {
-        Err(todo_error("NdcTransactionManager::check_workflow_exists"))
+    fn check_workflow_exists(&self, domain_id: &str, workflow_id: &str, run_id: &str) -> NdcResult<bool> {
+        self.inner().check_workflow_exists(domain_id, workflow_id, run_id)
     }
-    fn get_current_workflow_run_id(&self, _domain_id: &str, _workflow_id: &str) -> NdcResult<String> {
-        Err(todo_error("NdcTransactionManager::get_current_workflow_run_id"))
+    fn get_current_workflow_run_id(&self, domain_id: &str, workflow_id: &str) -> NdcResult<String> {
+        self.inner().get_current_workflow_run_id(domain_id, workflow_id)
     }
-    fn load_ndc_workflow(&self, _domain_id: &str, _workflow_id: &str, _run_id: &str) -> NdcResult<Box<dyn NdcWorkflow>> {
-        Err(todo_error("NdcTransactionManager::load_ndc_workflow"))
+    fn load_ndc_workflow(&self, domain_id: &str, workflow_id: &str, run_id: &str) -> NdcResult<Box<dyn NdcWorkflow>> {
+        self.inner().load_ndc_workflow(domain_id, workflow_id, run_id)
     }
 }
 
@@ -235,7 +313,7 @@ pub struct EngineNdcEnv {
     cluster: EngineNdcClusterMetadata,
     serializer: ThriftBatchDeserializer,
     cache: EngineNdcExecutionCache,
-    transactions: TodoNdcTransactionManager,
+    transactions: EngineNdcTransactionManager,
     state_builder: TypedNdcStateBuilder,
     state_rebuilder: SqlNdcStateRebuilder,
     branch_env: SqlBranchManagerEnv,
@@ -259,7 +337,7 @@ impl EngineNdcEnv {
                 Arc::new(EngineNdcClusterMetadata::new(cluster.clone())),
                 core.clock.clone(),
             ),
-            transactions: TodoNdcTransactionManager,
+            transactions: EngineNdcTransactionManager,
             state_builder: TypedNdcStateBuilder,
             state_rebuilder: new_state_rebuilder(core),
             branch_env: SqlBranchManagerEnv { history: history.clone(), domains: core.domains.clone() },
