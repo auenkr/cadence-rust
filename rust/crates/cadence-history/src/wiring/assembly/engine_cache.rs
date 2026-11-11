@@ -177,6 +177,41 @@ impl EngineExecutionContext {
         Ok(state.snapshot.clone())
     }
 
+    /// Append an incoming NDC history batch without rewriting its source task
+    /// IDs. Go `PersistNonStartWorkflowBatchEvents` assigns only a shard
+    /// transaction ID; event task IDs belong to the replicating cluster.
+    pub(super) async fn persist_ndc_history_batch(
+        &self,
+        events: &crate::execution::context::WorkflowEvents,
+        new_branch: bool,
+    ) -> HResult<crate::execution::context::PersistedBlob> {
+        use crate::execution::context::PersistedBlob;
+        if events.events.is_empty() {
+            return if new_branch {
+                Err(HistoryError::internal("cannot persist first workflow events with empty events"))
+            } else {
+                Ok(PersistedBlob::default())
+            };
+        }
+        self.core.domains.get_domain_name(&events.key.domain_id)?;
+        let transaction_id = self.core.shard.generate_task_id().map_err(shard_err)?;
+        let manager = SqlHistoryManager::new(self.core.history_v2.clone(), self.core.shard.shard_id());
+        let cleanup = if new_branch {
+            format!("{}:{}:{}", events.key.domain_id, events.key.workflow_id, events.key.run_id)
+        } else {
+            String::new()
+        };
+        let data_blob = manager
+            .append_history_nodes(&events.branch_token, &events.events, transaction_id, new_branch, &cleanup)
+            .await
+            .map_err(to_history_error)?;
+        Ok(PersistedBlob {
+            data_blob,
+            branch_token: events.branch_token.clone(),
+            first_event_id: events.events[0].event_id,
+        })
+    }
+
     /// Go `UpdateWorkflowExecutionAsActive`.
     pub async fn update_as_active(&self, now: i64) -> HResult<()> {
         let state = self.load_state().await?;
