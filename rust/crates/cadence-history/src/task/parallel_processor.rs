@@ -141,6 +141,7 @@ impl ProcInner {
     }
 
     async fn execute_task(&self, task: TaskRef, worker_shutdown: &watch::Receiver<bool>) {
+        tracing::debug!("parallel processor worker executing task");
         let run = AssertUnwindSafe(self.run_with_retry(&task, worker_shutdown)).catch_unwind().await;
         match run {
             Ok(Ok(())) => task.ack(),
@@ -466,6 +467,7 @@ impl<K: Hash + Eq + Clone + Send + Sync + 'static> WeightedRoundRobinTaskSchedul
         }
         let key = (i.options.task_to_channel_key_fn)(&task);
         let weight = (i.options.channel_key_to_weight_fn)(&key);
+        tracing::debug!(weight, "scheduler try_submit");
         let ch = i.pool.get_or_create(&key, weight);
         match ch.tx.try_send(task) {
             Ok(()) => {
@@ -508,6 +510,7 @@ impl<K: Hash + Eq + Clone + Send + Sync + 'static> SchedInner<K> {
                 if let Some(task) = ch.try_recv() {
                     has_task = true;
                     self.dispatched.fetch_add(1, Ordering::SeqCst);
+                    tracing::debug!("scheduler dispatching task to processor");
                     if let Err(e) = self.processor.submit(task.clone()).await {
                         tracing::error!("fail to submit task to processor: {e}");
                         task.nack(Some(TaskError::Other(e.to_string())));
