@@ -18,7 +18,6 @@ fn schedule_activity_task_decision_attributes(v:tasks::ScheduleActivityTaskDecis
         retry_policy: v.retry_policy.map(retry_out),
         header: v.header.map(header),
         request_local_dispatch: v.request_local_dispatch,
-        ..Default::default()
     }
 }
 fn start_timer_decision_attributes(v:tasks::StartTimerDecisionAttributes) -> p::StartTimerDecisionAttributes {
