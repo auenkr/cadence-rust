@@ -23,3 +23,7 @@ pub mod start_workflow_execution;
 pub mod register_domain_failover_callback;
 pub mod lifecycle;
 pub mod interface;
+#[cfg(test)]
+pub(crate) mod test_support;
+#[cfg(test)]
+mod engine_tests;

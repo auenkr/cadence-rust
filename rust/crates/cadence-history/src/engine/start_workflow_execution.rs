@@ -49,7 +49,7 @@ pub fn terminate_if_running_details(new_run_id: &str) -> Vec<u8> {
 }
 
 /// `FailedWorkflowCloseState`
-fn is_failed_close_state(close_status: i32) -> bool {
+pub(crate) fn is_failed_close_state(close_status: i32) -> bool {
     matches!(
         close_status,
         WORKFLOW_CLOSE_STATUS_FAILED | WORKFLOW_CLOSE_STATUS_CANCELED | WORKFLOW_CLOSE_STATUS_TERMINATED | WORKFLOW_CLOSE_STATUS_TIMED_OUT
@@ -233,7 +233,7 @@ pub fn create_history_start_request(
 }
 
 /// `shouldTerminateAndStart`
-fn should_terminate_and_start(start_request: &HistoryStartWorkflowExecutionRequest, state: i32) -> bool {
+pub(crate) fn should_terminate_and_start(start_request: &HistoryStartWorkflowExecutionRequest, state: i32) -> bool {
     start_request.start_request.as_ref().and_then(|r| r.workflow_id_reuse_policy) == Some(WorkflowIDReusePolicy::TerminateIfRunning)
         && (state == WORKFLOW_STATE_CREATED || state == WORKFLOW_STATE_RUNNING)
 }
