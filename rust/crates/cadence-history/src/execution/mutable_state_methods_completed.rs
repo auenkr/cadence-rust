@@ -152,6 +152,7 @@ mod close_task_tests {
     #[test]
     fn replicate_completed_generates_close_tasks() {
         let mut ms = TypedMutableState::new();
+        ms.execution_info.state = 1; // running
         ms.replicate_workflow_execution_completed_event(3, &ev()).unwrap();
         assert_close_tasks(&ms);
     }
@@ -159,6 +160,7 @@ mod close_task_tests {
     #[test]
     fn replicate_failed_generates_close_tasks() {
         let mut ms = TypedMutableState::new();
+        ms.execution_info.state = 1; // running
         ms.replicate_workflow_execution_failed_event(3, &ev()).unwrap();
         assert_close_tasks(&ms);
     }
@@ -166,6 +168,7 @@ mod close_task_tests {
     #[test]
     fn replicate_terminated_generates_close_tasks() {
         let mut ms = TypedMutableState::new();
+        ms.execution_info.state = 1; // running
         ms.replicate_workflow_execution_terminated_event(3, &ev()).unwrap();
         assert_close_tasks(&ms);
     }
@@ -173,6 +176,7 @@ mod close_task_tests {
     #[test]
     fn replicate_canceled_generates_close_tasks() {
         let mut ms = TypedMutableState::new();
+        ms.execution_info.state = 1; // running
         ms.replicate_workflow_execution_canceled_event(3, &ev()).unwrap();
         assert_close_tasks(&ms);
     }
@@ -180,6 +184,7 @@ mod close_task_tests {
     #[test]
     fn replicate_timedout_generates_close_tasks() {
         let mut ms = TypedMutableState::new();
+        ms.execution_info.state = 1; // running
         ms.replicate_workflow_execution_timedout_event(3, &ev()).unwrap();
         assert_close_tasks(&ms);
     }
