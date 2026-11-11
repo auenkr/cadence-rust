@@ -125,7 +125,8 @@ fn get_start_request_copies_signal_with_start_fields() {
 
 #[tokio::test]
 async fn start_workflow_execution_unknown_domain() {
-    let engine = nop_engine();
+    let mut engine = nop_engine();
+    engine.domain_cache = std::sync::Arc::new(FakeDomainCache::default());
     let req = HistoryStartWorkflowExecutionRequest { domain_uuid: "missing".into(), ..Default::default() };
     let err = engine.start_workflow_execution(&req).await.unwrap_err();
     assert!(err.is_entity_not_exists(), "{err}");
