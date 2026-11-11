@@ -9,10 +9,10 @@
 //! + queue notification only after a durable write, and shard closing on
 //! ownership loss. Anything that depends on unported code is an explicit error.
 //!
-//! Gaps (recorded in memory/history-ndcpersist2-20261111.md):
-//! `verify_and_repair`/`flush_as_active` (error), signal reapplication (error),
-//! history notifier (no-op), strong idempotency (Go default false), request type
-//! decoding (-1), continued-as-new two-run writes (error).
+//! Gaps (recorded in memory/history-ndcpersist2-20261111.md): `verify_and_repair`
+//! and `flush_as_active` (error), signal reapplication (error), history notifier
+//! (no-op), strong idempotency (Go default false), request type decoding (-1),
+//! continued-as-new two-run writes (error).
 
 #![allow(clippy::result_large_err)]
 
