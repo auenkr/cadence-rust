@@ -285,8 +285,14 @@ impl TransferDependencies for TransferDepsImpl {
         if record.search_attributes.contains_key("CadenceChangeVersion") {
             return Ok(());
         }
-        // Go sql visibility store: UpsertWorkflowExecution is not supported.
-        self.env.visibility.upsert().map_err(pe)
+        // Go sql visibility store: UpsertWorkflowExecution returns the
+        // *types.BadRequestError ErrVisibilityOperationNotSupported.
+        self.env.visibility.upsert().map_err(|e| match e {
+            PersistenceError::Internal(m) if m == crate::wiring::persistence::visibility::VISIBILITY_OPERATION_NOT_SUPPORTED => {
+                TaskError::BadRequest(m)
+            }
+            other => pe(other),
+        })
     }
 
     async fn record_workflow_execution_closed(&self, record: VisibilityRecord) -> TaskResult<()> {
