@@ -114,22 +114,37 @@ fn load_config(config: Option<String>, env: Option<String>, zone: Option<String>
     Ok(cfg)
 }
 
+/// Go `dynamicconfig.NewFileBasedClient` (path resolution + poll interval).
+fn file_based_client(
+    p: &svc_config::DynamicConfigClientConfig,
+    root: &std::path::Path,
+) -> anyhow::Result<Arc<dyn DynamicClient>> {
+    let path = std::path::PathBuf::from(&p.filepath);
+    let path = if path.is_absolute() { path } else { root.join(path) };
+    let client = FileDynamicClient::from_file(&path)?;
+    let interval = if p.poll_interval.is_empty() {
+        Duration::from_secs(5)
+    } else {
+        let nanos = svc_config::parse_go_duration(&p.poll_interval).map_err(anyhow::Error::msg)?;
+        Duration::from_nanos(nanos.max(5_000_000_000) as u64)
+    };
+    client.spawn_reloader(interval);
+    Ok(client)
+}
+
 /// Builds the dynamic-config client selected by the config (Go `dynamicconfigfx`).
 /// OpenFeature is not supported by the Rust History yet.
 async fn dynamic_client(cfg: &ServiceConfig, root: &std::path::Path) -> anyhow::Result<Arc<dyn DynamicClient>> {
     match cfg.dynamic_config_provider() {
         DynamicConfigProvider::FileBased(p) if !p.filepath.is_empty() => {
-            let path = std::path::PathBuf::from(&p.filepath);
-            let path = if path.is_absolute() { path } else { root.join(path) };
-            let client = FileDynamicClient::from_file(&path)?;
-            let interval = if p.poll_interval.is_empty() {
-                Duration::from_secs(5)
-            } else {
-                let nanos = svc_config::parse_go_duration(&p.poll_interval).map_err(anyhow::Error::msg)?;
-                Duration::from_nanos(nanos.max(5_000_000_000) as u64)
-            };
-            client.spawn_reloader(interval);
-            Ok(client)
+            // Go dynamicconfigfx: a client creation error means NOP, never an abort.
+            match file_based_client(p, root) {
+                Ok(client) => Ok(client),
+                Err(e) => {
+                    eprintln!("error: creating dynamic config client failed, using no-op config client instead: {e}");
+                    Ok(FileDynamicClient::empty())
+                }
+            }
         }
         DynamicConfigProvider::FileBased(_) | DynamicConfigProvider::Nop => Ok(FileDynamicClient::empty()),
         DynamicConfigProvider::ConfigStore(store) => {
@@ -345,4 +360,18 @@ pub async fn run(bin_name: &'static str) -> anyhow::Result<()> {
     replication.stop_fetchers();
     provider.stop().await.map_err(|e| anyhow::anyhow!("stopping History Ringpop membership: {e}"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod dynamic_client_fallback_tests {
+    use super::*;
+
+    #[test]
+    fn missing_file_creation_error_is_mapped_to_nop_by_dynamic_client() {
+        let cfg = svc_config::DynamicConfigClientConfig {
+            filepath: "/nonexistent/dir/dynamicconfig.yaml".into(),
+            ..Default::default()
+        };
+        assert!(file_based_client(&cfg, std::path::Path::new("/")).is_err());
+    }
 }
