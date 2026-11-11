@@ -784,6 +784,19 @@ impl DecisionHandler for EngineDecisionHandler {
                 &failed.identity,
                 &failed.binary_checksum,
             )?;
+            // Go handler.go handleDecisionTaskFailed: terminate when the decision
+            // attempt exceeds DecisionRetryMaxAttempts.
+            let domain_name = state.get_domain_entry().info.name.clone();
+            let max_attempts = (self.config.decision_retry_max_attempts)(&domain_name);
+            if max_attempts > 0 && state.get_execution_info().decision_attempt > max_attempts {
+                let cause = failed.cause.map(|c| c.as_str()).unwrap_or_default();
+                let details = failed.details.iter().map(u8::to_string).collect::<Vec<_>>().join(" ");
+                let message = format!(
+                    "Decision attempt exceeds limit. Last decision failure cause and details: {cause} - [{details}]"
+                );
+                let next = state.get_next_event_id();
+                state.terminate_workflow(next, "DECISION_ATTEMPTS_EXCEEDS_LIMIT", message.as_bytes(), "history-service")?;
+            }
             Ok(Outcome { noop: false, create_decision: true, value: () })
         })
         .await
