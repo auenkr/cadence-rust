@@ -8,8 +8,6 @@ use std::collections::BTreeMap;
 
 use cadence_api::types::VersionHistories;
 use cadence_persistence::{history_contract as pc, sqlblobs};
-use cadence_thrift::FromThrift;
-
 use crate::engine::deps::{HResult, HistoryError};
 
 #[derive(Debug, Clone)]
