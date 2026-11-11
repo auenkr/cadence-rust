@@ -660,7 +660,9 @@ mod tests {
         snapshot.execution_info.run_id = "run".into();
         snapshot.execution_info.task_list = "wf-tl".into();
         snapshot.execution_info.next_event_id = 5;
-        EngineMutableState::from_snapshot(snapshot, domain, 0, Arc::new(|| 1_700_000_000_000_000_000)).unwrap()
+        let s = EngineMutableState::from_snapshot(snapshot, domain, 0, Arc::new(|| 1_700_000_000_000_000_000)).unwrap();
+        s.inner.lock().unwrap().exec.workflow_timeout = 100;
+        s
     }
 
     fn handler(state: &EngineMutableState) -> TaskHandler<EngineOps<'_>> {
