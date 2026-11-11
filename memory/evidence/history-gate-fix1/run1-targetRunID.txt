@@ -1,0 +1,3 @@
+GATE FAIL sdk-start-echo code:invalid-argument message:error InternalServiceError (cadence internal error, msg: invalid thrift data: targetRunID: invalid UUID "": invalid length: found 0) not declared for StartWorkflowExecution
+GATE FAIL sdk-workflow-id-250-chars-accepted code:invalid-argument message:error InternalServiceError (cadence internal error, msg: invalid thrift data: targetRunID: invalid UUID "": invalid length: found 0) not declared for StartWorkflowExecution
+STEP start-echo FAIL code:invalid-argument message:error InternalServiceError (cadence internal error, msg: invalid thrift data: targetRunID: invalid UUID "": invalid length: found 0) not declared for StartWorkflowExecution
