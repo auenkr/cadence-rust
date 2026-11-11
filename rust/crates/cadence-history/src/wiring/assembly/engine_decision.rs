@@ -297,7 +297,6 @@ impl EngineMutableState {
                 started_event_id: stid,
                 identity: ident,
                 binary_checksum: checksum,
-                ..Default::default()
             });
         });
         // AfterAddDecisionTaskCompletedEvent + ReplicateDecisionTaskCompletedEvent:
@@ -523,7 +522,7 @@ impl EngineDecisionHandler {
             let timeout = (self.config.decision_heartbeat_timeout)(&domain_name);
             let now = self.core.clock.now();
             let timed_out = heartbeat && original > 0 && now > original.saturating_add(timeout.as_nanos() as i64);
-            let mut has_unhandled = false;
+            let mut has_unhandled: bool;
             if timed_out {
                 state.add_decision_timed_out(d.schedule_id, d.started_id)?;
                 state.clear_sticky();

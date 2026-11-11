@@ -630,6 +630,7 @@ impl ValidationContext for Validation {
 mod tests {
     use super::*;
     use crate::decision::task_handler::TaskHandler;
+    use crate::engine::deps_ms::MutableState;
     use crate::engine::deps::{DomainCacheEntry, DomainInfo, HResult};
     use cadence_api::types::{ActivityType, TaskList};
 
