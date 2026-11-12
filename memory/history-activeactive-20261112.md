@@ -13,3 +13,10 @@
 
 ## Evidence
 - rust-ci package=cadence-history success, head 5948eca04: https://github.com/auenkr/cadence-rust/actions/runs/43191932040
+
+Final head 1f734f7792569cb5c46ec8653c6161abc5edc8b5 (after merging origin/master):
+- mysql/grpc/true: https://github.com/auenkr/cadence-rust/actions/runs/43193296898 success, GATE SUMMARY failed: []
+- cassandra/grpc/true: https://github.com/auenkr/cadence-rust/actions/runs/43193304548 success, GATE SUMMARY failed: []
+- postgres/tchannel/false: https://github.com/auenkr/cadence-rust/actions/runs/43193309875 success, GATE SUMMARY failed: []
+- rust-ci full workspace: https://github.com/auenkr/cadence-rust/actions/runs/43193315246 success
+(The evidence commit itself only touches memory/.)
