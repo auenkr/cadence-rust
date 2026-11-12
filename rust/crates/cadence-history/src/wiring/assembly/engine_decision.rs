@@ -641,7 +641,19 @@ impl EngineDecisionHandler {
                         false,
                     )
                 } else {
+                    let semaphore_lookups = if (self.config.enable_distributed_semaphore)(&domain_name) {
+                        let sem_domain_id = state.inner.lock().unwrap().exec.domain_id.clone();
+                        super::engine_decision_ops::resolve_semaphore_lookups(
+                            &*self.core.semaphore_metadata,
+                            &sem_domain_id,
+                            &decisions,
+                        )
+                        .await
+                    } else {
+                        Default::default()
+                    };
                     let ops = EngineOps {
+                        semaphore_lookups,
                         state: &state,
                         config: self.config.clone(),
                         domains: self.core.domains.clone(),

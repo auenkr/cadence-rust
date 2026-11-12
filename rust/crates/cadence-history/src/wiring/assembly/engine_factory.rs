@@ -151,6 +151,7 @@ impl HistoryEventNotifier for NotifierAdapter {
 pub fn build_core(env: &Arc<HistoryEnv>, shard: &Arc<ShardContext>) -> (Arc<EngineCore>, Arc<EngineExecutionCache>) {
     let core = Arc::new(EngineCore {
         engine_slot: Arc::new(std::sync::OnceLock::new()),
+        semaphore_metadata: env.semaphore_metadata.clone(),
         strong_idempotency_sanity_check: env.config.enable_strong_idempotency_sanity_check.clone(),
         advanced_visibility_writing: {
             // Go `AdvancedVisibilityWritingMode() != "off"`: advanced store configured and written to.

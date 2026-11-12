@@ -56,6 +56,8 @@ pub struct EngineCore {
     pub active_cluster_manager: Arc<dyn crate::engine::runtime::ActiveClusterManager>,
     /// Go `clientBean.GetRemoteAdminClient`.
     pub remote_admin_clients: Arc<crate::wiring::resources::replication_clients::RemoteAdminClients>,
+    /// Go `semaphoreMetadataManager`.
+    pub semaphore_metadata: Arc<dyn cadence_persistence::SemaphorePersistence>,
 }
 
 impl EngineCore {

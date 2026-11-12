@@ -90,6 +90,9 @@ pub struct HistoryEnv {
     /// Go handler `dlqHostLimiter`: `taskdlq.NewHostLimiter(config.HistoryTaskDLQProcessorHostConcurrency())`,
     /// shared by every shard's task DLQ processor.
     pub dlq_host_limiter: crate::taskdlq::HostLimiter,
+    /// Go `shard.GetService().GetSemaphoreMetadataManager()`: SQL returns Go's
+    /// "not supported on SQL" error, Cassandra reads `semaphore_metadata`.
+    pub semaphore_metadata: Arc<dyn cadence_persistence::SemaphorePersistence>,
 }
 
 impl HistoryEnv {
@@ -98,6 +101,7 @@ impl HistoryEnv {
         let HistoryEnvParams { config, persistence, cluster, who_am_i, hosts, matching_resolver, dynamic_client } =
             params;
         let active = cluster.current_cluster_name.clone();
+        let semaphore_metadata = cadence_matching::matching_task_store::open_configured_semaphore_store(&persistence).await?;
 
         let stores = tokio::task::spawn_blocking(move || {
             open_configured_default_store(
@@ -187,6 +191,7 @@ impl HistoryEnv {
         );
         Ok(Arc::new(Self {
             dlq_host_limiter,
+            semaphore_metadata,
             config_adapter,
             config,
             persistence,

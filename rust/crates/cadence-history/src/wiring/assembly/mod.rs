@@ -13,6 +13,7 @@ pub mod engine_factory;
 pub mod engine_start;
 pub mod engine_refresher;
 pub mod engine_resetter;
+pub mod engine_semaphore;
 pub mod engine_state;
 pub mod engine_tasks;
 pub mod engine_timer;
