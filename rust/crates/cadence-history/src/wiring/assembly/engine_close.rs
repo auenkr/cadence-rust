@@ -49,7 +49,7 @@ impl EngineMutableState {
                     p.points.iter().any(|pt| {
                         pt.resettable
                             && !pt.expiring_time_nano.is_some_and(|e| e > 0 && now_nanos > e)
-                            && self.domain.bad_binaries.contains(&pt.binary_checksum)
+                            && self.is_bad_binary(&pt.binary_checksum)
                     })
                 });
                 if hit {

@@ -152,7 +152,11 @@ impl EngineExecutionContext {
 
     /// Go `Context.LoadWorkflowExecution` returning the concrete state.
     pub async fn load_state(&self) -> HResult<Arc<EngineMutableState>> {
-        if let Some(state) = self.state.lock().unwrap().clone() {
+        let cached = self.state.lock().unwrap().clone();
+        if let Some(state) = cached {
+            if let Ok(d) = self.core.domains.get_domain_by_id(&self.domain_id) {
+                state.set_bad_binaries(d.bad_binaries.clone());
+            }
             return Ok(state);
         }
         let core = &self.core;
