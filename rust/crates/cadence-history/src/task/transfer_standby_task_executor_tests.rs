@@ -251,7 +251,6 @@ impl TransferDependencies for TDeps {
         self.upserted.lock().unwrap().push(r);
         Ok(())
     }
-    async fn record_workflow_closed_noop(&self) {}
     async fn record_workflow_execution_closed(&self, r: VisibilityRecord) -> Result<()> {
         self.closed.lock().unwrap().push(r);
         Ok(())
