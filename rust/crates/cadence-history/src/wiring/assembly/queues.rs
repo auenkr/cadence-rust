@@ -128,6 +128,7 @@ fn to_queue_notify_info(
                 }) as Arc<dyn crate::queue::deps::PersistenceTask>
             })
             .collect(),
+        persistence_error: info.persistence_error,
         ..NotifyTaskInfo::default()
     }
 }

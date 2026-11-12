@@ -6,7 +6,7 @@ use std::sync::Arc;
 use super::engine_cache::EngineCore;
 use super::engine_state::EngineMutableState;
 use crate::execution::checksum::{Checksum, MutableStateChecksumPayload};
-use crate::task::deps::{MetricsClient, MetricsScope, Tag};
+use crate::task::deps::{MetricsClient, Tag};
 
 /// Result of the load-time checksum handling.
 #[derive(Debug, PartialEq, Eq)]
@@ -118,14 +118,14 @@ impl EngineMutableState {
         let metrics: &Arc<dyn MetricsClient> = &core.metrics;
         match outcome {
             ChecksumLoadOutcome::Invalidated => {
-                metrics.inc_counter("WorkflowContext", "MutableStateChecksumInvalidated");
+                metrics.inc_counter("WorkflowContextScope", "MutableStateChecksumInvalidated");
             }
             ChecksumLoadOutcome::Mismatch => {
                 let cluster = core.current_cluster.clone();
-                metrics.inc_counter("WorkflowContext", "MutableStateChecksumMismatch");
+                metrics.inc_counter("WorkflowContextScope", "MutableStateChecksumMismatch");
                 metrics
                     .scope(
-                        "WorkflowCorruptionRepair",
+                        "WorkflowCorruptionRepairScope",
                         vec![tag("corruption_type", "ChecksumMismatch"), tag("source_cluster", &cluster)],
                     )
                     .inc_counter("MutableStateCorruptionDetected");

@@ -28,6 +28,8 @@ pub struct NotifyTaskInfo {
     pub version_histories: Option<cadence_api::types::VersionHistories>,
     pub activities: HashMap<i64, ActivityInfo>,
     pub history: Vec<PersistedBlobRef>,
+    /// Go `NotifyTaskInfo.PersistenceError`: the write outcome is uncertain.
+    pub persistence_error: bool,
 }
 /// `events.PersistedBlob` (lookup key + payload).
 #[derive(Clone)]

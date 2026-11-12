@@ -516,6 +516,7 @@ impl Harness {
         let domains: Arc<dyn DomainCache> = Arc::new(TestDomains(domain_status.clone(), domain_active_clusters.clone()));
         let core = Arc::new(EngineCore {
             metrics: Arc::new(crate::task::deps::NoopMetrics),
+            cached_queue_reader_shadow: Arc::new(|| (false, false)),
             engine_slot: Arc::new(std::sync::OnceLock::new()),
             semaphore_metadata: Arc::new(cadence_persistence::InMemoryExecutionStore::new()),
             cluster_metadata: Arc::new(crate::engine::test_support::FixedClusterMetadata(CLUSTER.to_string())),

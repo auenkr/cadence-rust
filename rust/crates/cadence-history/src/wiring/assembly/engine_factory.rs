@@ -94,6 +94,16 @@ impl HistoryEventNotifier for NotifierAdapter {
 pub fn build_core(env: &Arc<HistoryEnv>, shard: &Arc<ShardContext>) -> (Arc<EngineCore>, Arc<EngineExecutionCache>) {
     let core = Arc::new(EngineCore {
         metrics: env.metrics.clone() as Arc<dyn crate::task::deps::MetricsClient>,
+        cached_queue_reader_shadow: {
+            let cfg = env.config.clone();
+            let shard_id = shard.shard_id();
+            Arc::new(move || {
+                (
+                    (cfg.timer_processor_cached_queue_reader_mode)(shard_id) == "shadow",
+                    (cfg.transfer_processor_cached_queue_reader_mode)(shard_id) == "shadow",
+                )
+            })
+        },
         engine_slot: Arc::new(std::sync::OnceLock::new()),
         semaphore_metadata: env.semaphore_metadata.clone(),
         cluster_metadata: env.cluster.clone() as Arc<dyn crate::engine::deps::ClusterMetadata>,
@@ -138,7 +148,7 @@ pub fn build_core(env: &Arc<HistoryEnv>, shard: &Arc<ShardContext>) -> (Arc<Engi
                     data_inconsistency: crate::execution::mutable_state_builder::DataInconsistencyHook(Some({
                         let m = metrics.clone();
                         Arc::new(move || {
-                            crate::task::deps::MetricsClient::inc_counter(&*m, "WorkflowContext", "DataInconsistentCounter")
+                            crate::task::deps::MetricsClient::inc_counter(&*m, "WorkflowContextScope", "DataInconsistentCounter")
                         })
                     })),
                     ..StateParams::default()
