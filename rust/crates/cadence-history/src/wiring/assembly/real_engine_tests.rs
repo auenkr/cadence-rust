@@ -2,7 +2,7 @@
 //! real mutable state + persistence. They drive the real `HistoryEngine` over the in-memory stores of
 //! `real_engine_harness` (instead of gomock persistence): each test starts a workflow through the engine
 //! and then performs the Go test's record/respond steps.
-use cadence_api::enums::DecisionType;
+use cadence_api::enums::{DecisionType, ParentClosePolicy};
 use cadence_api::service_types::{RequestCancelWorkflowExecutionRequest, SignalWithStartWorkflowExecutionRequest};
 use cadence_api::tasks::*;
 use cadence_api::tasktoken::{JsonTaskTokenSerializer, TaskToken};
