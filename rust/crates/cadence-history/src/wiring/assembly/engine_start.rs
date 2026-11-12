@@ -8,8 +8,7 @@
 //!
 //! Documented gaps: workflow request dedup rows (`insertWorkflowRequest`),
 //! orphan history branch cleanup and visibility writes are not ported (there is
-//! no visibility writer yet, so `has_visibility` is false);
-//! `ReplicateFailoverMarkers` has no shard implementation and is a no-op.
+//! no visibility writer yet, so `has_visibility` is false).
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -638,12 +637,47 @@ impl WorkflowStartHost for EngineStartHost {
 pub struct EngineFailoverHost {
     shard: Arc<crate::shard_context::ShardContext>,
     domains: Arc<HistoryDomainCache>,
+    executions: Arc<dyn cadence_persistence::history_contract::GoExecutionStore>,
+    dlq_processor: Option<Arc<dyn crate::taskdlq::Processor>>,
 }
 
 impl EngineFailoverHost {
-    pub fn new(shard: Arc<crate::shard_context::ShardContext>, domains: Arc<HistoryDomainCache>) -> Arc<Self> {
-        Arc::new(Self { shard, domains })
+    pub fn new(
+        shard: Arc<crate::shard_context::ShardContext>,
+        domains: Arc<HistoryDomainCache>,
+        executions: Arc<dyn cadence_persistence::history_contract::GoExecutionStore>,
+        dlq_processor: Option<Arc<dyn crate::taskdlq::Processor>>,
+    ) -> Arc<Self> {
+        Arc::new(Self { shard, domains, executions, dlq_processor })
     }
+}
+
+/// Go `persistence.FailoverMarkerTask` as a `Task` row: replication task of type
+/// `ReplicationTaskTypeFailoverMarker` (2) carrying domain id, version and creation time.
+pub(crate) fn failover_marker_task(
+    marker: &FailoverMarkerTask,
+    task_id: i64,
+    visibility_timestamp: i64,
+) -> HResult<pc::Task> {
+    let rt = pc::ReplicationTask {
+        domain_id: marker.domain_id.clone(),
+        // The store rewrites run/workflow ids with the fixed failover-marker values (Go
+        // `createFailoverMarkerTasks`); the blob only needs parseable UUIDs.
+        run_id: "30000000-5000-f000-f000-000000000000".into(),
+        task_id,
+        task_type: 2,
+        version: marker.version,
+        creation_time_unix_nanos: visibility_timestamp,
+        ..Default::default()
+    };
+    let s = cadence_persistence::sqlblobs::replication_task_to_struct(&rt)
+        .map_err(|e| HistoryError::internal(format!("encode failover marker: {e}")))?;
+    Ok(pc::Task {
+        visibility_timestamp_unix_nanos: visibility_timestamp,
+        task_type: 2,
+        task_id,
+        data: task_blob(Encoding::ThriftRW.encode(&s))?,
+    })
 }
 
 fn failover_entry(m: &MatchingDomainMetadata) -> FailoverDomainEntry {
@@ -682,15 +716,58 @@ impl DomainFailoverHost for EngineFailoverHost {
         self.shard.update_domain_notification_version(version).map_err(shard_err)
     }
 
-    async fn replicate_failover_markers(&self, _markers: Vec<FailoverMarkerTask>) -> HResult<()> {
-        Ok(())
+    /// Go `shard.ReplicateFailoverMarkers`.
+    async fn replicate_failover_markers(&self, markers: Vec<FailoverMarkerTask>) -> HResult<()> {
+        let _gate = self.shard.lock_task_writes().await;
+        if let Some(e) = self.shard.closed_error() {
+            return Err(shard_err(e));
+        }
+        let mut slots: Vec<(i64, i64)> = vec![(0, 0); markers.len()];
+        let mut max_read_level = 0i64;
+        self.shard.allocate_transfer_ids(&mut slots, &mut max_read_level).map_err(shard_err)?;
+        let tasks = markers
+            .iter()
+            .zip(slots.iter())
+            .map(|(m, (id, ts))| failover_marker_task(m, *id, *ts))
+            .collect::<HResult<Vec<_>>>()?;
+        let res = self
+            .executions
+            .create_failover_markers_with_range(self.shard.shard_id(), self.shard.range_id(), tasks)
+            .await;
+        match res {
+            Ok(()) => {
+                self.shard.update_max_read_level(max_read_level);
+                Ok(())
+            }
+            Err(e @ cadence_persistence::history_contract::PersistenceError::ShardOwnershipLost { .. }) => {
+                self.shard.close_shard(None);
+                Err(to_history_error(e))
+            }
+            Err(e) => {
+                tracing::error!(error = ?e, "failed to add failover marker tasks");
+                Err(to_history_error(e))
+            }
+        }
     }
 
     fn has_dlq_processor(&self) -> bool {
-        false
+        self.dlq_processor.is_some()
     }
 
-    fn failover_dlq_partitions(&self, _partitions: Vec<FailoverDlqPartition>) {}
+    fn failover_dlq_partitions(&self, partitions: Vec<FailoverDlqPartition>) {
+        if let Some(p) = &self.dlq_processor {
+            p.failover_partitions(
+                partitions
+                    .into_iter()
+                    .map(|x| crate::taskdlq::Partition {
+                        domain_id: x.domain_id,
+                        cluster_attribute_scope: x.cluster_attribute_scope,
+                        cluster_attribute_name: x.cluster_attribute_name,
+                    })
+                    .collect(),
+            );
+        }
+    }
 
     fn register_domain_change_callback(
         &self,
@@ -720,5 +797,27 @@ impl DomainFailoverHost for EngineFailoverHost {
             on_changed(&metas);
         });
         self.domains.inner().register_callback(shard_name.to_string(), catch_up, prepare, on_changed);
+    }
+}
+
+#[cfg(test)]
+mod failover_marker_tests {
+    use super::*;
+
+    #[test]
+    fn failover_marker_task_is_replication_failover_marker_row() {
+        let m = FailoverMarkerTask { version: 7, domain_id: "11111111-2222-3333-4444-555555555555".into() };
+        let t = failover_marker_task(&m, 42, 1_000).unwrap();
+        assert_eq!((t.task_id, t.task_type, t.visibility_timestamp_unix_nanos), (42, 2, 1_000));
+        let v = Encoding::parse(&t.data.encoding).unwrap().decode(&t.data.data).unwrap();
+        let rt = cadence_persistence::sqlblobs::replication_task_from_struct(&v).unwrap();
+        assert_eq!(rt.domain_id, m.domain_id);
+        assert_eq!((rt.version, rt.task_type, rt.creation_time_unix_nanos), (7, 2, 1_000));
+    }
+
+    #[test]
+    fn failover_marker_task_rejects_bad_domain_id() {
+        let m = FailoverMarkerTask { version: 1, domain_id: "not-a-uuid".into() };
+        assert!(failover_marker_task(&m, 1, 1).is_err());
     }
 }

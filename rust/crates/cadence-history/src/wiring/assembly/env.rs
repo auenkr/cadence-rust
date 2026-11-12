@@ -87,6 +87,9 @@ pub struct HistoryEnv {
     pub identity: String,
     /// Go `failover.NewCoordinator` (handler-level; started by the handler).
     pub failover_coordinator: Arc<crate::failover::CoordinatorImpl>,
+    /// Go handler `dlqHostLimiter`: `taskdlq.NewHostLimiter(config.HistoryTaskDLQProcessorHostConcurrency())`,
+    /// shared by every shard's task DLQ processor.
+    pub dlq_host_limiter: crate::taskdlq::HostLimiter,
 }
 
 impl HistoryEnv {
@@ -179,7 +182,11 @@ impl HistoryEnv {
             history_client: None,
         })
         .coordinator;
+        let dlq_host_limiter = crate::taskdlq::new_host_limiter(
+            (config.history_task_dlq_processor_host_concurrency)().clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+        );
         Ok(Arc::new(Self {
+            dlq_host_limiter,
             config_adapter,
             config,
             persistence,
