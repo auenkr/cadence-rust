@@ -25,7 +25,7 @@ use crate::engine::deps::{
 };
 use crate::engine::runtime::{UpdateAction, UpdateFn, WorkflowUpdater};
 use crate::shard_context::{ShardContext, ShardContextError};
-use crate::task::deps::{MetricsClient as _, MetricsScope};
+use crate::task::deps::MetricsScope;
 use crate::wiring::assembly::engine_state::{EngineMutableState, StateParams};
 use crate::wiring::persistence::engine_ndc::{to_history_error, SqlHistoryManager};
 
