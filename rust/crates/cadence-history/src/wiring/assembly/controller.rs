@@ -17,6 +17,8 @@ use crate::engine::deps::{HResult, HistoryError};
 use crate::engine::runtime::HistoryEngine;
 use crate::shard::ShardController;
 use crate::shard_context::ShardContext;
+use crate::task::deps::MetricsScope as _;
+use crate::wiring::resources::metrics::Scope;
 use crate::wiring::assembly::engine_factory::build_engine;
 use crate::wiring::assembly::env::{HistoryEnv, QueueFactory, ReplicationFactory, ShardBuildCtx};
 use crate::wiring::assembly::shard_factory::{ShardFactory, TaskShardContext};
@@ -55,6 +57,8 @@ pub struct ShardRegistry {
     entries: Arc<Mutex<HashMap<u32, Cell>>>,
     num_shards: u32,
     runtime: OnceLock<tokio::runtime::Handle>,
+    /// Go `metrics.HistoryShardControllerScope`.
+    metrics_scope: Scope,
 }
 
 impl ShardRegistry {
@@ -66,12 +70,13 @@ impl ShardRegistry {
         let num_shards = env.config.number_of_shards.max(1) as u32;
         Arc::new(Self {
             factory: Arc::new(ShardFactory::new(env.clone())),
-            env,
             queues,
             replication,
             entries: Arc::new(Mutex::new(HashMap::new())),
             num_shards,
             runtime: OnceLock::new(),
+            metrics_scope: Scope::new(env.metrics_registry.clone(), "HistoryShardController", vec![]),
+            env,
         })
     }
 
@@ -89,7 +94,16 @@ impl ShardRegistry {
     }
 
     pub async fn engine_for_shard(&self, shard_id: u32) -> Result<Arc<HistoryEngine>, HistoryError> {
-        Ok(self.entry_for_shard(shard_id).await?.engine.clone())
+        // Go `GetEngineForShard`: latency timer + exponential histogram.
+        let start = std::time::Instant::now();
+        let res = self.entry_for_shard(shard_id).await;
+        let elapsed = start.elapsed();
+        self.metrics_scope.record_timer("GetEngineForShardLatency", elapsed);
+        self.metrics_scope.exponential_histogram("GetEngineForShardLatencyHistogram", elapsed);
+        if res.is_err() {
+            self.metrics_scope.inc_counter("GetEngineForShardErrorCounter");
+        }
+        Ok(res?.engine.clone())
     }
 
     pub async fn entry_for_shard(&self, shard_id: u32) -> Result<Arc<ShardEntry>, HistoryError> {
@@ -110,6 +124,7 @@ impl ShardRegistry {
             guard.entry(shard_id).or_default().clone()
         };
         let entry = cell.get_or_try_init(|| self.create_entry(shard_id)).await?;
+        self.metrics_scope.update_gauge("NumShardsGauge", self.owned_shard_ids().len() as f64);
         Ok(entry.clone())
     }
 
@@ -121,11 +136,19 @@ impl ShardRegistry {
         let entries = self.entries.clone();
         let handle = tokio::runtime::Handle::current();
         let _ = self.runtime.set(handle.clone());
+        let started = std::time::Instant::now();
+        let scope = self.metrics_scope.clone();
+        tracing::info!(shard_id, "Creating new history shard item");
         let entry = tokio::task::spawn_blocking(move || -> HResult<Arc<ShardEntry>> {
             let id = shard_id as i32;
             let on_close = entries.clone();
             // Go `removeEngineForShard`: the engine is stopped when the shard goes away.
+            let closed_scope = scope.clone();
             let close_callback: Arc<dyn Fn(i32) + Send + Sync> = Arc::new(move |closed: i32| {
+                // Go `shardClosedCallback`.
+                closed_scope.inc_counter("ShardClosedCounter");
+                closed_scope.inc_counter("ShardItemRemovedCounter");
+                tracing::info!(shard_id = closed, reason = "shardClosedCallback", "Shard controller state changed: stopping shard");
                 let cell = on_close.lock().unwrap().remove(&(closed as u32));
                 if let Some(entry) = cell.and_then(|c| c.get().cloned()) {
                     let engine = entry.engine.clone();
@@ -156,6 +179,15 @@ impl ShardRegistry {
         .map_err(|e| HistoryError::internal(format!("shard creation task failed: {e}")))??;
         // Go `newShardItem` -> `engine.Start()` after the engine is created.
         entry.engine.start().await;
+        let acquisition = started.elapsed();
+        self.metrics_scope.inc_counter("ShardItemCreatedCounter");
+        {
+            // Go `ShardItemAcquisitionLatency` (ShardInfoScope).
+            let shard_info = Scope::new(self.env.metrics_registry.clone(), "ShardInfo", vec![]);
+            shard_info.record_timer("ShardItemAcquisitionLatency", acquisition);
+            shard_info.exponential_histogram("ShardItemAcquisitionLatencyHistogram", acquisition);
+        }
+        tracing::info!(shard_id, "Created new history shard item");
         Ok(entry)
     }
 
@@ -181,13 +213,26 @@ impl ShardRegistry {
     pub fn close_shard(&self, shard_id: u32) {
         let cell = self.entries.lock().unwrap().remove(&shard_id);
         if let Some(entry) = cell.and_then(|c| c.get().cloned()) {
+            // Go `removeEngineForShard`.
+            let start = std::time::Instant::now();
+            tracing::info!(shard_id, "removeEngineForShard called");
             self.stop_engine(&entry);
+            let elapsed = start.elapsed();
+            self.metrics_scope.record_timer("RemoveEngineForShardLatency", elapsed);
+            self.metrics_scope.exponential_histogram("RemoveEngineForShardLatencyHistogram", elapsed);
+            tracing::info!(shard_id, "removeEngineForShard completed");
             entry.shard.close_shard(None);
         }
     }
 
     /// Call after the membership ring changed: closes shards this host no longer owns.
     pub fn on_membership_change(&self) {
+        self.metrics_scope.inc_counter("MembershipChangedCounter");
+        tracing::info!("Ring membership changed");
+        // Go `acquireShards`.
+        let acquire_start = std::time::Instant::now();
+        self.metrics_scope.inc_counter("AcquireShardsCounter");
+        let _acquire = scopeguard_timer(self.metrics_scope.clone(), acquire_start);
         let who = self.env.membership.who_am_i().to_string();
         let ids: Vec<u32> = self.entries.lock().unwrap().keys().copied().collect();
         for id in ids {
@@ -208,6 +253,18 @@ impl ShardRegistry {
             }
         }
     }
+}
+
+struct AcquireTimer(Scope, std::time::Instant);
+impl Drop for AcquireTimer {
+    fn drop(&mut self) {
+        let d = self.1.elapsed();
+        self.0.record_timer("AcquireShardsLatency", d);
+        self.0.exponential_histogram("AcquireShardsLatencyHistogram", d);
+    }
+}
+fn scopeguard_timer(s: Scope, start: std::time::Instant) -> AcquireTimer {
+    AcquireTimer(s, start)
 }
 
 #[cfg(test)]
