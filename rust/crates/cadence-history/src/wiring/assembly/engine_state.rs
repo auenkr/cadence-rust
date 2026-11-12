@@ -59,6 +59,8 @@ pub struct StateParams {
     /// History node store used to read events of the current branch.
     pub history_nodes: Option<Arc<dyn HistoryNodeStore>>,
     pub shard_id: i32,
+    /// `config.MaximumBufferedEventsBatch()`.
+    pub max_buffered_events_batch: i64,
 }
 
 impl Default for StateParams {
@@ -71,6 +73,7 @@ impl Default for StateParams {
             failover_version: EMPTY_VERSION,
             history_nodes: None,
             shard_id: 0,
+            max_buffered_events_batch: 100,
         }
     }
 }

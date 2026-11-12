@@ -39,6 +39,25 @@ impl EngineMutableState {
     /// (`active == false`) no buffered events are flushed and no activity timer
     /// is created.
     pub(super) fn close_transaction(&self, now_nanos: i64, active: bool) -> HResult<ClosedTxn> {
+        if active {
+            // Go `closeTransactionHandleBufferedEventsLimit`: too many persisted buffered events
+            // force-close the in-flight decision and schedule a new one.
+            let (running, over_limit, in_flight) = {
+                let g = self.inner.lock().unwrap();
+                (
+                    g.exec.state != WORKFLOW_STATE_COMPLETED,
+                    g.buffered.len() as i64 >= self.params.max_buffered_events_batch,
+                    g.in_flight(),
+                )
+            };
+            if running && over_limit && in_flight {
+                self.force_close_in_flight_decision()?;
+                let pending = self.inner.lock().unwrap().pc_exec.decision_schedule_id != crate::engine::deps::EMPTY_EVENT_ID;
+                if !pending {
+                    self.add_decision_task_scheduled(false)?;
+                }
+            }
+        }
         let mut g = self.inner.lock().unwrap();
         if active {
             g.flush_buffered();

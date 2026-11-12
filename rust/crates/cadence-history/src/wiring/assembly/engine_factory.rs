@@ -125,6 +125,7 @@ pub fn build_core(env: &Arc<HistoryEnv>, shard: &Arc<ShardContext>) -> (Arc<Engi
                 let mut p = StateParams {
                     history_nodes: Some(history_nodes.clone()),
                     shard_id,
+                    max_buffered_events_batch: (cfg.maximum_buffered_events_batch)(),
                     ..StateParams::default()
                 };
                 if let Ok(entry) = crate::task::deps::DomainCache::get_domain_by_id(&*domains, domain_id) {
