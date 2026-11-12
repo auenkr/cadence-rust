@@ -521,3 +521,77 @@ async fn terminate_workflow_execution_closes_run() {
     assert_eq!(info.state, WORKFLOW_STATE_COMPLETED);
     assert_eq!(info.close_status, WORKFLOW_CLOSE_STATUS_TERMINATED);
 }
+
+// ---- batch 2: heartbeat, timers, markers, request cancel
+
+#[tokio::test]
+async fn record_activity_heartbeat_success() {
+    let h = Harness::new();
+    let (run, sched) = with_scheduled_activity(&h).await;
+    activity_started(&h, &run, sched, "act-req").await.unwrap();
+    let resp = h
+        .engine
+        .record_activity_task_heartbeat(&HistoryRecordActivityTaskHeartbeatRequest {
+            domain_uuid: DOMAIN_ID.into(),
+            heartbeat_request: Some(RecordActivityTaskHeartbeatRequest { task_token: activity_token(&run, sched), details: b"hb".to_vec(), identity: IDENTITY.into() }),
+        })
+        .await
+        .expect("heartbeat");
+    assert!(!resp.cancel_requested);
+    // Heartbeat writes no history event.
+    assert_eq!(h.execs.snapshot(WF, &run).unwrap().execution_info.next_event_id, 7);
+}
+
+#[tokio::test]
+async fn respond_decision_completed_start_timer_creates_timer() {
+    let h = Harness::new();
+    let run = start(&h).await;
+    decision_started(&h, &run, 2, "dec-req").await.unwrap();
+    let timer = Decision {
+        decision_type: Some(DecisionType::StartTimer),
+        start_timer_decision_attributes: Some(StartTimerDecisionAttributes { timer_id: "t1".into(), start_to_fire_timeout_seconds: Some(5) }),
+        ..Default::default()
+    };
+    decision_completed(&h, &run, 2, vec![timer]).await.expect("completed");
+    let snap = h.execs.snapshot(WF, &run).unwrap();
+    assert_eq!(snap.timer_infos.len(), 1);
+    // + DecisionCompleted + TimerStarted
+    assert_eq!(snap.execution_info.next_event_id, 6);
+}
+
+#[tokio::test]
+async fn respond_decision_completed_record_marker_appends_event() {
+    let h = Harness::new();
+    let run = start(&h).await;
+    decision_started(&h, &run, 2, "dec-req").await.unwrap();
+    let marker = Decision {
+        decision_type: Some(DecisionType::RecordMarker),
+        record_marker_decision_attributes: Some(RecordMarkerDecisionAttributes { marker_name: "m".into(), ..Default::default() }),
+        ..Default::default()
+    };
+    decision_completed(&h, &run, 2, vec![marker]).await.expect("completed");
+    assert_eq!(h.execs.snapshot(WF, &run).unwrap().execution_info.next_event_id, 6);
+}
+
+#[tokio::test]
+async fn request_cancel_workflow_execution_appends_event() {
+    let h = Harness::new();
+    let run = start(&h).await;
+    h.engine
+        .request_cancel_workflow_execution(&HistoryRequestCancelWorkflowExecutionRequest {
+            domain_uuid: DOMAIN_ID.into(),
+            cancel_request: Some(RequestCancelWorkflowExecutionRequest {
+                domain: DOMAIN_NAME.into(),
+                workflow_execution: exec(&run),
+                identity: IDENTITY.into(),
+                request_id: "cancel-req".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .await
+        .expect("cancel");
+    let info = h.execs.snapshot(WF, &run).unwrap().execution_info;
+    assert!(info.cancel_requested);
+    assert_eq!(info.next_event_id, 4);
+}
