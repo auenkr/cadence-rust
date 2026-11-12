@@ -47,10 +47,6 @@ fn internal(msg: impl Into<String>) -> OperationError {
     OperationError { kind: ErrorKind::Internal, message: msg.into() }
 }
 
-fn not_ported(what: &str) -> OperationError {
-    internal(format!("{what} decision is not ported on the engine mutable state yet"))
-}
-
 fn secs(d: Duration) -> i32 {
     d.as_secs().min(i32::MAX as u64) as i32
 }
