@@ -24,3 +24,6 @@ Head 09258fdd8 (memory note commit; code identical to the rust-ci run). All `GAT
 - mysql/grpc/true: https://github.com/auenkr/cadence-rust/actions/runs/43178295898
 - cassandra/grpc/true: https://github.com/auenkr/cadence-rust/actions/runs/43178300719
 - postgres/tchannel/false: https://github.com/auenkr/cadence-rust/actions/runs/43178304942
+
+## Post-merge master validation (master 31d14ff7e incl. 6c10d0ed8, 2026-11-12)
+- Full workspace rust-ci + all 12 history-mixed-gate combos: runs 43180605820..43180659904, all success.
