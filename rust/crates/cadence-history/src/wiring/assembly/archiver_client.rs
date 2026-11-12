@@ -3,14 +3,12 @@
 //! (rate limited), and whatever is left is sent to the archival system workflow with a
 //! signal-with-start (`cadence-archival-<n>`).
 //!
-//! The write-side archivers (Go `historyArchiver.Archive` / `visibilityArchiver.Archive` of the
-//! filestore / s3store / gstorage plugins; cadence-common only has the read side) and the
-//! signal-with-start client (needs the Rust worker's archival workflow, which does not exist
-//! yet) are seams: [`InlineArchivers`] and [`ArchivalSignaler`]. Until real implementations exist
-//! the default ones fail with an explicit error, so the callers keep the task (and the data).
-//! TODO(link): real filestore/s3/gcs write archivers and frontend signal-with-start client.
+//! The inline write archivers ([`FileInlineArchivers`]: filestore only) and the signal-with-start
+//! client (`archiver_wiring::FrontendArchivalSignaler`, processed by the Go worker's archival
+//! workflow) are seams: [`InlineArchivers`] and [`ArchivalSignaler`]. s3 / gs fail explicitly, so
+//! the callers keep the task (and the data).
 
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -200,24 +198,31 @@ impl ArchiverClient {
     }
 }
 
-const NOT_PORTED: &str = "archiver is not ported yet (no write-side archiver / archival workflow signal client in Rust)";
+const NOT_PORTED: &str = "archiver scheme is not supported (only file:// is ported)";
 
 /// Inline archivers: the `file://` (filestore) scheme is written like Go (same on-disk format);
-/// other schemes (s3 / gs) and history without a [`HistoryBatchSource`] keep failing explicitly so
-/// the task is retried and the data is kept. Go default config: fileMode 0666, dirMode 0766.
-struct UnconfiguredInline {
-    history_source: Option<Arc<dyn cadence_common::archiver::HistoryBatchSource + Send + Sync>>,
+/// other schemes (s3 / gs) fail explicitly so the task is retried and the data is kept. Go default
+/// config: fileMode 0666, dirMode 0766.
+pub struct FileInlineArchivers {
+    pub history_nodes: Option<Arc<dyn cadence_persistence::history_reader::HistoryNodeStore>>,
+    /// `Config.AllowArchivingIncompleteHistory`.
+    pub allow_incomplete: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
 }
 #[async_trait]
-impl InlineArchivers for UnconfiguredInline {
+impl InlineArchivers for FileInlineArchivers {
     async fn archive_history(&self, r: &ClientRequest) -> Result<(), String> {
         let a = &r.archive_request;
         let uri = cadence_common::archiver::parse_uri(&a.uri).map_err(|e| e.to_string())?;
         if uri.scheme != cadence_common::archiver::FILESTORE_SCHEME {
             return Err(format!("inline history archival for scheme {:?}: {NOT_PORTED}", uri.scheme));
         }
-        let Some(source) = self.history_source.clone() else {
-            return Err(format!("inline history archival: no history batch source ({NOT_PORTED})"));
+        let Some(nodes) = self.history_nodes.clone() else {
+            return Err("inline history archival: no history node store".into());
+        };
+        let source = super::archiver_wiring::HistoryNodeBatchSource {
+            store: nodes,
+            shard_id: a.shard_id,
+            allow_incomplete: self.allow_incomplete.as_ref().is_some_and(|f| f()),
         };
         let cfg = cadence_common::archiver::FilestoreWriterConfig::new("0666", "0766").map_err(|e| e.to_string())?;
         let req = cadence_common::archiver::ArchiveHistoryRequest {
@@ -229,13 +234,12 @@ impl InlineArchivers for UnconfiguredInline {
             next_event_id: a.next_event_id,
             close_failover_version: a.close_failover_version,
         };
-        tokio::task::spawn_blocking(move || {
-            cadence_common::archiver::filestore_archive_history(&cfg, &uri, &req, source.as_ref())
-        })
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())
+        tokio::task::spawn_blocking(move || cadence_common::archiver::filestore_archive_history(&cfg, &uri, &req, &source))
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())
     }
+
     async fn archive_visibility(&self, r: &ClientRequest) -> Result<(), String> {
         let a = &r.archive_request;
         let uri = cadence_common::archiver::parse_uri(&a.visibility_uri).map_err(|e| e.to_string())?;
@@ -269,31 +273,6 @@ impl InlineArchivers for UnconfiguredInline {
             .map_err(|e| e.to_string())
     }
 }
-struct UnconfiguredSignaler;
-#[async_trait]
-impl ArchivalSignaler for UnconfiguredSignaler {
-    async fn signal_with_start(&self, _id: &str, _r: &ArchiveRequest, _t: Duration) -> Result<(), String> {
-        Err(format!("archival signal: {NOT_PORTED}"))
-    }
-}
-
-/// Process-wide client with the default seams (Go: `resource.GetArchiverClient`). The rates are
-/// the Go defaults of `ArchiveRequestRPS` (300), `ArchiveInlineHistoryRPS` (1000) and
-/// `ArchiveInlineVisibilityRPS` (1000); `NumArchiveSystemWorkflows` defaults to 1000.
-pub fn default_client() -> &'static ArchiverClient {
-    static CLIENT: OnceLock<ArchiverClient> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        ArchiverClient::new(
-            Box::new(|| 1000),
-            AllowLimiter::new(|| 300),
-            AllowLimiter::new(|| 1000),
-            AllowLimiter::new(|| 1000),
-            Arc::new(UnconfiguredInline { history_source: None }),
-            Arc::new(UnconfiguredSignaler),
-        )
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -355,8 +334,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn default_client_fails_explicitly() {
-        // empty URIs are invalid -> explicit error, task is kept
-        assert!(default_client().archive(req(true)).await.is_err());
+    async fn invalid_uri_fails_explicitly_and_signals() {
+        // empty URIs are invalid -> inline fails, so the targets fall through to the signal.
+        let sig = Arc::new(Sig(Mutex::new(vec![])));
+        let c = ArchiverClient::new(
+            Box::new(|| 1),
+            AllowLimiter::new(|| 100),
+            AllowLimiter::new(|| 100),
+            AllowLimiter::new(|| 100),
+            Arc::new(FileInlineArchivers { history_nodes: None, allow_incomplete: None }),
+            sig.clone(),
+        );
+        let resp = c.archive(req(true)).await.unwrap();
+        assert!(!resp.history_archived_inline);
+        assert_eq!(sig.0.lock().unwrap()[0].1, 2);
+    }
+
+    #[tokio::test]
+    async fn rate_limited_signal_is_rejected() {
+        let sig = Arc::new(Sig(Mutex::new(vec![])));
+        let c = ArchiverClient::new(
+            Box::new(|| 1),
+            AllowLimiter::new(|| 0),
+            AllowLimiter::new(|| 100),
+            AllowLimiter::new(|| 100),
+            Arc::new(Fake { history_ok: false }),
+            sig.clone(),
+        );
+        let e = c.archive(req(false)).await.unwrap_err();
+        assert_eq!(e, TOO_MANY_REQUESTS_ERR_MSG);
+        assert!(sig.0.lock().unwrap().is_empty());
     }
 }

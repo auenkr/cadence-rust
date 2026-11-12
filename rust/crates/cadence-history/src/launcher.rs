@@ -133,8 +133,37 @@ fn file_based_client(
 }
 
 /// Builds the dynamic-config client selected by the config (Go `dynamicconfigfx`).
-/// OpenFeature is not supported by the Rust History yet.
-async fn dynamic_client(cfg: &ServiceConfig, root: &std::path::Path) -> anyhow::Result<Arc<dyn DynamicClient>> {
+/// OpenFeature registers the process-wide provider (Go fx OnStart hook).
+/// Go fx OnStop hook: `openfeatureclient.DeregisterProvider()`.
+pub struct OpenFeatureGuard;
+
+impl Drop for OpenFeatureGuard {
+    fn drop(&mut self) {
+        cadence_service_core::openfeature::client::deregister_provider();
+    }
+}
+
+async fn dynamic_client_with_guard(
+    cfg: &ServiceConfig,
+    root: &std::path::Path,
+) -> anyhow::Result<(Arc<dyn DynamicClient>, Option<OpenFeatureGuard>)> {
+    if let DynamicConfigProvider::OpenFeature(feature) = cfg.dynamic_config_provider() {
+        use cadence_service_core::openfeature::{client::register_provider, provider, unleash};
+        // Go's server binary blank-imports the unleash plugin, whose init registers the constructor.
+        if provider::get(unleash::PROVIDER_NAME).is_none() {
+            provider::register(unleash::PROVIDER_NAME, unleash::constructor())?;
+        }
+        eprintln!("initialising OpenFeature dynamic config client");
+        // Go RegisterProvider failure aborts startup (fx OnStart error).
+        register_provider(&feature.provider_name, feature.provider.as_ref())?;
+        let cluster = cfg.cluster_metadata.as_ref().map(|m| m.current_cluster_name.clone()).unwrap_or_default();
+        let client: Arc<dyn DynamicClient> = Arc::new(crate::openfeature_dynamic::OpenFeatureDynamicClient::new(cluster));
+        return Ok((client, Some(OpenFeatureGuard)));
+    }
+    dynamic_client_inner(cfg, root).await.map(|c| (c, None))
+}
+
+async fn dynamic_client_inner(cfg: &ServiceConfig, root: &std::path::Path) -> anyhow::Result<Arc<dyn DynamicClient>> {
     match cfg.dynamic_config_provider() {
         DynamicConfigProvider::FileBased(p) if !p.filepath.is_empty() => {
             // Go dynamicconfigfx: a client creation error means NOP, never an abort.
@@ -186,9 +215,7 @@ async fn dynamic_client(cfg: &ServiceConfig, root: &std::path::Path) -> anyhow::
                 }
             }
         }
-        DynamicConfigProvider::OpenFeature(_) => anyhow::bail!(
-            "History OpenFeature dynamic config provider is not supported yet; see memory/history-gap-startup2-20261107.md"
-        ),
+        DynamicConfigProvider::OpenFeature(_) => unreachable!("handled by dynamic_client_with_guard"),
     }
 }
 
@@ -274,7 +301,7 @@ pub async fn run(bin_name: &'static str) -> anyhow::Result<()> {
         grpc_addr.port(),
     )?);
 
-    let client = dynamic_client(&cfg, &root).await?;
+    let (client, _openfeature_guard) = dynamic_client_with_guard(&cfg, &root).await?;
     let collection = Collection::new(client.clone());
     let service_config = Arc::new(Config::new(
         &collection,
