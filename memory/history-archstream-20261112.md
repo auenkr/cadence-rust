@@ -18,3 +18,6 @@ paged iteration call sequence `[1,2,3,4]` and state encoding, first-page EntityN
 - gate mysql/grpc/true: https://github.com/auenkr/cadence-rust/actions/runs/43182140040
 - gate postgres/tchannel/false: https://github.com/auenkr/cadence-rust/actions/runs/43182145355
 Results: rust-ci success; both gates success with `GATE SUMMARY failed: []`. Head 8c37f862 differs from the final head only by this memory file (and merged master memory).
+
+## Post-merge master validation (master 503889cb1, 2026-11-12)
+- Full workspace rust-ci + all 12 history-mixed-gate combos (runs 43183817456..43183880496): 12 success first try; postgres/grpc lane 43183848335 failed on a harness port-bind flake (EADDRINUSE before services started), rerun success with GATE SUMMARY failed: []. Harness fixed in be17151da (bind retry).
