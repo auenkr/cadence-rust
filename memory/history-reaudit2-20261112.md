@@ -11,3 +11,6 @@ Evidence section below is filled from CI runs.
 - postgres/tchannel/single: https://github.com/auenkr/cadence-rust/actions/runs/43203892931 — success, `GATE SUMMARY failed: []`
 
 Not done: P1 `startTransactionHandleDecisionFailover` not ported (see audit v2); no unit test added for the buffered-events-limit change.
+
+## Post-merge master validation (master aabe60505, 2026-11-12)
+- Full workspace rust-ci + all 12 history-mixed-gate combos: runs 43207043548..43207108352, all success.
