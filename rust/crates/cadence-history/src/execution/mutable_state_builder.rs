@@ -70,6 +70,8 @@ pub struct TypedWorkflowMutation {
     pub delete_signal_infos: Vec<i64>,
     pub upsert_signal_requested_ids: Vec<String>,
     pub delete_signal_requested_ids: Vec<String>,
+    pub upsert_semaphore_infos: Vec<super::semaphore::SemaphoreInfo>,
+    pub delete_semaphore_infos: Vec<i64>,
     pub new_buffered_events: Vec<HistoryEvent>,
     pub clear_buffered_events: bool,
     pub tasks_by_category: BTreeMap<HistoryTaskCategory, Vec<Task>>,
@@ -90,6 +92,7 @@ pub struct TypedWorkflowSnapshot {
     pub request_cancel_infos: Vec<RequestCancelInfo>,
     pub signal_infos: Vec<SignalInfo>,
     pub signal_requested_ids: Vec<String>,
+    pub semaphore_infos: Vec<super::semaphore::SemaphoreInfo>,
     pub tasks_by_category: BTreeMap<HistoryTaskCategory, Vec<Task>>,
     pub workflow_requests: Vec<WorkflowRequest>,
     pub condition: i64,
@@ -121,6 +124,8 @@ pub struct TypedMutableState {
     pub update_signal_infos: BTreeMap<i64, SignalInfo>,
     pub delete_signal_info_ids: BTreeSet<i64>,
 
+    /// Go `pendingSemaphoreInfoIDs` / `updateSemaphoreInfos` / `deleteSemaphoreInfoIDs`.
+    pub semaphore_state: super::semaphore::SemaphoreState,
     pub pending_signal_requested_ids: BTreeSet<String>,
     pub update_signal_requested_ids: BTreeSet<String>,
     pub delete_signal_requested_ids: BTreeSet<String>,
@@ -184,6 +189,14 @@ impl TypedMutableState {
             },
             ..Self::default()
         }
+    }
+
+    /// Go `Load` semaphore map (`pendingSemaphoreInfoIDs`), installed after `load`.
+    pub fn load_semaphores(&mut self, semaphores: Vec<super::semaphore::SemaphoreInfo>) {
+        self.semaphore_state = super::semaphore::SemaphoreState {
+            pending: semaphores.into_iter().map(|s| (s.initiated_id, s)).collect(),
+            ..Default::default()
+        };
     }
 
     /// Go `Load`: install persisted state and rebuild the derived indexes.
@@ -563,6 +576,8 @@ impl TypedMutableState {
     /// Go `cleanupTransaction`.
     pub fn cleanup_transaction(&mut self) {
         self.reset_update_tracking();
+        self.semaphore_state.updates.clear();
+        self.semaphore_state.deletes.clear();
         if !self.update_buffered_events.is_empty() {
             let moved = std::mem::take(&mut self.update_buffered_events);
             self.buffered_events.extend(moved);
@@ -643,6 +658,8 @@ impl TypedMutableState {
             delete_signal_infos: self.delete_signal_info_ids.iter().copied().collect(),
             upsert_signal_requested_ids: self.update_signal_requested_ids.iter().cloned().collect(),
             delete_signal_requested_ids: self.delete_signal_requested_ids.iter().cloned().collect(),
+            upsert_semaphore_infos: self.semaphore_state.updates.values().cloned().collect(),
+            delete_semaphore_infos: self.semaphore_state.deletes.iter().copied().collect(),
             new_buffered_events: self.update_buffered_events.clone(),
             clear_buffered_events: self.clear_buffered_events,
             tasks_by_category,
@@ -681,6 +698,7 @@ impl TypedMutableState {
             request_cancel_infos: self.pending_request_cancel_info_ids.values().cloned().collect(),
             signal_infos: self.pending_signal_info_ids.values().cloned().collect(),
             signal_requested_ids: self.pending_signal_requested_ids.iter().cloned().collect(),
+            semaphore_infos: self.semaphore_state.pending.values().cloned().collect(),
             tasks_by_category,
             workflow_requests,
             condition: self.next_event_id_in_db,

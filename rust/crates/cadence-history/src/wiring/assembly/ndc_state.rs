@@ -5,6 +5,7 @@
 //! engine-cache checkout are available.
 
 use cadence_api::types::{VersionHistories, WorkflowExecution};
+use cadence_thrift::value::FromThrift as _;
 use cadence_persistence::version_history::VersionHistoriesExt;
 
 use crate::execution::mutable_state_builder::{TypedMutableState, EMPTY_VERSION};
@@ -168,9 +169,8 @@ impl NdcMutableState for OwnedNdcMutableState {
                 return Ok(history.branch_token.clone());
             }
         }
-        if self.typed.execution_info.branch_token.is_empty() {
-            return self.unsupported("get_current_branch_token");
-        }
+        // Go `GetCurrentBranchToken`: without version histories the execution
+        // info token is returned as is (possibly empty).
         Ok(self.typed.execution_info.branch_token.clone())
     }
 
@@ -242,18 +242,17 @@ impl NdcMutableState for OwnedNdcMutableState {
     fn vector_clock_inputs(
         &self,
     ) -> NdcResult<(Option<cadence_api::types::ActiveClusterSelectionPolicy>, i64)> {
-        // Decoding the persisted policy blob is not ported: refuse rather than
-        // compare clocks as if the policy were absent.
-        if self
-            .typed
-            .execution_info
-            .active_cluster_selection_policy
-            .as_ref()
-            .is_some_and(|b| !b.data.is_empty())
-        {
-            return self.unsupported("vector_clock_inputs (active cluster selection policy decode)");
-        }
-        Ok((None, self.typed.execution_info.last_event_task_id))
+        // Go `GetActiveClusterSelectionPolicy`: decode the persisted thriftrw blob.
+        let policy = match self.typed.execution_info.active_cluster_selection_policy.as_ref() {
+            Some(b) if !b.data.is_empty() => Some(
+                cadence_api::types::ActiveClusterSelectionPolicy::from_thrift(
+                    &super::engine_state::decode(b).map_err(|e| NdcError::internal(e.to_string()))?,
+                )
+                .map_err(|e| NdcError::internal(format!("decode active cluster selection policy: {e}")))?,
+            ),
+            _ => None,
+        };
+        Ok((policy, self.typed.execution_info.last_event_task_id))
     }
 
     fn has_processed_or_pending_decision(&self) -> NdcResult<bool> {
@@ -266,16 +265,22 @@ impl NdcMutableState for OwnedNdcMutableState {
     }
 
     fn update_workflow_state(&mut self, state: WorkflowState) -> NdcResult<()> {
+        // Go callers pass the existing close status (Completed keeps it, others reset to none).
+        let close_status = match state {
+            WorkflowState::Completed => self.typed.execution_info.close_status,
+            _ => CLOSE_STATUS_NONE,
+        };
         let raw = match state {
             WorkflowState::Created => WORKFLOW_STATE_CREATED,
             WorkflowState::Running => WORKFLOW_STATE_RUNNING,
             WorkflowState::Zombie => WORKFLOW_STATE_ZOMBIE,
-            WorkflowState::Completed | WorkflowState::Corrupted => {
-                return self.unsupported("update_workflow_state to completed/corrupted (needs close status)")
+            WorkflowState::Completed => WORKFLOW_STATE_COMPLETED,
+            WorkflowState::Corrupted => {
+                return self.unsupported("update_workflow_state to corrupted (typed transition table has no corrupted state)")
             }
         };
         self.typed
-            .update_workflow_state_close_status(raw, CLOSE_STATUS_NONE)
+            .update_workflow_state_close_status(raw, close_status)
             .map_err(|e| NdcError::internal(e.to_string()))
     }
 
@@ -328,6 +333,7 @@ mod tests {
     use cadence_persistence::version_history::VersionHistoryExt;
 
     use super::*;
+    use cadence_thrift::value::ToThrift as _;
 
     fn state() -> OwnedNdcMutableState {
         OwnedNdcMutableState::new(
@@ -366,6 +372,38 @@ mod tests {
         assert_eq!(state.get_current_version(), EMPTY_VERSION);
         assert_eq!(state.get_start_version().unwrap(), 7);
         assert_eq!(state.get_last_write_version().unwrap(), 7);
+    }
+
+    #[test]
+    fn completed_state_keeps_existing_close_status_and_none_is_rejected() {
+        let mut state = state();
+        state.typed_mut().execution_info.state = WORKFLOW_STATE_RUNNING;
+        // Running -> Completed with close status none is invalid (Go UpdateWorkflowStateCloseStatus).
+        assert!(state.update_workflow_state(WorkflowState::Completed).is_err());
+        state.typed_mut().execution_info.close_status = 1;
+        state.update_workflow_state(WorkflowState::Completed).unwrap();
+        assert_eq!(state.get_workflow_state(), WorkflowState::Completed);
+        assert_eq!(state.typed().execution_info.close_status, 1);
+    }
+
+    #[test]
+    fn empty_branch_token_without_version_histories_is_returned_as_is() {
+        let state = state();
+        assert_eq!(state.get_current_branch_token().unwrap(), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn vector_clock_inputs_decodes_active_cluster_selection_policy() {
+        let mut state = state();
+        assert_eq!(state.vector_clock_inputs().unwrap().0, None);
+        let policy = cadence_api::types::ActiveClusterSelectionPolicy::default();
+        let encoded = cadence_persistence::sqlblobs::Encoding::ThriftRW.encode(&policy.to_thrift()).unwrap();
+        state.typed_mut().execution_info.active_cluster_selection_policy =
+            Some(cadence_persistence::history_contract::DataBlob { encoding: "thriftrw".into(), data: encoded });
+        state.typed_mut().execution_info.last_event_task_id = 9;
+        let (decoded, task_id) = state.vector_clock_inputs().unwrap();
+        assert_eq!(decoded, Some(policy));
+        assert_eq!(task_id, 9);
     }
 
     #[test]

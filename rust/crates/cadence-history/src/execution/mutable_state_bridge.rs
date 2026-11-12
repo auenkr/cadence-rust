@@ -194,11 +194,103 @@ pub fn mutation_to_persistence(
         else if let Some(old) = find_activity(activity.schedule_id) { result.rewrite_activity_infos.push(pc::KeyedBlob { key: activity.schedule_id, value: old.clone() }); }
         else { let empty = pc::DataBlob::default(); let mut x = activity.clone(); x.timer_task_status = 0; result.rewrite_activity_infos.push(keyed(activity.schedule_id, &pc::ActivityInfo { version:x.version, ..Default::default() }, Some(&empty))?); }
     }
+    result.upsert_semaphore_infos = mutation.upsert_semaphore_infos.iter().map(semaphore_to_record).collect();
+    result.delete_semaphore_infos = mutation.delete_semaphore_infos.clone();
     if !mutation.new_buffered_events.is_empty() {
         let blob = cadence_thrift::history_blob::encode(mutation.new_buffered_events.clone());
         result.new_buffered_events = Some(pc::DataBlob { encoding: "thriftrw".into(), data: blob.data });
     }
     Ok(result)
+}
+
+
+/// Typed (builder) pending maps decoded from a snapshot; inverse of `mutation_to_persistence`.
+pub struct TypedPendingMaps {
+    pub activities: Vec<crate::mutable_state_activity::ActivityInfo>,
+    pub timers: Vec<super::timer::TimerInfo>,
+    pub children: Vec<super::child_workflow::ChildExecutionInfo>,
+    pub request_cancels: Vec<super::cancellation::RequestCancelInfo>,
+    pub signals: Vec<super::signal::SignalInfo>,
+    pub semaphores: Vec<super::semaphore::SemaphoreInfo>,
+}
+
+/// Go `Load` of the pending activity/timer/child/cancel/signal/semaphore maps.
+pub fn typed_pending_maps(envelope: &MutableStateEnvelope) -> HResult<TypedPendingMaps> {
+    let snap = &envelope.snapshot;
+    let mut activities = Vec::new();
+    for (id, a) in &envelope.activities {
+        let hb = snap.activity_heartbeats.get(id);
+        activities.push(crate::mutable_state_activity::ActivityInfo {
+            version: a.version, schedule_id: *id, scheduled_event_batch_id: a.scheduled_event_batch_id,
+            scheduled_time: a.scheduled_time_unix_nanos, started_id: a.started_id, started_time: a.started_time_unix_nanos,
+            activity_id: a.activity_id.clone(), domain_id: String::new(),
+            schedule_to_start_timeout: a.schedule_to_start_timeout_seconds, schedule_to_close_timeout: a.schedule_to_close_timeout_seconds,
+            start_to_close_timeout: a.start_to_close_timeout_seconds, heartbeat_timeout: a.heartbeat_timeout_seconds,
+            timer_task_status: a.timer_task_status,
+            last_heartbeat_timeout_visibility_in_seconds: a.last_heartbeat_timeout_visibility_in_seconds,
+            cancel_requested: a.cancel_requested, cancel_request_id: a.cancel_request_id,
+            task_list: a.task_list.clone(), attempt: a.attempt, request_id: a.request_id.clone(),
+            started_identity: a.started_identity.clone(),
+            last_heartbeat_updated_time: hb.map_or(0, |h| h.updated_time_unix_nanos),
+            details: hb.map(|h| h.details.clone()).unwrap_or_default(),
+            has_retry_policy: a.has_retry_policy, initial_interval: a.retry_initial_interval_seconds,
+            backoff_coefficient: a.retry_backoff_coefficient, jitter_coefficient: a.retry_jitter_coefficient,
+            maximum_interval: a.retry_maximum_interval_seconds, maximum_attempts: a.retry_maximum_attempts,
+            expiration_time: a.retry_expiration_time_unix_nanos, non_retriable_errors: a.retry_non_retriable_errors.clone(),
+            last_failure_reason: a.retry_last_failure_reason.clone(), last_failure_details: a.retry_last_failure_details.clone(),
+            last_retry_interval_seconds: a.retry_last_retry_interval_seconds, last_worker_identity: a.retry_last_worker_identity.clone(),
+        });
+    }
+    let timers = envelope.timers.iter().map(|(id, t)| super::timer::TimerInfo {
+        version: t.version, timer_id: id.clone(), expiry_time_unix_nanos: t.expiry_time_unix_nanos,
+        started_id: t.started_id, task_status: t.task_id as i32,
+    }).collect();
+    let children = envelope.children.iter().map(|(id, c)| super::child_workflow::ChildExecutionInfo {
+        version: c.version, initiated_id: *id, initiated_event_batch_id: c.initiated_event_batch_id, started_id: c.started_id,
+        started_workflow_id: c.started_workflow_id.clone(), started_run_id: String::from_utf8_lossy(&c.started_run_id).into_owned(),
+        create_request_id: c.create_request_id.clone(), domain_id: c.domain_id.clone(), workflow_type_name: c.workflow_type_name.clone(),
+        parent_close_policy: match c.parent_close_policy {
+            0 => Some(cadence_api::enums::ParentClosePolicy::Abandon),
+            1 => Some(cadence_api::enums::ParentClosePolicy::RequestCancel),
+            2 => Some(cadence_api::enums::ParentClosePolicy::Terminate),
+            _ => None,
+        },
+    }).collect();
+    let mut request_cancels = Vec::new();
+    for row in &snap.request_cancel_infos {
+        let r = sqlblobs::request_cancel_info_from_struct(&decode(&row.value)?)
+            .map_err(|e| HistoryError::internal(format!("decode request cancel info: {e}")))?;
+        request_cancels.push(super::cancellation::RequestCancelInfo {
+            version: r.version, initiated_id: row.key, initiated_event_batch_id: r.initiated_event_batch_id, cancel_request_id: r.cancel_request_id,
+        });
+    }
+    let mut signals = Vec::new();
+    for row in &snap.signal_infos {
+        let s = sqlblobs::signal_info_from_struct(&decode(&row.value)?)
+            .map_err(|e| HistoryError::internal(format!("decode signal info: {e}")))?;
+        signals.push(super::signal::SignalInfo {
+            version: s.version, initiated_event_batch_id: s.initiated_event_batch_id, initiated_id: row.key,
+            signal_request_id: s.request_id, signal_name: s.name, input: s.input, control: s.control,
+        });
+    }
+    let semaphores = snap.semaphore_infos.iter().map(semaphore_from_record).collect();
+    Ok(TypedPendingMaps { activities, timers, children, request_cancels, signals, semaphores })
+}
+
+/// Library `SemaphoreInfo` -> persistence record (Go `persistence.SemaphoreInfo`).
+pub fn semaphore_to_record(i: &super::semaphore::SemaphoreInfo) -> pc::SemaphoreInfoRecord {
+    pc::SemaphoreInfoRecord {
+        version: i.version, initiated_id: i.initiated_id, semaphore_name: i.semaphore_name.clone(),
+        owner_id: i.owner_id.clone(), token_id: i.token_id, acquire_deadline_unix_nanos: i.acquire_deadline_unix_nanos,
+    }
+}
+
+/// Persistence record -> library `SemaphoreInfo`.
+pub fn semaphore_from_record(r: &pc::SemaphoreInfoRecord) -> super::semaphore::SemaphoreInfo {
+    super::semaphore::SemaphoreInfo {
+        version: r.version, initiated_id: r.initiated_id, semaphore_name: r.semaphore_name.clone(),
+        owner_id: r.owner_id.clone(), acquire_deadline_unix_nanos: r.acquire_deadline_unix_nanos, token_id: r.token_id,
+    }
 }
 
 /// Convert a typed full snapshot through the same keyed row codecs as mutations.
@@ -217,6 +309,7 @@ pub fn typed_snapshot_to_persistence(
         upsert_request_cancel_infos: snapshot.request_cancel_infos.clone(),
         upsert_signal_infos: snapshot.signal_infos.clone(),
         upsert_signal_requested_ids: snapshot.signal_requested_ids.clone(),
+        upsert_semaphore_infos: snapshot.semaphore_infos.clone(),
         tasks_by_category: snapshot.tasks_by_category.clone(),
         workflow_requests: snapshot.workflow_requests.clone(),
         condition: snapshot.condition,
@@ -233,6 +326,7 @@ pub fn typed_snapshot_to_persistence(
         request_cancel_infos: mutation.upsert_request_cancel_infos,
         signal_infos: mutation.upsert_signal_infos,
         signal_requested_ids: mutation.upsert_signal_requested_ids,
+        semaphore_infos: mutation.upsert_semaphore_infos,
         tasks_by_category: mutation.tasks_by_category,
         workflow_requests: mutation.workflow_requests,
         condition: mutation.condition,
