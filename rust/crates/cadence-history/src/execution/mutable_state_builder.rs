@@ -695,7 +695,7 @@ impl TypedMutableState {
             if inserted.data.data.is_empty() || inserted.data.encoding.is_empty() {
                 return internal(format!("workflow request {} has no encoded deduplication data", inserted.request_id));
             }
-            if let Some(existing) = requests.iter_mut().find(|request| request.request_id == inserted.request_id) {
+            if let Some(existing) = requests.iter_mut().find(|request| request.request_id == inserted.request_id && request.version == inserted.version && request.request_type == inserted.request_type) {
                 if existing.data.data.is_empty() || existing.data.encoding.is_empty() { existing.data = inserted.data.clone(); }
             } else {
                 requests.push(inserted.clone());
@@ -1000,7 +1000,7 @@ mod tests {
         let mut state = TypedMutableState::new();
         state.next_event_id_in_db = 12;
         state.history_events.push(HistoryEvent { event_id: 1, ..Default::default() });
-        state.insert_workflow_requests.push(WorkflowRequest { request_id: "req".into(), data: Default::default() });
+        state.insert_workflow_requests.push(WorkflowRequest { request_id: "req".into(), version: 0, request_type: 0, data: Default::default() });
         assert!(state.prepare_close_mutation(99, super::super::workflow::TransactionPolicy::Passive).is_err());
         assert_eq!(state.history_events.len(), 1);
         assert_eq!(state.next_event_id_in_db, 12);

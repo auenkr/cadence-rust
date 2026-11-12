@@ -844,15 +844,14 @@ pub(crate) fn push_current(st: &mut Stmts, shard: i32, domain: Uuid, workflow: &
     Ok(())
 }
 
-/// Go `insertOrUpsertWorkflowRequestRow` (type/version are not representable in the contract:
-/// rows are written as WorkflowRequestStart with the snapshot's last write version).
+/// Go `insertOrUpsertWorkflowRequestRow` (row type and version come from each request).
 pub(crate) fn push_requests(
     st: &mut Stmts,
     shard: i32,
     domain: Uuid,
     workflow: &str,
     run: &str,
-    version: i64,
+    _last_write_version: i64,
     requests: &[WorkflowRequest],
     mode: WorkflowRequestMode,
     now: DateTime<Utc>,
@@ -863,8 +862,13 @@ pub(crate) fn push_requests(
     };
     for r in requests {
         let request_id = parse_uuid(&r.request_id)?;
-        for task_id in [-EMPTY_REQUEST_VERSION, -version] {
-            let mut v = key_values(shard, ROW_TYPE_REQUEST_START, domain, workflow, request_id, task_id);
+        // Go `toRequestRowType`: start/signal/cancel/reset map to consecutive row types.
+        if !(0..=3).contains(&r.request_type) {
+            return Err(E::InvalidPersistenceRequest(format!("unknown workflow request type {}", r.request_type)));
+        }
+        let row_type = ROW_TYPE_REQUEST_START + r.request_type;
+        for task_id in [-EMPTY_REQUEST_VERSION, -r.version] {
+            let mut v = key_values(shard, row_type, domain, workflow, request_id, task_id);
             v.push(bound(parse_uuid(run)?));
             v.push(bound(now));
             v.push(bound(REQUEST_TTL_SECONDS));

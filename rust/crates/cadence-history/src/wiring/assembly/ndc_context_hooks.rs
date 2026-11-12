@@ -128,9 +128,8 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
     /// GAP: the Rust `WorkflowRequest` carries no type/version (the mutable
     /// state does not encode them yet), so there is nothing to decode; the Go
     /// zero value (Start = 0) is returned, which is what an empty blob decodes to.
-    fn request_type(&self, _request: &pc::WorkflowRequest) -> i32 {
-        // Go `WorkflowRequestType` zero value (Start); see GAP above.
-        0
+    fn request_type(&self, request: &pc::WorkflowRequest) -> i32 {
+        request.request_type
     }
     fn log_request_validation_error(&mut self, message: &'static str) {
         tracing::warn!(message, "ndc workflow request validation");

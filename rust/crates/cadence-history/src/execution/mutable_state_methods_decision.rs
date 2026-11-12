@@ -10,8 +10,8 @@
 //! * Logging / metrics go through `tracing` and `TaskGenEnv::metrics`.
 //! * `insertWorkflowRequest` stores only the request id (type/version are not
 //!   representable in the Rust `WorkflowRequest` yet).
-//! * Auto reset points are kept in `DecisionEnv::auto_reset_points` because the
-//!   `WorkflowExecutionInfo.auto_reset_points` blob codec is not available here.
+//! * Auto reset points are returned in `DecisionEnv::auto_reset_points` and also
+//!   encoded (thriftrw) into `WorkflowExecutionInfo.auto_reset_points`.
 //!
 //! Timeouts stored on `WorkflowExecutionInfo` are in nanoseconds
 //! (`decision_timeout_nanos`), the Go `DecisionInfo.DecisionTimeout` is seconds.
@@ -264,9 +264,11 @@ impl TypedMutableState {
     }
 
     /// Go `insertWorkflowRequest` for reset requests (only the id is kept).
-    fn insert_reset_workflow_request(&mut self, request_id: &str, _version: i64) {
+    fn insert_reset_workflow_request(&mut self, request_id: &str, version: i64) {
         self.insert_workflow_requests.push(WorkflowRequest {
             request_id: request_id.to_string(),
+            version,
+            request_type: cadence_persistence::history_contract::WORKFLOW_REQUEST_TYPE_RESET,
             data: Default::default(),
         });
     }
@@ -937,7 +939,17 @@ impl TypedMutableState {
             expiring_time_nano: None,
             resettable,
         });
-        env.auto_reset_points = Some(ResetPoints { points: curr });
+        let points = ResetPoints { points: curr };
+        {
+            use cadence_persistence::sqlblobs::Encoding;
+            use cadence_thrift::ToThrift;
+            let data = Encoding::ThriftRW
+                .encode(&points.to_thrift())
+                .map_err(|e| TypedMutableStateError::Internal(format!("encode auto reset points: {e}")))?;
+            self.execution_info.auto_reset_points =
+                Some(cadence_persistence::history_contract::DataBlob { encoding: "thriftrw".to_string(), data });
+        }
+        env.auto_reset_points = Some(points);
 
         let bytes = serde_json::to_vec(&recent)
             .map_err(|e| TypedMutableStateError::Internal(e.to_string()))?;
@@ -954,6 +966,59 @@ impl TypedMutableState {
 #[cfg(test)]
 mod decision_tests {
     use super::*;
+
+    fn completed_event(id: i64, checksum: &str) -> HistoryEvent {
+        HistoryEvent {
+            event_id: id,
+            decision_task_completed_event_attributes: Some(cadence_api::service_types::DecisionTaskCompletedEventAttributes {
+                binary_checksum: checksum.to_string(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn binary_checksum_creates_reset_points_and_persists_blob() {
+        let mut ms = TypedMutableState::new();
+        ms.execution_info.run_id = "run".into();
+        let mut e = env();
+        ms.add_binary_checksum_if_not_exists(&mut e, &completed_event(4, "a"), 2).unwrap();
+        // empty and duplicate checksums are no-ops
+        ms.add_binary_checksum_if_not_exists(&mut e, &completed_event(5, ""), 2).unwrap();
+        ms.add_binary_checksum_if_not_exists(&mut e, &completed_event(6, "a"), 2).unwrap();
+        let p = e.auto_reset_points.clone().unwrap().points;
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0].first_decision_completed_id, 4);
+        assert_eq!(p[0].run_id, "run");
+        assert_eq!(p[0].created_time_nano, Some(1_000_000_000));
+        assert!(p[0].resettable);
+        let blob = ms.execution_info.auto_reset_points.clone().unwrap();
+        assert_eq!(blob.encoding, "thriftrw");
+        assert!(!blob.data.is_empty());
+        // the max cap rotates out the oldest point
+        ms.add_binary_checksum_if_not_exists(&mut e, &completed_event(7, "b"), 2).unwrap();
+        ms.add_binary_checksum_if_not_exists(&mut e, &completed_event(8, "c"), 2).unwrap();
+        let names: Vec<_> = e.auto_reset_points.unwrap().points.into_iter().map(|p| p.binary_checksum).collect();
+        assert_eq!(names, vec!["b", "c"]);
+        let sa: Vec<String> = serde_json::from_slice(&ms.execution_info.search_attributes[BINARY_CHECKSUMS]).unwrap();
+        assert_eq!(sa, vec!["b", "c"]);
+    }
+
+    #[test]
+    fn set_history_tree_stores_branch_token() {
+        let mut ms = TypedMutableState::new();
+        ms.set_history_tree("tree-1").unwrap();
+        assert!(!ms.execution_info.branch_token.is_empty());
+        let mut ms = TypedMutableState::new();
+        ms.version_histories = Some(cadence_api::types::VersionHistories {
+            current_version_history_index: 0,
+            histories: vec![Default::default()],
+        });
+        ms.set_history_tree("tree-1").unwrap();
+        assert!(ms.execution_info.branch_token.is_empty());
+        assert!(!ms.version_histories.unwrap().histories[0].branch_token.is_empty());
+    }
 
     fn env() -> DecisionEnv {
         DecisionEnv { now_nanos: 1_000_000_000, ..Default::default() }

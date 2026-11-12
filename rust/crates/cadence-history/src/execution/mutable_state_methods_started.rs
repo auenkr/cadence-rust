@@ -2,10 +2,9 @@
 //!
 //! Differences from Go (the typed state owns no clock, domain entry or task
 //! generator): `timeSource.Now()` and domain entry fields come from
-//! [`StartedEnv`]; `SetHistoryTree`, `writeEventToCache`, task generation
-//! (workflow start / record-started / delayed decision) and the thrift blob of
-//! `active_cluster_selection_policy` are NOT wired. Decoded auto reset points
-//! are kept in `StartedEnv::auto_reset_points`.
+//! [`StartedEnv`]; `writeEventToCache` is NOT wired. `SetHistoryTree` and the
+//! thriftrw blob of `active_cluster_selection_policy` are wired. Decoded auto
+//! reset points are kept in `StartedEnv::auto_reset_points`.
 
 use cadence_api::enums::{ContinueAsNewInitiator, EventType, TaskListKind};
 use cadence_api::service_types::{HistoryEvent, WorkflowExecutionStartedEventAttributes};
@@ -234,7 +233,7 @@ impl TypedMutableState {
             false,
         )?;
 
-        // Go: SetHistoryTree(RunID) is not wired here.
+        self.set_history_tree(&execution.run_id)?;
 
         self.add_first_decision_task_scheduled(decision_env, &event)?;
         Ok(event)
@@ -284,6 +283,35 @@ impl TypedMutableState {
         Ok(event)
     }
 
+    /// Go `SetHistoryTree`: new branch token for `tree_id`, stored through
+    /// `SetCurrentBranchToken` (execution info without version histories,
+    /// otherwise the current version history).
+    pub fn set_history_tree(&mut self, tree_id: &str) -> Result<()> {
+        let branch_id = uuid::Uuid::new_v4().to_string();
+        let token = cadence_persistence::history_branch::new_token(tree_id, &branch_id);
+        self.set_current_branch_token(token)
+    }
+
+    /// Go `SetCurrentBranchToken`.
+    pub fn set_current_branch_token(&mut self, token: Vec<u8>) -> Result<()> {
+        match self.version_histories.as_mut() {
+            None => {
+                self.execution_info.branch_token = token;
+                Ok(())
+            }
+            Some(h) => {
+                let idx = h.current_version_history_index as usize;
+                match h.histories.get_mut(idx) {
+                    Some(v) => {
+                        v.branch_token = token;
+                        Ok(())
+                    }
+                    None => internal_err("version history index out of range"),
+                }
+            }
+        }
+    }
+
     /// Go `ReplicateWorkflowExecutionStartedEvent` (task generation, events
     /// cache write and ACSP blob not wired).
     #[allow(clippy::too_many_arguments)]
@@ -310,6 +338,8 @@ impl TypedMutableState {
         // Go insertWorkflowRequest (type/version not representable yet).
         self.insert_workflow_requests.push(WorkflowRequest {
             request_id,
+            version: start_event.version,
+            request_type: cadence_persistence::history_contract::WORKFLOW_REQUEST_TYPE_START,
             data: Default::default(),
         });
         self.execution_info.domain_id = env.domain_id.clone();
@@ -391,7 +421,19 @@ impl TypedMutableState {
         if let Some(pc) = a.partition_config.as_ref() {
             self.execution_info.partition_config = pc.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         }
-        // Not wired: ActiveClusterSelectionPolicy blob, writeEventToCache.
+        // Go `executionInfo.ActiveClusterSelectionPolicy = event.ActiveClusterSelectionPolicy`.
+        self.execution_info.active_cluster_selection_policy = match a.active_cluster_selection_policy.as_ref() {
+            Some(policy) => {
+                use cadence_persistence::sqlblobs::Encoding;
+                use cadence_thrift::ToThrift;
+                let data = Encoding::ThriftRW
+                    .encode(&policy.to_thrift())
+                    .map_err(|e| super::mutable_state_builder::TypedMutableStateError::Internal(format!("encode active cluster selection policy: {e}")))?;
+                Some(cadence_persistence::history_contract::DataBlob { encoding: "thriftrw".to_string(), data })
+            }
+            None => None,
+        };
+        // Not wired: writeEventToCache.
         if !self.suppress_task_generation {
             self.run_task_generator(0, |g| g.generate_workflow_start_tasks(ts, start_event))?;
             self.run_task_generator(0, |g| g.generate_record_workflow_started_tasks(start_event))?;

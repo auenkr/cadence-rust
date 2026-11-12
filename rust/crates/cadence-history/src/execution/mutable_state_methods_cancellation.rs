@@ -73,6 +73,11 @@ impl TypedMutableState {
         };
         self.execution_info.cancel_requested = true;
         self.execution_info.cancel_request_id = attributes.request_id.clone();
+        self.insert_workflow_request(
+            &attributes.request_id,
+            event.version,
+            cadence_persistence::history_contract::WORKFLOW_REQUEST_TYPE_CANCEL,
+        );
         Ok(())
     }
 
