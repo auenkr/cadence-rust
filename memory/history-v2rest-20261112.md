@@ -17,3 +17,6 @@ Harness: get_errors and conflict_hooks fault injection.
 
 ## Not ported
 Remaining items from history-eventsv2 list unchanged except those above.
+
+## Post-merge master validation (master 9a80035ad, 2026-11-12)
+- Full workspace rust-ci + all 12 history-mixed-gate combos: runs 43169177754..43169226481, all success.
