@@ -1209,7 +1209,7 @@ mod query_ports {
     #[tokio::test]
     async fn start_unknown_cluster_attribute_is_rejected() {
         let h = Harness::new();
-        *h.domain_active_clusters.lock().unwrap() = vec![(None, CLUSTER.into())];
+        h.domain_active_clusters.lock().unwrap().clear();
         let mut req = start_req("start-req");
         req.start_request.as_mut().unwrap().active_cluster_selection_policy = Some(ActiveClusterSelectionPolicy { cluster_attribute: Some(active_active_attr()) });
         let err = h.engine.start_workflow_execution(&req).await.unwrap_err();
