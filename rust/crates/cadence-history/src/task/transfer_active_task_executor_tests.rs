@@ -14,6 +14,7 @@ use super::transfer_active_task_executor::*;
 use super::transfer_task_executor_base::*;
 
 const NOW: i64 = 1_000_000_000_000;
+const GLOBAL: &str = "global-domain";
 
 struct FakeTime(AtomicI64);
 impl TimeSource for FakeTime {
@@ -28,7 +29,12 @@ impl DomainCache for Domains {
         if id == "missing-domain" {
             return Err(TaskError::EntityNotExists("domain".into()));
         }
-        Ok(Arc::new(DomainCacheEntry { info: DomainInfo { id: id.into(), name: format!("name-of-{id}") }, ..Default::default() }))
+        Ok(Arc::new(DomainCacheEntry {
+            info: DomainInfo { id: id.into(), name: format!("name-of-{id}") },
+            is_global_domain: id == GLOBAL,
+            failover_version: 5,
+            ..Default::default()
+        }))
     }
     fn get_domain(&self, name: &str) -> Result<Arc<DomainCacheEntry>> {
         Ok(Arc::new(DomainCacheEntry { info: DomainInfo { id: format!("id-of-{name}"), name: name.into() }, ..Default::default() }))
@@ -64,7 +70,7 @@ impl ShardContext for Shard {
         Arc::new(Metrics)
     }
     fn get_service(&self) -> Arc<dyn Service> {
-        unimplemented!()
+        Arc::new(super::standby_test_support::Svc)
     }
     fn get_logger(&self) -> Logger {
         Logger::new()
@@ -97,6 +103,7 @@ struct MsState {
     signals: HashMap<i64, SignalInfo>,
     children: BTreeMap<i64, ChildExecutionInfo>,
     has_parent: bool,
+    start_version: i64,
     completion: CloseEvent,
     start: StartEvent,
     attrs: StartChildAttributes,
@@ -124,6 +131,7 @@ impl Ms {
             signals: HashMap::new(),
             children: BTreeMap::new(),
             has_parent: false,
+            start_version: 0,
             completion: CloseEvent {
                 event_id: 9,
                 event_type: CloseEventType::Completed,
@@ -198,7 +206,7 @@ impl ActiveMutableState for Ms {
         Ok(0)
     }
     fn start_version(&self) -> Result<i64> {
-        Ok(0)
+        Ok(self.0.lock().unwrap().start_version)
     }
     fn current_version_history(&self) -> Result<Option<Arc<dyn ResetVersionHistory>>> {
         Ok(None)
@@ -266,6 +274,9 @@ struct TDeps {
     activity: Mutex<Vec<AddMatchingTaskRequest>>,
     decision: Mutex<Vec<AddMatchingTaskRequest>>,
     closed: Mutex<Vec<VisibilityRecord>>,
+    started: Mutex<Vec<VisibilityRecord>>,
+    upserted: Mutex<Vec<VisibilityRecord>>,
+    context_header: std::sync::atomic::AtomicBool,
     decision_errors: Mutex<Vec<TaskError>>,
 }
 #[async_trait]
@@ -296,10 +307,10 @@ impl TransferDependencies for TDeps {
         Ok(VisibilityDomain { name: "vis-domain".into(), retention_days: 3, ..Default::default() })
     }
     fn enable_context_header_in_visibility(&self, _: &str) -> bool {
-        false
+        self.context_header.load(Ordering::SeqCst)
     }
     fn valid_search_attributes(&self) -> HashSet<String> {
-        HashSet::new()
+        ["Header_foo".to_string()].into_iter().collect()
     }
     fn hidden_value_keys(&self) -> BTreeMap<String, serde_json::Value> {
         BTreeMap::new()
@@ -310,10 +321,12 @@ impl TransferDependencies for TDeps {
     async fn record_workflow_execution_uninitialized(&self, _: &VisibilityRecord) -> Result<()> {
         Ok(())
     }
-    async fn record_workflow_execution_started(&self, _: VisibilityRecord) -> Result<()> {
+    async fn record_workflow_execution_started(&self, r: VisibilityRecord) -> Result<()> {
+        self.started.lock().unwrap().push(r);
         Ok(())
     }
-    async fn upsert_workflow_execution(&self, _: VisibilityRecord) -> Result<()> {
+    async fn upsert_workflow_execution(&self, r: VisibilityRecord) -> Result<()> {
+        self.upserted.lock().unwrap().push(r);
         Ok(())
     }
     async fn record_workflow_execution_closed(&self, r: VisibilityRecord) -> Result<()> {
@@ -925,4 +938,152 @@ async fn start_child_target_domain_deleted_falls_back_to_domain_id() {
     h.exec.process_start_child_execution(&t).await.unwrap();
     assert!(h.deps.log()[0].starts_with("start:missing-domain:"));
     assert!(h.ms.calls()[0].starts_with("child_started:child-domain:"));
+}
+
+// ---------------------------------------------------------------------------
+// record workflow started / upsert search attributes / reset / ephemeral / global version mismatch
+// ---------------------------------------------------------------------------
+fn gwi() -> WorkflowIdentifier {
+    WorkflowIdentifier { domain_id: GLOBAL.into(), workflow_id: "wf".into(), run_id: "run".into() }
+}
+fn started_task(domain_global: bool, version: i64) -> RecordWorkflowStartedTask {
+    RecordWorkflowStartedTask { workflow_identifier: if domain_global { gwi() } else { wi() }, task_data: td(version) }
+}
+fn upsert_task(domain_global: bool, version: i64) -> UpsertWorkflowSearchAttributesTask {
+    UpsertWorkflowSearchAttributesTask { workflow_identifier: if domain_global { gwi() } else { wi() }, task_data: td(version), task_list: "tl".into() }
+}
+
+#[tokio::test]
+async fn record_workflow_started_records_visibility() {
+    let h = harness();
+    h.exec.process_record_workflow_started(&started_task(false, 0)).await.unwrap();
+    let started = h.tdeps.started.lock().unwrap().clone();
+    assert_eq!(started.len(), 1);
+    assert_eq!(started[0].workflow_id, "wf");
+    assert_eq!(started[0].workflow_type_name, "wt");
+    assert_eq!(started[0].task_list, "tl");
+    assert_eq!(started[0].workflow_timeout, 100);
+    assert_eq!(started[0].update_timestamp, NOW);
+    assert!(started[0].search_attributes.is_empty());
+    assert!(h.tdeps.upserted.lock().unwrap().is_empty());
+    assert!(released_ok(&h));
+}
+
+#[tokio::test]
+async fn record_workflow_started_not_running_is_noop() {
+    let h = harness();
+    h.ms.set(|s| s.running = false);
+    h.exec.process_record_workflow_started(&started_task(false, 0)).await.unwrap();
+    assert!(h.tdeps.started.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn record_workflow_started_global_domain_version_mismatch_is_noop() {
+    let h = harness();
+    h.ms.set(|s| s.start_version = 4);
+    h.exec.process_record_workflow_started(&started_task(true, 3)).await.unwrap();
+    assert!(h.tdeps.started.lock().unwrap().is_empty());
+    // matching version records
+    h.exec.process_record_workflow_started(&started_task(true, 4)).await.unwrap();
+    assert_eq!(h.tdeps.started.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn record_workflow_started_with_context_header() {
+    let h = harness();
+    h.tdeps.context_header.store(true, Ordering::SeqCst);
+    h.ms.set(|s| {
+        let mut headers = BytesMap::new();
+        headers.insert("foo".into(), b"bar".to_vec());
+        headers.insert("ignored".into(), b"x".to_vec());
+        s.start.headers = Some(headers);
+    });
+    h.exec.process_record_workflow_started(&started_task(false, 0)).await.unwrap();
+    let started = h.tdeps.started.lock().unwrap().clone();
+    assert_eq!(started[0].search_attributes.len(), 1);
+    assert_eq!(started[0].search_attributes.get("Header_foo").unwrap(), &b"\"bar\"".to_vec());
+}
+
+#[tokio::test]
+async fn upsert_search_attributes_records_visibility_without_version_check() {
+    let h = harness();
+    h.ms.set(|s| s.start_version = 4);
+    h.exec.process_upsert_workflow_search_attributes(&upsert_task(true, 3)).await.unwrap();
+    assert_eq!(h.tdeps.upserted.lock().unwrap().len(), 1);
+    assert!(h.tdeps.started.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn upsert_search_attributes_with_context_header() {
+    let h = harness();
+    h.tdeps.context_header.store(true, Ordering::SeqCst);
+    h.ms.set(|s| {
+        let mut headers = BytesMap::new();
+        headers.insert("foo".into(), b"bar".to_vec());
+        s.start.headers = Some(headers);
+    });
+    h.exec.process_upsert_workflow_search_attributes(&upsert_task(false, 0)).await.unwrap();
+    let up = h.tdeps.upserted.lock().unwrap().clone();
+    assert_eq!(up[0].search_attributes.get("Header_foo").unwrap(), &b"\"bar\"".to_vec());
+}
+
+#[tokio::test]
+async fn activity_task_list_kind_ephemeral_is_forwarded() {
+    let h = harness();
+    h.ms.set(|s| {
+        s.activities.insert(5, ActiveActivityInfo { version: 0, schedule_to_start_timeout: 20, task_list: "act-tl".into(), task_list_kind: TaskListKind::Ephemeral });
+    });
+    h.exec.process_activity_task(&atask()).await.unwrap();
+    assert_eq!(h.tdeps.activity.lock().unwrap()[0].task_list.kind, TaskListKind::Ephemeral);
+}
+
+#[tokio::test]
+async fn activity_global_domain_version_mismatch_is_noop() {
+    let h = harness();
+    h.ms.set(|s| {
+        s.activities.insert(5, ActiveActivityInfo { version: 4, schedule_to_start_timeout: 20, task_list: "act-tl".into(), task_list_kind: TaskListKind::Normal });
+    });
+    let mut t = atask();
+    t.workflow_identifier = gwi();
+    t.target_domain_id = GLOBAL.into();
+    t.task_data = td(3);
+    h.exec.process_activity_task(&t).await.unwrap();
+    assert!(h.tdeps.activity.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn decision_global_domain_version_mismatch_is_noop() {
+    let h = harness();
+    h.ms.set(|s| {
+        s.decisions.insert(5, ActiveDecisionInfo { version: 4 });
+    });
+    let mut t = dtask("tl");
+    t.workflow_identifier = gwi();
+    t.target_domain_id = GLOBAL.into();
+    t.task_data = td(3);
+    h.exec.process_decision_task(&t).await.unwrap();
+    assert!(h.tdeps.decision.lock().unwrap().is_empty());
+}
+
+fn reset_task() -> ResetWorkflowTask {
+    ResetWorkflowTask { workflow_identifier: wi(), task_data: td(0) }
+}
+
+#[tokio::test]
+async fn reset_workflow_skipped_without_reset_point() {
+    // fake mutable state has no auto-reset point
+    let h = harness();
+    h.exec.process_reset_workflow(&reset_task()).await.unwrap();
+    assert!(h.deps.log().is_empty());
+    assert!(released_ok(&h));
+}
+
+#[tokio::test]
+async fn reset_workflow_skipped_with_pending_child_executions() {
+    let h = harness();
+    h.ms.set(|s| {
+        s.children.insert(11, child(true, ParentClosePolicy::Abandon));
+    });
+    h.exec.process_reset_workflow(&reset_task()).await.unwrap();
+    assert!(h.deps.log().is_empty());
 }
