@@ -358,6 +358,11 @@ impl Default for Harness {
 
 impl Harness {
     pub fn new() -> Self {
+        Self::build(|_| {})
+    }
+
+    /// Builds the harness, letting the caller override engine collaborators (matching client, config, ...).
+    pub fn build(configure: impl FnOnce(&mut HistoryEngine)) -> Self {
         let execs = Arc::new(MemExecutions::default());
         let history = Arc::new(MemHistory::default());
         let clock = Arc::new(TestClock(AtomicI64::new(1_700_000_000_000_000_000)));
@@ -408,6 +413,7 @@ impl Harness {
         engine.history_event_notifier =
             Arc::new(crate::wiring::assembly::engine_factory::NotifierAdapter::new(crate::events::Notifier::new()));
         engine.execution_cache = cache.clone();
+        configure(&mut engine);
         let engine = Arc::new(engine);
         let _ = core.engine_slot.set(Arc::downgrade(&engine));
         Self { engine, execs, history, clock, cache }

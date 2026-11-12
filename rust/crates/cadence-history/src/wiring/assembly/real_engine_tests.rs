@@ -907,3 +907,287 @@ async fn record_child_execution_completed_child_not_started_is_stale() {
         .await;
     assert!(res.is_err());
 }
+
+// ---- batch 5: query workflow (history_engine_test.go TestQueryWorkflow_*), sticky query, cancel heartbeat
+
+mod query_ports {
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+
+    use cadence_api::enums::{QueryConsistencyLevel, QueryRejectCondition, QueryResultType, WorkflowExecutionCloseStatus};
+
+    use super::*;
+    use crate::engine::runtime::{ClientChecker, QueryMatchingClient};
+    use crate::engine::test_support::TestConfig;
+    use crate::query::{Registry, TerminationState, TerminationType, WorkflowQueryResult as RegResult};
+
+    /// Minimal fake Matching: records the task list of every QueryWorkflow call.
+    #[derive(Default)]
+    struct FakeMatching {
+        answer: Vec<u8>,
+        sticky_unavailable: bool,
+        calls: Mutex<Vec<String>>,
+    }
+
+    #[async_trait::async_trait]
+    impl QueryMatchingClient for FakeMatching {
+        async fn query_workflow(&self, _: &str, _: &QueryWorkflowRequest, task_list: Option<&TaskList>) -> HResult<QueryWorkflowResponse> {
+            self.calls.lock().unwrap().push(task_list.map(|t| t.name.clone()).unwrap_or_default());
+            if self.sticky_unavailable {
+                return Err(HistoryError::StickyWorkerUnavailable);
+            }
+            Ok(QueryWorkflowResponse { query_result: self.answer.clone(), ..Default::default() })
+        }
+    }
+
+    struct SupportsSticky;
+    impl ClientChecker for SupportsSticky {
+        fn supports_sticky_query(&self, _: &str, _: &str) -> bool {
+            true
+        }
+    }
+
+    fn harness_with(matching: Arc<FakeMatching>, raw: Arc<FakeMatching>) -> Harness {
+        Harness::build(move |e| {
+            e.matching_client = matching;
+            e.raw_matching_client = raw;
+            e.client_checker = Arc::new(SupportsSticky);
+        })
+    }
+
+    fn qreq(run: &str, level: Option<QueryConsistencyLevel>, reject: Option<QueryRejectCondition>) -> HistoryQueryWorkflowRequest {
+        HistoryQueryWorkflowRequest {
+            domain_uuid: DOMAIN_ID.into(),
+            request: Some(QueryWorkflowRequest {
+                domain: DOMAIN_NAME.into(),
+                execution: exec(run),
+                query: Some(WorkflowQuery::default()),
+                query_reject_condition: reject,
+                query_consistency_level: level,
+                ..Default::default()
+            }),
+        }
+    }
+
+    /// First decision completed (activity scheduled), then a signal schedules and starts a second decision.
+    async fn with_in_flight_decision(h: &Harness) -> String {
+        let (run, _) = with_scheduled_activity(h).await;
+        signal(h, &run).await; // 6 signaled, 7 decision scheduled
+        decision_started(h, &run, 7, "dec-req-2").await.expect("decision started");
+        run
+    }
+
+    async fn raw_registry(h: &Harness, run: &str) -> Arc<Registry> {
+        let (ctx, release) = h.engine.execution_cache.get_or_create_workflow_execution(DOMAIN_ID, &exec(run).unwrap()).await.expect("ctx");
+        let state = ctx.load_workflow_execution().await.expect("load");
+        let reg = state.get_query_registry().raw_registry_for_test().expect("raw registry");
+        release(None);
+        reg
+    }
+
+    fn assert_registry_empty(r: &Registry) {
+        assert!(!r.has_buffered_query());
+        assert!(!r.has_completed_query());
+        assert!(!r.has_unblocked_query());
+        assert!(!r.has_failed_query());
+    }
+
+    #[tokio::test]
+    async fn query_strong_reject_when_consistent_query_not_enabled() {
+        // TestQueryWorkflow_RejectBasedOnNotEnabled (cluster-level switch half).
+        let h = Harness::build(|e| e.config = Arc::new(TestConfig { no_consistent_query: true, ..Default::default() }));
+        let err = h.engine.query_workflow(&qreq("any", Some(QueryConsistencyLevel::Strong), None), None).await.unwrap_err();
+        assert!(err.to_string().contains("does not enable strongly consistent query"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn query_reject_based_on_completed() {
+        let h = Harness::new();
+        let run = run_first_decision(&h, complete_decision()).await;
+        let resp = h.engine.query_workflow(&qreq(&run, None, Some(QueryRejectCondition::NotOpen)), None).await.expect("query").response.unwrap();
+        assert!(resp.query_result.is_empty());
+        assert_eq!(resp.query_rejected.unwrap().close_status, Some(WorkflowExecutionCloseStatus::Completed));
+    }
+
+    #[tokio::test]
+    async fn query_reject_based_on_failed() {
+        let h = Harness::new();
+        let fail = Decision {
+            decision_type: Some(DecisionType::FailWorkflowExecution),
+            fail_workflow_execution_decision_attributes: Some(FailWorkflowExecutionDecisionAttributes { reason: Some("failure reason".into()), details: vec![1, 2, 3] }),
+            ..Default::default()
+        };
+        let run = run_first_decision(&h, fail).await;
+        for cond in [QueryRejectCondition::NotOpen, QueryRejectCondition::NotCompletedCleanly] {
+            let resp = h.engine.query_workflow(&qreq(&run, None, Some(cond)), None).await.expect("query").response.unwrap();
+            assert!(resp.query_result.is_empty());
+            assert_eq!(resp.query_rejected.unwrap().close_status, Some(WorkflowExecutionCloseStatus::Failed));
+        }
+    }
+
+    #[tokio::test]
+    async fn query_first_decision_not_completed() {
+        // TestQueryWorkflow_FirstDecisionNotCompleted: the load loop waits ~1s, then ErrQueryWorkflowBeforeFirstDecision.
+        let h = Harness::new();
+        let run = start(&h).await;
+        decision_started(&h, &run, 2, "dec-req").await.unwrap();
+        let err = h.engine.query_workflow(&qreq(&run, None, None), None).await.unwrap_err();
+        assert!(matches!(err, HistoryError::QueryFailed(_)) || err.to_string().contains("at least one decision"), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn query_directly_through_matching() {
+        let matching = Arc::new(FakeMatching { answer: vec![1, 2, 3], ..Default::default() });
+        let h = harness_with(matching.clone(), Arc::new(FakeMatching::default()));
+        let run = with_in_flight_decision(&h).await;
+        let resp = h
+            .engine
+            .query_workflow(&qreq(&run, Some(QueryConsistencyLevel::Eventual), Some(QueryRejectCondition::NotOpen)), None)
+            .await
+            .expect("query")
+            .response
+            .unwrap();
+        assert!(resp.query_rejected.is_none());
+        assert_eq!(resp.query_result, vec![1, 2, 3]);
+        assert_eq!(matching.calls.lock().unwrap().as_slice(), [TL.to_string()]);
+    }
+
+    #[tokio::test]
+    async fn query_consistent_buffer_full() {
+        let h = Harness::new();
+        let run = with_in_flight_decision(&h).await;
+        let reg = raw_registry(&h, &run).await;
+        reg.buffer_query(WorkflowQuery::default()); // max buffered query count is 1
+        let err = h.engine.query_workflow(&qreq(&run, Some(QueryConsistencyLevel::Strong), None), None).await.unwrap_err();
+        assert!(err.to_string().contains("consistent query buffer is full"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn query_decision_task_dispatch_timeout() {
+        let h = Harness::new();
+        let run = with_in_flight_decision(&h).await;
+        let reg = raw_registry(&h, &run).await;
+        let deadline = Instant::now() + Duration::from_millis(800);
+        let res = h.engine.query_workflow(&qreq(&run, Some(QueryConsistencyLevel::Strong), None), Some(deadline)).await;
+        assert!(res.is_err());
+        assert_registry_empty(&reg);
+    }
+
+    #[tokio::test]
+    async fn query_decision_task_dispatch_complete() {
+        let h = Harness::new();
+        let run = with_in_flight_decision(&h).await;
+        let reg = raw_registry(&h, &run).await;
+        let updater = {
+            let reg = reg.clone();
+            async move {
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                let ids = reg.get_buffered_ids();
+                assert_eq!(ids.len(), 1);
+                for id in ids {
+                    let state = TerminationState {
+                        termination_type: TerminationType::Completed,
+                        query_result: Some(RegResult { result_type: Some(QueryResultType::Answered), answer: Some(vec![1, 2, 3]), error_message: String::new() }),
+                        failure: None,
+                    };
+                    reg.set_termination_state(&id, state).unwrap();
+                }
+            }
+        };
+        let started = Instant::now();
+        let (res, _) = tokio::join!(h.engine.query_workflow(&qreq(&run, Some(QueryConsistencyLevel::Strong), None), None), updater);
+        assert!(started.elapsed() >= Duration::from_millis(300));
+        assert_eq!(res.expect("query").response.unwrap().query_result, vec![1, 2, 3]);
+        assert!(!reg.has_buffered_query());
+        assert!(!reg.has_completed_query());
+    }
+
+    #[tokio::test]
+    async fn query_decision_task_dispatch_unblocked() {
+        let matching = Arc::new(FakeMatching { answer: vec![1, 2, 3], ..Default::default() });
+        let h = harness_with(matching.clone(), Arc::new(FakeMatching::default()));
+        let run = with_in_flight_decision(&h).await;
+        let reg = raw_registry(&h, &run).await;
+        let updater = {
+            let reg = reg.clone();
+            async move {
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                for id in reg.get_buffered_ids() {
+                    reg.set_termination_state(&id, TerminationState { termination_type: TerminationType::Unblocked, query_result: None, failure: None }).unwrap();
+                }
+            }
+        };
+        let (res, _) = tokio::join!(h.engine.query_workflow(&qreq(&run, Some(QueryConsistencyLevel::Strong), None), None), updater);
+        assert_eq!(res.expect("query").response.unwrap().query_result, vec![1, 2, 3]);
+        assert_registry_empty(&reg);
+        assert_eq!(matching.calls.lock().unwrap().len(), 1);
+    }
+
+    /// Completes the first decision with sticky attributes, leaving the run sticky-enabled with an activity pending.
+    async fn sticky_run(h: &Harness) -> String {
+        let run = start(h).await;
+        decision_started(h, &run, 2, "dec-req").await.expect("started");
+        h.engine
+            .respond_decision_task_completed(&HistoryRespondDecisionTaskCompletedRequest {
+                domain_uuid: DOMAIN_ID.into(),
+                complete_request: Some(RespondDecisionTaskCompletedRequest {
+                    task_token: token(&run, 2),
+                    decisions: vec![schedule_activity_decision("act-1")],
+                    identity: IDENTITY.into(),
+                    sticky_attributes: Some(StickyExecutionAttributes {
+                        worker_task_list: Some(TaskList { name: "sticky-tl".into(), ..Default::default() }),
+                        schedule_to_start_timeout_seconds: Some(5),
+                    }),
+                    ..Default::default()
+                }),
+            })
+            .await
+            .expect("completed");
+        run
+    }
+
+    #[tokio::test]
+    async fn query_sticky_goes_to_sticky_task_list() {
+        let matching = Arc::new(FakeMatching::default());
+        let raw = Arc::new(FakeMatching { answer: vec![9], ..Default::default() });
+        let h = harness_with(matching.clone(), raw.clone());
+        let run = sticky_run(&h).await;
+        let resp = h.engine.query_workflow(&qreq(&run, Some(QueryConsistencyLevel::Eventual), None), None).await.expect("query").response.unwrap();
+        assert_eq!(resp.query_result, vec![9]);
+        assert_eq!(raw.calls.lock().unwrap().as_slice(), ["sticky-tl".to_string()]);
+        assert!(matching.calls.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn query_sticky_worker_unavailable_falls_back_to_normal_task_list() {
+        let matching = Arc::new(FakeMatching { answer: vec![7], ..Default::default() });
+        let raw = Arc::new(FakeMatching { sticky_unavailable: true, ..Default::default() });
+        let h = harness_with(matching.clone(), raw.clone());
+        let run = sticky_run(&h).await;
+        let resp = h.engine.query_workflow(&qreq(&run, Some(QueryConsistencyLevel::Eventual), None), None).await.expect("query").response.unwrap();
+        assert_eq!(resp.query_result, vec![7]);
+        assert_eq!(raw.calls.lock().unwrap().len(), 1);
+        assert_eq!(matching.calls.lock().unwrap().as_slice(), [TL.to_string()]);
+    }
+
+    // ---- activity heartbeat after a cancel request (RecordActivityTaskHeartbeat returns CancelRequested)
+
+    #[tokio::test]
+    async fn record_activity_heartbeat_after_cancel_request_reports_cancel_requested() {
+        let h = Harness::new();
+        let (run, sched) = with_scheduled_activity(&h).await;
+        activity_started(&h, &run, sched, "act-req").await.unwrap();
+        signal(&h, &run).await; // 6 started? decision scheduled at 8 (see respond_activity_canceled_after_cancel_requested_success)
+        decision_started(&h, &run, 8, "dec-req-2").await.expect("started");
+        decision_completed(&h, &run, 8, vec![cancel_activity_decision()]).await.expect("completed");
+        let resp = h
+            .engine
+            .record_activity_task_heartbeat(&HistoryRecordActivityTaskHeartbeatRequest {
+                domain_uuid: DOMAIN_ID.into(),
+                heartbeat_request: Some(RecordActivityTaskHeartbeatRequest { task_token: activity_token(&run, sched), details: b"hb".to_vec(), identity: IDENTITY.into() }),
+            })
+            .await
+            .expect("heartbeat");
+        assert!(resp.cancel_requested);
+    }
+}
