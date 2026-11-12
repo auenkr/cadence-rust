@@ -463,10 +463,7 @@ impl WorkflowStartHost for EngineStartHost {
         let entry = self.core.domains.get_domain_by_id(domain_id)?;
         match entry.get_active_cluster_info_by_cluster_attribute(attribute) {
             Some((active_cluster_name, failover_version)) => Ok(ActiveClusterInfo { active_cluster_name, failover_version }),
-            None => Err(HistoryError::ClusterAttributeNotFound(format!(
-                "could not find cluster attribute {:?} in the domain {}'s active cluster config",
-                attribute, domain_id
-            ))),
+            None => Err(HistoryError::ClusterAttributeNotFound(crate::engine::deps::cluster_attribute_not_found_message(domain_id, attribute))),
         }
     }
 

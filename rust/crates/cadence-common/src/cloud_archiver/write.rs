@@ -219,6 +219,15 @@ fn go_history_batch(mut batch: Value) -> Value {
                         m.remove(f);
                     }
                 }
+                // `WorkflowExecutionStartedEventAttributes.Attempt` is `json:"attempt,omitempty"`.
+                if let Some(a) = m
+                    .get_mut("workflowExecutionStartedEventAttributes")
+                    .and_then(Value::as_object_mut)
+                {
+                    if a.get("attempt").and_then(Value::as_i64) == Some(0) {
+                        a.remove("attempt");
+                    }
+                }
             }
         }
     }

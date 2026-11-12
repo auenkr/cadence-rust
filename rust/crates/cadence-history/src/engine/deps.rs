@@ -88,6 +88,16 @@ pub enum HistoryError {
 
 pub type HResult<T> = Result<T, HistoryError>;
 
+/// Go `activecluster.ClusterAttributeNotFoundError.Error()`: `%s` of a `*types.ClusterAttribute`
+/// (no `String` method): `&{Scope Name}`, or `%!s(*types.ClusterAttribute=<nil>)` for nil.
+pub fn cluster_attribute_not_found_message(domain_id: &str, attribute: Option<&cadence_api::types::ClusterAttribute>) -> String {
+    let attr = match attribute {
+        Some(a) => format!("&{{{} {}}}", a.scope, a.name),
+        None => "%!s(*types.ClusterAttribute=<nil>)".to_owned(),
+    };
+    format!("could not find cluster attribute {attr} in the domain {domain_id}'s active cluster config")
+}
+
 macro_rules! history_error_from {
     ($($t:ty),* $(,)?) => { $(impl From<$t> for HistoryError {
         fn from(e: $t) -> Self { HistoryError::Cadence(Box::new(CadenceError::from(e))) }
