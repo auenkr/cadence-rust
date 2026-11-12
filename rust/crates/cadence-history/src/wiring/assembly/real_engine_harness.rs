@@ -4,7 +4,7 @@
 #![cfg(test)]
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -35,6 +35,11 @@ pub struct Inner {
     pub timer: Vec<pc::Task>,
     pub updates: usize,
     pub fail_updates: usize,
+    /// Errors returned (FIFO) by the next create/update calls instead of touching state (gomock `.Return(nil, err)`).
+    pub create_errors: std::collections::VecDeque<PersistenceError>,
+    pub update_errors: std::collections::VecDeque<PersistenceError>,
+    /// Recorded create requests: (mode name, previous run id, previous last write version).
+    pub create_calls: Vec<(&'static str, String, i64)>,
 }
 
 /// In-memory execution store: create/get/update/current-execution plus task capture.
@@ -118,6 +123,16 @@ impl MemExecutions {
 impl pc::GoExecutionStore for MemExecutions {
     async fn create_workflow_execution(&self, r: pc::CreateWorkflowExecutionRequest) -> Result<pc::CurrentExecution, PersistenceError> {
         let mut g = self.inner.lock().unwrap();
+        let mode_name = match r.mode {
+            pc::CreateWorkflowMode::BrandNew => "BrandNew",
+            pc::CreateWorkflowMode::WorkflowIdReuse => "WorkflowIdReuse",
+            pc::CreateWorkflowMode::ContinueAsNew => "ContinueAsNew",
+            pc::CreateWorkflowMode::Zombie => "Zombie",
+        };
+        g.create_calls.push((mode_name, r.previous_run_id.clone(), r.previous_last_write_version));
+        if let Some(e) = g.create_errors.pop_front() {
+            return Err(e);
+        }
         let s = r.new_workflow_snapshot;
         let info = s.execution_info.clone();
         let key_cur = (info.domain_id.clone(), info.workflow_id.clone());
@@ -165,6 +180,9 @@ impl pc::GoExecutionStore for MemExecutions {
     }
     async fn update_workflow_execution(&self, r: pc::UpdateWorkflowExecutionRequest) -> Result<(), PersistenceError> {
         let mut g = self.inner.lock().unwrap();
+        if let Some(e) = g.update_errors.pop_front() {
+            return Err(e);
+        }
         if g.fail_updates > 0 {
             g.fail_updates -= 1;
             return Err(PersistenceError::Internal("injected update failure".into()));
@@ -194,8 +212,74 @@ impl pc::GoExecutionStore for MemExecutions {
         g.updates += 1;
         Ok(())
     }
-    async fn conflict_resolve_workflow_execution(&self, _: pc::ConflictResolveWorkflowExecutionRequest) -> Result<(), PersistenceError> {
-        Err(PersistenceError::Internal("conflict resolve not supported by MemExecutions".into()))
+    /// Go `sqlExecutionStore.ConflictResolveWorkflowExecution`: validate mode, assert/update the current
+    /// record, replace the reset run, apply the optional current mutation and insert the optional new run.
+    async fn conflict_resolve_workflow_execution(&self, r: pc::ConflictResolveWorkflowExecutionRequest) -> Result<(), PersistenceError> {
+        let mut g = self.inner.lock().unwrap();
+        let reset = r.reset_workflow_snapshot;
+        let cur_wf = r.current_workflow_mutation;
+        let new_wf = r.new_workflow_snapshot;
+        let rinfo = reset.execution_info.clone();
+        let cur_key = (rinfo.domain_id.clone(), rinfo.workflow_id.clone());
+        let current_row = g.current.get(&cur_key).cloned();
+        // Go ValidateConflictResolveWorkflowModeState (subset relevant to the mode).
+        match r.mode {
+            pc::ConflictResolveWorkflowMode::BypassCurrent => {
+                if current_row.as_ref().map(|c| c.run_id == rinfo.run_id).unwrap_or(false) {
+                    return Err(PersistenceError::CurrentWorkflowConditionFailed(format!(
+                        "ConflictResolveWorkflowExecution: reset run {} is the current run",
+                        rinfo.run_id
+                    )));
+                }
+            }
+            pc::ConflictResolveWorkflowMode::UpdateCurrent => {
+                let (info, sv, lw) = match &new_wf {
+                    Some(n) => (n.execution_info.clone(), n.start_version, n.last_write_version),
+                    None => (rinfo.clone(), reset.start_version, reset.last_write_version),
+                };
+                let prev_run = cur_wf.as_ref().map(|m| m.execution_info.run_id.clone()).unwrap_or_else(|| rinfo.run_id.clone());
+                match &current_row {
+                    Some(c) if c.run_id == prev_run => {}
+                    _ => {
+                        return Err(PersistenceError::CurrentWorkflowConditionFailed(format!(
+                            "ConflictResolveWorkflowExecution: current run is not {prev_run}"
+                        )))
+                    }
+                }
+                Self::set_current(&mut g, &info, sv, lw);
+            }
+        }
+        let key = (rinfo.domain_id.clone(), rinfo.workflow_id.clone(), rinfo.run_id.clone());
+        match g.runs.get(&key) {
+            None => return Err(PersistenceError::EntityNotExists("workflow execution not found".into())),
+            Some(s) if s.execution_info.next_event_id != reset.condition => {
+                return Err(PersistenceError::ConditionFailed(format!("condition {} != {}", s.execution_info.next_event_id, reset.condition)));
+            }
+            _ => {}
+        }
+        store_tasks(&mut g, &reset.tasks_by_category);
+        let mut stored = reset;
+        stored.condition = stored.execution_info.next_event_id;
+        g.runs.insert(key, stored);
+        if let Some(m) = cur_wf {
+            let k = (m.execution_info.domain_id.clone(), m.execution_info.workflow_id.clone(), m.execution_info.run_id.clone());
+            let Some(snap) = g.runs.get_mut(&k) else {
+                return Err(PersistenceError::EntityNotExists("workflow execution not found".into()));
+            };
+            if snap.execution_info.next_event_id != m.condition {
+                return Err(PersistenceError::ConditionFailed(format!("condition {} != {}", snap.execution_info.next_event_id, m.condition)));
+            }
+            apply_mutation(snap, &m);
+            snap.condition = snap.execution_info.next_event_id;
+            store_tasks(&mut g, &m.tasks_by_category);
+        }
+        if let Some(n) = new_wf {
+            let ni = n.execution_info.clone();
+            store_tasks(&mut g, &n.tasks_by_category);
+            g.runs.insert((ni.domain_id.clone(), ni.workflow_id.clone(), ni.run_id.clone()), n);
+        }
+        g.updates += 1;
+        Ok(())
     }
     async fn delete_workflow_execution(&self, _: i32, d: String, w: String, r: String) -> Result<(), PersistenceError> {
         self.inner.lock().unwrap().runs.remove(&(d, w, r));
@@ -299,13 +383,14 @@ impl pc::GoHistoryV2Store for MemHistory {
     async fn get_all_history_tree_branches(&self, _: i32, _: i32, _: Vec<u8>) -> Result<pc::HistoryTreePage, PersistenceError> { Ok(Default::default()) }
 }
 
-pub struct TestDomains;
+#[derive(Default)]
+pub struct TestDomains(pub Arc<AtomicI32>);
 impl DomainCache for TestDomains {
     fn get_domain_by_id(&self, id: &str) -> HResult<Arc<DomainCacheEntry>> {
         if id != DOMAIN_ID {
             return Err(HistoryError::internal(format!("domain {id} not found")));
         }
-        Ok(Arc::new(DomainCacheEntry { info: DomainInfo { id: DOMAIN_ID.into(), name: DOMAIN_NAME.into(), status: 0 }, ..Default::default() }))
+        Ok(Arc::new(DomainCacheEntry { info: DomainInfo { id: DOMAIN_ID.into(), name: DOMAIN_NAME.into(), status: self.0.load(Ordering::SeqCst) }, ..Default::default() }))
     }
     fn get_domain(&self, name: &str) -> HResult<Arc<DomainCacheEntry>> {
         if name != DOMAIN_NAME {
@@ -348,6 +433,8 @@ pub struct Harness {
     pub history: Arc<MemHistory>,
     pub clock: Arc<TestClock>,
     pub cache: Arc<EngineExecutionCache>,
+    /// Domain status served by the test domain cache (0 registered, 1 deprecated).
+    pub domain_status: Arc<AtomicI32>,
 }
 
 impl Default for Harness {
@@ -380,7 +467,8 @@ impl Harness {
         )
         .unwrap_or_else(|_| panic!("shard"));
         let config = Arc::new(Config::new_for_test());
-        let domains: Arc<dyn DomainCache> = Arc::new(TestDomains);
+        let domain_status = Arc::new(AtomicI32::new(0));
+        let domains: Arc<dyn DomainCache> = Arc::new(TestDomains(domain_status.clone()));
         let core = Arc::new(EngineCore {
             engine_slot: Arc::new(std::sync::OnceLock::new()),
             semaphore_metadata: Arc::new(cadence_persistence::InMemoryExecutionStore::new()),
@@ -416,7 +504,7 @@ impl Harness {
         configure(&mut engine);
         let engine = Arc::new(engine);
         let _ = core.engine_slot.set(Arc::downgrade(&engine));
-        Self { engine, execs, history, clock, cache }
+        Self { engine, execs, history, clock, cache, domain_status }
     }
 }
 

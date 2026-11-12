@@ -25,7 +25,7 @@ use cadence_persistence::history_contract::{
 };
 use cadence_persistence::history_reader::{read_history_branch, HistoryNodeStore, ReadHistoryBranchRequest};
 
-use crate::engine::deps::{DomainCache, HResult, HistoryError, PersistenceAlreadyStarted};
+use crate::engine::deps::{DomainCache, HResult, HistoryError, PersistenceAlreadyStarted, WorkflowRequestType};
 use crate::execution::cache::ExecutionCacheBackend;
 use crate::execution::context::{
     ConflictContextStore, PersistedBlob, TransactionState, WorkflowContextStore, WorkflowEvents,
@@ -69,6 +69,15 @@ pub fn to_history_error(err: PersistenceError) -> HistoryError {
             }))
         }
         PersistenceError::CurrentWorkflowConditionFailed(m) => HistoryError::CurrentWorkflowConditionFailed(m),
+        PersistenceError::DuplicateRequest { request_type, run_id } => HistoryError::DuplicateRequest {
+            request_type: match request_type {
+                1 => WorkflowRequestType::Signal,
+                2 => WorkflowRequestType::Cancel,
+                3 => WorkflowRequestType::Reset,
+                _ => WorkflowRequestType::Start,
+            },
+            run_id,
+        },
         PersistenceError::EntityNotExists(m) => HistoryError::entity_not_exists(m),
         PersistenceError::AlreadyExists(m) => HistoryError::Other(m),
         PersistenceError::InvalidPersistenceRequest(m) | PersistenceError::InvalidArgument(m) => HistoryError::bad_request(m),
