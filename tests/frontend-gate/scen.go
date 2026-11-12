@@ -316,6 +316,8 @@ func scenMain(rpc workflowserviceclient.Interface, domain, archDomain, archDir s
 				})
 				step("scen-autoreset-first-decision-completed", err)
 				_, err = rpc.UpdateDomain(ctx, &shared.UpdateDomainRequest{Name: &domain, Configuration: &shared.DomainConfiguration{
+					// Go persists a bad-binary-only update only when another config field also changes.
+					EmitMetric: ptr(true),
 					BadBinaries: &shared.BadBinaries{Binaries: map[string]*shared.BadBinaryInfo{bad: {Reason: ptr("gate auto-reset"), Operator: ptr("gate")}}}}})
 				step("scen-autoreset-mark-binary-bad", err)
 				time.Sleep(15 * time.Second) // domain cache refresh in History

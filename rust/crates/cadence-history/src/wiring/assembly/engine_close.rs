@@ -52,12 +52,6 @@ impl EngineMutableState {
                             && self.domain.bad_binaries.contains(&pt.binary_checksum)
                     })
                 });
-                tracing::debug!(
-                    hit,
-                    points = ?g.exec.auto_reset_points.as_ref().map(|p| p.points.iter().map(|x| (x.binary_checksum.clone(), x.resettable)).collect::<Vec<_>>()),
-                    bad = ?self.domain.bad_binaries,
-                    "auto-reset check"
-                );
                 if hit {
                     let version = g.current_version;
                     let mut t = g.transfer_base(7, version);
