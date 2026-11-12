@@ -268,6 +268,8 @@ fn build_dlq_processor(env: &Arc<HistoryEnv>, shard: &Arc<ShardContext>) -> Arc<
     task_shard.reinjector.bind(crate::wiring::assembly::shard_factory::ShardTaskReinjector::new(
         shard.clone(),
         env.domain_cache.clone(),
+        env.persistence.executions.clone(),
+        env.cluster.metadata().current_cluster_name.clone(),
     ));
     let config = &env.config;
     Arc::new(crate::taskdlq::new_processor_from_shard(

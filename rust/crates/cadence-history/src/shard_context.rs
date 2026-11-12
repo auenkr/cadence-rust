@@ -262,7 +262,7 @@ impl ShardContext {
         self.inner.lock().unwrap().last_updated
     }
 
-    fn now(&self) -> i64 {
+    pub fn now(&self) -> i64 {
         (self.time_source)()
     }
 
