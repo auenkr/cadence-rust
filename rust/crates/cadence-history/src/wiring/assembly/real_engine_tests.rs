@@ -825,3 +825,85 @@ async fn respond_activity_failed_with_retry_policy_retries_without_history_event
     // The ActivityTaskStarted event is not written while the activity may still retry.
     assert_eq!(snap.execution_info.next_event_id, 6);
 }
+
+// ---- batch 4: reload after cache clear, child completed errors
+
+#[tokio::test]
+async fn reload_after_cache_clear_continues_workflow() {
+    let h = Harness::new();
+    let (run, sched) = with_scheduled_activity(&h).await;
+    h.cache.clear_all_for_test();
+    activity_started(&h, &run, sched, "act-req").await.expect("started after reload");
+    h.cache.clear_all_for_test();
+    h.engine
+        .respond_activity_task_completed(&HistoryRespondActivityTaskCompletedRequest {
+            domain_uuid: DOMAIN_ID.into(),
+            complete_request: Some(RespondActivityTaskCompletedRequest { task_token: activity_token(&run, sched), result: b"r".to_vec(), identity: IDENTITY.into() }),
+        })
+        .await
+        .expect("completed after reload");
+    let snap = h.execs.snapshot(WF, &run).unwrap();
+    assert!(snap.activity_infos.is_empty());
+    assert_eq!(snap.execution_info.next_event_id, 9);
+}
+
+#[tokio::test]
+async fn reload_after_cache_clear_preserves_decision_state() {
+    let h = Harness::new();
+    let run = start(&h).await;
+    h.cache.clear_all_for_test();
+    decision_started(&h, &run, 2, "dec-req").await.expect("started");
+    h.cache.clear_all_for_test();
+    decision_completed(&h, &run, 2, vec![complete_decision()]).await.expect("completed");
+    assert_eq!(h.execs.snapshot(WF, &run).unwrap().execution_info.state, WORKFLOW_STATE_COMPLETED);
+}
+
+#[tokio::test]
+async fn record_child_execution_completed_unknown_child_entity_not_exists() {
+    let h = Harness::new();
+    let run = start(&h).await;
+    let err = h
+        .engine
+        .record_child_execution_completed(&RecordChildExecutionCompletedRequest {
+            domain_uuid: DOMAIN_ID.into(),
+            workflow_execution: exec(&run),
+            initiated_id: 1,
+            completed_execution: Some(WorkflowExecution { workflow_id: "child".into(), run_id: String::new() }),
+            completion_event: Some(HistoryEvent { event_type: Some(cadence_api::enums::EventType::WorkflowExecutionCompleted), ..Default::default() }),
+            started_id: 3,
+        })
+        .await
+        .unwrap_err();
+    assert!(err.to_string().to_lowercase().contains("child"), "{err}");
+}
+
+#[tokio::test]
+async fn record_child_execution_completed_child_not_started_is_stale() {
+    let h = Harness::new();
+    let d = Decision {
+        decision_type: Some(DecisionType::StartChildWorkflowExecution),
+        start_child_workflow_execution_decision_attributes: Some(StartChildWorkflowExecutionDecisionAttributes {
+            domain: DOMAIN_NAME.into(),
+            workflow_id: "child-1".into(),
+            workflow_type: Some(WorkflowType { name: "child-type".into() }),
+            task_list: Some(tl()),
+            execution_start_to_close_timeout_seconds: Some(100),
+            task_start_to_close_timeout_seconds: Some(10),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let run = run_first_decision(&h, d).await;
+    let res = h
+        .engine
+        .record_child_execution_completed(&RecordChildExecutionCompletedRequest {
+            domain_uuid: DOMAIN_ID.into(),
+            workflow_execution: exec(&run),
+            initiated_id: 5,
+            completed_execution: Some(WorkflowExecution { workflow_id: "child-1".into(), run_id: String::new() }),
+            completion_event: Some(HistoryEvent { event_type: Some(cadence_api::enums::EventType::WorkflowExecutionCompleted), ..Default::default() }),
+            started_id: 7,
+        })
+        .await;
+    assert!(res.is_err());
+}
