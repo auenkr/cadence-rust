@@ -79,8 +79,7 @@ dyn = (root / 'go/config/dynamicconfig/development.yaml').read_text()
 if args.es_url:
     assert 'value: "db"' in dyn
     dyn = dyn.replace('value: "db"', 'value: "es"')
-# retention-0 archival scenario: delete/archive tasks are jittered by up to this many minutes (default 60)
-dyn += '\nsystem.workflowDeletionJitterRange:\n- value: 1\n  constraints: {}\n'
+# development.yaml already sets system.minRetentionDays=0 and system.workflowDeletionJitterRange=1 (retention-0 archival scenario).
 (work / 'dynamic-config.yaml').write_text(dyn)
 (work / 'rust-dynamic-config.yaml').write_text(dyn + f'\nsystem.enableGRPCOutbound:\n  - value: {str(args.rust_outbound == "grpc").lower()}\nfrontend.sendRawWorkflowHistory:\n  - value: true\n')
 (work / 'config/base.yaml').write_text((root / 'go/config/base.yaml').read_text())
