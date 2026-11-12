@@ -25,3 +25,6 @@ pub mod timer_active_task_executor;
 pub mod timer_standby_task_executor;
 pub mod transfer_standby_task_executor;
 pub mod transfer_active_task_executor;
+
+#[cfg(test)]
+mod timer_active_task_executor_tests;
