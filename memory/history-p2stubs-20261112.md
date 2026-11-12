@@ -15,3 +15,9 @@
 - timer_standby_task_executor_tests.rs: `execute_activity_retry_timer_task_is_dropped_on_standby` (Go TestProcessRetryTimeout, via the `Executor::execute` dispatch).
 
 ## CI evidence
+Final head fd4b7d9af74f82755f92a889a1f7ef4ce8c9105c (includes merged origin/master with history-s3gs):
+- rust-ci cadence-history: success https://github.com/auenkr/cadence-rust/actions/runs/43174667623
+- history-mixed-gate mysql/grpc/true: success, `GATE SUMMARY failed: []` https://github.com/auenkr/cadence-rust/actions/runs/43174672604
+- history-mixed-gate cassandra/grpc/true: success, `GATE SUMMARY failed: []` https://github.com/auenkr/cadence-rust/actions/runs/43174676967
+- history-mixed-gate postgres/tchannel/false: success, `GATE SUMMARY failed: []` https://github.com/auenkr/cadence-rust/actions/runs/43174681013
+(Earlier pre-merge head f5771ccb0: rust-ci success 43172459690; its gates were cancelled and re-run post-merge.)
