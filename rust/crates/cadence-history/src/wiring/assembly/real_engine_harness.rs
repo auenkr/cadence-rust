@@ -175,12 +175,12 @@ impl pc::GoExecutionStore for MemExecutions {
         let Some(snap) = g.runs.get_mut(&key) else {
             return Err(PersistenceError::EntityNotExists("workflow execution not found".into()));
         };
-        if snap.condition != m.condition {
-            return Err(PersistenceError::ConditionFailed(format!("condition {} != {}", snap.condition, m.condition)));
+        // Go's DB condition is the stored next_event_id.
+        if snap.execution_info.next_event_id != m.condition {
+            return Err(PersistenceError::ConditionFailed(format!("condition {} != {}", snap.execution_info.next_event_id, m.condition)));
         }
-        let before_cond = m.condition;
         apply_mutation(snap, &m);
-        snap.condition = before_cond + 1;
+        snap.condition = snap.execution_info.next_event_id;
         store_tasks(&mut g, &m.tasks_by_category);
         if matches!(r.mode, pc::UpdateWorkflowMode::UpdateCurrent) {
             Self::set_current(&mut g, info, m.start_version, m.last_write_version);
