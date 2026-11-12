@@ -206,6 +206,8 @@ pub(super) struct Inner {
     pub(super) clear_buffered: bool,
     pub(super) transfer_tasks: Vec<pc::TransferTask>,
     pub(super) timer_tasks: Vec<pc::TimerTask>,
+    /// Go `pendingSemaphoreInfoIDs` / `updateSemaphoreInfos` / `deleteSemaphoreInfos`.
+    pub(super) semaphores: crate::execution::semaphore::SemaphoreState,
     pub(super) dirty: bool,
 }
 
@@ -413,6 +415,13 @@ impl EngineMutableState {
             clear_buffered: false,
             transfer_tasks: Vec::new(),
             timer_tasks: Vec::new(),
+            semaphores: {
+                let mut s = crate::execution::semaphore::SemaphoreState::default();
+                for r in &snapshot.semaphore_infos {
+                    s.pending.insert(r.initiated_id, super::engine_semaphore::from_record(r));
+                }
+                s
+            },
             dirty: false,
         };
         Ok(Self {

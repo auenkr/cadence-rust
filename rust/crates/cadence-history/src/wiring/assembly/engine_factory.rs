@@ -151,6 +151,7 @@ impl HistoryEventNotifier for NotifierAdapter {
 pub fn build_core(env: &Arc<HistoryEnv>, shard: &Arc<ShardContext>) -> (Arc<EngineCore>, Arc<EngineExecutionCache>) {
     let core = Arc::new(EngineCore {
         engine_slot: Arc::new(std::sync::OnceLock::new()),
+        semaphore_metadata: env.semaphore_metadata.clone(),
         strong_idempotency_sanity_check: env.config.enable_strong_idempotency_sanity_check.clone(),
         advanced_visibility_writing: {
             // Go `AdvancedVisibilityWritingMode() != "off"`: advanced store configured and written to.
@@ -210,7 +211,13 @@ pub fn build_engine(
     replication: ReplicationParts,
 ) -> Arc<HistoryEngine> {
     let start_host = super::engine_start::EngineStartHost::new(core.clone(), env.config.clone());
-    let failover_host = super::engine_start::EngineFailoverHost::new(shard.clone(), env.domain_cache.clone());
+    let dlq_processor = build_dlq_processor(env, shard);
+    let failover_host = super::engine_start::EngineFailoverHost::new(
+        shard.clone(),
+        env.domain_cache.clone(),
+        env.persistence.executions.clone(),
+        Some(dlq_processor.clone()),
+    );
     let decision_handler = Arc::new(EngineDecisionHandler::new(cache.clone(), core.clone(), env.config.clone()));
     let workflow_resetter =
         Arc::new(super::engine_resetter::EngineWorkflowResetter::new(core.clone(), cache.clone()));
@@ -225,6 +232,7 @@ pub fn build_engine(
         failover_host,
         lifecycle_host: Arc::new(EngineLifecycleParts {
             graceful_failover: env.config.enable_graceful_failover.clone(),
+            dlq_processor,
             dlq_daemon: replication.dlq_daemon.clone(),
             metrics_emitter: replication.metrics_emitter.clone(),
             task_processors: replication.task_processors.clone(),
@@ -310,10 +318,30 @@ fn reapply_signal_events(
     Ok(reapplied)
 }
 
-/// `EngineLifecycleHost`: replication DLQ handler, metrics emitter and task processors are the
-/// real daemons built by `ReplicationFactoryImpl`. Still no-ops (recorded in memory): the history
-/// task DLQ processor (no persistence manager wired).
+/// Go `taskdlq.NewProcessorFromShard(shard, 100, config.HistoryTaskDLQProcessorInterval, ...)`.
+/// The shard's task reinjector is bound to `ShardTaskReinjector`, as for the queue processors.
+fn build_dlq_processor(env: &Arc<HistoryEnv>, shard: &Arc<ShardContext>) -> Arc<dyn crate::taskdlq::Processor> {
+    let task_shard = crate::wiring::assembly::shard_factory::TaskShardContext::new(env.clone(), shard.clone());
+    task_shard.reinjector.bind(crate::wiring::assembly::shard_factory::ShardTaskReinjector::new(
+        shard.clone(),
+        env.domain_cache.clone(),
+    ));
+    let config = &env.config;
+    Arc::new(crate::taskdlq::new_processor_from_shard(
+        task_shard,
+        100,
+        config.history_task_dlq_processor_interval.clone(),
+        config.history_task_dlq_processor_failover_jitter_max_delay.clone(),
+        config.history_task_dlq_mode.clone(),
+        config.history_task_dlq_processor_enabled.clone(),
+        env.dlq_host_limiter.clone(),
+    ))
+}
+
+/// `EngineLifecycleHost`: replication DLQ handler, metrics emitter, task processors and the
+/// history task DLQ processor are the real daemons.
 struct EngineLifecycleParts {
+    dlq_processor: Arc<dyn crate::taskdlq::Processor>,
     graceful_failover: crate::config_collection::Prop<bool>,
     dlq_daemon: Arc<dyn crate::replication::deps::Daemon>,
     metrics_emitter: Arc<dyn crate::replication::deps::Daemon>,
@@ -323,8 +351,12 @@ struct EngineLifecycleParts {
 
 #[async_trait::async_trait]
 impl crate::engine::lifecycle::EngineLifecycleHost for EngineLifecycleParts {
-    async fn start_dlq_processor(&self, _ctx: tokio_util::sync::CancellationToken) -> HResult<()> { Ok(()) }
-    async fn stop_dlq_processor(&self, _ctx: tokio_util::sync::CancellationToken) -> HResult<()> { Ok(()) }
+    async fn start_dlq_processor(&self, ctx: tokio_util::sync::CancellationToken) -> HResult<()> {
+        self.dlq_processor.start(ctx).await.map_err(|e| HistoryError::internal(e.to_string()))
+    }
+    async fn stop_dlq_processor(&self, ctx: tokio_util::sync::CancellationToken) -> HResult<()> {
+        self.dlq_processor.stop(ctx).await.map_err(|e| HistoryError::internal(e.to_string()))
+    }
     fn start_replication_dlq_handler(&self) { self.dlq_daemon.start(); }
     fn stop_replication_dlq_handler(&self) { self.dlq_daemon.stop(); }
     fn start_replication_metrics_emitter(&self) { self.metrics_emitter.start(); }

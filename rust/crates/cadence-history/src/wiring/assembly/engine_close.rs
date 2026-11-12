@@ -163,6 +163,8 @@ impl EngineMutableState {
             delete_child_execution_infos: g.deleted_children.iter().copied().collect(),
             upsert_request_cancel_infos,
             upsert_signal_infos,
+            upsert_semaphore_infos: g.semaphores.updates.values().map(super::engine_semaphore::to_record).collect(),
+            delete_semaphore_infos: g.semaphores.deletes.iter().copied().collect(),
             delete_request_cancel_infos: g.deleted_request_cancels.iter().copied().collect(),
             delete_signal_infos: g.deleted_signals.iter().copied().collect(),
             upsert_signal_requested_ids: g.upsert_signal_requested.iter().cloned().collect(),
@@ -216,6 +218,8 @@ impl EngineMutableState {
         g.upsert_cancels.clear();
         g.upsert_signals.clear();
         g.deleted_request_cancels.clear();
+        g.semaphores.updates.clear();
+        g.semaphores.deletes.clear();
         g.deleted_signals.clear();
         g.upsert_signal_requested.clear();
         g.delete_signal_requested.clear();

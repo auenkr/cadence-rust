@@ -47,10 +47,6 @@ fn internal(msg: impl Into<String>) -> OperationError {
     OperationError { kind: ErrorKind::Internal, message: msg.into() }
 }
 
-fn not_ported(what: &str) -> OperationError {
-    internal(format!("{what} decision is not ported on the engine mutable state yet"))
-}
-
 fn secs(d: Duration) -> i32 {
     d.as_secs().min(i32::MAX as u64) as i32
 }
@@ -61,6 +57,48 @@ pub struct EngineOps<'a> {
     pub domains: Arc<dyn DomainCache>,
     pub domain_name: String,
     pub identity: String,
+    /// Go `semaphoreMetadataManager.GetSemaphore` results, resolved asynchronously before the
+    /// synchronous decision handler runs (see [`resolve_semaphore_lookups`]).
+    pub semaphore_lookups: std::collections::HashMap<String, SemaphoreLookup>,
+}
+
+/// Result of a `GetSemaphore` metadata lookup.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SemaphoreLookup {
+    Found,
+    /// `EntityNotExistsError`.
+    NotFound(String),
+    /// Any other persistence error (e.g. Go's "not supported on SQL").
+    Failed(String),
+}
+
+/// Looks up the metadata of every semaphore named by an `AcquireSemaphore` decision
+/// (Go calls `GetSemaphore` when it reaches that decision; the lookup is read-only, so
+/// resolving it up front is equivalent).
+pub async fn resolve_semaphore_lookups(
+    store: &dyn cadence_persistence::SemaphorePersistence,
+    domain_id: &str,
+    decisions: &[Decision],
+) -> std::collections::HashMap<String, SemaphoreLookup> {
+    let mut out = std::collections::HashMap::new();
+    for d in decisions {
+        if d.decision_type != Some(DecisionType::AcquireSemaphore) {
+            continue;
+        }
+        let Some(name) = d.acquire_semaphore_decision_attributes.as_ref().map(|a| a.semaphore_name.clone()) else {
+            continue;
+        };
+        if out.contains_key(&name) {
+            continue;
+        }
+        let r = match store.get_semaphore_metadata(domain_id, &name).await {
+            Ok(_) => SemaphoreLookup::Found,
+            Err(cadence_persistence::semaphores::AcquireError::NotFound(e)) => SemaphoreLookup::NotFound(e.to_string()),
+            Err(e) => SemaphoreLookup::Failed(e.to_string()),
+        };
+        out.insert(name, r);
+    }
+    out
 }
 
 impl EngineOps<'_> {
@@ -765,16 +803,28 @@ impl Operations for EngineOps<'_> {
         (self.config.enable_distributed_semaphore)(&self.domain_name)
     }
 
-    fn semaphore_exists(&mut self, _name: &str) -> Result<()> {
-        Err(not_ported("AcquireSemaphore"))
+    fn semaphore_exists(&mut self, name: &str) -> Result<()> {
+        match self.semaphore_lookups.get(name) {
+            Some(SemaphoreLookup::Found) => Ok(()),
+            Some(SemaphoreLookup::NotFound(m)) => {
+                Err(OperationError { kind: ErrorKind::NotFound, message: m.clone() })
+            }
+            Some(SemaphoreLookup::Failed(m)) => Err(internal(m.clone())),
+            None => Err(internal(format!("semaphore {name:?} metadata was not resolved"))),
+        }
     }
 
     fn semaphore_wait_timeout_seconds(&self, supplied: Option<i32>) -> i32 {
         supplied.unwrap_or_else(|| secs((self.config.semaphore_acquire_default_wait_timeout)(&self.domain_name)))
     }
 
-    fn initiate_semaphore(&mut self, _completed_id: i64, _name: &str, _wait_seconds: i32) -> Result<()> {
-        Err(not_ported("AcquireSemaphore"))
+    fn initiate_semaphore(&mut self, completed_id: i64, name: &str, wait_seconds: i32) -> Result<()> {
+        use crate::wiring::assembly::engine_semaphore::SemaphoreOpError;
+        match self.state.add_semaphore_acquire_initiated(completed_id, name, wait_seconds) {
+            Ok(_) => Ok(()),
+            Err(SemaphoreOpError::Caller(m)) => Err(bad(m)),
+            Err(SemaphoreOpError::Internal(m)) => Err(internal(m)),
+        }
     }
 }
 
@@ -957,6 +1007,7 @@ mod tests {
             domains: Arc::new(Domains),
             domain_name: "test-domain".into(),
             identity: "id".into(),
+            semaphore_lookups: Default::default(),
         };
         TaskHandler::new(ops, "id".into(), 4)
     }
