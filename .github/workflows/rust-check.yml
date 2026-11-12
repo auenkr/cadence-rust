@@ -31,6 +31,8 @@ jobs:
       CARGO_INCREMENTAL: 0
     steps:
       - uses: actions/checkout@v5
+      - name: Init IDL submodule
+        run: git submodule update --init go/idls
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
