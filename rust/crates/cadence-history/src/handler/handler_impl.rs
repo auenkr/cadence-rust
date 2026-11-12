@@ -19,7 +19,9 @@ use crate::engine::deps::{HResult, HistoryError};
 use crate::engine::runtime::HistoryEngine;
 use crate::engine::types::*;
 use crate::handler::Handler;
+use crate::task::deps::MetricsScope as _;
 use crate::wiring::assembly::controller::ShardRegistry;
+use crate::wiring::resources::metrics::Scope;
 use crate::wiring::server::limiter::RateLimiter;
 
 /// Go `shardOwnershipTransferDelay`.
@@ -76,12 +78,13 @@ fn cmp_replication_shard_messages(a: &ReplicationShardMessages, b: &ReplicationS
 }
 
 /// Go `buildGetReplicationMessagesResponse`.
-pub(crate) fn build_get_replication_messages_response(mut msgs: Vec<ReplicationShardMessages>, max_response_size: usize) -> adm::GetReplicationMessagesResponse {
+pub(crate) fn build_get_replication_messages_response(mut msgs: Vec<ReplicationShardMessages>, max_response_size: usize, on_too_large: &dyn Fn(i32)) -> adm::GetReplicationMessagesResponse {
     msgs.sort_by(cmp_replication_shard_messages);
     let mut response_size = 0usize;
     let mut by_shard = std::collections::HashMap::with_capacity(msgs.len());
     for m in msgs {
         if response_size + m.size >= max_response_size {
+            on_too_large(m.shard_id);
             tracing::warn!(shard_id = m.shard_id, size = m.size, total = response_size, max = max_response_size,
                 "Replication messages did not fit in the response (history host)");
             continue;
@@ -159,6 +162,10 @@ impl HandlerImpl {
             return Err(constants::err_domain_not_set().into());
         }
         self.check_rate()
+    }
+
+    fn handler_scope(&self, name: &str) -> Scope {
+        Scope::new(self.registry.env().metrics_registry.clone(), name, vec![])
     }
 
     fn check_rate(&self) -> HResult<()> {
@@ -330,7 +337,11 @@ impl Handler for HandlerImpl {
         });
         let msgs: Vec<ReplicationShardMessages> = futures_util::future::join_all(futs).await.into_iter().flatten().collect();
         let max = self.registry.env().config.max_response_size.max(0) as usize;
-        Ok(build_get_replication_messages_response(msgs, max))
+        let reg = self.registry.env().metrics_registry.clone();
+        Ok(build_get_replication_messages_response(msgs, max, &|shard| {
+            Scope::new(reg.clone(), "HistoryGetReplicationMessages", vec![("shard_id".to_string(), shard.to_string())])
+                .inc_counter("ReplicationMessageTooLargePerShard");
+        }))
     }
 
     async fn merge_dlq_messages(&self, request: Option<&adm::MergeDLQMessagesRequest>) -> HResult<adm::MergeDLQMessagesResponse> {
@@ -512,13 +523,32 @@ impl Handler for HandlerImpl {
     async fn respond_decision_task_completed(&self, request: Option<&HistoryRespondDecisionTaskCompletedRequest>) -> HResult<HistoryRespondDecisionTaskCompletedResponse> {
         let r = nil(request)?;
         let c = r.complete_request.as_ref().ok_or_else(|| HistoryError::internal("nil request"))?;
-        self.prep_token(&r.domain_uuid, &c.task_token).await?.respond_decision_task_completed(r).await
+        self.check_domain_and_rate(&r.domain_uuid)?;
+        if c.decisions.is_empty() {
+            self.handler_scope("HistoryRespondDecisionTaskCompleted").inc_counter("EmptyCompletionDecisionsCounter");
+        }
+        let t = deser_token(&c.task_token)?;
+        validate_task_token(&t)?;
+        self.engine(&t.workflow_id).await?.respond_decision_task_completed(r).await
     }
 
     async fn respond_decision_task_failed(&self, request: Option<&HistoryRespondDecisionTaskFailedRequest>) -> HResult<()> {
         let r = nil(request)?;
         let c = r.failed_request.as_ref().ok_or_else(|| HistoryError::internal("nil request"))?;
-        self.prep_token(&r.domain_uuid, &c.task_token).await?.respond_decision_task_failed(r).await
+        self.check_domain_and_rate(&r.domain_uuid)?;
+        let t = deser_token(&c.task_token)?;
+        if c.cause == Some(cadence_api::enums::DecisionTaskFailedCause::UnhandledDecision) {
+            tracing::info!(domain_id = %t.domain_id, workflow_id = %t.workflow_id, run_id = %t.run_id, "Non-Deterministic Error");
+            let domain_name = crate::engine::deps::DomainCache::get_domain_name(&*self.registry.env().domain_cache, &t.domain_id);
+            let tag = match domain_name {
+                Ok(n) => ("domain".to_string(), n),
+                Err(_) => ("domain".to_string(), "_unknown_".to_string()),
+            };
+            Scope::new(self.registry.env().metrics_registry.clone(), "HistoryRespondDecisionTaskFailed", vec![tag])
+                .inc_counter("CadenceErrNonDeterministicCounter");
+        }
+        validate_task_token(&t)?;
+        self.engine(&t.workflow_id).await?.respond_decision_task_failed(r).await
     }
 
     async fn schedule_decision_task(&self, request: Option<&ScheduleDecisionTaskRequest>) -> HResult<()> {
@@ -654,7 +684,7 @@ mod start_handler_tests {
         let b = shard_msgs(2, Some(2), 1);
         let one = a.size;
         // fits exactly one (check is `>=`, so max = size+1 admits the first only)
-        let resp = build_get_replication_messages_response(vec![b, a], one + 1);
+        let resp = build_get_replication_messages_response(vec![b, a], one + 1, &|_| {});
         let m = resp.messages_by_shard.unwrap();
         assert_eq!(m.len(), 1);
         assert!(m.contains_key(&1));
