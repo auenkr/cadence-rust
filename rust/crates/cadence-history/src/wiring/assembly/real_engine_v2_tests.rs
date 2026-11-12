@@ -168,7 +168,7 @@ async fn reuse_policy_matrix(close_status: i32, run_id: &str, expect_err: [bool;
         }
         let res = h.engine.start_workflow_execution(&start_req("newRequestID", Some(policy))).await;
         if expect_err[i] {
-            assert!(is_already_started(&res.as_ref().unwrap_err()), "policy {i} close status {close_status}: {res:?}");
+            assert!(is_already_started(res.as_ref().unwrap_err()), "policy {i} close status {close_status}: {res:?}");
         } else {
             let resp = res.unwrap_or_else(|e| panic!("policy {i} close status {close_status}: {e}"));
             assert!(!resp.run_id.is_empty());
