@@ -26,6 +26,8 @@ impl DomainCache for Domains {
     fn get_domain_by_id(&self, id: &str) -> Result<Arc<DomainCacheEntry>> {
         Ok(Arc::new(DomainCacheEntry {
             info: DomainInfo { id: id.into(), name: "domain".into() },
+            is_global_domain: id == "global-domain",
+            failover_version: 5,
             ..Default::default()
         }))
     }
@@ -317,10 +319,14 @@ struct Deps {
     resurrection_delay: Duration,
     advanced_visibility: bool,
     pushed: Mutex<Vec<AddMatchingTaskRequest>>,
+    load_err: Option<TaskError>,
 }
 #[async_trait]
 impl TimerActiveDependencies for Deps {
     async fn load_workflow(&self, _: &dyn PersistenceTask, _: i64) -> Result<Option<Arc<dyn TimerWorkflow>>> {
+        if let Some(e) = &self.load_err {
+            return Err(e.clone());
+        }
         Ok(self.w.clone().map(|w| w as Arc<dyn TimerWorkflow>))
     }
     fn resurrection_check_min_delay(&self, _: &str) -> Duration {
@@ -355,6 +361,7 @@ fn deps(w: &Arc<W>) -> Deps {
         resurrection_delay: Duration::from_secs(3600),
         advanced_visibility: false,
         pushed: Mutex::new(vec![]),
+        load_err: None,
     }
 }
 
@@ -781,5 +788,59 @@ async fn load_none_is_noop_and_busy_mapped() {
     d.w = None;
     let e = executor(Arc::new(d));
     e.execute_workflow_timeout_task(&wf_timeout()).await.unwrap();
+    assert!(w.calls().is_empty());
+
+    // context deadline while loading is surfaced as WorkflowBusy
+    let mut d = deps(&w);
+    d.load_err = Some(TaskError::ContextDeadlineExceeded);
+    let e = executor(Arc::new(d));
+    assert_eq!(e.execute_workflow_timeout_task(&wf_timeout()).await, Err(TaskError::WorkflowBusy));
+    // other load errors pass through unchanged
+    let mut d = deps(&w);
+    d.load_err = Some(TaskError::Other("boom".into()));
+    let e = executor(Arc::new(d));
+    assert_eq!(e.execute_workflow_timeout_task(&wf_timeout()).await, Err(TaskError::Other("boom".into())));
+}
+
+// ---- global domain version mismatch paths ----
+
+fn gwf() -> WorkflowIdentifier {
+    WorkflowIdentifier { domain_id: "global-domain".into(), workflow_id: "wid".into(), run_id: "rid".into() }
+}
+fn gtd(version: i64) -> TaskData {
+    TaskData { version, task_id: 100, visibility_timestamp: Time(NOW) }
+}
+
+#[tokio::test]
+async fn global_domain_decision_timeout_version_mismatch_is_noop() {
+    let w = W::new();
+    w.set(|s| s.decision = Some(dinfo(0, EMPTY_EVENT_ID)));
+    let e = executor(Arc::new(deps(&w)));
+    let t = DecisionTimeoutTask { workflow_identifier: gwf(), task_data: gtd(2), event_id: 5, schedule_attempt: 0, timeout_type: 0 };
+    e.execute_decision_timeout_task(&t).await.unwrap();
+    assert!(w.calls().is_empty());
+}
+
+#[tokio::test]
+async fn global_domain_activity_retry_timer_version_mismatch_is_noop() {
+    // Go: only the activity retry timer verifies the activity version (the timeout task does not).
+    let w = W::new();
+    w.set(|s| {
+        s.activity_infos.insert(5, ainfo(5));
+    });
+    let d = Arc::new(deps(&w));
+    let e = executor(d.clone());
+    let t = ActivityRetryTimerTask { workflow_identifier: gwf(), task_data: gtd(2), event_id: 5, attempt: 0 };
+    e.execute_activity_retry_timer_task(&t).await.unwrap();
+    assert!(d.pushed.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn global_domain_workflow_timeout_version_mismatch_is_noop() {
+    // fake start_version() is 1
+    let w = W::new();
+    let e = executor(Arc::new(deps(&w)));
+    let t = WorkflowTimeoutTask { workflow_identifier: gwf(), task_data: gtd(2) };
+    e.execute_workflow_timeout_task(&t).await.unwrap();
     assert!(w.calls().is_empty());
 }
