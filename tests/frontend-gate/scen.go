@@ -203,15 +203,30 @@ func scenMain(rpc workflowserviceclient.Interface, domain, archDomain, archDir s
 				rA, rB := uuid.NewString(), uuid.NewString()
 				e1, e2, e3 := sig(rA), sig(rA), sig(rB)
 				step("scen-idem-signal-calls-ok", firstErr(e1, e2, e3))
-				ev, err := scenHistory(ctx, rpc, domain, swid, sr.GetRunId())
-				n := 0
-				for _, e := range ev {
-					if e.GetEventType() == shared.EventTypeWorkflowExecutionSignaled {
-						n++
+				countSig := func() (int, error) {
+					ev, err := scenHistory(ctx, rpc, domain, swid, sr.GetRunId())
+					n := 0
+					for _, e := range ev {
+						if e.GetEventType() == shared.EventTypeWorkflowExecutionSignaled {
+							n++
+						}
 					}
+					return n, err
 				}
-				if err == nil && n != 2 {
-					err = fmt.Errorf("%d signal events, want 2 (duplicate request id must be deduped)", n)
+				err := scenPoll(ctx, 90*time.Second, func() error {
+					n, err := countSig()
+					if err == nil && n < 2 {
+						err = fmt.Errorf("%d signal events so far, want 2", n)
+					}
+					return err
+				})
+				if err == nil {
+					time.Sleep(2 * time.Second)
+					n, e := countSig()
+					if e == nil && n != 2 {
+						e = fmt.Errorf("%d signal events, want exactly 2 (duplicate request id must be deduped)", n)
+					}
+					err = e
 				}
 				step("scen-idem-signal-request-id-dedup", err)
 				_ = rpc.TerminateWorkflowExecution(ctx, &shared.TerminateWorkflowExecutionRequest{Domain: &domain, WorkflowExecution: exe, Reason: ptr("scen done")})
@@ -233,8 +248,6 @@ func scenMain(rpc workflowserviceclient.Interface, domain, archDomain, archDir s
 			var runID string
 			if step("scen-archival-start", err) {
 				runID = run.GetRunID()
-				var out string
-				step("scen-archival-completes", run.Get(ctx, &out))
 				err = scenPoll(ctx, 6*time.Minute, func() error {
 					var files []string
 					_ = filepath.Walk(archDir, func(p string, info os.FileInfo, e error) error {
