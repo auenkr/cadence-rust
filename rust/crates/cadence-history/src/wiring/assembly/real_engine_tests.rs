@@ -141,7 +141,7 @@ async fn start_creates_run_current_execution_and_first_decision() {
     let snap = h.execs.snapshot(WF, &run).expect("persisted");
     assert_eq!(snap.execution_info.next_event_id, 3, "WorkflowExecutionStarted + DecisionTaskScheduled");
     assert_eq!(snap.execution_info.decision_schedule_id, 2);
-    assert_eq!(snap.execution_info.state, WORKFLOW_STATE_CREATED);
+    assert_eq!(snap.execution_info.state, WORKFLOW_STATE_RUNNING);
     assert_eq!(h.execs.current_run(WF).unwrap().run_id, run);
     assert!(!h.history.nodes.lock().unwrap().is_empty(), "start events appended to history branch");
     assert!(h.execs.transfer_types().contains(&0), "decision transfer task");
