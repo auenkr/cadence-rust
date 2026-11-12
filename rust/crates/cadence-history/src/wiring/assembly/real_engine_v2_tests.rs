@@ -2,7 +2,8 @@
 //! history_engine3_eventsv2_test.go (deprecated-domain checks, brand-new start, signal-with-start) over the
 //! in-memory stores of `real_engine_harness`. Go's gomock `.Return(nil, err)` persistence errors are injected via
 //! `Inner::create_errors` / `Inner::update_errors`.
-use cadence_api::enums::WorkflowIDReusePolicy;
+use cadence_api::enums::{DecisionType, WorkflowIDReusePolicy};
+use cadence_api::tasktoken::{JsonTaskTokenSerializer, TaskToken};
 use cadence_api::errors::CadenceError;
 use cadence_api::service_types::SignalWithStartWorkflowExecutionRequest;
 use cadence_api::service_types::RequestCancelWorkflowExecutionRequest;
@@ -375,4 +376,393 @@ async fn request_cancel_completed_workflow_fails() {
     close_run(&h, &run, 0, "");
     let err = h.engine.request_cancel_workflow_execution(&cancel_req(&run, "")).await.unwrap_err();
     assert!(err.is_workflow_already_completed(), "{err}");
+}
+
+// ---- direct conflict_resolve store test (Go checks every condition in one tx before mutating)
+
+#[tokio::test]
+async fn conflict_resolve_checks_all_conditions_before_mutating() {
+    use cadence_persistence::history_contract::{ConflictResolveWorkflowExecutionRequest, ConflictResolveWorkflowMode, GoExecutionStore, WorkflowMutation, WorkflowRequestMode};
+    let h = Harness::new();
+    let run_a = started(&h).await;
+    // Second (zombie-like) run B of the same workflow, not current.
+    let mut b = h.execs.snapshot(WF, &run_a).unwrap();
+    b.execution_info.run_id = "run-b".into();
+    h.execs.inner.lock().unwrap().runs.insert((DOMAIN_ID.into(), WF.into(), "run-b".into()), b.clone());
+    let a_snapshot = h.execs.snapshot(WF, &run_a).unwrap();
+    let mut reset = b.clone();
+    reset.condition = b.execution_info.next_event_id;
+    reset.execution_info.next_event_id += 10;
+    // Current-run mutation with a wrong condition must fail the whole request.
+    let cur = WorkflowMutation {
+        execution_info: a_snapshot.execution_info.clone(),
+        condition: a_snapshot.execution_info.next_event_id + 99,
+        ..Default::default()
+    };
+    let err = h
+        .execs
+        .conflict_resolve_workflow_execution(ConflictResolveWorkflowExecutionRequest {
+            shard_id: 0,
+            range_id: 0,
+            mode: ConflictResolveWorkflowMode::UpdateCurrent,
+            reset_workflow_snapshot: reset,
+            new_workflow_snapshot: None,
+            current_workflow_mutation: Some(cur),
+            workflow_request_mode: WorkflowRequestMode::New,
+            current_timestamp_unix_nanos: 0,
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(err, PersistenceError::ConditionFailed(_)), "{err:?}");
+    // Nothing was mutated: current run still A, B untouched.
+    assert_eq!(h.execs.current_run(WF).unwrap().run_id, run_a);
+    assert_eq!(h.execs.snapshot(WF, "run-b").unwrap().execution_info.next_event_id, b.execution_info.next_event_id);
+}
+
+// ---- RecordDecisionTaskStarted* variants (history_engine2_test.go)
+
+fn exec_of(run: &str) -> Option<WorkflowExecution> {
+    Some(WorkflowExecution { workflow_id: WF.into(), run_id: run.into() })
+}
+
+async fn rec_decision(h: &Harness, run: &str, schedule_id: i64, request_id: &str) -> HResult<RecordDecisionTaskStartedResponse> {
+    h.engine
+        .record_decision_task_started(&RecordDecisionTaskStartedRequest {
+            domain_uuid: DOMAIN_ID.into(),
+            workflow_execution: exec_of(run),
+            schedule_id,
+            task_id: 100,
+            request_id: request_id.into(),
+            poll_request: Some(PollForDecisionTaskRequest { task_list: Some(TaskList { name: TL.into(), ..Default::default() }), identity: IDENTITY.into(), ..Default::default() }),
+        })
+        .await
+}
+
+async fn rec_activity(h: &Harness, run: &str, schedule_id: i64, request_id: &str) -> HResult<RecordActivityTaskStartedResponse> {
+    h.engine
+        .record_activity_task_started(&RecordActivityTaskStartedRequest {
+            domain_uuid: DOMAIN_ID.into(),
+            workflow_execution: exec_of(run),
+            schedule_id,
+            task_id: 100,
+            request_id: request_id.into(),
+            poll_request: Some(PollForActivityTaskRequest { task_list: Some(TaskList { name: TL.into(), ..Default::default() }), identity: IDENTITY.into(), ..Default::default() }),
+        })
+        .await
+}
+
+fn task_token(run: &str, schedule_id: i64) -> Vec<u8> {
+    JsonTaskTokenSerializer::serialize(&TaskToken { domain_id: DOMAIN_ID.into(), workflow_id: WF.into(), run_id: run.into(), schedule_id, ..Default::default() }).unwrap()
+}
+
+async fn respond_decision(h: &Harness, run: &str, decisions: Vec<Decision>) -> HResult<HistoryRespondDecisionTaskCompletedResponse> {
+    h.engine
+        .respond_decision_task_completed(&HistoryRespondDecisionTaskCompletedRequest {
+            domain_uuid: DOMAIN_ID.into(),
+            complete_request: Some(RespondDecisionTaskCompletedRequest { task_token: task_token(run, 2), decisions, identity: IDENTITY.into(), ..Default::default() }),
+        })
+        .await
+}
+
+fn schedule_activity(id: &str) -> Decision {
+    Decision {
+        decision_type: Some(DecisionType::ScheduleActivityTask),
+        schedule_activity_task_decision_attributes: Some(ScheduleActivityTaskDecisionAttributes {
+            activity_id: id.into(),
+            activity_type: Some(ActivityType { name: "activity_type1".into() }),
+            domain: DOMAIN_NAME.into(),
+            task_list: Some(TaskList { name: TL.into(), ..Default::default() }),
+            input: b"input1".to_vec(),
+            schedule_to_close_timeout_seconds: Some(100),
+            schedule_to_start_timeout_seconds: Some(10),
+            start_to_close_timeout_seconds: Some(1),
+            heartbeat_timeout_seconds: Some(5),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
+/// Go `createExecutionStartedState(..., startDecision=false)`: workflow started + decision scheduled (id 2).
+async fn started_with_decision(h: &Harness) -> String {
+    started(h).await
+}
+
+/// Go `createExecutionStartedState(..., startDecision=true)` + DecisionTaskCompleted + ActivityTaskScheduled (id 5).
+async fn started_with_activity(h: &Harness) -> String {
+    let run = started(h).await;
+    rec_decision(h, &run, 2, "dec-req").await.expect("decision started");
+    respond_decision(h, &run, vec![schedule_activity("activity1_id")]).await.expect("decision completed");
+    run
+}
+
+#[tokio::test]
+async fn record_decision_task_started_success() {
+    let h = Harness::new();
+    let run = started_with_decision(&h).await;
+    let resp = rec_decision(&h, &run, 2, "reqId").await.expect("record");
+    assert_eq!(resp.workflow_type.as_ref().unwrap().name, "workflowType");
+    assert!(resp.previous_started_event_id.is_none());
+    assert_eq!(resp.scheduled_event_id, 2);
+    assert_eq!(resp.started_event_id, 3);
+    assert!(resp.queries.is_empty());
+}
+
+#[tokio::test]
+async fn record_decision_task_started_if_no_execution() {
+    let h = Harness::new();
+    let err = rec_decision(&h, "00000000-0000-0000-0000-000000000009", 2, "reqId").await.unwrap_err();
+    assert!(err.is_entity_not_exists(), "{err:?}");
+}
+
+#[tokio::test]
+async fn record_decision_task_started_if_get_execution_failed() {
+    let h = Harness::new();
+    h.execs.inner.lock().unwrap().get_errors.push_back(PersistenceError::Internal("FAILED".into()));
+    let err = rec_decision(&h, "00000000-0000-0000-0000-000000000009", 2, "reqId").await.unwrap_err();
+    assert!(err.to_string().contains("FAILED"), "{err:?}");
+}
+
+#[tokio::test]
+async fn record_decision_task_started_if_task_already_started() {
+    let h = Harness::new();
+    let run = started_with_decision(&h).await;
+    rec_decision(&h, &run, 2, "first").await.expect("first");
+    let err = rec_decision(&h, &run, 2, "reqId").await.unwrap_err();
+    assert!(matches!(err, HistoryError::EventAlreadyStarted(_)), "{err:?}");
+}
+
+#[tokio::test]
+async fn record_decision_task_started_if_task_already_completed() {
+    let h = Harness::new();
+    let run = started_with_decision(&h).await;
+    rec_decision(&h, &run, 2, "first").await.expect("first");
+    respond_decision(&h, &run, vec![]).await.expect("completed");
+    let err = rec_decision(&h, &run, 2, "reqId").await.unwrap_err();
+    assert!(err.is_entity_not_exists(), "{err:?}");
+}
+
+#[tokio::test]
+async fn record_decision_task_started_conflict_on_update() {
+    let h = Harness::new();
+    let run = started_with_decision(&h).await;
+    h.execs.inner.lock().unwrap().update_errors.push_back(PersistenceError::ConditionFailed("conflict".into()));
+    let resp = rec_decision(&h, &run, 2, "reqId").await.expect("retry after conflict");
+    assert_eq!(resp.workflow_type.as_ref().unwrap().name, "workflowType");
+    assert!(resp.previous_started_event_id.is_none());
+    assert_eq!(resp.started_event_id, 3);
+}
+
+/// Competing writer started the decision (with `request_id`) between the first load and the conditional update.
+fn competing_decision_start(h: &Harness, run: &str, request_id: &'static str) {
+    let key = (DOMAIN_ID.to_string(), WF.to_string(), run.to_string());
+    h.execs.inner.lock().unwrap().conflict_hooks.push_back(Box::new(move |runs| {
+        let info = &mut runs.get_mut(&key).unwrap().execution_info;
+        info.decision_started_id = 3;
+        info.decision_request_id = request_id.into();
+        info.next_event_id = 4;
+    }));
+}
+
+#[tokio::test]
+async fn record_decision_task_retry_same_request() {
+    let h = Harness::new();
+    let run = started_with_decision(&h).await;
+    competing_decision_start(&h, &run, "testRecordDecisionTaskRetrySameRequestID");
+    let resp = rec_decision(&h, &run, 2, "testRecordDecisionTaskRetrySameRequestID").await.expect("same request returns started decision");
+    assert_eq!(resp.workflow_type.as_ref().unwrap().name, "workflowType");
+    assert!(resp.previous_started_event_id.is_none());
+    assert_eq!(resp.started_event_id, 3);
+}
+
+#[tokio::test]
+async fn record_decision_task_retry_different_request() {
+    let h = Harness::new();
+    let run = started_with_decision(&h).await;
+    competing_decision_start(&h, &run, "some_other_req");
+    let err = rec_decision(&h, &run, 2, "testRecordDecisionTaskRetrySameRequestID").await.unwrap_err();
+    assert!(matches!(err, HistoryError::EventAlreadyStarted(_)), "{err:?}");
+}
+
+#[tokio::test]
+async fn record_decision_task_started_max_attempts_exceeded() {
+    let h = Harness::new();
+    let run = started_with_decision(&h).await;
+    for _ in 0..10 {
+        h.execs.inner.lock().unwrap().update_errors.push_back(PersistenceError::ConditionFailed("conflict".into()));
+    }
+    let err = rec_decision(&h, &run, 2, "reqId").await.unwrap_err();
+    assert!(matches!(err, HistoryError::MaxAttemptsExceeded), "{err:?}");
+}
+
+// ---- RecordActivityTaskStarted* variants
+
+#[tokio::test]
+async fn record_activity_task_started_if_no_execution() {
+    let h = Harness::new();
+    let err = rec_activity(&h, "00000000-0000-0000-0000-000000000009", 5, "reqId").await.unwrap_err();
+    assert!(err.is_entity_not_exists(), "{err:?}");
+}
+
+#[tokio::test]
+async fn record_activity_task_started_success() {
+    let h = Harness::new();
+    let run = started_with_activity(&h).await;
+    let resp = rec_activity(&h, &run, 5, "reqId").await.expect("record");
+    let ev = resp.scheduled_event.expect("scheduled event");
+    assert_eq!(ev.event_id, 5);
+    assert_eq!(ev.activity_task_scheduled_event_attributes.as_ref().unwrap().activity_id, "activity1_id");
+}
+
+#[tokio::test]
+async fn record_activity_task_started_stale_state() {
+    let h = Harness::new();
+    let run = started_with_decision(&h).await;
+    rec_decision(&h, &run, 2, "dec-req").await.expect("decision started");
+    // schedule id 5 is beyond next_event_id (4): the cached state is stale and reloading never fixes it.
+    let err = rec_activity(&h, &run, 5, "reqId").await.unwrap_err();
+    assert!(matches!(err, HistoryError::MaxAttemptsExceeded), "{err:?}");
+}
+
+#[tokio::test]
+async fn record_activity_task_started_activity_not_pending() {
+    let h = Harness::new();
+    let run = started_with_decision(&h).await;
+    rec_decision(&h, &run, 2, "dec-req").await.expect("decision started");
+    let err = rec_activity(&h, &run, 3, "reqId").await.unwrap_err();
+    assert!(err.is_entity_not_exists(), "{err:?}");
+}
+
+#[tokio::test]
+async fn record_activity_task_started_activity_already_started() {
+    let h = Harness::new();
+    let run = started_with_activity(&h).await;
+    let first = rec_activity(&h, &run, 5, "reqId").await.expect("first");
+    // same schedule id and same request id returns the same scheduled event
+    let again = rec_activity(&h, &run, 5, "reqId").await.expect("same request id");
+    assert_eq!(first.scheduled_event, again.scheduled_event);
+    // same schedule id and a different request id is rejected
+    let err = rec_activity(&h, &run, 5, "otherReqId").await.unwrap_err();
+    assert!(matches!(err, HistoryError::EventAlreadyStarted(_)), "{err:?}");
+}
+
+#[tokio::test]
+async fn record_activity_task_started_resurrected() {
+    let h = Harness::new();
+    let run = started_with_activity(&h).await;
+    let stale = h.execs.snapshot(WF, &run).unwrap();
+    rec_activity(&h, &run, 5, "reqId").await.expect("started");
+    h.engine
+        .respond_activity_task_completed(&HistoryRespondActivityTaskCompletedRequest {
+            domain_uuid: DOMAIN_ID.into(),
+            complete_request: Some(RespondActivityTaskCompletedRequest {
+                task_token: JsonTaskTokenSerializer::serialize(&TaskToken { domain_id: DOMAIN_ID.into(), workflow_id: WF.into(), run_id: run.clone(), schedule_id: 5, ..Default::default() }).unwrap(),
+                identity: IDENTITY.into(),
+                ..Default::default()
+            }),
+        })
+        .await
+        .expect("activity completed");
+    // Persistence is rolled back to the pre-start snapshot (activity resurrected) while history has the later events.
+    let next_id = h.execs.snapshot(WF, &run).unwrap().execution_info.next_event_id;
+    {
+        let mut g = h.execs.inner.lock().unwrap();
+        let mut resurrected = stale;
+        resurrected.condition = resurrected.execution_info.next_event_id;
+        g.runs.insert((DOMAIN_ID.into(), WF.into(), run.clone()), resurrected);
+    }
+    h.cache.clear_all_for_test();
+    h.clock.0.fetch_add(3_600_000_000_000, std::sync::atomic::Ordering::SeqCst);
+    let err = rec_activity(&h, &run, 5, "reqId2").await.unwrap_err();
+    assert!(err.is_entity_not_exists(), "{err:?} (history next event {next_id})");
+    assert!(h.execs.snapshot(WF, &run).unwrap().activity_infos.is_empty(), "resurrected activity deleted from mutable state");
+}
+
+// ---- RespondDecisionTaskCompleted RecordMarker, Terminate
+
+#[tokio::test]
+async fn respond_decision_task_completed_record_marker_decision() {
+    let h = Harness::new();
+    let run = started_with_decision(&h).await;
+    rec_decision(&h, &run, 2, "dec-req").await.expect("decision started");
+    let marker = Decision {
+        decision_type: Some(DecisionType::RecordMarker),
+        record_marker_decision_attributes: Some(RecordMarkerDecisionAttributes { marker_name: "marker name".into(), details: b"marker details".to_vec(), ..Default::default() }),
+        ..Default::default()
+    };
+    respond_decision(&h, &run, vec![marker]).await.expect("completed");
+    let info = h.execs.snapshot(WF, &run).unwrap().execution_info;
+    assert_eq!(info.next_event_id, 6);
+    assert_eq!(info.last_processed_event, 3);
+    assert_eq!(info.state, WORKFLOW_STATE_RUNNING);
+    assert_eq!(info.decision_schedule_id, -23, "no pending decision");
+}
+
+#[tokio::test]
+async fn terminate_workflow_execution_success() {
+    // Go's TestTerminateWorkflowExecution_Success is an empty body; assert the documented behavior.
+    let h = Harness::new();
+    let run = started(&h).await;
+    h.engine
+        .terminate_workflow_execution(&HistoryTerminateWorkflowExecutionRequest {
+            domain_uuid: DOMAIN_ID.into(),
+            terminate_request: Some(TerminateWorkflowExecutionRequest {
+                domain: DOMAIN_NAME.into(),
+                workflow_execution: exec_of(&run),
+                reason: "reason".into(),
+                identity: IDENTITY.into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .await
+        .expect("terminate");
+    let info = h.execs.snapshot(WF, &run).unwrap().execution_info;
+    assert_eq!(info.state, WORKFLOW_STATE_COMPLETED);
+    assert_eq!(info.close_status, WORKFLOW_CLOSE_STATUS_TERMINATED);
+    assert_eq!(info.next_event_id, 4, "WorkflowExecutionTerminated appended");
+}
+
+// ---- SignalWithStart NotRunning / Start_DuplicateRequests
+
+fn sws_allow_dup(request_id: &str) -> HistorySignalWithStartWorkflowExecutionRequest {
+    let mut r = sws_req(request_id);
+    r.signal_with_start_request.as_mut().unwrap().workflow_id_reuse_policy = Some(WorkflowIDReusePolicy::AllowDuplicate);
+    r.partition_config = [("zone".to_string(), "phx".to_string())].into_iter().collect();
+    r
+}
+
+#[tokio::test]
+async fn signal_with_start_workflow_not_running() {
+    let h = Harness::new();
+    let mut s = start_req("first-req", None);
+    s.start_request.as_mut().unwrap().workflow_id = "wId".into();
+    let first = h.engine.start_workflow_execution(&s).await.expect("start");
+    {
+        let mut g = h.execs.inner.lock().unwrap();
+        let snap = g.runs.get_mut(&(DOMAIN_ID.to_string(), "wId".to_string(), first.run_id.clone())).unwrap();
+        snap.execution_info.state = WORKFLOW_STATE_COMPLETED;
+    }
+    h.cache.clear_all_for_test();
+    let resp = h.engine.signal_with_start_workflow_execution(&sws_allow_dup("sws-req")).await.expect("sws");
+    assert!(!resp.run_id.is_empty());
+    assert_ne!(resp.run_id, first.run_id);
+    let snap = h.execs.snapshot("wId", &resp.run_id).unwrap();
+    assert_eq!(snap.execution_info.partition_config.get("zone").map(String::as_str), Some("phx"));
+}
+
+#[tokio::test]
+async fn signal_with_start_start_duplicate_requests() {
+    let h = Harness::new();
+    push_create_error(&h, already_started("testRequestID", "existing-run", 1, 0));
+    let resp = h.engine.signal_with_start_workflow_execution(&sws_allow_dup("testRequestID")).await.expect("same request id returns the running run");
+    assert_eq!(resp.run_id, "existing-run");
+}
+
+#[tokio::test]
+async fn signal_with_start_start_duplicate_request_error() {
+    let h = Harness::new();
+    push_create_error(&h, PersistenceError::DuplicateRequest { request_type: 1, run_id: "test-run-id".into() });
+    let resp = h.engine.signal_with_start_workflow_execution(&sws_allow_dup("testRequestID")).await.expect("duplicate request error");
+    assert_eq!(resp.run_id, "test-run-id");
 }
