@@ -252,7 +252,7 @@ impl NdcMutableState for OwnedNdcMutableState {
             ),
             _ => None,
         };
-        return Ok((policy, self.typed.execution_info.last_event_task_id));
+        Ok((policy, self.typed.execution_info.last_event_task_id))
     }
 
     fn has_processed_or_pending_decision(&self) -> NdcResult<bool> {
