@@ -307,6 +307,31 @@ impl task::DomainMetricsScopeCache for DomainMetricsScopeCacheImpl {
     }
 }
 
+/// Go archiver `MetricsClient.Scope(HistoryArchiverScope, DomainTag(domain))` over the registry
+/// (s3/gcloud archivers run inside History for inline archival).
+pub struct ArchiverMetricsAdapter(pub Arc<MetricsRegistry>);
+
+impl ArchiverMetricsAdapter {
+    fn scope(&self, scope: &str, domain: &str) -> Scope {
+        Scope::new(self.0.clone(), scope, vec![("domain".to_owned(), domain.to_owned())])
+    }
+}
+
+impl cadence_common::cloud_archiver::ArchiverMetrics for ArchiverMetricsAdapter {
+    fn inc_counter(&self, scope: &str, domain: &str, name: &str) {
+        self.scope(scope, domain).counter(name, 1.0);
+    }
+    fn add_counter(&self, scope: &str, domain: &str, name: &str, delta: i64) {
+        self.scope(scope, domain).counter(name, delta as f64);
+    }
+    fn record_timer(&self, scope: &str, domain: &str, name: &str, value: i64) {
+        self.scope(scope, domain).obs(name, value as f64);
+    }
+    fn int_histogram(&self, scope: &str, domain: &str, name: &str, value: i64) {
+        self.scope(scope, domain).obs(name, value as f64);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

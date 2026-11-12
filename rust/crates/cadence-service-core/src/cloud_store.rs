@@ -825,6 +825,111 @@ mod tests {
         (addr, handle)
     }
 
+    type Seen = Vec<(String, Vec<u8>)>;
+
+    /// Like `serve` but reads each full request (headers + `content-length` body).
+    fn serve_full(
+        responses: Vec<(u16, String)>,
+    ) -> (String, std::thread::JoinHandle<Seen>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = format!("http://{}", listener.local_addr().unwrap());
+        let handle = std::thread::spawn(move || {
+            let mut seen = Vec::new();
+            for (status, body) in responses {
+                let (mut s, _) = listener.accept().unwrap();
+                let mut data = Vec::new();
+                let mut buf = [0_u8; 4096];
+                let (head, mut rest) = loop {
+                    let n = s.read(&mut buf).unwrap();
+                    data.extend_from_slice(&buf[..n]);
+                    if let Some(i) = data.windows(4).position(|w| w == b"\r\n\r\n") {
+                        break (
+                            String::from_utf8_lossy(&data[..i]).into_owned(),
+                            data[i + 4..].to_vec(),
+                        );
+                    }
+                    assert!(n > 0, "connection closed before headers");
+                };
+                let want = head
+                    .lines()
+                    .find_map(|l| l.to_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap()))
+                    .unwrap_or(0);
+                while rest.len() < want {
+                    let n = s.read(&mut buf).unwrap();
+                    assert!(n > 0, "connection closed before body");
+                    rest.extend_from_slice(&buf[..n]);
+                }
+                seen.push((head, rest));
+                let reply = format!(
+                    "HTTP/1.1 {status} X\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                s.write_all(reply.as_bytes()).unwrap();
+            }
+            seen
+        });
+        (addr, handle)
+    }
+
+    #[test]
+    fn s3_put_and_head_object_requests() {
+        let (addr, handle) = serve_full(vec![
+            (200, String::new()),
+            (404, String::new()),
+            (200, String::new()),
+            (404, "<Error><Code>NoSuchBucket</Code><Message>m</Message></Error>".to_owned()),
+            (503, String::new()),
+        ]);
+        let store = S3Store::with_creds_for_test(
+            &S3Config { region: "us-east-1".into(), endpoint: Some(addr), force_path_style: true },
+            "AKID",
+            "secret",
+        );
+        store.put_object("bkt", "p/k 1", b"hello").unwrap();
+        assert!(!store.head_object("bkt", "p/k").unwrap());
+        assert!(store.head_object("bkt", "p/k").unwrap());
+        assert_eq!(store.put_object("nob", "k", b"x").unwrap_err().kind, StoreErrorKind::NoSuchBucket);
+        assert_eq!(store.head_object("bkt", "k").unwrap_err().kind, StoreErrorKind::Retryable);
+        let seen = handle.join().unwrap();
+        let (head, body) = &seen[0];
+        assert!(head.starts_with("PUT /bkt/p/k%201 HTTP/1.1"), "{head}");
+        assert_eq!(body, b"hello");
+        let lower = head.to_lowercase();
+        assert!(lower.contains("authorization: aws4-hmac-sha256 credential=akid/"));
+        assert!(lower.contains("/us-east-1/s3/aws4_request"));
+        assert!(lower.contains("signedheaders=host;x-amz-content-sha256;x-amz-date"));
+        assert!(lower.contains(&format!("x-amz-content-sha256: {}", sha256_hex(b"hello"))));
+        assert!(seen[1].0.starts_with("HEAD /bkt/p/k HTTP/1.1"), "{}", seen[1].0);
+        assert!(seen[1].0.to_lowercase().contains(&format!("x-amz-content-sha256: {}", sha256_hex(b""))));
+        assert!(seen[3].0.starts_with("PUT /nob/k HTTP/1.1"));
+    }
+
+    #[test]
+    fn gcs_put_and_head_object_requests() {
+        let (addr, handle) = serve_full(vec![
+            (200, "{}".to_owned()),
+            (200, "{}".to_owned()),
+            (404, "{}".to_owned()),
+            (404, r#"{"error":{"message":"bucket gone"}}"#.to_owned()),
+        ]);
+        let store = GcsStore::for_test(&addr);
+        store.put_object("bkt", "dir/file.history", b"payload").unwrap();
+        assert!(store.head_object("bkt", "dir/file.history").unwrap());
+        assert!(!store.head_object("bkt", "missing").unwrap());
+        assert_eq!(store.put_object("nob", "k", b"x").unwrap_err().kind, StoreErrorKind::NoSuchBucket);
+        let seen = handle.join().unwrap();
+        let (head, body) = &seen[0];
+        assert!(
+            head.starts_with("POST /upload/storage/v1/b/bkt/o?uploadType=media&name=dir%2Ffile.history HTTP/1.1"),
+            "{head}"
+        );
+        assert!(head.to_lowercase().contains("content-type: application/octet-stream"));
+        assert!(!head.to_lowercase().contains("authorization:"));
+        assert_eq!(body, b"payload");
+        assert!(seen[1].0.starts_with("GET /storage/v1/b/bkt/o/dir%2Ffile.history HTTP/1.1"), "{}", seen[1].0);
+        assert!(seen[3].0.starts_with("POST /upload/storage/v1/b/nob/o?"));
+    }
+
     #[test]
     fn hmac_matches_rfc4231_vector() {
         assert_eq!(
