@@ -146,6 +146,11 @@ impl EngineMutableState {
         g.pc_exec.decision_scheduled_time_unix_nanos = now;
         g.pc_exec.decision_started_time_unix_nanos = 0;
         g.pc_exec.decision_original_scheduled_time_unix_nanos = original;
+        // Go ReplicateDecisionTaskScheduledEvent: Created -> Running unless Zombie.
+        if g.exec.state != crate::engine::deps::WORKFLOW_STATE_ZOMBIE {
+            g.exec.state = crate::engine::deps::WORKFLOW_STATE_RUNNING;
+            g.exec.close_status = 0;
+        }
         g.mirror_decision();
         g.dirty = true;
         if !bypass_task_generation {

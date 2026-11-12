@@ -26,6 +26,7 @@ pub const DOMAIN_NAME: &str = "test-domain";
 pub const CLUSTER: &str = "cluster-a";
 
 type RunKey = (String, String, String);
+pub type ConflictHook = Box<dyn FnOnce(&mut HashMap<RunKey, pc::WorkflowSnapshot>) + Send>;
 
 #[derive(Default)]
 pub struct Inner {
@@ -38,6 +39,11 @@ pub struct Inner {
     /// Errors returned (FIFO) by the next create/update calls instead of touching state (gomock `.Return(nil, err)`).
     pub create_errors: std::collections::VecDeque<PersistenceError>,
     pub update_errors: std::collections::VecDeque<PersistenceError>,
+    /// Errors returned (FIFO) by the next get_workflow_execution calls (gomock `Return(nil, err)` on GetWorkflowExecution).
+    pub get_errors: std::collections::VecDeque<PersistenceError>,
+    /// Competing-writer hooks: the next update runs the hook against the stored runs and fails with ConditionFailed
+    /// (Go tests: UpdateWorkflowExecution returns ConditionFailedError and the next GetWorkflowExecution shows newer state).
+    pub conflict_hooks: std::collections::VecDeque<ConflictHook>,
     /// Recorded create requests: (mode name, previous run id, previous last write version).
     pub create_calls: Vec<(&'static str, String, i64)>,
 }
@@ -170,10 +176,11 @@ impl pc::GoExecutionStore for MemExecutions {
         Ok(out)
     }
     async fn get_workflow_execution(&self, _: i32, d: String, w: String, r: String, _: i64) -> Result<pc::WorkflowSnapshot, PersistenceError> {
-        self.inner
-            .lock()
-            .unwrap()
-            .runs
+        let mut g = self.inner.lock().unwrap();
+        if let Some(e) = g.get_errors.pop_front() {
+            return Err(e);
+        }
+        g.runs
             .get(&(d, w, r))
             .cloned()
             .ok_or_else(|| PersistenceError::EntityNotExists("workflow execution not found".into()))
@@ -182,6 +189,10 @@ impl pc::GoExecutionStore for MemExecutions {
         let mut g = self.inner.lock().unwrap();
         if let Some(e) = g.update_errors.pop_front() {
             return Err(e);
+        }
+        if let Some(hook) = g.conflict_hooks.pop_front() {
+            hook(&mut g.runs);
+            return Err(PersistenceError::ConditionFailed("injected competing writer".into()));
         }
         if g.fail_updates > 0 {
             g.fail_updates -= 1;
@@ -222,6 +233,7 @@ impl pc::GoExecutionStore for MemExecutions {
         let rinfo = reset.execution_info.clone();
         let cur_key = (rinfo.domain_id.clone(), rinfo.workflow_id.clone());
         let current_row = g.current.get(&cur_key).cloned();
+        let mut pending_current: Option<(pc::WorkflowExecutionInfo, i64, i64)> = None;
         // Go ValidateConflictResolveWorkflowModeState (subset relevant to the mode).
         match r.mode {
             pc::ConflictResolveWorkflowMode::BypassCurrent => {
@@ -246,7 +258,7 @@ impl pc::GoExecutionStore for MemExecutions {
                         )))
                     }
                 }
-                Self::set_current(&mut g, &info, sv, lw);
+                pending_current = Some((info, sv, lw));
             }
         }
         let key = (rinfo.domain_id.clone(), rinfo.workflow_id.clone(), rinfo.run_id.clone());
@@ -256,6 +268,20 @@ impl pc::GoExecutionStore for MemExecutions {
                 return Err(PersistenceError::ConditionFailed(format!("condition {} != {}", s.execution_info.next_event_id, reset.condition)));
             }
             _ => {}
+        }
+        // Check the current-run mutation before mutating anything (Go does all checks in one tx).
+        if let Some(m) = &cur_wf {
+            let k = (m.execution_info.domain_id.clone(), m.execution_info.workflow_id.clone(), m.execution_info.run_id.clone());
+            match g.runs.get(&k) {
+                None => return Err(PersistenceError::EntityNotExists("workflow execution not found".into())),
+                Some(s) if s.execution_info.next_event_id != m.condition => {
+                    return Err(PersistenceError::ConditionFailed(format!("condition {} != {}", s.execution_info.next_event_id, m.condition)));
+                }
+                _ => {}
+            }
+        }
+        if let Some((info, sv, lw)) = pending_current {
+            Self::set_current(&mut g, &info, sv, lw);
         }
         store_tasks(&mut g, &reset.tasks_by_category);
         let mut stored = reset;

@@ -1909,4 +1909,33 @@ mod semaphore_and_history_task_tests {
         assert!(matches!(history_tasks_cas_error(&[shard_row], 1, 5), E::ShardOwnershipLost { actual_range_id: 9, .. }));
         assert!(matches!(history_tasks_cas_error(&[], 1, 5), E::ShardOwnershipLost { actual_range_id: -1, .. }));
     }
+
+    #[test]
+    fn cas_error_maps_request_rows_to_duplicate_request() {
+        let ctx = CasContext {
+            shard: 1,
+            request_range_id: 5,
+            workflow_id: "wf",
+            run_id: "run",
+            create: None,
+            current_insert: false,
+            requested_current: None,
+            previous_next_event_id: 0,
+        };
+        for offset in 0..4 {
+            let row: RowMap = [
+                ("type".to_owned(), Some(CqlValue::Int(ROW_TYPE_REQUEST_START + offset))),
+                ("current_run_id".to_owned(), Some(CqlValue::Text("existing-run".into()))),
+            ]
+            .into_iter()
+            .collect();
+            match cas_error(&[row], &ctx) {
+                E::DuplicateRequest { request_type, run_id } => {
+                    assert_eq!(request_type, offset);
+                    assert_eq!(run_id, "existing-run");
+                }
+                other => panic!("offset {offset}: expected DuplicateRequest, got {other:?}"),
+            }
+        }
+    }
 }
