@@ -606,50 +606,78 @@ async fn run_first_decision(h: &Harness, d: Decision) -> String {
     run
 }
 
+async fn signal(h: &Harness, run: &str) {
+    h.engine
+        .signal_workflow_execution(&HistorySignalWorkflowExecutionRequest {
+            domain_uuid: DOMAIN_ID.into(),
+            signal_request: Some(SignalWorkflowExecutionRequest {
+                domain: DOMAIN_NAME.into(),
+                workflow_execution: exec(run),
+                signal_name: "sig".into(),
+                identity: IDENTITY.into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .await
+        .expect("signal");
+}
+
+fn cancel_activity_decision() -> Decision {
+    Decision {
+        decision_type: Some(DecisionType::RequestCancelActivityTask),
+        request_cancel_activity_task_decision_attributes: Some(RequestCancelActivityTaskDecisionAttributes { activity_id: "act-1".into() }),
+        ..Default::default()
+    }
+}
+
+fn canceled_req(run: &str, sched: i64) -> HistoryRespondActivityTaskCanceledRequest {
+    HistoryRespondActivityTaskCanceledRequest {
+        domain_uuid: DOMAIN_ID.into(),
+        cancel_request: Some(RespondActivityTaskCanceledRequest { task_token: activity_token(run, sched), details: b"d".to_vec(), identity: IDENTITY.into() }),
+    }
+}
+
 #[tokio::test]
-async fn respond_activity_canceled_success() {
+async fn respond_activity_canceled_after_cancel_requested_success() {
     let h = Harness::new();
     let (run, sched) = with_scheduled_activity(&h).await;
     activity_started(&h, &run, sched, "act-req").await.unwrap();
-    h.engine
-        .respond_activity_task_canceled(&HistoryRespondActivityTaskCanceledRequest {
-            domain_uuid: DOMAIN_ID.into(),
-            cancel_request: Some(RespondActivityTaskCanceledRequest { task_token: activity_token(&run, sched), details: b"d".to_vec(), identity: IDENTITY.into() }),
-        })
-        .await
-        .expect("canceled");
+    signal(&h, &run).await;
+    // events: 6 started, 7 signaled, 8 decision scheduled
+    decision_started(&h, &run, 8, "dec-req-2").await.expect("started");
+    decision_completed(&h, &run, 8, vec![cancel_activity_decision()]).await.expect("completed");
+    let ai = h.execs.snapshot(WF, &run).unwrap();
+    assert_eq!(ai.activity_infos.len(), 1, "started activity stays until the worker responds");
+    h.engine.respond_activity_task_canceled(&canceled_req(&run, sched)).await.expect("canceled");
     let snap = h.execs.snapshot(WF, &run).unwrap();
     assert!(snap.activity_infos.is_empty());
-    // + ActivityTaskCanceled + DecisionTaskScheduled
-    assert_eq!(snap.execution_info.next_event_id, 9);
+}
+
+#[tokio::test]
+async fn respond_activity_canceled_without_cancel_request_is_internal_error() {
+    // Go AddActivityTaskCanceledEvent rejects an activity whose cancel was never requested.
+    let h = Harness::new();
+    let (run, sched) = with_scheduled_activity(&h).await;
+    activity_started(&h, &run, sched, "act-req").await.unwrap();
+    let res = h.engine.respond_activity_task_canceled(&canceled_req(&run, sched)).await;
+    assert!(res.is_err());
 }
 
 #[tokio::test]
 async fn respond_activity_canceled_not_started_is_error() {
     let h = Harness::new();
     let (run, sched) = with_scheduled_activity(&h).await;
-    let res = h
-        .engine
-        .respond_activity_task_canceled(&HistoryRespondActivityTaskCanceledRequest {
-            domain_uuid: DOMAIN_ID.into(),
-            cancel_request: Some(RespondActivityTaskCanceledRequest { task_token: activity_token(&run, sched), ..Default::default() }),
-        })
-        .await;
-    assert!(res.is_err());
+    assert!(h.engine.respond_activity_task_canceled(&canceled_req(&run, sched)).await.is_err());
 }
 
 #[tokio::test]
 async fn request_cancel_activity_decision_before_start_cancels_activity() {
     let h = Harness::new();
     let (run, _) = with_scheduled_activity(&h).await;
-    // decision 2 scheduled at event 6
-    decision_started(&h, &run, 6, "dec-req-2").await.expect("started");
-    let cancel = Decision {
-        decision_type: Some(DecisionType::RequestCancelActivityTask),
-        request_cancel_activity_task_decision_attributes: Some(RequestCancelActivityTaskDecisionAttributes { activity_id: "act-1".into() }),
-        ..Default::default()
-    };
-    decision_completed(&h, &run, 6, vec![cancel]).await.expect("completed");
+    signal(&h, &run).await; // 6 signaled, 7 decision scheduled
+    decision_started(&h, &run, 7, "dec-req-2").await.expect("started");
+    decision_completed(&h, &run, 7, vec![cancel_activity_decision()]).await.expect("completed");
     let snap = h.execs.snapshot(WF, &run).unwrap();
     // Not-started activity is canceled immediately: no activity left.
     assert!(snap.activity_infos.is_empty());
@@ -794,5 +822,6 @@ async fn respond_activity_failed_with_retry_policy_retries_without_history_event
     let snap = h.execs.snapshot(WF, &run).unwrap();
     // Activity is retried: still pending, no ActivityTaskFailed event written.
     assert_eq!(snap.activity_infos.len(), 1);
-    assert_eq!(snap.execution_info.next_event_id, 7);
+    // The ActivityTaskStarted event is not written while the activity may still retry.
+    assert_eq!(snap.execution_info.next_event_id, 6);
 }
