@@ -1032,7 +1032,7 @@ mod query_ports {
         let run = start(&h).await;
         decision_started(&h, &run, 2, "dec-req").await.unwrap();
         let err = h.engine.query_workflow(&qreq(&run, None, None), None).await.unwrap_err();
-        assert!(matches!(err, HistoryError::QueryFailed(_)) || err.to_string().contains("at least one decision"), "{err:?}");
+        assert!(err.to_string().contains("at least one decision task"), "{err:?}");
     }
 
     #[tokio::test]
@@ -1095,7 +1095,8 @@ mod query_ports {
             }
         };
         let started = Instant::now();
-        let (res, _) = tokio::join!(h.engine.query_workflow(&qreq(&run, Some(QueryConsistencyLevel::Strong), None), None), updater);
+        let req = qreq(&run, Some(QueryConsistencyLevel::Strong), None);
+        let (res, _) = tokio::join!(h.engine.query_workflow(&req, None), updater);
         assert!(started.elapsed() >= Duration::from_millis(300));
         assert_eq!(res.expect("query").response.unwrap().query_result, vec![1, 2, 3]);
         assert!(!reg.has_buffered_query());
@@ -1117,7 +1118,8 @@ mod query_ports {
                 }
             }
         };
-        let (res, _) = tokio::join!(h.engine.query_workflow(&qreq(&run, Some(QueryConsistencyLevel::Strong), None), None), updater);
+        let req = qreq(&run, Some(QueryConsistencyLevel::Strong), None);
+        let (res, _) = tokio::join!(h.engine.query_workflow(&req, None), updater);
         assert_eq!(res.expect("query").response.unwrap().query_result, vec![1, 2, 3]);
         assert_registry_empty(&reg);
         assert_eq!(matching.calls.lock().unwrap().len(), 1);
