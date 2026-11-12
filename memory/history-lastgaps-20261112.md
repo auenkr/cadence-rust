@@ -16,3 +16,9 @@ Branch `history-lastgaps` (from origin/master 503889cb1). CI-only validation.
 ## Evidence
 - rust-ci (package=cadence-history) success: https://github.com/auenkr/cadence-rust/actions/runs/43187050844 head 99276d26e98ea60253f5435945b610ed689b469f
 - Gate runs: see bottom (filled after dispatch).
+
+Final head a4df1c976d69526619bc818b4132329f568dfa83 (after merging origin/master):
+- mysql/grpc/true: https://github.com/auenkr/cadence-rust/actions/runs/43188363694 success, GATE SUMMARY failed: []
+- cassandra/grpc/true: https://github.com/auenkr/cadence-rust/actions/runs/43188368774 success, GATE SUMMARY failed: []
+- postgres/tchannel/false: https://github.com/auenkr/cadence-rust/actions/runs/43188373717 success, GATE SUMMARY failed: []
+- rust-ci full workspace: https://github.com/auenkr/cadence-rust/actions/runs/43188379294 success
