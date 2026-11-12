@@ -13,6 +13,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::cloud_archiver::{
+    gcs_archive_history, gcs_archive_visibility, s3_archive_history, s3_archive_visibility,
     gcs_get_history, gcs_query_visibility, gcs_validate_uri, s3_get_history, s3_query_visibility,
     s3_validate_uri, CloudBackends, ObjectStore, S3_ACCESS_POINT_SCHEME,
 };
@@ -277,6 +278,63 @@ impl ArchiverProvider {
                 gcs_validate_uri(store.as_ref(), &parsed)
             }
             _ => filestore_validate_uri(&parsed),
+        }
+    }
+
+    /// Go `historyArchiver.Archive` through the provider (inline archival from the History
+    /// service). `file://` keeps the filestore behaviour; `s3://`, `s3-ap://` and `gs://` use the
+    /// configured cloud archivers.
+    pub fn archive_history(
+        &self,
+        uri: &str,
+        request: &ArchiveHistoryRequest,
+        source: &dyn HistoryBatchSource,
+        filestore: &FilestoreWriterConfig,
+    ) -> Result<(), ArchiverError> {
+        let parsed = parse_uri(uri).map_err(ArchiverError::Other)?;
+        match parsed.scheme.as_str() {
+            S3_SCHEME | S3_ACCESS_POINT_SCHEME => {
+                self.resolve(Kind::History, &parsed.scheme)?;
+                let store = self.s3_store(Kind::History, &parsed.scheme)?;
+                s3_archive_history(store.as_ref(), &self.cloud.s3_region, &parsed, request, source)
+            }
+            GCLOUD_SCHEME => {
+                self.resolve(Kind::History, &parsed.scheme)?;
+                let store = self.gcs_store(Kind::History, &parsed.scheme)?;
+                gcs_archive_history(store.as_ref(), &parsed, request, source)
+            }
+            FILESTORE_SCHEME => filestore_archive_history(filestore, &parsed, request, source),
+            other => Err(ArchiverError::Other(format!(
+                "inline history archival for scheme {}: {ERR_NOT_SUPPORTED}",
+                go_quote(other)
+            ))),
+        }
+    }
+
+    /// Go `visibilityArchiver.Archive` through the provider (see [`Self::archive_history`]).
+    pub fn archive_visibility(
+        &self,
+        uri: &str,
+        request: &ArchiveVisibilityRequest,
+        filestore: &FilestoreWriterConfig,
+    ) -> Result<(), ArchiverError> {
+        let parsed = parse_uri(uri).map_err(ArchiverError::Other)?;
+        match parsed.scheme.as_str() {
+            S3_SCHEME | S3_ACCESS_POINT_SCHEME => {
+                self.resolve(Kind::Visibility, &parsed.scheme)?;
+                let store = self.s3_store(Kind::Visibility, &parsed.scheme)?;
+                s3_archive_visibility(store.as_ref(), &self.cloud.s3_region, &parsed, request)
+            }
+            GCLOUD_SCHEME => {
+                self.resolve(Kind::Visibility, &parsed.scheme)?;
+                let store = self.gcs_store(Kind::Visibility, &parsed.scheme)?;
+                gcs_archive_visibility(store.as_ref(), &parsed, request)
+            }
+            FILESTORE_SCHEME => filestore_archive_visibility(filestore, &parsed, request),
+            other => Err(ArchiverError::Other(format!(
+                "inline visibility archival for scheme {}: {ERR_NOT_SUPPORTED}",
+                go_quote(other)
+            ))),
         }
     }
 

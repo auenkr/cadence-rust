@@ -3,6 +3,7 @@
 pub mod admin;
 pub mod admin_replication;
 pub mod cli;
+pub mod cloud_store;
 pub mod config;
 pub mod domain_failover_watcher;
 pub mod header_forwarding;

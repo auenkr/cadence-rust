@@ -10,7 +10,7 @@ pub mod async_kafka;
 pub mod async_kafka_tls;
 pub mod async_publisher;
 pub mod async_queue;
-pub mod cloud_store;
+pub use cadence_service_core::cloud_store;
 pub mod config;
 pub mod es_query;
 pub mod es_visibility;

@@ -328,6 +328,7 @@ pub async fn run(bin_name: &'static str) -> anyhow::Result<()> {
         hosts: Vec::new(),
         matching_resolver: matching_resolver(provider.clone(), matching_client_tls),
         dynamic_client: Some(client),
+        archiver_provider: Arc::new(cadence_service_core::cloud_store::archiver_provider_from_yaml(cfg.archival.as_ref())),
     })
     .await?;
 
