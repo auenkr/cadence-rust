@@ -23,3 +23,6 @@ Branch `history-acmanager` (from master 62016da50).
 - history-mixed-gate mysql/grpc/true: https://github.com/auenkr/cadence-rust/actions/runs/43198706174 success, GATE SUMMARY failed: []
 - history-mixed-gate cassandra/grpc/true: https://github.com/auenkr/cadence-rust/actions/runs/43198713637 success, GATE SUMMARY failed: []
 - history-mixed-gate postgres/tchannel/false: https://github.com/auenkr/cadence-rust/actions/runs/43198721366 success, GATE SUMMARY failed: []
+
+## Post-merge master validation (master f8914f198, 2026-11-12)
+- Full workspace rust-ci + all 12 history-mixed-gate combos: runs 43200800912..43200865298, all success.
