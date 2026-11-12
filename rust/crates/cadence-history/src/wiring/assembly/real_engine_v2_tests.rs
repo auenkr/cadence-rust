@@ -664,13 +664,12 @@ async fn record_activity_task_started_resurrected() {
         })
         .await
         .expect("activity completed");
-    // Persistence is rolled back to the pre-start snapshot (activity resurrected) while history has the later events.
+    // The activity info is resurrected in persisted mutable state (next_event_id already past the completion event).
     let next_id = h.execs.snapshot(WF, &run).unwrap().execution_info.next_event_id;
     {
         let mut g = h.execs.inner.lock().unwrap();
-        let mut resurrected = stale;
-        resurrected.condition = resurrected.execution_info.next_event_id;
-        g.runs.insert((DOMAIN_ID.into(), WF.into(), run.clone()), resurrected);
+        let snap = g.runs.get_mut(&(DOMAIN_ID.into(), WF.into(), run.clone())).unwrap();
+        snap.activity_infos = stale.activity_infos.clone();
     }
     h.cache.clear_all_for_test();
     h.clock.0.fetch_add(3_600_000_000_000, std::sync::atomic::Ordering::SeqCst);
@@ -695,7 +694,7 @@ async fn respond_decision_task_completed_record_marker_decision() {
     let info = h.execs.snapshot(WF, &run).unwrap().execution_info;
     assert_eq!(info.next_event_id, 6);
     assert_eq!(info.last_processed_event, 3);
-    assert_eq!(info.state, WORKFLOW_STATE_RUNNING);
+    assert_eq!(info.state, 1, "Running");
     assert_eq!(info.decision_schedule_id, -23, "no pending decision");
 }
 
