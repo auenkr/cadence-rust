@@ -216,6 +216,7 @@ pub fn build_client(
     membership: Arc<MembershipResolver>,
     cluster: Arc<ClusterMetadataImpl>,
     history_nodes: Arc<dyn HistoryNodeStore>,
+    provider: Arc<cadence_common::archiver::ArchiverProvider>,
 ) -> ArchiverClient {
     let (c1, c2, c3, c4) = (config.clone(), config.clone(), config.clone(), config.clone());
     let (m1, m2) = (membership.clone(), membership);
@@ -228,6 +229,7 @@ pub fn build_client(
         Arc::new(FileInlineArchivers {
             history_nodes: Some(history_nodes),
             allow_incomplete: Some(config.allow_archiving_incomplete_history.clone()),
+            provider,
         }),
         Arc::new(FrontendArchivalSignaler { cluster }),
     )

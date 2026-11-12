@@ -62,6 +62,8 @@ pub struct HistoryEnvParams {
     /// Resolves a Matching address to a gRPC channel (query forwarding).
     pub matching_resolver: ChannelResolver,
     pub dynamic_client: Option<Arc<dyn DynamicClient>>,
+    /// Go `provider.ArchiverProvider` built from the service config `archival` section.
+    pub archiver_provider: Arc<cadence_common::archiver::ArchiverProvider>,
 }
 
 /// All process-wide shared dependencies.
@@ -100,7 +102,7 @@ pub struct HistoryEnv {
 impl HistoryEnv {
     /// Opens persistence and builds every shared resource.
     pub async fn build(params: HistoryEnvParams) -> anyhow::Result<Arc<Self>> {
-        let HistoryEnvParams { config, persistence, cluster, who_am_i, hosts, matching_resolver, dynamic_client } =
+        let HistoryEnvParams { config, persistence, cluster, who_am_i, hosts, matching_resolver, dynamic_client, archiver_provider } =
             params;
         let active = cluster.current_cluster_name.clone();
         let semaphore_metadata = cadence_matching::matching_task_store::open_configured_semaphore_store(&persistence).await?;
@@ -198,6 +200,7 @@ impl HistoryEnv {
             membership.clone(),
             cluster.clone(),
             persistence.history_nodes.clone(),
+            archiver_provider,
         ));
         Ok(Arc::new(Self {
             archiver_client,

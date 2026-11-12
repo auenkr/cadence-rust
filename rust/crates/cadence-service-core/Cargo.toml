@@ -29,6 +29,7 @@ tracing = "0.1"
 axum = { version = "0.8", features = ["json"] }
 base64 = "0.22"
 jsonwebtoken = "9"
+sha2 = "0.10"
 clap = { version = "4", features = ["derive", "env"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }

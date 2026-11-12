@@ -264,8 +264,9 @@ impl S3Store {
         path: &str,
         query: &[(String, String)],
         now: &(String, String),
+        payload: &[u8],
     ) -> Vec<(String, String)> {
-        let payload_hash = sha256_hex(b"");
+        let payload_hash = sha256_hex(payload);
         let mut headers = vec![
             ("host".to_owned(), host.to_owned()),
             ("x-amz-content-sha256".to_owned(), payload_hash.clone()),
@@ -334,9 +335,20 @@ impl S3Store {
         key: &str,
         query: Vec<(String, String)>,
     ) -> Result<Raw, StoreError> {
+        self.request_body(method, bucket, key, query, Vec::new())
+    }
+
+    fn request_body(
+        &self,
+        method: &str,
+        bucket: &str,
+        key: &str,
+        query: Vec<(String, String)>,
+        body: Vec<u8>,
+    ) -> Result<Raw, StoreError> {
         let t = self.target(bucket, key);
         let now = amz_now();
-        let headers = self.sign(method, &t.host, &t.path, &query, &now);
+        let headers = self.sign(method, &t.host, &t.path, &query, &now, &body);
         let mut url = format!("{}://{}{}", t.scheme, t.host, uri_encode(&t.path, true));
         if !query.is_empty() {
             let qs: Vec<String> = query
@@ -352,6 +364,9 @@ impl S3Store {
             let mut req = c.request(m, &url);
             for (k, v) in &headers {
                 req = req.header(k.as_str(), v.as_str());
+            }
+            if !body.is_empty() {
+                req = req.body(body);
             }
             send(req)
         })
@@ -388,6 +403,26 @@ impl ObjectStore for S3Store {
         let (status, body) = self.request("HEAD", bucket, "", Vec::new())?;
         if (200..300).contains(&status) {
             Ok(())
+        } else {
+            Err(Self::error(status, &body))
+        }
+    }
+
+    fn put_object(&self, bucket: &str, key: &str, data: &[u8]) -> Result<(), StoreError> {
+        let (status, body) = self.request_body("PUT", bucket, key, Vec::new(), data.to_vec())?;
+        if (200..300).contains(&status) {
+            Ok(())
+        } else {
+            Err(Self::error(status, &body))
+        }
+    }
+
+    fn head_object(&self, bucket: &str, key: &str) -> Result<bool, StoreError> {
+        let (status, body) = self.request("HEAD", bucket, key, Vec::new())?;
+        if (200..300).contains(&status) {
+            Ok(true)
+        } else if status == 404 {
+            Ok(false)
         } else {
             Err(Self::error(status, &body))
         }
@@ -604,6 +639,47 @@ impl ObjectStore for GcsStore {
         }
     }
 
+    fn put_object(&self, bucket: &str, key: &str, data: &[u8]) -> Result<(), StoreError> {
+        let url = format!(
+            "{}/upload/storage/v1/b/{}/o?uploadType=media&name={}",
+            self.base,
+            uri_encode(bucket, false),
+            uri_encode(key, false)
+        );
+        let bearer = self.bearer()?;
+        let data = data.to_vec();
+        let (status, body) = on_thread(move || {
+            let mut req = client()?
+                .post(&url)
+                .header("content-type", "application/octet-stream")
+                .body(data);
+            if let Some(t) = bearer {
+                req = req.bearer_auth(t);
+            }
+            send(req)
+        })?;
+        if (200..300).contains(&status) {
+            Ok(())
+        } else {
+            Err(Self::error(status, &body, StoreErrorKind::NoSuchBucket))
+        }
+    }
+
+    fn head_object(&self, bucket: &str, key: &str) -> Result<bool, StoreError> {
+        let url = format!(
+            "{}/storage/v1/b/{}/o/{}",
+            self.base,
+            uri_encode(bucket, false),
+            uri_encode(key, false)
+        );
+        let (status, body) = self.get(url)?;
+        match status {
+            200 => Ok(true),
+            404 => Ok(false),
+            _ => Err(Self::error(status, &body, StoreErrorKind::NoSuchKey)),
+        }
+    }
+
     fn get_object(&self, bucket: &str, key: &str) -> Result<Vec<u8>, StoreError> {
         let url = format!(
             "{}/storage/v1/b/{}/o/{}?alt=media",
@@ -681,6 +757,44 @@ impl CloudStoreFactory for HttpStoreFactory {
     fn gcs(&self, config: &GcsConfig) -> Result<Arc<dyn ObjectStore>, String> {
         Ok(Arc::new(GcsStore::new(config)?))
     }
+}
+
+/// Builds the archiver provider (configured plugin keys plus s3store / gstorage backends) from the
+/// service config `archival` section (Go `config.Archival` -> `provider.NewArchiverProvider`).
+pub fn archiver_provider_from_yaml(
+    archival: Option<&serde_yaml::Value>,
+) -> cadence_common::archiver::ArchiverProvider {
+    let mut keys: Vec<String> = Vec::new();
+    let (mut s3, mut gcs) = (None, None);
+    let text = |n: &serde_yaml::Value, k: &str| {
+        n.get(k).and_then(serde_yaml::Value::as_str).unwrap_or_default().to_owned()
+    };
+    for kind in ["history", "visibility"] {
+        let Some(map) = archival
+            .and_then(|r| r.get(kind))
+            .and_then(|k| k.get("provider"))
+            .and_then(serde_yaml::Value::as_mapping)
+        else {
+            continue;
+        };
+        for key in map.keys().filter_map(serde_yaml::Value::as_str) {
+            if !keys.iter().any(|k| k == key) {
+                keys.push(key.to_owned());
+            }
+        }
+        if let Some(n) = map.get("s3store").filter(|_| s3.is_none()) {
+            s3 = Some(S3Config {
+                region: text(n, "region"),
+                endpoint: Some(text(n, "endpoint")).filter(|e| !e.is_empty()),
+                force_path_style: n.get("s3ForcePathStyle").and_then(serde_yaml::Value::as_bool).unwrap_or(false),
+            });
+        }
+        if let Some(n) = map.get("gstorage").filter(|_| gcs.is_none()) {
+            gcs = Some(GcsConfig { credentials_path: text(n, "credentialsPath") });
+        }
+    }
+    cadence_common::archiver::ArchiverProvider::new(keys)
+        .with_cloud(cadence_common::cloud_archiver::CloudBackends::new(s3, gcs, &HttpStoreFactory))
 }
 
 #[cfg(test)]

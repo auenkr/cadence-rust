@@ -198,24 +198,20 @@ impl ArchiverClient {
     }
 }
 
-const NOT_PORTED: &str = "archiver scheme is not supported (only file:// is ported)";
-
-/// Inline archivers: the `file://` (filestore) scheme is written like Go (same on-disk format);
-/// other schemes (s3 / gs) fail explicitly so the task is retried and the data is kept. Go default
-/// config: fileMode 0666, dirMode 0766.
+/// Inline archivers: `file://` (filestore) is written like Go (same on-disk format); `s3://`,
+/// `s3-ap://` and `gs://` go through the configured s3store / gstorage archivers; other schemes
+/// fail so the task is retried. Go default filestore config: fileMode 0666, dirMode 0766.
 pub struct FileInlineArchivers {
     pub history_nodes: Option<Arc<dyn cadence_persistence::history_reader::HistoryNodeStore>>,
     /// `Config.AllowArchivingIncompleteHistory`.
     pub allow_incomplete: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
+    /// Go `provider.ArchiverProvider` (configured s3store / gstorage backends).
+    pub provider: Arc<cadence_common::archiver::ArchiverProvider>,
 }
 #[async_trait]
 impl InlineArchivers for FileInlineArchivers {
     async fn archive_history(&self, r: &ClientRequest) -> Result<(), String> {
         let a = &r.archive_request;
-        let uri = cadence_common::archiver::parse_uri(&a.uri).map_err(|e| e.to_string())?;
-        if uri.scheme != cadence_common::archiver::FILESTORE_SCHEME {
-            return Err(format!("inline history archival for scheme {:?}: {NOT_PORTED}", uri.scheme));
-        }
         let Some(nodes) = self.history_nodes.clone() else {
             return Err("inline history archival: no history node store".into());
         };
@@ -234,7 +230,8 @@ impl InlineArchivers for FileInlineArchivers {
             next_event_id: a.next_event_id,
             close_failover_version: a.close_failover_version,
         };
-        tokio::task::spawn_blocking(move || cadence_common::archiver::filestore_archive_history(&cfg, &uri, &req, &source))
+        let (provider, uri) = (self.provider.clone(), a.uri.clone());
+        tokio::task::spawn_blocking(move || provider.archive_history(&uri, &req, &source, &cfg))
             .await
             .map_err(|e| e.to_string())?
             .map_err(|e| e.to_string())
@@ -242,10 +239,6 @@ impl InlineArchivers for FileInlineArchivers {
 
     async fn archive_visibility(&self, r: &ClientRequest) -> Result<(), String> {
         let a = &r.archive_request;
-        let uri = cadence_common::archiver::parse_uri(&a.visibility_uri).map_err(|e| e.to_string())?;
-        if uri.scheme != cadence_common::archiver::FILESTORE_SCHEME {
-            return Err(format!("inline visibility archival for scheme {:?}: {NOT_PORTED}", uri.scheme));
-        }
         let cfg = cadence_common::archiver::FilestoreWriterConfig::new("0666", "0766").map_err(|e| e.to_string())?;
         let req = cadence_common::archiver::ArchiveVisibilityRequest {
             domain_id: a.domain_id.clone(),
@@ -267,7 +260,8 @@ impl InlineArchivers for FileInlineArchivers {
             ),
             history_archival_uri: a.uri.clone(),
         };
-        tokio::task::spawn_blocking(move || cadence_common::archiver::filestore_archive_visibility(&cfg, &uri, &req))
+        let (provider, uri) = (self.provider.clone(), a.visibility_uri.clone());
+        tokio::task::spawn_blocking(move || provider.archive_visibility(&uri, &req, &cfg))
             .await
             .map_err(|e| e.to_string())?
             .map_err(|e| e.to_string())
@@ -342,7 +336,7 @@ mod tests {
             AllowLimiter::new(|| 100),
             AllowLimiter::new(|| 100),
             AllowLimiter::new(|| 100),
-            Arc::new(FileInlineArchivers { history_nodes: None, allow_incomplete: None }),
+            Arc::new(FileInlineArchivers { history_nodes: None, allow_incomplete: None, provider: Arc::default() }),
             sig.clone(),
         );
         let resp = c.archive(req(true)).await.unwrap();
