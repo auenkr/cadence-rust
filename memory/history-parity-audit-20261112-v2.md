@@ -42,14 +42,15 @@ decision: Go `task_handler.go handleDecision*` names differ (Rust `decision/task
 | Item | Status | Pointer |
 |---|---|---|
 | closeTransactionWithPolicyCheck | DONE | `wiring/assembly/engine_close.rs close_transaction_with_policy_check`, `engine_state.rs ClosePolicy`, wired in `engine_factory.rs` |
-| generateChecksum (write path) | DONE (gen only) | `engine_close.rs close_transaction` (probability from `history.mutableStateChecksumGenProbability`, JSON blob like Go `SerializeChecksum`); verify-on-load + invalidateBefore OPEN |
+| generateChecksum (write path) + verify-on-load + invalidateBefore | DONE (detection/metrics/logs; repair-by-rebuild NOT on engine path) | `engine_close.rs close_transaction` (probability from `history.mutableStateChecksumGenProbability`, JSON blob like Go `SerializeChecksum`);  |
 | validateNoEventsAfterWorkflowFinish | DONE | `engine_close.rs validate_no_events_after_workflow_finish` |
 | DeleteTransferTasks/DeleteTimerTasks | DONE | `execution/mutable_state_builder.rs` (unused by Go callers outside tests) |
-| logDataInconsistency | PARTIAL | `mutable_state_builder.rs log_data_inconsistency` (log only; DataInconsistentCounter and Go call sites not wired) |
+| logDataInconsistency | DONE | `mutable_state_builder.rs DataInconsistencyHook`, `engine_state.rs Inner::log_data_inconsistency`, `engine_timer.rs`, `engine_semaphore.rs`; counter `WorkflowContextScope/DataInconsistentCounter` wired in `engine_factory.rs` (task_util.go stale-task call site not separately re-audited) |
 | failoverMarkerSkipReason | DONE | `wiring/assembly/failover.rs failover_marker_skip_reason` + drop log |
-| task_notifier / ReloadMutableState | OPEN (inlined, not 1:1; shadow-mode drop log absent) | `shard_context.rs`, `engine_cache.rs load_workflow_execution` |
+| task_notifier (persistence-error notify + shadow drop log) | DONE for update/create paths | `engine_cache.rs notify_tasks_after_failed_write/notify_needed_on_error`, `engine_start.rs`, `engine_factory.rs cached_queue_reader_shadow`; NDC `write_failed` path and conflict-resolve/CreateHistoryTasks not classified (only HistoryError available) = PARTIAL |
+| ReloadMutableState | equivalent (context.clear + reload in update_helper) | `engine_cache.rs update_helper` |
 | archival client metrics | DONE | `archiver_client.rs` (`ArchiverClient` scope counters, wired in `env.rs`) |
-| cache metrics (HistoryExecutionCache) | OPEN | Go `execution/cache.go` |
+| cache metrics (HistoryExecutionCache) | DONE (no TTL/size-based eviction metrics; Rust cache is not LRU) | `engine_cache.rs cache_scope/lru_scope/acquire_in` |
 | frontend soak port-bind retry | DONE | `tests/gates/run-frontend-soak.py` |
 | non-blob JSON tag mismatches | OPEN, not wire-affecting (SDKs use thrift/proto; only HTTP/JSON surfaces) | listed in history-p1batch note |
 | real S3/GCS endpoints | OPEN, needs credentials | - |
