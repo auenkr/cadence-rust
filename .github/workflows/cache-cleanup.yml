@@ -1,0 +1,35 @@
+name: cache-cleanup
+
+# Branch caches (mainly setup-go, ~0.75-0.9GB each) fill the 10GB repo quota and evict
+# master's Rust cache. Delete a branch's caches when the branch is deleted, plus a daily
+# sweep of caches for branches that no longer exist.
+on:
+  delete:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Delete caches of the deleted branch
+        if: github.event_name == 'delete' && github.event.ref_type == 'branch'
+        run: gh cache delete --all --ref "refs/heads/${{ github.event.ref }}" || true
+      - name: Delete caches of branches that no longer exist
+        if: github.event_name != 'delete'
+        run: |
+          branches=$(gh api --paginate "repos/$GH_REPO/branches" -q '.[].name')
+          gh cache list -L 100 --json id,ref -q '.[]|"\(.id) \(.ref)"' | while read -r id ref; do
+            b=${ref#refs/heads/}
+            case "$ref" in refs/heads/*) ;; *) continue ;; esac
+            if ! grep -qxF "$b" <<<"$branches"; then gh cache delete "$id" || true; fi
+          done
