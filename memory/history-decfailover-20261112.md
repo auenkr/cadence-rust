@@ -19,3 +19,10 @@ Branch `history-decfailover` (from master aabe60505).
 
 ## CI evidence
 See the section below (filled in after runs).
+
+Head SHA: 6f4b7003f55e6a127f93785b2750634785f8882f (merged origin/master). Evidence (all conclusion success):
+- rust-ci (clippy+tests): https://github.com/auenkr/cadence-rust/actions/runs/43212376018
+- gate mysql/grpc/two_history=true: https://github.com/auenkr/cadence-rust/actions/runs/43212359114 (GATE SUMMARY failed: [])
+- gate cassandra/grpc/true: https://github.com/auenkr/cadence-rust/actions/runs/43212365030 (GATE SUMMARY failed: [])
+- gate postgres/tchannel/false: https://github.com/auenkr/cadence-rust/actions/runs/43212369767 (GATE SUMMARY failed: [])
+Earlier fixes: clippy type_complexity / clone_on_copy, and no-in-flight test setup (EMPTY_EVENT_ID).
