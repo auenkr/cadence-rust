@@ -67,7 +67,15 @@ keys = ['FRONTEND_PORT', 'MATCHING_PORT', 'HISTORY_PORT', 'WORKER_PORT', 'FRONTE
         'RUST_MATCHING_PORT', 'RUST_MATCHING_PORT_GRPC', 'HISTORY2_PORT', 'HISTORY2_PORT_GRPC', 'HISTORY2_PORT_PPROF']
 socks = [socket.socket() for _ in keys]
 for s in socks:
-    s.bind(('127.0.0.1', 10000 + secrets.randbelow(18000)))
+    # Retry on collision with a port already in use (observed flake: EADDRINUSE).
+    for _ in range(100):
+        try:
+            s.bind(('127.0.0.1', 10000 + secrets.randbelow(18000)))
+            break
+        except OSError:
+            continue
+    else:
+        raise RuntimeError('no free port found')
 ports = {k: str(s.getsockname()[1]) for k, s in zip(keys, socks)}
 for s in socks:
     s.close()

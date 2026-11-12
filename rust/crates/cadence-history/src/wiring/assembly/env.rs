@@ -216,7 +216,8 @@ impl HistoryEnv {
             cluster.clone(),
             persistence.history_nodes.clone(),
             archiver_provider,
-        ));
+        )
+        .with_metrics(crate::task::deps::MetricsClient::scope(&*metrics, "ArchiverClient", vec![])));
         Ok(Arc::new(Self {
             archiver_client,
             dlq_host_limiter,

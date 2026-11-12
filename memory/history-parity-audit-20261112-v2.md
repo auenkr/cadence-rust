@@ -37,3 +37,19 @@ None known.
 
 ## Package notes
 decision: Go `task_handler.go handleDecision*` names differ (Rust `decision/task_handler.rs` dispatch); engine: only constructors/helpers missing; execution: 87 misses = constructors, retry wrappers, checksum, replication-task builders (inline in Rust `mutable_state_builder.rs`/`engine_close.rs`); ndc/queue/queuev2/replication/reset/resource/handler/query: constructors and private helpers only.
+
+## P2 status after history-p2gaps (2026-11-12; details memory/history-p2gaps-20261112.md)
+| Item | Status | Pointer |
+|---|---|---|
+| closeTransactionWithPolicyCheck | DONE | `wiring/assembly/engine_close.rs close_transaction_with_policy_check`, `engine_state.rs ClosePolicy`, wired in `engine_factory.rs` |
+| generateChecksum (write path) | DONE (gen only) | `engine_close.rs close_transaction` (probability from `history.mutableStateChecksumGenProbability`, JSON blob like Go `SerializeChecksum`); verify-on-load + invalidateBefore OPEN |
+| validateNoEventsAfterWorkflowFinish | DONE | `engine_close.rs validate_no_events_after_workflow_finish` |
+| DeleteTransferTasks/DeleteTimerTasks | DONE | `execution/mutable_state_builder.rs` (unused by Go callers outside tests) |
+| logDataInconsistency | PARTIAL | `mutable_state_builder.rs log_data_inconsistency` (log only; DataInconsistentCounter and Go call sites not wired) |
+| failoverMarkerSkipReason | DONE | `wiring/assembly/failover.rs failover_marker_skip_reason` + drop log |
+| task_notifier / ReloadMutableState | OPEN (inlined, not 1:1; shadow-mode drop log absent) | `shard_context.rs`, `engine_cache.rs load_workflow_execution` |
+| archival client metrics | DONE | `archiver_client.rs` (`ArchiverClient` scope counters, wired in `env.rs`) |
+| cache metrics (HistoryExecutionCache) | OPEN | Go `execution/cache.go` |
+| frontend soak port-bind retry | DONE | `tests/gates/run-frontend-soak.py` |
+| non-blob JSON tag mismatches | OPEN, not wire-affecting (SDKs use thrift/proto; only HTTP/JSON surfaces) | listed in history-p1batch note |
+| real S3/GCS endpoints | OPEN, needs credentials | - |

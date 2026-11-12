@@ -114,9 +114,24 @@ pub struct ArchiverClient {
     inline_visibility_rate_limiter: AllowLimiter,
     inline: Arc<dyn InlineArchivers>,
     signaler: Arc<dyn ArchivalSignaler>,
+    /// Go `metricsClient.Scope(metrics.ArchiverClientScope)`; `None` disables emission.
+    metrics: Option<Arc<dyn crate::task::deps::MetricsScope>>,
 }
 
 impl ArchiverClient {
+    /// Attach the `ArchiverClient` metrics scope.
+    pub fn with_metrics(mut self, scope: Arc<dyn crate::task::deps::MetricsScope>) -> Self {
+        self.metrics = Some(scope);
+        self
+    }
+
+    /// `scope.Tagged(DomainTag(domain)).IncCounter(name)`.
+    fn count(&self, domain: &str, name: crate::task::deps::MetricIdx) {
+        if let Some(m) = &self.metrics {
+            m.tagged(vec![crate::task::deps::domain_tag(domain)]).inc_counter(name);
+        }
+    }
+
     pub fn new(
         num_workflows: Box<dyn Fn() -> i64 + Send + Sync>,
         rate_limiter: AllowLimiter,
@@ -125,12 +140,19 @@ impl ArchiverClient {
         inline: Arc<dyn InlineArchivers>,
         signaler: Arc<dyn ArchivalSignaler>,
     ) -> Self {
-        Self { num_workflows, rate_limiter, inline_history_rate_limiter, inline_visibility_rate_limiter, inline, signaler }
+        Self { num_workflows, rate_limiter, inline_history_rate_limiter, inline_visibility_rate_limiter, inline, signaler, metrics: None }
     }
 
     /// Go `client.Archive`.
     pub async fn archive(&self, mut request: ClientRequest) -> Result<ClientResponse, String> {
         let mut resp = ClientResponse::default();
+        for target in &request.archive_request.targets {
+            let name = match target {
+                ArchivalTarget::History => "ArchiverClientHistoryRequestCountPerDomain",
+                ArchivalTarget::Visibility => "ArchiverClientVisibilityRequestCountPerDomain",
+            };
+            self.count(&request.archive_request.domain_name, name);
+        }
         if request.attempt_archive_inline {
             // Go runs one goroutine per target and then collects the results in target order.
             let targets = request.archive_request.targets.clone();
@@ -158,31 +180,41 @@ impl ArchiverClient {
     }
 
     async fn archive_history_inline(&self, request: &ClientRequest) -> Result<(), String> {
+        let domain = request.archive_request.domain_name.as_str();
         if !self.inline_history_rate_limiter.allow() {
+            self.count(domain, "ArchiverClientHistoryInlineArchiveThrottledCountPerDomain");
             tracing::debug!("inline history archival throttled");
             return Err(ERR_INLINE_ARCHIVAL_THROTTLED.into());
         }
+        self.count(domain, "ArchiverClientHistoryInlineArchiveAttemptCountPerDomain");
         let result = self.inline.archive_history(request).await;
         if let Err(e) = &result {
+            self.count(domain, "ArchiverClientHistoryInlineArchiveFailureCountPerDomain");
             tracing::info!(error = %e, "failed to perform workflow history archival inline");
         }
         result
     }
 
     async fn archive_visibility_inline(&self, request: &ClientRequest) -> Result<(), String> {
+        let domain = request.archive_request.domain_name.as_str();
         if !self.inline_visibility_rate_limiter.allow() {
+            self.count(domain, "ArchiverClientVisibilityInlineArchiveThrottledCountPerDomain");
             tracing::debug!("inline visibility archival throttled");
             return Err(ERR_INLINE_ARCHIVAL_THROTTLED.into());
         }
+        self.count(domain, "ArchiverClientVisibilityInlineArchiveAttemptCountPerDomain");
         let result = self.inline.archive_visibility(request).await;
         if let Err(e) = &result {
+            self.count(domain, "ArchiverClientVisibilityInlineArchiveFailureCountPerDomain");
             tracing::info!(error = %e, "failed to perform visibility archival inline");
         }
         result
     }
 
     async fn send_archive_signal(&self, request: &ArchiveRequest) -> Result<(), String> {
+        self.count(&request.domain_name, "ArchiverClientSendSignalCountPerDomain");
         if !self.rate_limiter.allow() {
+            self.count(&request.domain_name, "CadenceErrServiceBusyCounter");
             tracing::error!("{TOO_MANY_REQUESTS_ERR_MSG}");
             return Err(TOO_MANY_REQUESTS_ERR_MSG.into());
         }
@@ -192,6 +224,7 @@ impl ArchiverClient {
             .signal_with_start(&workflow_id, request, SIGNAL_TIMEOUT)
             .await
             .inspect_err(|e| {
+                self.count(&request.domain_name, "ArchiverClientSendSignalFailureCountPerDomain");
                 tracing::error!(error = %e, domain_id = %request.domain_id, workflow_id = %request.workflow_id,
                     run_id = %request.run_id, archival_workflow_id = %workflow_id, "failed to send signal to archival system workflow");
             })
