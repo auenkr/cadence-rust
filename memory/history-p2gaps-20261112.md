@@ -21,3 +21,7 @@ Branch `history-p2gaps` from origin/master 105718ea8. CI only (no local cargo/go
 - gate cassandra/tchannel/true: https://github.com/auenkr/cadence-rust/actions/runs/43224274492 (GATE SUMMARY failed: [])
 - gate postgres/grpc/false: https://github.com/auenkr/cadence-rust/actions/runs/43224280484 (GATE SUMMARY failed: [])
 (Earlier rust-ci on d9c9659ad, same Rust code: run 43221840578 success; a rust-ci failed twice before on clippy/compile, fixed.)
+
+## Post-merge master validation
+
+Master ff1a5f415 (2026-11-12): 43226512773: success 43226521682: success 43226529439: success 43226536476: success 43226543748: success 43226550283: success 43226556923: success 43226564271: success 43226569964: success 43226574961: success 43226581953: success 43226589356: success 43226594566: success 
