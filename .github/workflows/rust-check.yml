@@ -1,0 +1,51 @@
+name: rust-check
+
+# Fast pre-check: clippy only (type-check + lints, no codegen, no tests), about 2-4 min.
+# Runs automatically on every push to history-* branches; dispatch for other refs:
+#   gh workflow run rust-check.yml --ref <branch> [-f package=cadence-history] -R auenkr/cadence-rust
+# Full validation (tests, fresh target) still uses rust-ci.yml.
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "Crate to check (empty = whole workspace)"
+        required: false
+        default: ""
+  push:
+    branches: ["history-*"]
+    paths: ["rust/**", ".github/workflows/rust-check.yml"]
+
+concurrency:
+  group: rust-check-${{ github.ref }}-${{ inputs.package || 'all' }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: never
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@v5
+      - name: Init IDL submodule
+        run: git submodule update --init go/idls
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+          # Restore master's rust-ci cache; never save (cache quota).
+          save-if: false
+      - name: Clippy
+        working-directory: rust
+        run: |
+          if [ -n "${{ inputs.package }}" ]; then
+            cargo clippy -p "${{ inputs.package }}" --all-targets -- -D warnings
+          else
+            cargo clippy --workspace --all-targets -- -D warnings
+          fi
