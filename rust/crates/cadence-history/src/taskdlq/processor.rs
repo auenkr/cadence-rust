@@ -207,36 +207,6 @@ pub fn new_shard_max_read_level_fn(shard: Arc<dyn ShardContext>) -> MaxReadLevel
     })
 }
 
-/// `NewProcessorFromShard`: derives the shard-scoped dependencies (shard ID, reinjector, DLQ
-/// manager, time source, metrics, logger) from the shard context and delegates to `NewProcessor`.
-pub fn new_processor_from_shard(
-    shard: Arc<dyn ShardContext>,
-    page_size: i32,
-    interval: DurationPropertyFnWithShardIDFilter,
-    failover_jitter_max_delay: DurationPropertyFn,
-    domain_mode: StringPropertyFnWithDomainFilter,
-    enabled: BoolPropertyFn,
-    host_limiter: HostLimiter,
-) -> Arc<ProcessorImpl> {
-    let domain_cache = shard.get_domain_cache();
-    new_processor(ProcessorParams {
-        shard_id: shard.get_shard_id(),
-        manager: shard.get_service().get_history_task_dlq_manager(),
-        domain_name: Arc::new(move |domain_id: &str| domain_cache.get_domain_name(domain_id)),
-        reinjector: shard.as_task_reinjector(),
-        max_read_level: Some(new_shard_max_read_level_fn(shard.clone())),
-        page_size,
-        interval,
-        failover_jitter_max_delay,
-        domain_mode,
-        enabled,
-        host_limiter,
-        time_source: shard.get_time_source(),
-        metrics_client: shard.get_metrics_client(),
-        logger: shard.get_logger(),
-    })
-}
-
 impl ProcessorImpl {
     fn ctx(&self) -> CancellationToken {
         self.ctx.lock().unwrap().clone()

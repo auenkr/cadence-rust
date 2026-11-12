@@ -152,7 +152,6 @@ mod tests {
 #[cfg(test)]
 mod decision_tests {
     use super::super::engine_decision_ops::{resolve_semaphore_lookups, SemaphoreLookup};
-    use super::*;
     use async_trait::async_trait;
     use cadence_api::enums::DecisionType;
     use cadence_api::tasks::{AcquireSemaphoreDecisionAttributes, Decision};
