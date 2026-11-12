@@ -825,10 +825,12 @@ mod tests {
         (addr, handle)
     }
 
+    type Seen = Vec<(String, Vec<u8>)>;
+
     /// Like `serve` but reads each full request (headers + `content-length` body).
     fn serve_full(
         responses: Vec<(u16, String)>,
-    ) -> (String, std::thread::JoinHandle<Vec<(String, Vec<u8>)>>) {
+    ) -> (String, std::thread::JoinHandle<Seen>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = format!("http://{}", listener.local_addr().unwrap());
         let handle = std::thread::spawn(move || {
