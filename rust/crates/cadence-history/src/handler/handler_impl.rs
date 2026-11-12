@@ -136,7 +136,8 @@ impl HandlerImpl {
             decay_after: cfg.global_ratelimiter_decay_after.clone(),
             gc_after: cfg.global_ratelimiter_gc_after.clone(),
         })
-        .expect("invalid ratelimit algorithm config");
+        .expect("invalid ratelimit algorithm config")
+        .with_metrics(registry.env().metrics_registry.clone());
         Self {
             ratelimit_aggregator,
             registry,
