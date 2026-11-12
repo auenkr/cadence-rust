@@ -389,7 +389,10 @@ impl Harness {
             sticky_ttl_nanos: Arc::new(|_| 10_000_000_000),
             current_cluster: CLUSTER.to_string(),
             history_v2: history.clone(),
-            state_params: Arc::new(|_| StateParams { retention_days: 1, ..StateParams::default() }),
+            state_params: {
+                let nodes: Arc<dyn cadence_persistence::history_reader::HistoryNodeStore> = Arc::new(MemNodeStore(history.clone()));
+                Arc::new(move |_| StateParams { retention_days: 1, history_nodes: Some(nodes.clone()), ..StateParams::default() })
+            },
         });
         let cache = EngineExecutionCache::new(core.clone());
         let mut engine = nop_engine();
@@ -417,5 +420,42 @@ impl crate::engine::deps::ClusterMetadata for TestClusterMetadata {
     }
     fn cluster_name_for_failover_version(&self, _: i64) -> crate::engine::deps::HResult<String> {
         Ok(CLUSTER.into())
+    }
+}
+
+/// Row view over `MemHistory` for the sync `read_history_branch` path (mutable-state event reads).
+#[derive(Debug)]
+struct MemNodeStore(Arc<MemHistory>);
+impl std::fmt::Debug for MemHistory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("MemHistory")
+    }
+}
+impl cadence_persistence::history_reader::HistoryNodeStore for MemNodeStore {
+    fn select_nodes(
+        &self,
+        _shard_id: i32,
+        tree_id: [u8; 16],
+        branch_id: [u8; 16],
+        min_node: i64,
+        max_node: i64,
+        limit: i64,
+    ) -> Result<Vec<cadence_persistence::history_reader::HistoryNodeRow>, cadence_persistence::history_reader::HistoryReadError> {
+        let tree = uuid::Uuid::from_bytes(tree_id).to_string();
+        let branch = uuid::Uuid::from_bytes(branch_id).to_string();
+        let g = self.0.nodes.lock().unwrap();
+        let mut rows: Vec<_> = g
+            .iter()
+            .filter(|n| n.tree_id == tree && n.branch_id == branch && n.node_id >= min_node && n.node_id < max_node)
+            .map(|n| cadence_persistence::history_reader::HistoryNodeRow {
+                node_id: n.node_id,
+                txn_id: n.transaction_id,
+                data: n.data.data.clone(),
+                encoding: n.data.encoding.clone(),
+            })
+            .collect();
+        rows.sort_by_key(|r| (r.node_id, r.txn_id));
+        rows.truncate(limit.max(0) as usize);
+        Ok(rows)
     }
 }

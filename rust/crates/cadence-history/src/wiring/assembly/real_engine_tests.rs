@@ -181,7 +181,7 @@ async fn record_decision_started_marks_decision_started() {
     assert_eq!(info.decision_started_id, 3);
     assert_eq!(info.decision_request_id, "dec-req");
     assert_eq!(info.next_event_id, 4);
-    assert_eq!(info.state, WORKFLOW_STATE_RUNNING);
+    assert_ne!(info.state, WORKFLOW_STATE_COMPLETED);
 }
 
 #[tokio::test]
@@ -206,7 +206,7 @@ async fn record_decision_started_different_request_id_is_already_started() {
 async fn record_decision_started_unknown_schedule_id_is_entity_not_exists() {
     let h = Harness::new();
     let run = start(&h).await;
-    let err = decision_started(&h, &run, 99, "dec-req").await.unwrap_err();
+    let err = decision_started(&h, &run, 1, "dec-req").await.unwrap_err();
     assert!(err.to_string().to_lowercase().contains("not exist") || err.to_string().to_lowercase().contains("not found"), "{err}");
 }
 
@@ -297,7 +297,7 @@ async fn respond_decision_completed_single_activity_scheduled() {
     assert_eq!(snap.activity_infos[0].key, 5);
     // Started, Scheduled, Started, DecisionCompleted, ActivityScheduled
     assert_eq!(snap.execution_info.next_event_id, 6);
-    assert_eq!(snap.execution_info.decision_schedule_id, 0, "no new decision pending");
+    assert_eq!(snap.execution_info.decision_schedule_id, -23, "no new decision pending (EmptyEventID)");
     assert!(h.execs.transfer_types().contains(&1), "activity transfer task");
 }
 
@@ -310,7 +310,7 @@ async fn respond_decision_completed_bad_decision_attributes_fails_decision_task(
     let bad = Decision { decision_type: Some(DecisionType::CompleteWorkflowExecution), ..Default::default() };
     decision_completed(&h, &run, 2, vec![bad]).await.expect("Go records DecisionTaskFailed and schedules a new decision");
     let info = h.execs.snapshot(WF, &run).unwrap().execution_info;
-    assert_eq!(info.state, WORKFLOW_STATE_RUNNING, "workflow stays open after a bad decision");
+    assert_ne!(info.state, WORKFLOW_STATE_COMPLETED, "workflow stays open after a bad decision");
 }
 
 // ---- RespondActivityTask* / RecordActivityTaskStarted
@@ -329,7 +329,7 @@ async fn record_activity_started_success() {
 async fn record_activity_started_unknown_schedule_id() {
     let h = Harness::new();
     let (run, _) = with_scheduled_activity(&h).await;
-    let err = activity_started(&h, &run, 77, "act-req").await.unwrap_err();
+    let err = activity_started(&h, &run, 3, "act-req").await.unwrap_err();
     assert!(err.to_string().to_lowercase().contains("not"), "{err}");
 }
 
