@@ -107,7 +107,7 @@ pub trait HistoryBatchSource {
     fn read_all(&self, request: &ArchiveHistoryRequest) -> Result<Option<Vec<Value>>, ArchiverError>;
 }
 
-fn validate_history_request(r: &ArchiveHistoryRequest) -> Result<(), ArchiverError> {
+pub(crate) fn validate_history_request(r: &ArchiveHistoryRequest) -> Result<(), ArchiverError> {
     let missing = |s: &str| s.is_empty();
     if missing(&r.domain_id)
         || missing(&r.domain_name)
@@ -225,14 +225,11 @@ fn ser_memo<S: serde::Serializer>(
     }
 }
 
-/// Go filestore `visibilityArchiver.Archive`.
-pub fn filestore_archive_visibility(
-    cfg: &FilestoreWriterConfig,
-    uri: &ArchiverUri,
+/// Go `ValidateVisibilityArchivalRequest`: DomainID, DomainName, WorkflowID, RunID, WorkflowTypeName,
+/// StartTimestamp and CloseTimestamp are required.
+pub(crate) fn validate_visibility_request(
     request: &ArchiveVisibilityRequest,
 ) -> Result<(), ArchiverError> {
-    filestore_validate_uri(uri)?;
-    // Go ValidateVisibilityArchivalRequest: DomainID, DomainName, WorkflowID, RunID, WorkflowTypeName required.
     if request.domain_id.is_empty()
         || request.domain_name.is_empty()
         || request.workflow_id.is_empty()
@@ -243,6 +240,17 @@ pub fn filestore_archive_visibility(
     {
         return Err(ArchiverError::Other(ERR_INVALID_ARCHIVE_REQUEST.into()));
     }
+    Ok(())
+}
+
+/// Go filestore `visibilityArchiver.Archive`.
+pub fn filestore_archive_visibility(
+    cfg: &FilestoreWriterConfig,
+    uri: &ArchiverUri,
+    request: &ArchiveVisibilityRequest,
+) -> Result<(), ArchiverError> {
+    filestore_validate_uri(uri)?;
+    validate_visibility_request(request)?;
     let dir = Path::new(&uri.path).join(&request.domain_id);
     let dir_s = dir.to_string_lossy().into_owned();
     mkdir_all(&dir_s, cfg.dir_mode)?;

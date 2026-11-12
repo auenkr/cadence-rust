@@ -5,8 +5,11 @@
 //! `go/common/archiver/gcloud` (`util.go`, `historyArchiver.go`,
 //! `visibilityArchiver.go`, `queryParser.go`, `connector/client.go`).
 //! Object-store I/O is behind [`ObjectStore`]; the HTTP implementations
-//! (S3 SigV4, GCS JSON API) live in `cadence-frontend`. Archive (write) paths
-//! belong to the History service and are not ported here.
+//! (S3 SigV4, GCS JSON API) live in `cadence-service-core`. Archive (write) paths
+//! are in the `write` submodule (used by the History inline archival).
+
+mod write;
+pub use write::*;
 
 use std::sync::Arc;
 
@@ -77,6 +80,10 @@ pub struct ListPage {
 pub trait ObjectStore: Send + Sync {
     fn head_bucket(&self, bucket: &str) -> Result<(), StoreError>;
     fn get_object(&self, bucket: &str, key: &str) -> Result<Vec<u8>, StoreError>;
+    /// S3 PutObject / GCS object upload (archive write path).
+    fn put_object(&self, bucket: &str, key: &str, data: &[u8]) -> Result<(), StoreError>;
+    /// S3 HeadObject / GCS object attrs: `Ok(false)` when the object is missing.
+    fn head_object(&self, bucket: &str, key: &str) -> Result<bool, StoreError>;
     /// One page of a prefix listing (S3 ListObjectsV2 / GCS objects.list).
     fn list(
         &self,
@@ -1028,6 +1035,12 @@ mod tests {
                 .get(key)
                 .cloned()
                 .ok_or_else(|| StoreError::new(StoreErrorKind::NoSuchKey, "no key"))
+        }
+        fn put_object(&self, _b: &str, _k: &str, _d: &[u8]) -> Result<(), StoreError> {
+            Err(StoreError::new(StoreErrorKind::Other, "read-only fake"))
+        }
+        fn head_object(&self, _b: &str, key: &str) -> Result<bool, StoreError> {
+            Ok(self.objects.contains_key(key))
         }
         fn list(
             &self,
