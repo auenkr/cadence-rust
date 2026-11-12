@@ -85,3 +85,6 @@ because `cadence_api::tasks` now contains it, but regenerating diverged from the
 AcquireSemaphore arm is emitted. `decisions.rs` was regenerated; the only diff is cosmetic
 (`request_local_dispatch: v.request_local_dispatch` instead of a `let` binding). Reproduce:
 `python3 rust/tools/generate-grpc-decisions.py && git diff --exit-code` (needs `rustfmt`).
+
+## CI
+rust-ci cadence-proto, head f054185ae: success https://github.com/auenkr/cadence-rust/actions/runs/43123895729
