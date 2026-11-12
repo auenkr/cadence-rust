@@ -141,14 +141,29 @@ fn sanity(lower: f64, actual: f64, upper: f64, what: &str) -> f64 {
 pub struct RequestWeighted {
     cfg: Config,
     usage: Mutex<HashMap<String, HashMap<String, Entry>>>,
+    /// Go `scope` (`met.Scope(metrics.GlobalRatelimiterAggregator)`); `None` == no metrics client.
+    scope: Option<crate::wiring::resources::metrics::Scope>,
 }
 
 impl RequestWeighted {
     /// Go `algorithm.New`: validates the config by taking a snapshot.
     pub fn new(cfg: Config) -> Result<Self, String> {
-        let a = Self { cfg, usage: Mutex::new(HashMap::new()) };
+        let a = Self { cfg, usage: Mutex::new(HashMap::new()), scope: None };
         a.snapshot(Instant::now()).map_err(|e| format!("invalid config: {e}"))?;
         Ok(a)
+    }
+
+    /// Binds the `GlobalRatelimiterAggregator` metrics scope.
+    pub fn with_metrics(mut self, registry: std::sync::Arc<crate::wiring::resources::metrics::MetricsRegistry>) -> Self {
+        self.scope = Some(crate::wiring::resources::metrics::Scope::new(registry, "GlobalRatelimiterAggregator", vec![]));
+        self
+    }
+
+    fn histogram(&self, name: &'static str, v: usize) {
+        use crate::task::deps::MetricsScope as _;
+        if let Some(s) = &self.scope {
+            s.record_histogram_value(name, v as f64);
+        }
     }
 
     fn snapshot(&self, now: Instant) -> Result<Snapshot, String> {
@@ -171,6 +186,7 @@ impl RequestWeighted {
         p.validate().map_err(|e| format!("bad args to update: {e}"))?;
         let mut usage = self.usage.lock().unwrap();
         let snap = self.snapshot(now)?;
+        let (mut initialized, mut reinitialized, mut updated, mut decayed) = (0usize, 0usize, 0usize, 0usize);
         for (key, req) in &p.load {
             let prev = usage.get(key).and_then(|ih| ih.get(&p.id)).copied();
             // elapsed capped to at least 1s
@@ -183,13 +199,21 @@ impl RequestWeighted {
             }
             let fresh = Entry { last_update: snap.now, accepted: aps, rejected: rps };
             let next = match prev {
-                None => fresh,
+                None => {
+                    initialized += 1;
+                    fresh
+                }
                 Some(prev) => {
                     let age = snap.now.saturating_duration_since(prev.last_update);
                     if snap.should_gc(age) {
+                        reinitialized += 1;
                         fresh
                     } else {
+                        updated += 1;
                         let reduce = snap.missed_update_scalar(age);
+                        if reduce < 1.0 {
+                            decayed += 1;
+                        }
                         Entry {
                             last_update: snap.now,
                             accepted: sanity(0.0, weighted(aps, prev.accepted * reduce, snap.weight), GUESS_IMPOSSIBLE_RPS, "weighted accepted rps"),
@@ -200,6 +224,11 @@ impl RequestWeighted {
             };
             usage.entry(key.clone()).or_default().insert(p.id.clone(), next);
         }
+        drop(usage); // Go: don't hold the lock while emitting metrics
+        self.histogram("GlobalRatelimiterInitialized", initialized);
+        self.histogram("GlobalRatelimiterReinitialized", reinitialized);
+        self.histogram("GlobalRatelimiterUpdated", updated);
+        self.histogram("GlobalRatelimiterDecayed", decayed);
         Ok(())
     }
 
@@ -255,8 +284,13 @@ impl RequestWeighted {
         let mut usage = self.usage.lock().unwrap();
         let snap = self.snapshot(now)?;
         let mut out = HashMap::with_capacity(limits.len());
+        let mut cumulative = Metrics::default();
         for lim in limits {
-            let (hosts, used, _met) = Self::weights_locked(&mut usage, lim, &snap);
+            let (hosts, used, met) = Self::weights_locked(&mut usage, lim, &snap);
+            cumulative.limits += met.limits;
+            cumulative.host_limits += met.host_limits;
+            cumulative.removed_limits += met.removed_limits;
+            cumulative.removed_host_limits += met.removed_host_limits;
             if !hosts.is_empty() {
                 out.insert(
                     lim.clone(),
@@ -267,6 +301,11 @@ impl RequestWeighted {
                 );
             }
         }
+        drop(usage);
+        self.histogram("GlobalRatelimiterLimitsQueried", cumulative.limits as usize);
+        self.histogram("GlobalRatelimiterHostLimitsQueried", cumulative.host_limits as usize);
+        self.histogram("GlobalRatelimiterRemovedLimits", cumulative.removed_limits as usize);
+        self.histogram("GlobalRatelimiterRemovedHostLimits", cumulative.removed_host_limits as usize);
         Ok(out)
     }
 

@@ -495,13 +495,14 @@ pub struct TestConfig {
     pub corruption_check: bool,
     pub max_signals: i32,
     pub no_consistent_query: bool,
+    pub no_consistent_query_by_domain: bool,
 }
 impl EngineConfig for TestConfig {
     fn enable_consistent_query(&self) -> bool {
         !self.no_consistent_query
     }
     fn enable_consistent_query_by_domain(&self, _: &str) -> bool {
-        true
+        !self.no_consistent_query_by_domain
     }
     fn enable_sticky_query(&self, _: &str) -> bool {
         true

@@ -2,7 +2,7 @@
 //! real mutable state + persistence. They drive the real `HistoryEngine` over the in-memory stores of
 //! `real_engine_harness` (instead of gomock persistence): each test starts a workflow through the engine
 //! and then performs the Go test's record/respond steps.
-use cadence_api::enums::DecisionType;
+use cadence_api::enums::{DecisionType, ParentClosePolicy};
 use cadence_api::service_types::{RequestCancelWorkflowExecutionRequest, SignalWithStartWorkflowExecutionRequest};
 use cadence_api::tasks::*;
 use cadence_api::tasktoken::{JsonTaskTokenSerializer, TaskToken};
@@ -734,6 +734,40 @@ async fn respond_decision_start_child_workflow_records_initiated() {
     assert_eq!(snap.execution_info.next_event_id, 6);
 }
 
+async fn start_child_with_policy(policy: Option<ParentClosePolicy>, expect: i32) {
+    // TestRespondDecisionTaskCompletedStartChildWorkflowWithAbandonPolicy / WithTerminatePolicy.
+    let h = Harness::new();
+    let d = Decision {
+        decision_type: Some(DecisionType::StartChildWorkflowExecution),
+        start_child_workflow_execution_decision_attributes: Some(StartChildWorkflowExecutionDecisionAttributes {
+            domain: DOMAIN_NAME.into(),
+            workflow_id: "child-1".into(),
+            workflow_type: Some(WorkflowType { name: "child-type".into() }),
+            task_list: Some(tl()),
+            execution_start_to_close_timeout_seconds: Some(100),
+            task_start_to_close_timeout_seconds: Some(10),
+            parent_close_policy: policy,
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let run = run_first_decision(&h, d).await;
+    let infos = h.execs.child_infos(WF, &run);
+    assert_eq!(infos.len(), 1);
+    assert_eq!(infos[0].started_workflow_id, "child-1");
+    assert_eq!(infos[0].parent_close_policy, expect);
+}
+
+#[tokio::test]
+async fn respond_decision_start_child_abandon_policy() {
+    start_child_with_policy(Some(ParentClosePolicy::Abandon), 0).await;
+}
+
+#[tokio::test]
+async fn respond_decision_start_child_terminate_policy() {
+    start_child_with_policy(Some(ParentClosePolicy::Terminate), 2).await;
+}
+
 #[tokio::test]
 async fn respond_decision_signal_external_records_initiated() {
     let h = Harness::new();
@@ -995,6 +1029,14 @@ mod query_ports {
     async fn query_strong_reject_when_consistent_query_not_enabled() {
         // TestQueryWorkflow_RejectBasedOnNotEnabled (cluster-level switch half).
         let h = Harness::build(|e| e.config = Arc::new(TestConfig { no_consistent_query: true, ..Default::default() }));
+        let err = h.engine.query_workflow(&qreq("any", Some(QueryConsistencyLevel::Strong), None), None).await.unwrap_err();
+        assert!(err.to_string().contains("does not enable strongly consistent query"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn query_strong_reject_when_consistent_query_not_enabled_by_domain() {
+        // TestQueryWorkflow_RejectBasedOnNotEnabled (per-domain half).
+        let h = Harness::build(|e| e.config = Arc::new(TestConfig { no_consistent_query_by_domain: true, ..Default::default() }));
         let err = h.engine.query_workflow(&qreq("any", Some(QueryConsistencyLevel::Strong), None), None).await.unwrap_err();
         assert!(err.to_string().contains("does not enable strongly consistent query"), "{err}");
     }
