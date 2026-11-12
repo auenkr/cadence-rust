@@ -595,3 +595,204 @@ async fn request_cancel_workflow_execution_appends_event() {
     assert!(info.cancel_requested);
     assert_eq!(info.next_event_id, 4);
 }
+
+// ---- batch 3: activity canceled, continue-as-new, child, external signal/cancel, retry policy
+
+/// Runs the first decision with one decision and returns the run id (decision completed at event 4).
+async fn run_first_decision(h: &Harness, d: Decision) -> String {
+    let run = start(h).await;
+    decision_started(h, &run, 2, "dec-req").await.expect("decision started");
+    decision_completed(h, &run, 2, vec![d]).await.expect("decision completed");
+    run
+}
+
+#[tokio::test]
+async fn respond_activity_canceled_success() {
+    let h = Harness::new();
+    let (run, sched) = with_scheduled_activity(&h).await;
+    activity_started(&h, &run, sched, "act-req").await.unwrap();
+    h.engine
+        .respond_activity_task_canceled(&HistoryRespondActivityTaskCanceledRequest {
+            domain_uuid: DOMAIN_ID.into(),
+            cancel_request: Some(RespondActivityTaskCanceledRequest { task_token: activity_token(&run, sched), details: b"d".to_vec(), identity: IDENTITY.into() }),
+        })
+        .await
+        .expect("canceled");
+    let snap = h.execs.snapshot(WF, &run).unwrap();
+    assert!(snap.activity_infos.is_empty());
+    // + ActivityTaskCanceled + DecisionTaskScheduled
+    assert_eq!(snap.execution_info.next_event_id, 9);
+}
+
+#[tokio::test]
+async fn respond_activity_canceled_not_started_is_error() {
+    let h = Harness::new();
+    let (run, sched) = with_scheduled_activity(&h).await;
+    let res = h
+        .engine
+        .respond_activity_task_canceled(&HistoryRespondActivityTaskCanceledRequest {
+            domain_uuid: DOMAIN_ID.into(),
+            cancel_request: Some(RespondActivityTaskCanceledRequest { task_token: activity_token(&run, sched), ..Default::default() }),
+        })
+        .await;
+    assert!(res.is_err());
+}
+
+#[tokio::test]
+async fn request_cancel_activity_decision_before_start_cancels_activity() {
+    let h = Harness::new();
+    let (run, _) = with_scheduled_activity(&h).await;
+    // decision 2 scheduled at event 6
+    decision_started(&h, &run, 6, "dec-req-2").await.expect("started");
+    let cancel = Decision {
+        decision_type: Some(DecisionType::RequestCancelActivityTask),
+        request_cancel_activity_task_decision_attributes: Some(RequestCancelActivityTaskDecisionAttributes { activity_id: "act-1".into() }),
+        ..Default::default()
+    };
+    decision_completed(&h, &run, 6, vec![cancel]).await.expect("completed");
+    let snap = h.execs.snapshot(WF, &run).unwrap();
+    // Not-started activity is canceled immediately: no activity left.
+    assert!(snap.activity_infos.is_empty());
+}
+
+#[tokio::test]
+async fn respond_decision_continue_as_new_closes_run_and_starts_new() {
+    let h = Harness::new();
+    let d = Decision {
+        decision_type: Some(DecisionType::ContinueAsNewWorkflowExecution),
+        continue_as_new_workflow_execution_decision_attributes: Some(ContinueAsNewWorkflowExecutionDecisionAttributes {
+            workflow_type: Some(WorkflowType { name: "wf-type".into() }),
+            task_list: Some(tl()),
+            input: b"next".to_vec(),
+            execution_start_to_close_timeout_seconds: Some(100),
+            task_start_to_close_timeout_seconds: Some(10),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let run = run_first_decision(&h, d).await;
+    let old = h.execs.snapshot(WF, &run).unwrap().execution_info;
+    assert_eq!(old.state, WORKFLOW_STATE_COMPLETED);
+    assert_eq!(old.close_status, WORKFLOW_CLOSE_STATUS_CONTINUED_AS_NEW);
+    let cur = h.execs.current_run(WF).unwrap();
+    assert_ne!(cur.run_id, run);
+    let new = h.execs.snapshot(WF, &cur.run_id).unwrap().execution_info;
+    assert_ne!(new.state, WORKFLOW_STATE_COMPLETED);
+    // WorkflowExecutionStarted + DecisionTaskScheduled
+    assert_eq!(new.next_event_id, 3);
+}
+
+#[tokio::test]
+async fn respond_decision_start_child_workflow_records_initiated() {
+    let h = Harness::new();
+    let d = Decision {
+        decision_type: Some(DecisionType::StartChildWorkflowExecution),
+        start_child_workflow_execution_decision_attributes: Some(StartChildWorkflowExecutionDecisionAttributes {
+            domain: DOMAIN_NAME.into(),
+            workflow_id: "child-1".into(),
+            workflow_type: Some(WorkflowType { name: "child-type".into() }),
+            task_list: Some(tl()),
+            input: b"in".to_vec(),
+            execution_start_to_close_timeout_seconds: Some(100),
+            task_start_to_close_timeout_seconds: Some(10),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let run = run_first_decision(&h, d).await;
+    let snap = h.execs.snapshot(WF, &run).unwrap();
+    assert_eq!(snap.child_execution_infos.len(), 1);
+    // + DecisionCompleted + StartChildWorkflowExecutionInitiated
+    assert_eq!(snap.execution_info.next_event_id, 6);
+}
+
+#[tokio::test]
+async fn respond_decision_signal_external_records_initiated() {
+    let h = Harness::new();
+    let d = Decision {
+        decision_type: Some(DecisionType::SignalExternalWorkflowExecution),
+        signal_external_workflow_execution_decision_attributes: Some(SignalExternalWorkflowExecutionDecisionAttributes {
+            domain: DOMAIN_NAME.into(),
+            execution: Some(WorkflowExecution { workflow_id: "other".into(), run_id: String::new() }),
+            signal_name: "sig".into(),
+            input: b"in".to_vec(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let run = run_first_decision(&h, d).await;
+    let snap = h.execs.snapshot(WF, &run).unwrap();
+    assert_eq!(snap.signal_infos.len(), 1);
+    assert_eq!(snap.execution_info.next_event_id, 6);
+}
+
+#[tokio::test]
+async fn respond_decision_request_cancel_external_records_initiated() {
+    let h = Harness::new();
+    let d = Decision {
+        decision_type: Some(DecisionType::RequestCancelExternalWorkflowExecution),
+        request_cancel_external_workflow_execution_decision_attributes: Some(RequestCancelExternalWorkflowExecutionDecisionAttributes {
+            domain: DOMAIN_NAME.into(),
+            workflow_id: "other".into(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let run = run_first_decision(&h, d).await;
+    let snap = h.execs.snapshot(WF, &run).unwrap();
+    assert_eq!(snap.request_cancel_infos.len(), 1);
+    assert_eq!(snap.execution_info.next_event_id, 6);
+}
+
+#[tokio::test]
+async fn start_workflow_with_retry_policy_persists_policy() {
+    let h = Harness::new();
+    let mut req = start_req("retry-req");
+    req.start_request.as_mut().unwrap().retry_policy = Some(RetryPolicy {
+        initial_interval_in_seconds: 1,
+        backoff_coefficient: 2.0,
+        maximum_interval_in_seconds: 10,
+        maximum_attempts: 3,
+        expiration_interval_in_seconds: 100,
+        ..Default::default()
+    });
+    let run = h.engine.start_workflow_execution(&req).await.expect("start").run_id;
+    let info = h.execs.snapshot(WF, &run).unwrap().execution_info;
+    assert!(info.has_retry_policy);
+    assert_eq!(info.maximum_attempts, 3);
+    assert_eq!(info.initial_interval_nanos, 1_000_000_000);
+}
+
+#[tokio::test]
+async fn respond_activity_failed_with_retry_policy_retries_without_history_event() {
+    let h = Harness::new();
+    let run = start(&h).await;
+    decision_started(&h, &run, 2, "dec-req").await.unwrap();
+    let mut d = schedule_activity_decision("act-1");
+    d.schedule_activity_task_decision_attributes.as_mut().unwrap().retry_policy = Some(RetryPolicy {
+        initial_interval_in_seconds: 1,
+        backoff_coefficient: 2.0,
+        maximum_interval_in_seconds: 10,
+        maximum_attempts: 3,
+        expiration_interval_in_seconds: 100,
+        ..Default::default()
+    });
+    decision_completed(&h, &run, 2, vec![d]).await.unwrap();
+    activity_started(&h, &run, 5, "act-req").await.unwrap();
+    h.engine
+        .respond_activity_task_failed(&HistoryRespondActivityTaskFailedRequest {
+            domain_uuid: DOMAIN_ID.into(),
+            failed_request: Some(RespondActivityTaskFailedRequest {
+                task_token: activity_token(&run, 5),
+                reason: Some("retryable".into()),
+                identity: IDENTITY.into(),
+                ..Default::default()
+            }),
+        })
+        .await
+        .expect("failed");
+    let snap = h.execs.snapshot(WF, &run).unwrap();
+    // Activity is retried: still pending, no ActivityTaskFailed event written.
+    assert_eq!(snap.activity_infos.len(), 1);
+    assert_eq!(snap.execution_info.next_event_id, 7);
+}
