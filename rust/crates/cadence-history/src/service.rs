@@ -140,7 +140,7 @@ impl Service {
         ));
         let raw = Arc::new(HandlerImpl::new(registry, (env.config.rps)() as f64));
         let handler: Arc<dyn Handler> =
-            Arc::new(HistoryHandler { wrapped: raw, workflow_id_cache: Arc::new(CacheAdapter(wf_cache)) });
+            Arc::new(HistoryHandler { wrapped: Arc::new(crate::handler::metrics_handler::MetricsHandler { wrapped: raw, registry: env.metrics_registry.clone() }), workflow_id_cache: Arc::new(CacheAdapter(wf_cache)) });
         Self {
             status: AtomicI32::new(STATUS_INITIALIZED),
             env,

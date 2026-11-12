@@ -302,6 +302,8 @@ impl QueueExecProvider for HistoryQueueExecProvider {
         task_shard.reinjector.bind(crate::wiring::assembly::shard_factory::ShardTaskReinjector::new(
             ctx.shard.clone(),
             env.domain_cache.clone(),
+            env.persistence.executions.clone(),
+            env.cluster.metadata().current_cluster_name.clone(),
         ));
         let task_shard_dyn: Arc<dyn t::ShardContext> = task_shard;
         let tasks = Arc::new(SqlQueueShardContext::new(

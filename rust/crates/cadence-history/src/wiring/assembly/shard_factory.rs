@@ -16,6 +16,9 @@ use crate::shard::ShardStore;
 use crate::shard_context::{
     ClusterInfo, HistoryTaskCategory as ShardCategory, ShardContext, ShardContextError,
 };
+use cadence_persistence::history_contract::{self as pc, GoExecutionStore};
+use cadence_persistence::sqlblobs;
+
 use crate::task::deps as task;
 use crate::taskdlq::interface::TaskReinjector;
 use crate::wiring::assembly::env::HistoryEnv;
@@ -200,21 +203,132 @@ impl TaskReinjector for ReinjectorSlot {
     }
 }
 
-/// Port of Go `shard.Context.ReinjectHistoryTasks` for the SQL persistence
-/// backend: closed check, group by (domain, workflow), resolve domain entries
-/// before the write path, then `ExecutionManager.CreateHistoryTasks`, which
-/// SQL does not implement (Go `errHistoryTasksNotImplemented`). The task-id
-/// allocation Go performs before that call is not observable on SQL because
-/// the persistence call always fails.
+/// Port of Go `shard.Context.ReinjectHistoryTasks`: closed check, group by
+/// (domain, workflow), resolve domain entries before taking the write gate,
+/// allocate task ids (transfer/timer, replication last), then
+/// `ExecutionManager.CreateHistoryTasks`. SQL stores return Go's
+/// `errHistoryTasksNotImplemented`; Cassandra performs the write.
 pub struct ShardTaskReinjector {
     shard: Arc<ShardContext>,
     domain_cache: Arc<dyn task::DomainCache>,
+    executions: Arc<dyn GoExecutionStore>,
+    current_cluster: String,
 }
 
 impl ShardTaskReinjector {
-    pub fn new(shard: Arc<ShardContext>, domain_cache: Arc<dyn task::DomainCache>) -> Arc<Self> {
-        Arc::new(Self { shard, domain_cache })
+    pub fn new(
+        shard: Arc<ShardContext>,
+        domain_cache: Arc<dyn task::DomainCache>,
+        executions: Arc<dyn GoExecutionStore>,
+        current_cluster: String,
+    ) -> Arc<Self> {
+        Arc::new(Self { shard, domain_cache, executions, current_cluster })
     }
+}
+
+fn kind_i32(k: task::TaskListKind) -> i32 {
+    match k {
+        task::TaskListKind::Normal => 0,
+        task::TaskListKind::Sticky => 1,
+        task::TaskListKind::Ephemeral => 2,
+    }
+}
+
+/// Typed history task -> persistence contract rows (the inverse of the queue decode).
+enum PcTask {
+    Transfer(pc::TransferTask),
+    Timer(pc::TimerTask),
+}
+
+fn to_pc_task(t: &dyn task::PersistenceTask) -> Result<PcTask, task::TaskError> {
+    use task as d;
+    let any = t.as_any();
+    let mut tr = pc::TransferTask {
+        domain_id: t.get_domain_id().to_owned(),
+        workflow_id: t.get_workflow_id().to_owned(),
+        run_id: t.get_run_id().to_owned(),
+        visibility_time_unix_nanos: t.get_visibility_timestamp().0,
+        task_id: t.get_task_id(),
+        task_type: t.get_task_type(),
+        version: t.get_version(),
+        ..Default::default()
+    };
+    let mut tm = pc::TimerTask {
+        domain_id: tr.domain_id.clone(),
+        workflow_id: tr.workflow_id.clone(),
+        run_id: tr.run_id.clone(),
+        visibility_timestamp_unix_nanos: tr.visibility_time_unix_nanos,
+        task_id: tr.task_id,
+        task_type: tr.task_type,
+        version: tr.version,
+        ..Default::default()
+    };
+    if let Some(x) = any.downcast_ref::<d::ActivityTask>() {
+        tr.target_domain_id = x.target_domain_id.clone();
+        tr.task_list = x.task_list.clone();
+        tr.schedule_id = x.schedule_id;
+        tr.original_task_list = x.original_task_list.clone();
+        tr.original_task_list_kind = kind_i32(x.original_task_list_kind);
+    } else if let Some(x) = any.downcast_ref::<d::DecisionTask>() {
+        tr.target_domain_id = x.target_domain_id.clone();
+        tr.task_list = x.task_list.clone();
+        tr.schedule_id = x.schedule_id;
+        tr.original_task_list = x.original_task_list.clone();
+        tr.original_task_list_kind = kind_i32(x.original_task_list_kind);
+    } else if let Some(x) = any.downcast_ref::<d::CancelExecutionTask>() {
+        tr.target_domain_id = x.target_domain_id.clone();
+        tr.target_workflow_id = x.target_workflow_id.clone();
+        tr.target_run_id = x.target_run_id.clone();
+        tr.target_child_workflow_only = x.target_child_workflow_only;
+        tr.schedule_id = x.initiated_id;
+    } else if let Some(x) = any.downcast_ref::<d::SignalExecutionTask>() {
+        tr.target_domain_id = x.target_domain_id.clone();
+        tr.target_workflow_id = x.target_workflow_id.clone();
+        tr.target_run_id = x.target_run_id.clone();
+        tr.target_child_workflow_only = x.target_child_workflow_only;
+        tr.schedule_id = x.initiated_id;
+    } else if let Some(x) = any.downcast_ref::<d::StartChildExecutionTask>() {
+        tr.target_domain_id = x.target_domain_id.clone();
+        tr.target_workflow_id = x.target_workflow_id.clone();
+        tr.schedule_id = x.initiated_id;
+        tr.task_list = x.task_list.clone();
+    } else if let Some(x) = any.downcast_ref::<d::UpsertWorkflowSearchAttributesTask>() {
+        tr.task_list = x.task_list.clone();
+    } else if let Some(x) = any.downcast_ref::<d::RecordChildExecutionCompletedTask>() {
+        tr.target_domain_id = x.target_domain_id.clone();
+        tr.target_workflow_id = x.target_workflow_id.clone();
+        tr.target_run_id = x.target_run_id.clone();
+    } else if let Some(x) = any.downcast_ref::<d::ApplyParentClosePolicyTask>() {
+        tr.target_domain_ids = x.target_domain_ids.clone();
+    } else if let Some(x) = any.downcast_ref::<d::DecisionTimeoutTask>() {
+        tm.event_id = x.event_id;
+        tm.schedule_attempt = x.schedule_attempt;
+        tm.timeout_type = x.timeout_type;
+    } else if let Some(x) = any.downcast_ref::<d::ActivityTimeoutTask>() {
+        tm.event_id = x.event_id;
+        tm.schedule_attempt = x.attempt;
+        tm.timeout_type = x.timeout_type;
+    } else if let Some(x) = any.downcast_ref::<d::UserTimerTask>() {
+        tm.event_id = x.event_id;
+    } else if let Some(x) = any.downcast_ref::<d::ActivityRetryTimerTask>() {
+        tm.event_id = x.event_id;
+        tm.schedule_attempt = x.attempt;
+    } else if let Some(x) = any.downcast_ref::<d::WorkflowBackoffTimerTask>() {
+        tm.event_id = x.event_id;
+        tm.timeout_type = x.timeout_type;
+    }
+    match t.get_task_category() {
+        task::HistoryTaskCategory::Transfer => Ok(PcTask::Transfer(tr)),
+        task::HistoryTaskCategory::Timer => Ok(PcTask::Timer(tm)),
+        other => Err(task::TaskError::InternalService(format!(
+            "CreateHistoryTasks only supports transfer and timer tasks, got category: {other:?}"
+        ))),
+    }
+}
+
+fn blob(r: Result<Vec<u8>, impl std::fmt::Display>) -> Result<pc::DataBlob, task::TaskError> {
+    r.map(|data| pc::DataBlob { encoding: "thriftrw".to_string(), data })
+        .map_err(|e| task::TaskError::InternalService(format!("encode task: {e}")))
 }
 
 #[async_trait]
@@ -224,17 +338,126 @@ impl TaskReinjector for ShardTaskReinjector {
         _ctx: &CancellationToken,
         tasks: Vec<Arc<dyn task::PersistenceTask>>,
     ) -> Result<(), task::TaskError> {
-        if let Some(ShardContextError::ShardClosed { closed_at_nanos }) = self.shard.closed_error() {
-            return Err(task::TaskError::ShardClosed { closed_at: task::Time(closed_at_nanos) });
+        let closed = |s: &ShardContext| match s.closed_error() {
+            Some(ShardContextError::ShardClosed { closed_at_nanos }) => {
+                Some(task::TaskError::ShardClosed { closed_at: task::Time(closed_at_nanos) })
+            }
+            _ => None,
+        };
+        if let Some(e) = closed(&self.shard) {
+            return Err(e);
         }
-        let mut domains = std::collections::HashSet::new();
+        // Group by (domain, workflow); Go iterates a map, order is not significant.
+        let mut by_exec: std::collections::BTreeMap<(String, String), Vec<PcTask>> = Default::default();
+        let mut domains = std::collections::HashMap::new();
         for t in &tasks {
-            domains.insert(t.get_domain_id().to_owned());
+            by_exec
+                .entry((t.get_domain_id().to_owned(), t.get_workflow_id().to_owned()))
+                .or_default()
+                .push(to_pc_task(t.as_ref())?);
         }
-        for d in &domains {
-            self.domain_cache.get_domain_by_id(d)?;
+        for (d, _) in by_exec.keys() {
+            if !domains.contains_key(d) {
+                domains.insert(d.clone(), self.domain_cache.get_domain_by_id(d)?);
+            }
         }
-        Err(task::TaskError::InternalService("create history tasks not implemented for SQL".into()))
+
+        // Go takes the shard lock from id allocation through the write.
+        let _gate = self.shard.lock_task_writes().await;
+        let shard_err = |e: ShardContextError| task::TaskError::InternalService(e.to_string());
+        let mut max_read_level = 0i64;
+        let mut transfer = Vec::new();
+        let mut timer = Vec::new();
+        for ((domain_id, _wf), items) in by_exec {
+            let entry = &domains[&domain_id];
+            let mut tr: Vec<pc::TransferTask> = Vec::new();
+            let mut tm: Vec<pc::TimerTask> = Vec::new();
+            for i in items {
+                match i {
+                    PcTask::Transfer(t) => tr.push(t),
+                    PcTask::Timer(t) => tm.push(t),
+                }
+            }
+            let mut slots: Vec<(i64, i64)> = tr.iter().map(|t| (0, t.visibility_time_unix_nanos)).collect();
+            self.shard.allocate_transfer_ids(&mut slots, &mut max_read_level).map_err(shard_err)?;
+            for (t, s) in tr.iter_mut().zip(&slots) {
+                t.task_id = s.0;
+                t.visibility_time_unix_nanos = s.1;
+            }
+            // Timer ids after transfer ids (Cadence indexer relies on the order).
+            for t in tm.iter_mut() {
+                let cluster = if t.version != task::EMPTY_VERSION {
+                    entry.replication_config.active_cluster_name.clone()
+                } else {
+                    self.current_cluster.clone()
+                };
+                let mut slot = [(0i64, t.visibility_timestamp_unix_nanos)];
+                self.shard.allocate_timer_ids(&cluster, &mut slot).map_err(shard_err)?;
+                t.task_id = slot[0].0;
+                t.visibility_timestamp_unix_nanos = slot[0].1;
+            }
+            transfer.extend(tr);
+            timer.extend(tm);
+        }
+
+        let mut tasks_by_category = std::collections::BTreeMap::new();
+        let mut rows = Vec::new();
+        for t in &transfer {
+            rows.push(pc::Task {
+                visibility_timestamp_unix_nanos: t.visibility_time_unix_nanos,
+                task_type: t.task_type,
+                task_id: t.task_id,
+                data: blob(
+                    sqlblobs::transfer_task_to_struct(t)
+                        .and_then(|s| sqlblobs::Encoding::ThriftRW.encode(&s)),
+                )?,
+            });
+        }
+        if !rows.is_empty() {
+            tasks_by_category.insert(pc::HistoryTaskCategory { category_type: 1, category_id: 1 }, rows);
+        }
+        let mut rows = Vec::new();
+        for t in &timer {
+            rows.push(pc::Task {
+                visibility_timestamp_unix_nanos: t.visibility_timestamp_unix_nanos,
+                task_type: t.task_type,
+                task_id: t.task_id,
+                data: blob(
+                    sqlblobs::timer_task_to_struct(t).and_then(|s| sqlblobs::Encoding::ThriftRW.encode(&s)),
+                )?,
+            });
+        }
+        if !rows.is_empty() {
+            tasks_by_category.insert(pc::HistoryTaskCategory { category_type: 2, category_id: 2 }, rows);
+        }
+
+        if let Some(e) = closed(&self.shard) {
+            return Err(e);
+        }
+        let res = self
+            .executions
+            .create_history_tasks(pc::CreateHistoryTasksRequest {
+                shard_id: self.shard.shard_id(),
+                range_id: self.shard.range_id(),
+                current_timestamp_unix_nanos: self.shard.now(),
+                tasks_by_category,
+            })
+            .await;
+        match res {
+            Ok(()) => {
+                self.shard.update_max_read_level(max_read_level);
+                Ok(())
+            }
+            Err(pc::PersistenceError::ShardOwnershipLost { .. }) => {
+                tracing::warn!("Closing shard: ReinjectHistoryTasks failed due to stolen shard.");
+                self.shard.close_shard(None);
+                Err(task::TaskError::ShardOwnershipLost("ReinjectHistoryTasks: shard ownership lost".into()))
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to re-inject history DLQ tasks into the executions table.");
+                Err(task::TaskError::InternalService(e.to_string()))
+            }
+        }
     }
 }
 

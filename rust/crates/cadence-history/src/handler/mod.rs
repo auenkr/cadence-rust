@@ -2,4 +2,5 @@
 pub mod interface;
 pub use interface::Handler;
 pub mod handler_impl;
+pub mod metrics_handler;
 pub use handler_impl::HandlerImpl;
