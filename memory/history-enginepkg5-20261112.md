@@ -18,4 +18,5 @@ None found.
 
 ## CI
 - Clippy + tests (rust-ci package=cadence-history) green: https://github.com/auenkr/cadence-rust/actions/runs/43160529935
+- Final merged head 450654698: https://github.com/auenkr/cadence-rust/actions/runs/43161291597 (success)
 - Earlier failed runs were compile/clippy fixes in new tests only.
