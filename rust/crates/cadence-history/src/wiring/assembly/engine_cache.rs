@@ -448,6 +448,12 @@ impl EngineExecutionCache {
         self.core.clone()
     }
 
+    /// Test-only: drops every cached context so the next load reads persistence (Go cache miss).
+    #[cfg(test)]
+    pub fn clear_all_for_test(&self) {
+        self.entries.lock().unwrap().clear();
+    }
+
     pub fn new(core: Arc<EngineCore>) -> Arc<Self> {
         Arc::new(Self { core, entries: Mutex::new(HashMap::new()), max_size: 10_000 })
     }

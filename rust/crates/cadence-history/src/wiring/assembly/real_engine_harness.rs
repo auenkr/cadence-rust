@@ -347,6 +347,7 @@ pub struct Harness {
     pub execs: Arc<MemExecutions>,
     pub history: Arc<MemHistory>,
     pub clock: Arc<TestClock>,
+    pub cache: Arc<EngineExecutionCache>,
 }
 
 impl Default for Harness {
@@ -406,10 +407,10 @@ impl Harness {
         engine.decision_handler = Arc::new(EngineDecisionHandler::new(cache.clone(), core.clone(), config));
         engine.history_event_notifier =
             Arc::new(crate::wiring::assembly::engine_factory::NotifierAdapter::new(crate::events::Notifier::new()));
-        engine.execution_cache = cache;
+        engine.execution_cache = cache.clone();
         let engine = Arc::new(engine);
         let _ = core.engine_slot.set(Arc::downgrade(&engine));
-        Self { engine, execs, history, clock }
+        Self { engine, execs, history, clock, cache }
     }
 }
 
