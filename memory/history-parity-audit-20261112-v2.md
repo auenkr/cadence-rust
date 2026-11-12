@@ -23,17 +23,17 @@ None known.
    (`R/wiring/assembly/ndc_state.rs:317`, `ndc_context_hooks.rs:74`; engine path has no equivalent). Affects an in-flight decision whose version is lower than
    the current version after failover (standby -> active): Go fails it with `FailoverCloseDecision` and reschedules. NOT ported here (needs cluster metadata in the
    typed mutable state; ~100 Go lines, cases 1-5).
-2. Task-DLQ processor, archival workflow signal client, semaphores on replay, failover marker persistence, request type/version in `WorkflowRequest`,
-   ACSP blob decode in NDC `vector_clock_inputs`: unchanged from audit 20261112 section 2 (P1 rows 3,4,5,6,7,12); several were closed by later branches
-   (p1b2..p1b5, retryreset, archgaps, acmanager) per their notes.
+2. CLOSED in history-p1batch (2026-11-12, memory/history-p1batch-20261112.md): task-DLQ processor, archival signal client, semaphores on replay,
+   failover marker persistence, request type/version in `WorkflowRequest`, ACSP blob decode in NDC `vector_clock_inputs` were all already present (file pointers there).
+3. Archival JSON tag `firstScheduleTimeNano` (Go `*time.Time` RFC3339 string) fixed in history-p1batch (`go_history_batch`); no other history-event tag mismatch.
 
 ### P2
 - `closeTransactionWithPolicyCheck` (DomainNotActive on active close when current version's cluster != current cluster): engine handlers check active status earlier; not in `engine_close.rs`.
 - `validateNoEventsAfterWorkflowFinish`, `generateChecksum`/`verifyMutableStateChecksum` (checksum is not written/verified on the engine path), `DeleteTransferTasks/DeleteTimerTasks`, `logDataInconsistency`.
 - Shard `task_notifier` / `failoverMarkerSkipReason` / `ReloadMutableState` have no same-named Rust function (behaviour is inlined in `shard_context.rs` and the engine cache; not behaviour-verified one by one).
-- Engine/events/query/queue test volume (see audit 20261112 P2 and enginepkg*/exectests/standbytests notes). Metrics gaps: aggregator, archival, cache metrics.
-- Archival: `HistoryBatchSource` reads whole history up front; blob size estimate via JSON; no real S3/GCS; `nonRetriable`/ProgressManager not on inline path.
-- Dead `Unwired*` stubs; stale `TODO(link)` comments.
+- Engine/events/query/queue test volume (see audit 20261112 P2 and enginepkg*/exectests/standbytests notes). Metrics gaps: aggregator (FIXED, aggregator metrics branch), archival, cache metrics.
+- Archival: streaming read (FIXED), blob size (FIXED), inline options (FIXED) by today's archival branches; remaining: no real S3/GCS network client; `nonRetriable`/ProgressManager not on inline path (matches Go inline).
+- Dead `Unwired*` stubs: FIXED (removed). Stale `TODO(link)` comments remain.
 
 ## Package notes
 decision: Go `task_handler.go handleDecision*` names differ (Rust `decision/task_handler.rs` dispatch); engine: only constructors/helpers missing; execution: 87 misses = constructors, retry wrappers, checksum, replication-task builders (inline in Rust `mutable_state_builder.rs`/`engine_close.rs`); ndc/queue/queuev2/replication/reset/resource/handler/query: constructors and private helpers only.
