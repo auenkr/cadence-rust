@@ -5,6 +5,7 @@ pub mod archiver_client;
 pub mod archiver_wiring;
 pub mod controller;
 pub mod engine_cache;
+pub mod engine_checksum;
 pub mod engine_close;
 pub mod engine_continue;
 pub mod engine_decision;

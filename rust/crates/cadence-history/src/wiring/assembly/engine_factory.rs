@@ -93,6 +93,17 @@ impl HistoryEventNotifier for NotifierAdapter {
 /// queue processors so the transfer / timer executors share the engine's cache.
 pub fn build_core(env: &Arc<HistoryEnv>, shard: &Arc<ShardContext>) -> (Arc<EngineCore>, Arc<EngineExecutionCache>) {
     let core = Arc::new(EngineCore {
+        metrics: env.metrics.clone() as Arc<dyn crate::task::deps::MetricsClient>,
+        cached_queue_reader_shadow: {
+            let cfg = env.config.clone();
+            let shard_id = shard.shard_id();
+            Arc::new(move || {
+                (
+                    (cfg.timer_processor_cached_queue_reader_mode)(shard_id) == "shadow",
+                    (cfg.transfer_processor_cached_queue_reader_mode)(shard_id) == "shadow",
+                )
+            })
+        },
         engine_slot: Arc::new(std::sync::OnceLock::new()),
         semaphore_metadata: env.semaphore_metadata.clone(),
         cluster_metadata: env.cluster.clone() as Arc<dyn crate::engine::deps::ClusterMetadata>,
@@ -124,6 +135,7 @@ pub fn build_core(env: &Arc<HistoryEnv>, shard: &Arc<ShardContext>) -> (Arc<Engi
             let history_nodes = env.persistence.history_nodes.clone();
             let shard_id = shard.shard_id();
             let cluster = env.cluster.clone();
+            let metrics = env.metrics.clone();
             Arc::new(move |domain_id: &str| {
                 let mut p = StateParams {
                     history_nodes: Some(history_nodes.clone()),
@@ -133,6 +145,12 @@ pub fn build_core(env: &Arc<HistoryEnv>, shard: &Arc<ShardContext>) -> (Arc<Engi
                         cluster: cluster.clone() as Arc<dyn crate::engine::deps::ClusterMetadata>,
                         replication_enabled: cfg.enable_replication_task_generation.clone(),
                     }),
+                    data_inconsistency: crate::execution::mutable_state_builder::DataInconsistencyHook(Some({
+                        let m = metrics.clone();
+                        Arc::new(move || {
+                            crate::task::deps::MetricsClient::inc_counter(&*m, "WorkflowContextScope", "DataInconsistentCounter")
+                        })
+                    })),
                     ..StateParams::default()
                 };
                 if let Ok(entry) = crate::task::deps::DomainCache::get_domain_by_id(&*domains, domain_id) {
@@ -143,6 +161,9 @@ pub fn build_core(env: &Arc<HistoryEnv>, shard: &Arc<ShardContext>) -> (Arc<Engi
                         (cfg.normal_decision_schedule_to_start_timeout)(&name).as_nanos() as i64;
                     p.normal_decision_s2s_max_attempts = (cfg.normal_decision_schedule_to_start_max_attempts)(&name);
                     p.checksum_gen_probability = (cfg.mutable_state_checksum_gen_probability)(&name);
+                    p.checksum_verify_probability = (cfg.mutable_state_checksum_verify_probability)(&name);
+                    p.checksum_invalidate_before_secs = (cfg.mutable_state_checksum_invalidate_before)() as i64;
+                    p.enable_corruption_auto_repair = (cfg.enable_corruption_auto_repair)(&name);
                     p.deletion_jitter_range = (cfg.workflow_deletion_jitter_range)(&name);
                 }
                 p

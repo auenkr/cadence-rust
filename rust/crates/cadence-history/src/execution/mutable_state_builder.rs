@@ -98,9 +98,30 @@ pub struct TypedWorkflowSnapshot {
     pub condition: i64,
 }
 
+/// Emits Go `metrics.DataInconsistentCounter` on `WorkflowContextScope` (installed by the
+/// engine wiring; absent in unit tests).
+#[derive(Clone, Default)]
+pub struct DataInconsistencyHook(pub Option<std::sync::Arc<dyn Fn() + Send + Sync>>);
+
+impl std::fmt::Debug for DataInconsistencyHook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DataInconsistencyHook")
+    }
+}
+
+impl DataInconsistencyHook {
+    pub fn emit(&self) {
+        if let Some(f) = &self.0 {
+            f();
+        }
+    }
+}
+
 /// Go `mutableStateBuilder`. Fields mirror the Go struct.
 #[derive(Debug, Clone, Default)]
 pub struct TypedMutableState {
+    /// Go `metricsClient.Scope(WorkflowContextScope).IncCounter(DataInconsistentCounter)`.
+    pub data_inconsistency: DataInconsistencyHook,
     pub pending_activity_info_ids: BTreeMap<i64, ActivityInfo>,
     pub pending_activity_id_to_event_id: BTreeMap<String, i64>,
     pub update_activity_infos: BTreeMap<i64, ActivityInfo>,
@@ -606,9 +627,9 @@ impl TypedMutableState {
         self.timer_tasks.clear();
     }
 
-    /// Go `logDataInconsistency`: error log with the workflow identity (the
-    /// `DataInconsistentCounter` metric is emitted by the callers that own a metrics scope).
+    /// Go `logDataInconsistency`: `DataInconsistentCounter` metric plus error log with the workflow identity.
     pub fn log_data_inconsistency(&self) {
+        self.data_inconsistency.emit();
         let info = &self.execution_info;
         tracing::error!(
             domain_id = %info.domain_id,
@@ -758,15 +779,19 @@ impl TypedMutableState {
     }
 
     pub fn delete_activity(&mut self, schedule_id: i64) -> Result<()> {
-        match self.pending_activity_info_ids.remove(&schedule_id) {
-            Some(info) => {
-                self.pending_activity_id_to_event_id.remove(&info.activity_id);
-                self.delete_activity_infos.insert(schedule_id);
-                self.update_activity_infos.remove(&schedule_id);
-                Ok(())
+        // Go DeleteActivity: a missing activity is logged as a data inconsistency, never an error.
+        if let Some(info) = self.pending_activity_info_ids.remove(&schedule_id) {
+            if self.pending_activity_id_to_event_id.remove(&info.activity_id).is_none() {
+                tracing::error!("unable to find activity ID: {} in mutable state", info.activity_id);
+                self.log_data_inconsistency();
             }
-            None => internal(format!("unable to find activity with schedule event id: {schedule_id} in mutable state")),
+        } else {
+            tracing::error!("unable to find activity event id: {schedule_id} in mutable state");
+            self.log_data_inconsistency();
         }
+        self.update_activity_infos.remove(&schedule_id);
+        self.delete_activity_infos.insert(schedule_id);
+        Ok(())
     }
 
     pub fn update_user_timer(&mut self, info: TimerInfo) {
@@ -779,7 +804,13 @@ impl TypedMutableState {
         // Go DeleteUserTimer: a missing timer is logged as a data
         // inconsistency, never returned as an error.
         if let Some(info) = self.pending_timer_info_ids.remove(timer_id) {
-            self.pending_timer_event_id_to_id.remove(&info.started_id);
+            if self.pending_timer_event_id_to_id.remove(&info.started_id).is_none() {
+                tracing::error!("unable to find timer event ID: {timer_id} in mutable state");
+                self.log_data_inconsistency();
+            }
+        } else {
+            tracing::error!("unable to find timer ID: {timer_id} in mutable state");
+            self.log_data_inconsistency();
         }
         self.update_timer_infos.remove(timer_id);
         self.delete_timer_infos.insert(timer_id.to_string());
@@ -793,7 +824,8 @@ impl TypedMutableState {
 
     pub fn delete_child_execution(&mut self, initiated_id: i64) -> Result<()> {
         if self.pending_child_execution_info_ids.remove(&initiated_id).is_none() {
-            return internal(format!("unable to find child execution with initiated event id: {initiated_id} in mutable state"));
+            tracing::error!("unable to find child workflow event ID: {initiated_id} in mutable state");
+            self.log_data_inconsistency();
         }
         self.delete_child_execution_info_ids.insert(initiated_id);
         self.update_child_execution_infos.remove(&initiated_id);
@@ -807,7 +839,8 @@ impl TypedMutableState {
 
     pub fn delete_request_cancel(&mut self, initiated_id: i64) -> Result<()> {
         if self.pending_request_cancel_info_ids.remove(&initiated_id).is_none() {
-            return internal(format!("unable to find request cancel with initiated event id: {initiated_id} in mutable state"));
+            tracing::error!("unable to find request cancel external workflow event ID: {initiated_id} in mutable state");
+            self.log_data_inconsistency();
         }
         self.delete_request_cancel_info_ids.insert(initiated_id);
         self.update_request_cancel_infos.remove(&initiated_id);
@@ -821,7 +854,8 @@ impl TypedMutableState {
 
     pub fn delete_signal(&mut self, initiated_id: i64) -> Result<()> {
         if self.pending_signal_info_ids.remove(&initiated_id).is_none() {
-            return internal(format!("unable to find signal with initiated event id: {initiated_id} in mutable state"));
+            tracing::error!("unable to find signal external workflow event ID: {initiated_id} in mutable state");
+            self.log_data_inconsistency();
         }
         self.delete_signal_info_ids.insert(initiated_id);
         self.update_signal_infos.remove(&initiated_id);
@@ -1012,7 +1046,14 @@ mod tests {
         let (m, _) = state.close_transaction_as_mutation().unwrap();
         assert_eq!(m.delete_activity_infos, vec![5]);
         assert!(state.update_activity_infos.is_empty());
-        assert!(state.delete_activity(5).is_err());
+        // Go DeleteActivity: a missing activity is a logged data inconsistency (counter), not an error.
+        let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let c = count.clone();
+        state.data_inconsistency = DataInconsistencyHook(Some(std::sync::Arc::new(move || {
+            c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        })));
+        assert!(state.delete_activity(5).is_ok());
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     #[test]

@@ -25,6 +25,7 @@ use crate::engine::deps::{
 };
 use crate::engine::runtime::{UpdateAction, UpdateFn, WorkflowUpdater};
 use crate::shard_context::{ShardContext, ShardContextError};
+use crate::task::deps::MetricsScope;
 use crate::wiring::assembly::engine_state::{EngineMutableState, StateParams};
 use crate::wiring::persistence::engine_ndc::{to_history_error, SqlHistoryManager};
 
@@ -64,6 +65,19 @@ pub struct EngineCore {
     pub cluster_metadata: Arc<dyn crate::engine::deps::ClusterMetadata>,
     /// Go `config.EnableReplicationTaskGeneration(domainID, workflowID)`.
     pub enable_replication_task_generation: EnableReplicationFn,
+    /// Go `shard.GetMetricsClient()`.
+    pub metrics: Arc<dyn crate::task::deps::MetricsClient>,
+    /// Go `config.{Timer,Transfer}ProcessorCachedQueueReaderMode(shardID) == "shadow"`.
+    pub cached_queue_reader_shadow: Arc<dyn Fn() -> (bool, bool) + Send + Sync>,
+}
+
+/// Go `isNotifyTaskNeeded` for a non-nil error: `DuplicateRequestError` means no new tasks
+/// were written; otherwise `IsOperationPossiblySuccessfulError`.
+pub(super) fn notify_needed_on_error(err: &pc::PersistenceError) -> bool {
+    if matches!(err, pc::PersistenceError::DuplicateRequest { .. }) {
+        return false;
+    }
+    crate::common::is_operation_possibly_successful_error(Some(err))
 }
 
 impl EngineCore {
@@ -77,11 +91,40 @@ impl EngineCore {
     /// Go `taskNotifier.notifyTasks`: wakes the transfer / timer queue
     /// processors after a successful write of `transfer` / `timer` tasks.
     pub(super) fn notify_tasks(&self, transfer: &[pc::TransferTask], timer: &[pc::TimerTask]) {
+        self.notify_tasks_with(transfer, timer, false);
+    }
+
+    /// Go `taskNotifier.on{Create,Update,ConflictResolve}WorkflowExecution` for a failed write:
+    /// `isNotifyTaskNeeded` (ambiguous error -> notify with `PersistenceError`) else
+    /// `logNotifyTaskDroppedOnPersistenceError`.
+    pub(super) fn notify_tasks_after_failed_write(
+        &self,
+        err: &pc::PersistenceError,
+        transfer: &[pc::TransferTask],
+        timer: &[pc::TimerTask],
+    ) {
+        if notify_needed_on_error(err) {
+            self.notify_tasks_with(transfer, timer, true);
+            return;
+        }
+        let (timer_shadow, transfer_shadow) = (self.cached_queue_reader_shadow)();
+        let timer_ids: Vec<i64> = if timer_shadow { timer.iter().map(|t| t.task_id).collect() } else { vec![] };
+        let transfer_ids: Vec<i64> = if transfer_shadow { transfer.iter().map(|t| t.task_id).collect() } else { vec![] };
+        if timer_ids.is_empty() && transfer_ids.is_empty() {
+            return;
+        }
+        tracing::info!(
+            error = %err, dropped_timer_task_ids = ?timer_ids, dropped_transfer_task_ids = ?transfer_ids,
+            "notify tasks dropped due to persistence error"
+        );
+    }
+
+    pub(super) fn notify_tasks_with(&self, transfer: &[pc::TransferTask], timer: &[pc::TimerTask], persistence_error: bool) {
         use crate::engine::notify_tasks::{NotifiedTask, NotifiedTaskKind, NotifyTaskInfo};
         tracing::debug!(transfer = transfer.len(), timer = timer.len(), has_engine = self.engine_slot.get().is_some(), "notify queues of new tasks");
         let Some(engine) = self.engine_slot.get().and_then(std::sync::Weak::upgrade) else { return };
         let info_of = |d: &str, w: &str, r: &str, tasks: Vec<NotifiedTask>| {
-            let mut info = NotifyTaskInfo { tasks, ..Default::default() };
+            let mut info = NotifyTaskInfo { tasks, persistence_error, ..Default::default() };
             info.execution_info.domain_id = d.to_string();
             info.execution_info.workflow_id = w.to_string();
             info.execution_info.run_id = r.to_string();
@@ -187,6 +230,8 @@ impl EngineExecutionContext {
             Arc::new(move || clock.now()),
         )?
         .with_params((core.state_params)(&self.domain_id)));
+        // Go `Load` checksum invalidation + `VerifyAndRepairWorkflowIfNeeded` detection.
+        state.verify_loaded_checksum(core);
         *self.state.lock().unwrap() = Some(state.clone());
         Ok(state)
     }
@@ -400,6 +445,7 @@ impl EngineExecutionContext {
                 Ok(())
             }
             Err(e) => {
+                core.notify_tasks_after_failed_write(&e, &txn.transfer, &txn.timer);
                 if matches!(e, cadence_persistence::history_contract::PersistenceError::ShardOwnershipLost { .. }) {
                     shard.close_shard(None);
                 }
@@ -484,21 +530,56 @@ impl EngineExecutionCache {
         Ok(execution)
     }
 
-    fn entry(&self, key: &Key, domain_id: &str, execution: &WorkflowExecution) -> Arc<Entry> {
+    /// Go `cacheImpl.cacheMetricsScope`.
+    fn cache_scope(&self, scope: &'static str) -> Arc<dyn MetricsScope> {
+        use crate::task::deps::Tag;
+        self.core.metrics.scope(
+            scope,
+            vec![
+                Tag { key: "cache_type", value: "mutablestate".to_string() },
+                Tag { key: "source_cluster", value: "none".to_string() },
+                Tag { key: "shard_id", value: self.core.shard.shard_id().to_string() },
+            ],
+        )
+    }
+
+    /// Go base LRU cache scope (`cache.New` options `MetricsScope`).
+    fn lru_scope(&self) -> Arc<dyn MetricsScope> {
+        use crate::task::deps::Tag;
+        self.core.metrics.scope(
+            "HistoryExecutionCacheScope",
+            vec![
+                Tag { key: "cache_type", value: "lru".to_string() },
+                Tag { key: "source_cluster", value: "none".to_string() },
+                Tag { key: "shard_id", value: self.core.shard.shard_id().to_string() },
+            ],
+        )
+    }
+
+    /// Returns the entry and whether it was newly created (a cache miss).
+    fn entry(&self, key: &Key, domain_id: &str, execution: &WorkflowExecution) -> (Arc<Entry>, bool) {
+        let lru = self.lru_scope();
         let mut entries = self.entries.lock().unwrap();
         if let Some(e) = entries.get(key) {
-            return e.clone();
+            lru.inc_counter("BaseCacheHit");
+            return (e.clone(), false);
         }
+        lru.inc_counter("BaseCacheMiss");
         if entries.len() >= self.max_size {
+            lru.inc_counter("BaseCacheFullCounter");
             // Evict entries nobody holds (a held lock owns a clone of the mutex Arc).
+            let before = entries.len();
             entries.retain(|_, e| Arc::strong_count(&e.lock) > 1);
+            lru.add_counter("BaseCacheEvictCounter", (before - entries.len()) as i64);
         }
         let entry = Arc::new(Entry {
             lock: Arc::new(tokio::sync::Mutex::new(())),
             context: EngineExecutionContext::new(self.core.clone(), domain_id, execution),
         });
         entries.insert(key.clone(), entry.clone());
-        entry
+        lru.update_gauge("BaseCacheCount", entries.len() as f64);
+        lru.update_gauge("BaseCacheCountLimitGauge", self.max_size as f64);
+        (entry, true)
     }
 
     /// Go `getOrCreateWorkflowExecutionInternal` (execution already validated).
@@ -508,8 +589,22 @@ impl EngineExecutionCache {
         execution: &WorkflowExecution,
         force_clear: bool,
     ) -> HResult<(Arc<EngineExecutionContext>, ReleaseFunc)> {
+        self.acquire_in("HistoryCacheGetOrCreateScope", domain_id, execution, force_clear).await
+    }
+
+    /// Go `getOrCreateWorkflowExecutionInternal` with the caller's metrics scope.
+    async fn acquire_in(
+        &self,
+        scope: &'static str,
+        domain_id: &str,
+        execution: &WorkflowExecution,
+        force_clear: bool,
+    ) -> HResult<(Arc<EngineExecutionContext>, ReleaseFunc)> {
         let key = (domain_id.to_string(), execution.workflow_id.clone(), execution.run_id.clone());
-        let entry = self.entry(&key, domain_id, execution);
+        let (entry, created) = self.entry(&key, domain_id, execution);
+        if created {
+            self.cache_scope(scope).inc_counter("CacheMissCounter");
+        }
         let guard: OwnedMutexGuard<()> = entry.lock.clone().lock_owned().await;
         let slot = Mutex::new(Some(guard));
         let context = entry.context.clone();
@@ -530,8 +625,23 @@ impl EngineExecutionCache {
         domain_id: &str,
         execution: &WorkflowExecution,
     ) -> HResult<(Arc<EngineExecutionContext>, ReleaseFunc)> {
-        let execution = self.validate(domain_id, execution).await?;
-        self.acquire(domain_id, &execution, false).await
+        const SCOPE: &str = "HistoryCacheGetOrCreateScope";
+        let metrics = self.cache_scope(SCOPE);
+        metrics.inc_counter("CacheRequests");
+        let start = std::time::Instant::now();
+        let result = async {
+            let execution = match self.validate(domain_id, execution).await {
+                Ok(e) => e,
+                Err(e) => {
+                    metrics.inc_counter("CacheFailures");
+                    return Err(e);
+                }
+            };
+            self.acquire_in(SCOPE, domain_id, &execution, false).await
+        }
+        .await;
+        metrics.record_timer("CacheLatency", start.elapsed());
+        result
     }
 }
 
@@ -551,15 +661,27 @@ impl ExecutionCache for EngineExecutionCache {
         domain_id: &str,
         execution: &WorkflowExecution,
     ) -> HResult<(ExecutionContextRef, ExecutionContextRef, ReleaseFunc, bool)> {
-        let execution = self.validate(domain_id, execution).await?;
+        const SCOPE: &str = "HistoryCacheGetAndCreateScope";
+        let metrics = self.cache_scope(SCOPE);
+        metrics.inc_counter("CacheRequests");
+        let start = std::time::Instant::now();
+        let _latency = scopeguard_timer(metrics.clone(), start);
+        let execution = match self.validate(domain_id, execution).await {
+            Ok(e) => e,
+            Err(e) => {
+                metrics.inc_counter("CacheFailures");
+                return Err(e);
+            }
+        };
         let key = (domain_id.to_string(), execution.workflow_id.clone(), execution.run_id.clone());
         let hit = self.entries.lock().unwrap().contains_key(&key);
         // The context loaded from the DB is never cached (Go comment).
         let from_db: ExecutionContextRef = EngineExecutionContext::new(self.core.clone(), domain_id, &execution);
         if hit {
-            let (cached, release) = self.acquire(domain_id, &execution, false).await?;
+            let (cached, release) = self.acquire_in(SCOPE, domain_id, &execution, false).await?;
             Ok((cached, from_db, release, true))
         } else {
+            metrics.inc_counter("CacheMissCounter");
             let noop: ReleaseFunc = Arc::new(|_| {});
             Ok((from_db.clone(), from_db, noop, false))
         }
@@ -572,8 +694,13 @@ impl ExecutionCache for EngineExecutionCache {
     ) -> HResult<ReleaseFunc> {
         // Empty run id is the key of the "current workflow" lock; always cleared on release.
         let execution = WorkflowExecution { workflow_id: workflow_id.to_string(), run_id: String::new() };
-        let (_, release) = self.acquire(domain_id, &execution, true).await?;
-        Ok(release)
+        const SCOPE: &str = "HistoryCacheGetOrCreateCurrentScope";
+        let metrics = self.cache_scope(SCOPE);
+        metrics.inc_counter("CacheRequests");
+        let start = std::time::Instant::now();
+        let result = self.acquire_in(SCOPE, domain_id, &execution, true).await;
+        metrics.record_timer("CacheLatency", start.elapsed());
+        result.map(|(_, release)| release)
     }
 }
 
@@ -709,5 +836,34 @@ impl WorkflowUpdater for EngineWorkflowUpdater {
         let result = self.update_helper(&context, now, &action).await;
         release(result.as_ref().err());
         result
+    }
+}
+
+/// Records `CacheLatency` when dropped (Go `defer sw.Stop()`).
+struct LatencyGuard(Arc<dyn MetricsScope>, std::time::Instant);
+impl Drop for LatencyGuard {
+    fn drop(&mut self) {
+        self.0.record_timer("CacheLatency", self.1.elapsed());
+    }
+}
+fn scopeguard_timer(scope: Arc<dyn MetricsScope>, start: std::time::Instant) -> LatencyGuard {
+    LatencyGuard(scope, start)
+}
+
+#[cfg(test)]
+mod notify_tests {
+    use super::*;
+
+    /// Go `isNotifyTaskNeeded`: ambiguous errors notify (with `PersistenceError`),
+    /// definitive failures and duplicate requests do not.
+    #[test]
+    fn notify_needed_matches_go() {
+        assert!(notify_needed_on_error(&pc::PersistenceError::Timeout("t".into())));
+        assert!(!notify_needed_on_error(&pc::PersistenceError::ShardOwnershipLost {
+            shard_id: 1,
+            expected_range_id: 1,
+            actual_range_id: 2,
+        }));
+        assert!(!notify_needed_on_error(&pc::PersistenceError::ConditionFailed("x".into())));
     }
 }

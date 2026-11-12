@@ -234,29 +234,7 @@ impl EngineMutableState {
         let checksum = if self.params.checksum_gen_probability > 0
             && rand::Rng::gen_range(&mut rand::thread_rng(), 0i64..100i64) < self.params.checksum_gen_probability
         {
-            use crate::execution::checksum::{MutableStateChecksumPayload as P, MUTABLE_STATE_CHECKSUM_PAYLOAD_V1};
-            let mut timers: Vec<i64> = g.timers.values().map(|t| t.started_id).collect();
-            timers.sort_unstable();
-            let payload = P {
-                cancel_requested: g.pc_exec.cancel_requested,
-                state: g.pc_exec.state as i16,
-                last_first_event_id: g.pc_exec.last_first_event_id,
-                next_event_id: g.pc_exec.next_event_id,
-                last_processed_event_id: g.pc_exec.last_processed_event,
-                signal_count: i64::from(g.pc_exec.signal_count),
-                decision_attempt: g.pc_exec.decision_attempt as i32,
-                decision_version: g.pc_exec.decision_version,
-                decision_scheduled_id: g.pc_exec.decision_schedule_id,
-                decision_started_id: g.pc_exec.decision_started_id,
-                pending_timer_started_ids: timers,
-                pending_activity_scheduled_ids: g.pc_acts.keys().copied().collect(),
-                pending_signal_initiated_ids: g.pc_signals.keys().copied().collect(),
-                pending_req_cancel_initiated_ids: g.pc_cancels.keys().copied().collect(),
-                pending_child_initiated_ids: g.pc_children.keys().copied().collect(),
-                sticky_task_list_name: g.pc_exec.sticky_task_list.clone(),
-                version_histories: g.version_histories.clone(),
-            };
-            let _ = MUTABLE_STATE_CHECKSUM_PAYLOAD_V1;
+            let payload = g.checksum_payload();
             Some(pc::DataBlob { encoding: "json".to_string(), data: checksum_json(&payload.generate()) })
         } else {
             None

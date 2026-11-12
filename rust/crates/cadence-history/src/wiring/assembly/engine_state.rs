@@ -75,6 +75,14 @@ pub struct StateParams {
     pub checksum_gen_probability: i64,
     /// Present in production wiring; `None` skips the active-close policy check.
     pub close_policy: Option<ClosePolicy>,
+    /// `config.MutableStateChecksumVerifyProbability(domain)` (0-100).
+    pub checksum_verify_probability: i64,
+    /// `config.MutableStateChecksumInvalidateBefore()` in epoch seconds (0 = off).
+    pub checksum_invalidate_before_secs: i64,
+    /// `config.EnableCorruptionAutoRepair(domain)`.
+    pub enable_corruption_auto_repair: bool,
+    /// Emits `DataInconsistentCounter` (Go `logDataInconsistency`).
+    pub data_inconsistency: crate::execution::mutable_state_builder::DataInconsistencyHook,
 }
 
 impl Default for StateParams {
@@ -90,6 +98,10 @@ impl Default for StateParams {
             max_buffered_events_batch: 100,
             checksum_gen_probability: 0,
             close_policy: None,
+            checksum_verify_probability: 0,
+            checksum_invalidate_before_secs: 0,
+            enable_corruption_auto_repair: false,
+            data_inconsistency: Default::default(),
         }
     }
 }
@@ -232,9 +244,48 @@ pub(super) struct Inner {
     /// Go `pendingSemaphoreInfoIDs` / `updateSemaphoreInfos` / `deleteSemaphoreInfos`.
     pub(super) semaphores: crate::execution::semaphore::SemaphoreState,
     pub(super) dirty: bool,
+    /// Go `logDataInconsistency` metric hook (installed by `with_params`).
+    pub(super) data_inconsistency: crate::execution::mutable_state_builder::DataInconsistencyHook,
 }
 
 impl Inner {
+    /// Go `logDataInconsistency`.
+    pub(super) fn log_data_inconsistency(&self) {
+        self.data_inconsistency.emit();
+        tracing::error!(
+            domain_id = %self.pc_exec.domain_id,
+            workflow_id = %self.pc_exec.workflow_id,
+            run_id = %self.pc_exec.run_id,
+            "encounter mutable state data inconsistency"
+        );
+    }
+
+    /// Go `generateMutableStateChecksum` payload (`newMutableStateChecksumPayload`).
+    pub(super) fn checksum_payload(&self) -> crate::execution::checksum::MutableStateChecksumPayload {
+        let g = self;
+        let mut timers: Vec<i64> = g.timers.values().map(|t| t.started_id).collect();
+        timers.sort_unstable();
+        crate::execution::checksum::MutableStateChecksumPayload {
+            cancel_requested: g.pc_exec.cancel_requested,
+            state: g.pc_exec.state as i16,
+            last_first_event_id: g.pc_exec.last_first_event_id,
+            next_event_id: g.pc_exec.next_event_id,
+            last_processed_event_id: g.pc_exec.last_processed_event,
+            signal_count: i64::from(g.pc_exec.signal_count),
+            decision_attempt: g.pc_exec.decision_attempt as i32,
+            decision_version: g.pc_exec.decision_version,
+            decision_scheduled_id: g.pc_exec.decision_schedule_id,
+            decision_started_id: g.pc_exec.decision_started_id,
+            pending_timer_started_ids: timers,
+            pending_activity_scheduled_ids: g.pc_acts.keys().copied().collect(),
+            pending_signal_initiated_ids: g.pc_signals.keys().copied().collect(),
+            pending_req_cancel_initiated_ids: g.pc_cancels.keys().copied().collect(),
+            pending_child_initiated_ids: g.pc_children.keys().copied().collect(),
+            sticky_task_list_name: g.pc_exec.sticky_task_list.clone(),
+            version_histories: g.version_histories.clone(),
+        }
+    }
+
     /// Copies the decision ids from the persistence view into the engine view.
     pub(super) fn mirror_decision(&mut self) {
         self.exec.decision_schedule_id = self.pc_exec.decision_schedule_id;
@@ -263,10 +314,10 @@ impl Inner {
 
     /// Go `DeleteActivity`.
     pub(super) fn remove_activity(&mut self, schedule_id: i64) -> HResult<()> {
+        // Go DeleteActivity: log a data inconsistency and continue instead of returning an error.
         if self.activities.remove(&schedule_id).is_none() {
-            return Err(HistoryError::internal(format!(
-                "unable to find activity with schedule event id: {schedule_id} in mutable state"
-            )));
+            tracing::error!("unable to find activity event id: {schedule_id} in mutable state");
+            self.log_data_inconsistency();
         }
         self.pc_acts.remove(&schedule_id);
         self.heartbeats.remove(&schedule_id);
@@ -278,10 +329,10 @@ impl Inner {
 
     /// Go `DeletePendingChildExecution`.
     pub(super) fn remove_child(&mut self, initiated_id: i64) -> HResult<()> {
+        // Go DeletePendingChildExecution: log a data inconsistency and continue.
         if self.children.remove(&initiated_id).is_none() {
-            return Err(HistoryError::internal(format!(
-                "unable to find child workflow with initiated id: {initiated_id} in mutable state"
-            )));
+            tracing::error!("unable to find child workflow event ID: {initiated_id} in mutable state");
+            self.log_data_inconsistency();
         }
         self.pc_children.remove(&initiated_id);
         self.upsert_children.remove(&initiated_id);
@@ -398,6 +449,7 @@ impl EngineMutableState {
             pc_signals.insert(k.key, info);
         }
         let inner = Inner {
+            data_inconsistency: Default::default(),
             prev_start_event: None,
             new_run: None,
             exec,
@@ -471,6 +523,7 @@ impl EngineMutableState {
 
     /// Sets the config / domain derived parameters.
     pub fn with_params(mut self, params: StateParams) -> Self {
+        self.inner.lock().unwrap().data_inconsistency = params.data_inconsistency.clone();
         self.params = params;
         self
     }

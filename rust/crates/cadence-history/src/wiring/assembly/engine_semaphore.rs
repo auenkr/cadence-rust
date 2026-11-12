@@ -75,6 +75,7 @@ impl SemaphoreExecution for Exec<'_> {
     }
     fn log_missing_hold(&mut self, initiated_id: i64) {
         tracing::error!(initiated_id, "unable to find semaphore hold event ID in mutable state");
+        self.g.log_data_inconsistency();
     }
 }
 

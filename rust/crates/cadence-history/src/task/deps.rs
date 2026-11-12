@@ -416,6 +416,14 @@ pub trait MetricsScope: Send + Sync {
     fn tagged(&self, tags: Vec<Tag>) -> Arc<dyn MetricsScope>;
 }
 
+/// Metrics client that drops everything (tests / harness).
+pub struct NoopMetrics;
+impl MetricsClient for NoopMetrics {
+    fn scope(&self, _: ScopeIdx, _: Vec<Tag>) -> Arc<dyn MetricsScope> {
+        Arc::new(NoopScope)
+    }
+}
+
 pub struct NoopScope;
 impl MetricsScope for NoopScope {
     fn inc_counter(&self, _: MetricIdx) {}

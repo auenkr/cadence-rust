@@ -576,6 +576,7 @@ impl WorkflowStartHost for EngineStartHost {
                 Ok(())
             }
             Err(e) => {
+                self.core.notify_tasks_after_failed_write(&e, &notify_transfer, &notify_timer);
                 if matches!(e, pc::PersistenceError::ShardOwnershipLost { .. }) {
                     shard.close_shard(None);
                 }
