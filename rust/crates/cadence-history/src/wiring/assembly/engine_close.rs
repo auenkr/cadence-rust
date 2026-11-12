@@ -12,7 +12,7 @@ use cadence_api::types::VersionHistoryItem;
 use cadence_persistence::history_contract as pc;
 use cadence_persistence::sqlblobs::{activity_info_to_struct, child_execution_info_to_struct, timer_info_to_struct, Encoding};
 
-use crate::engine::deps::{HResult, HistoryError};
+use crate::engine::deps::{HResult, HistoryError, WORKFLOW_STATE_COMPLETED};
 use crate::wiring::assembly::engine_state::EngineMutableState;
 
 /// Result of closing a transaction: the events to append to the history branch,
@@ -42,6 +42,23 @@ impl EngineMutableState {
         let mut g = self.inner.lock().unwrap();
         if active {
             g.flush_buffered();
+            // Go `closeTransactionHandleWorkflowReset`: schedule an auto-reset
+            // task when a resettable point carries a bad binary checksum.
+            if g.exec.state != WORKFLOW_STATE_COMPLETED && g.pc_children.is_empty() {
+                let hit = g.exec.auto_reset_points.as_ref().is_some_and(|p| {
+                    p.points.iter().any(|pt| {
+                        pt.resettable
+                            && !pt.expiring_time_nano.is_some_and(|e| e > 0 && now_nanos > e)
+                            && self.domain.bad_binaries.contains(&pt.binary_checksum)
+                    })
+                });
+                if hit {
+                    let version = g.current_version;
+                    let mut t = g.transfer_base(7, version);
+                    t.task_list = g.exec.task_list.clone();
+                    g.transfer_tasks.push(t);
+                }
+            }
             g.create_next_user_timer();
             g.create_next_activity_timer();
         } else if !g.hist.is_empty() {
