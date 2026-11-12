@@ -19,7 +19,7 @@ No cargo/go/docker run; "ported" = Go logic present, validated by CI only.
 None known.
 
 ### P1 (Go behaviour missing)
-1. `G/execution/mutable_state_builder.go startTransactionHandleDecisionFailover` (+ `canReplicateEvents`): Rust `start_transaction` is a stub returning `Ok(false)`
+1. FIXED in history-decfailover (2026-11-12). `G/execution/mutable_state_builder.go startTransactionHandleDecisionFailover` (+ `canReplicateEvents`): Rust `start_transaction` is a stub returning `Ok(false)`
    (`R/wiring/assembly/ndc_state.rs:317`, `ndc_context_hooks.rs:74`; engine path has no equivalent). Affects an in-flight decision whose version is lower than
    the current version after failover (standby -> active): Go fails it with `FailoverCloseDecision` and reschedules. NOT ported here (needs cluster metadata in the
    typed mutable state; ~100 Go lines, cases 1-5).
