@@ -26,6 +26,7 @@ pub const DOMAIN_NAME: &str = "test-domain";
 pub const CLUSTER: &str = "cluster-a";
 
 type RunKey = (String, String, String);
+pub type ConflictHook = Box<dyn FnOnce(&mut HashMap<RunKey, pc::WorkflowSnapshot>) + Send>;
 
 #[derive(Default)]
 pub struct Inner {
@@ -42,7 +43,7 @@ pub struct Inner {
     pub get_errors: std::collections::VecDeque<PersistenceError>,
     /// Competing-writer hooks: the next update runs the hook against the stored runs and fails with ConditionFailed
     /// (Go tests: UpdateWorkflowExecution returns ConditionFailedError and the next GetWorkflowExecution shows newer state).
-    pub conflict_hooks: std::collections::VecDeque<Box<dyn FnOnce(&mut HashMap<RunKey, pc::WorkflowSnapshot>) + Send>>,
+    pub conflict_hooks: std::collections::VecDeque<ConflictHook>,
     /// Recorded create requests: (mode name, previous run id, previous last write version).
     pub create_calls: Vec<(&'static str, String, i64)>,
 }
