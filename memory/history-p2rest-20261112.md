@@ -10,3 +10,9 @@ Gates (all `GATE SUMMARY failed: []`):
 - cassandra/grpc/two_history=false: https://github.com/auenkr/cadence-rust/actions/runs/43232173600
 - postgres/grpc/two_history=true: https://github.com/auenkr/cadence-rust/actions/runs/43232180482
 Note: three earlier gate runs dispatched without inputs were cancelled.
+
+## Post-merge master validation
+
+Master 87a4f4c71 (2026-11-12): 43234482463: success 43234489096: success 43234495897: success 43234501514: success 43234507870: success 43234513968: success 43234520493: success 43234527283: success 43234533943: success 43234539568: success 43234546786: success 43234553451: success 43234559010: success 
+
+Work paused here by user request (2026-11-12). Next: final audit w/ failure-restart-recovery evidence, Codex+Opus cross-review, dashboard update, FE soak fix.
