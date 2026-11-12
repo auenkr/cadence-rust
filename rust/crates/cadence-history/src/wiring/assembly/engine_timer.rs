@@ -4,10 +4,10 @@
 //! (user/activity timer ordering and next-timer creation), `AddTimerFiredEvent`,
 //! `AddActivityTaskTimedOutEvent`, `AddDecisionTaskTimedOutEvent`, `AddTimeoutWorkflowEvent`,
 //! `GetRetryBackoffDuration` and `GetCronBackoffDuration`.
-//! Not ported here: `retry_workflow` / `update_workflow_execution_with_new_as_active`
-//! (continue-as-new run creation), see memory/history-gap-timermut-20261107.md.
+//! `retry_workflow_new_run` is Go `executeWorkflowTimeoutTask` + `retryWorkflow` (continue-as-new run creation).
 
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
 use cadence_api::enums::{EventType, TimeoutType};
@@ -251,6 +251,65 @@ impl EngineMutableState {
         Ok(())
     }
 
+    /// Go `execution.FailDecision(ms, decision, ForceCloseDecision)` for an in-flight decision.
+    pub(super) fn force_close_in_flight_decision(&self) -> HResult<()> {
+        let pending = {
+            let g = self.inner.lock().unwrap();
+            g.in_flight()
+                .then(|| (g.pc_exec.decision_schedule_id, g.pc_exec.decision_started_id))
+        };
+        match pending {
+            Some((schedule_id, started_id)) => self.add_decision_task_failed(
+                schedule_id,
+                started_id,
+                Some(cadence_api::enums::DecisionTaskFailedCause::ForceCloseDecision),
+                &[],
+                "history-service",
+                "",
+            ),
+            None => Ok(()),
+        }
+    }
+
+    /// Go `executeWorkflowTimeoutTask` (retry / cron branch) + `retryWorkflow`: builds the
+    /// continue-as-new attributes from the start event, force-closes the in-flight decision, closes
+    /// this run with `WorkflowExecutionContinuedAsNew` and returns the new run's mutable state.
+    pub(super) fn retry_workflow_new_run(
+        &self,
+        first_event_id: i64,
+        backoff: Duration,
+        cron: bool,
+        reason: &str,
+    ) -> HResult<Arc<EngineMutableState>> {
+        let start = self
+            .inner
+            .lock()
+            .unwrap()
+            .prev_start_event
+            .clone()
+            .and_then(|e| e.workflow_execution_started_event_attributes)
+            .ok_or_else(|| HistoryError::internal("workflow start event is missing"))?;
+        let initiator = if cron {
+            cadence_api::enums::ContinueAsNewInitiator::CronSchedule
+        } else {
+            cadence_api::enums::ContinueAsNewInitiator::RetryPolicy
+        };
+        let seconds = i32::try_from(backoff.as_secs()).unwrap_or(i32::MAX);
+        let attrs = crate::decision::task_handler::retry_cron_continue_as_new_attributes(
+            &start,
+            seconds,
+            initiator,
+            Some(reason.to_string()),
+            Vec::new(),
+            Vec::new(),
+            start.active_cluster_selection_policy.clone(),
+        );
+        let parent_domain = start.parent_workflow_domain.clone().unwrap_or_default();
+        self.force_close_in_flight_decision()?;
+        self.add_continue_as_new_event(first_event_id, EMPTY_EVENT_ID, &parent_domain, &attrs)?;
+        self.take_new_run().ok_or_else(|| HistoryError::internal("continue-as-new did not produce a new run"))
+    }
+
     /// Go `AddTimeoutWorkflowEvent`.
     pub fn add_timeout_workflow(&self, first_event_id: i64) -> HResult<()> {
         let ms = self.now_millis();
@@ -387,5 +446,99 @@ impl EngineMutableState {
             g.current_version = version;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod retry_workflow_tests {
+    use super::*;
+    use crate::engine::deps::{DomainCacheEntry, DomainInfo};
+    use crate::engine::deps_ms::MutableState;
+    use cadence_api::enums::ContinueAsNewInitiator;
+    use cadence_api::service_types::{HistoryEvent, WorkflowExecutionStartedEventAttributes};
+    use cadence_api::types::{RetryPolicy, TaskList, WorkflowType};
+    use cadence_persistence::history_contract as pc;
+
+    fn state() -> EngineMutableState {
+        let domain = DomainCacheEntry {
+            info: DomainInfo { id: "d".into(), name: "n".into(), status: 0 },
+            ..Default::default()
+        };
+        let mut snapshot = pc::WorkflowSnapshot::default();
+        snapshot.execution_info.domain_id = "d".into();
+        snapshot.execution_info.workflow_id = "wf".into();
+        snapshot.execution_info.run_id = "run".into();
+        snapshot.execution_info.task_list = "tl".into();
+        snapshot.execution_info.next_event_id = 5;
+        let s = EngineMutableState::from_snapshot(snapshot, domain, 0, Arc::new(|| 1_700_000_000_000_000_000)).unwrap();
+        s.inner.lock().unwrap().prev_start_event = Some(HistoryEvent {
+            event_id: 1,
+            event_type: Some(EventType::WorkflowExecutionStarted),
+            workflow_execution_started_event_attributes: Some(WorkflowExecutionStartedEventAttributes {
+                workflow_type: Some(WorkflowType { name: "wt".into() }),
+                task_list: Some(TaskList { name: "tl".into(), ..Default::default() }),
+                execution_start_to_close_timeout_seconds: Some(10),
+                task_start_to_close_timeout_seconds: Some(5),
+                retry_policy: Some(RetryPolicy { maximum_attempts: 3, ..Default::default() }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        s
+    }
+
+    fn event_types(s: &EngineMutableState) -> Vec<EventType> {
+        s.inner.lock().unwrap().hist.iter().filter_map(|e| e.event_type).collect()
+    }
+
+    #[test]
+    fn workflow_timeout_with_retry_policy_continues_as_new_with_retry_initiator() {
+        let s = state();
+        let new_run = s.retry_workflow_new_run(5, Duration::from_secs(30), false, "START_TO_CLOSE").unwrap();
+        assert!(!s.is_workflow_execution_running());
+        assert_eq!(event_types(&s), vec![EventType::WorkflowExecutionContinuedAsNew]);
+        let closed = s.inner.lock().unwrap().hist[0].workflow_execution_continued_as_new_event_attributes.clone().unwrap();
+        assert_eq!(closed.initiator, Some(ContinueAsNewInitiator::RetryPolicy));
+        assert_eq!(closed.backoff_start_interval_in_seconds, Some(30));
+        assert_eq!(closed.failure_reason.as_deref(), Some("START_TO_CLOSE"));
+        let started = new_run.inner.lock().unwrap().hist[0].workflow_execution_started_event_attributes.clone().unwrap();
+        assert_eq!(started.initiator, Some(ContinueAsNewInitiator::RetryPolicy));
+        assert_eq!(started.continued_execution_run_id, "run");
+        assert_eq!(started.attempt, 1);
+        assert!(new_run.is_workflow_execution_running());
+    }
+
+    #[test]
+    fn workflow_timeout_with_cron_uses_cron_initiator_and_first_decision_backoff() {
+        let s = state();
+        let new_run = s.retry_workflow_new_run(5, Duration::from_secs(60), true, "START_TO_CLOSE").unwrap();
+        let started = new_run.inner.lock().unwrap().hist[0].workflow_execution_started_event_attributes.clone().unwrap();
+        assert_eq!(started.initiator, Some(ContinueAsNewInitiator::CronSchedule));
+        assert_eq!(started.first_decision_task_backoff_seconds, Some(60));
+        assert_eq!(started.attempt, 0);
+    }
+
+    #[test]
+    fn retry_force_closes_in_flight_decision_first() {
+        let s = state();
+        {
+            let mut g = s.inner.lock().unwrap();
+            g.pc_exec.decision_schedule_id = 3;
+            g.pc_exec.decision_started_id = 4;
+            g.mirror_decision();
+        }
+        s.retry_workflow_new_run(5, Duration::from_secs(1), false, "START_TO_CLOSE").unwrap();
+        assert_eq!(
+            event_types(&s),
+            vec![EventType::DecisionTaskFailed, EventType::WorkflowExecutionContinuedAsNew]
+        );
+    }
+
+    #[test]
+    fn retry_without_loaded_start_event_fails() {
+        let s = state();
+        s.inner.lock().unwrap().prev_start_event = None;
+        assert!(s.retry_workflow_new_run(5, Duration::from_secs(1), false, "START_TO_CLOSE").is_err());
+        assert!(s.is_workflow_execution_running());
     }
 }

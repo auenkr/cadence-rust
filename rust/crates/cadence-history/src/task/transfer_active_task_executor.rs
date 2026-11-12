@@ -117,6 +117,8 @@ pub struct WorkflowResetRequest {
 /// TODO(link): replace by execution::MutableState (only the accessors used by transferActiveTaskExecutor).
 #[async_trait]
 pub trait ActiveMutableState:DecisionState {
+ /// Downcast hook for dependencies that need the concrete engine mutable state.
+ fn as_any(&self)->Option<&dyn std::any::Any>{None}
  fn is_workflow_execution_running(&self)->bool;
  fn domain_name(&self)->String;
  fn execution_info(&self)->ActiveExecutionInfo;
@@ -149,6 +151,8 @@ pub trait ActiveMutableState:DecisionState {
 /// TODO(link): replace by execution::Context together with its release function.
 #[async_trait]
 pub trait ActiveTransferContext:Send+Sync {
+ /// Downcast hook for dependencies that need the concrete engine context (e.g. `WorkflowResetter`).
+ fn as_any(&self)->Option<&dyn std::any::Any>{None}
  /// Go `release(err)`; implementations must tolerate repeated calls.
  fn release(&self,error:Option<TaskError>);
  /// Go `loadMutableState`

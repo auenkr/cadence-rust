@@ -254,6 +254,28 @@ impl EngineExecutionContext {
         self.persist(&state, now, true, Some(new_snapshot), Some(held_gate)).await
     }
 
+    /// Go `UpdateWorkflowExecutionWithNewAsActive` with the new run's mutable state:
+    /// the closed current run and the new run are written in one update (shared by the
+    /// ContinueAsNew decision and the timer-driven workflow retry / cron).
+    pub(super) async fn update_with_new_run(&self, now: i64, new_run: &Arc<EngineMutableState>) -> HResult<()> {
+        let core = &self.core;
+        let info = {
+            let g = new_run.inner.lock().unwrap();
+            format!("{}:{}", g.pc_exec.workflow_id, g.pc_exec.run_id)
+        };
+        let mut txn = new_run.close_transaction(now, true)?;
+        let (size, last, _blob) = crate::wiring::assembly::engine_start::append_new_branch(core, &mut txn, &info).await?;
+        // Go holds the shard lock from task-id allocation through the write.
+        let gate = core.shard.lock_task_writes().await;
+        let (snapshot, max_read_level, transfer, timer) = crate::wiring::assembly::engine_start::snapshot_of(core, txn)?;
+        self.update_with_new_as_active(now, snapshot, &gate).await?;
+        core.shard.update_max_read_level(max_read_level);
+        drop(gate);
+        core.notify_tasks(&transfer, &timer);
+        new_run.finish_transaction(size, last);
+        Ok(())
+    }
+
     /// Go `UpdateWorkflowExecutionTasks`.
     async fn update_tasks(&self, now: i64) -> HResult<()> {
         let state = self.load_state().await?;

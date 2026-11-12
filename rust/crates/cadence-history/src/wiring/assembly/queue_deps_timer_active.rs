@@ -4,9 +4,9 @@
 //! shard execution cache, and the `TimerWorkflow` read accessors / `delete_activity` /
 //! `update_workflow_execution_as_active` over `EngineMutableState`.
 //!
-//! Timer support comes from `EngineMutableState` (engine_timer.rs). Still TODO(link): `retry_workflow` and
-//! `update_workflow_execution_with_new_as_active` (continue-as-new run creation); see
-//! memory/history-gap-timermut-20261107.md.
+//! Timer support comes from `EngineMutableState` (engine_timer.rs). `retry_workflow` /
+//! `update_workflow_execution_with_new_as_active` use the continue-as-new path (`engine_continue.rs`,
+//! `EngineExecutionContext::update_with_new_run`).
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -28,10 +28,6 @@ use crate::task::timer_active_task_executor::{
 use crate::task::standby_task_util::HistoryResendInfo;
 use crate::task::timer_standby_task_executor::StandbyTimerWorkflow;
 use crate::task::transfer_task_executor_base::{AddMatchingTaskRequest, TransferDependencies};
-
-fn todo_err<T>(what: &str) -> TaskResult<T> {
-    Err(TaskError::Other(format!("timer active: {what} is not supported yet (TODO(link): EngineMutableState timer support)")))
-}
 
 fn seq(t: SeqTimer) -> TimerSequenceId {
     TimerSequenceId {
@@ -77,6 +73,8 @@ pub(super) struct EngineTimerWorkflow {
     state: Arc<EngineMutableState>,
     context: Arc<EngineExecutionContext>,
     release: ReleaseFunc,
+    /// New run produced by `retry_workflow`, persisted by `update_workflow_execution_with_new_as_active`.
+    new_run: std::sync::Mutex<Option<Arc<EngineMutableState>>>,
 }
 
 #[async_trait]
@@ -214,13 +212,22 @@ impl TimerWorkflow for EngineTimerWorkflow {
         self.state.is_cancel_requested().0
     }
     fn timeout_workflow(&self, first_event_id: i64) -> TaskResult<()> {
+        self.state.force_close_in_flight_decision().map_err(he)?;
         self.state.add_timeout_workflow(first_event_id).map_err(he)
     }
-    async fn retry_workflow(&self, _first_event_id: i64, _backoff: Duration, _cron: bool, _reason: &str) -> TaskResult<()> {
-        todo_err("retry_workflow")
+    async fn retry_workflow(&self, first_event_id: i64, backoff: Duration, cron: bool, reason: &str) -> TaskResult<()> {
+        let new_run = self.state.retry_workflow_new_run(first_event_id, backoff, cron, reason).map_err(he)?;
+        *self.new_run.lock().unwrap() = Some(new_run);
+        Ok(())
     }
-    async fn update_workflow_execution_with_new_as_active(&self, _now: Time) -> TaskResult<()> {
-        todo_err("update_workflow_execution_with_new_as_active")
+    async fn update_workflow_execution_with_new_as_active(&self, now: Time) -> TaskResult<()> {
+        let new_run = self
+            .new_run
+            .lock()
+            .unwrap()
+            .take()
+            .ok_or_else(|| TaskError::InternalService("no new run to persist".into()))?;
+        self.context.update_with_new_run(now.0, &new_run).await.map_err(he)
     }
     async fn activity_scheduled_domain(&self, event_id: i64) -> TaskResult<String> {
         let ev = self.state.get_activity_scheduled_event(event_id).await.map_err(he)?;
@@ -279,7 +286,7 @@ pub(super) async fn load_engine_timer_workflow(
     };
     let (context, release) = cache.get_or_create(task.get_domain_id(), &execution).await.map_err(he)?;
     match context.load_state().await {
-        Ok(state) => Ok(Some(Arc::new(EngineTimerWorkflow { state, context, release }))),
+        Ok(state) => Ok(Some(Arc::new(EngineTimerWorkflow { state, context, release, new_run: std::sync::Mutex::new(None) }))),
         Err(e) => {
             release(Some(&e));
             match he(e) {

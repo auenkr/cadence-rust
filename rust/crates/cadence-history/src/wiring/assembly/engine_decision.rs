@@ -772,24 +772,7 @@ impl EngineDecisionHandler {
         context: &Arc<EngineExecutionContext>,
         new_run: &Arc<EngineMutableState>,
     ) -> HResult<()> {
-        let now = self.core.clock.now();
-        let info = {
-            let g = new_run.inner.lock().unwrap();
-            format!("{}:{}", g.pc_exec.workflow_id, g.pc_exec.run_id)
-        };
-        let mut txn = new_run.close_transaction(now, true)?;
-        let (size, last, _blob) =
-            crate::wiring::assembly::engine_start::append_new_branch(&self.core, &mut txn, &info).await?;
-        // Go holds the shard lock from task-id allocation through the write.
-        let gate = self.core.shard.lock_task_writes().await;
-        let (snapshot, max_read_level, transfer, timer) =
-            crate::wiring::assembly::engine_start::snapshot_of(&self.core, txn)?;
-        context.update_with_new_as_active(now, snapshot, &gate).await?;
-        self.core.shard.update_max_read_level(max_read_level);
-        drop(gate);
-        self.core.notify_tasks(&transfer, &timer);
-        new_run.finish_transaction(size, last);
-        Ok(())
+        context.update_with_new_run(self.core.clock.now(), new_run).await
     }
 
     /// Go `workflow.UpdateWithAction` (the closure here is synchronous).
