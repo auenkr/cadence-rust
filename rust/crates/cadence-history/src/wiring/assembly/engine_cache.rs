@@ -58,6 +58,10 @@ pub struct EngineCore {
     pub remote_admin_clients: Arc<crate::wiring::resources::replication_clients::RemoteAdminClients>,
     /// Go `semaphoreMetadataManager`.
     pub semaphore_metadata: Arc<dyn cadence_persistence::SemaphorePersistence>,
+    /// Go `shard.GetClusterMetadata()`.
+    pub cluster_metadata: Arc<dyn crate::engine::deps::ClusterMetadata>,
+    /// Go `config.EnableReplicationTaskGeneration(domainID, workflowID)`.
+    pub enable_replication_task_generation: Arc<dyn Fn(&str, &str) -> bool + Send + Sync>,
 }
 
 impl EngineCore {

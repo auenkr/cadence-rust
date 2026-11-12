@@ -517,6 +517,8 @@ impl Harness {
         let core = Arc::new(EngineCore {
             engine_slot: Arc::new(std::sync::OnceLock::new()),
             semaphore_metadata: Arc::new(cadence_persistence::InMemoryExecutionStore::new()),
+            cluster_metadata: Arc::new(crate::engine::test_support::FixedClusterMetadata(CLUSTER.to_string())),
+            enable_replication_task_generation: Arc::new(|_, _| true),
             strong_idempotency_sanity_check: Arc::new(|_| false),
             advanced_visibility_writing: Arc::new(|| false),
             active_cluster_manager: Arc::new(ActiveHere),

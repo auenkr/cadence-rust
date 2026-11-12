@@ -232,6 +232,11 @@ pub trait NdcMutableState {
     fn update_current_version(&mut self, _version: i64, _force: bool) -> NdcResult<()> {
         Err(NdcError::internal("update_current_version is not supported by this mutable state"))
     }
+    /// Go `startTransactionHandleDecisionFailover`; true means a decision was failed and
+    /// rescheduled so the caller must flush. Mocks without cluster metadata return false.
+    fn start_transaction_handle_decision_failover(&mut self, _incoming_task_version: i64) -> NdcResult<bool> {
+        Ok(false)
+    }
     fn fail_in_flight_decision_for_failover(&mut self) -> NdcResult<()> {
         Err(NdcError::internal("fail_in_flight_decision_for_failover is not supported by this mutable state"))
     }

@@ -155,6 +155,8 @@ pub struct TypedMutableState {
     pub task_gen_env: super::mutable_state_methods_common::TaskGenEnv,
     /// Suppress active queue generation while applying passive replicated history.
     pub suppress_task_generation: bool,
+    /// Go `clusterMetadata` + `canReplicateEvents` (None until the load path installs it).
+    pub failover: Option<super::mutable_state_failover::FailoverCluster>,
 }
 
 impl TypedMutableState {

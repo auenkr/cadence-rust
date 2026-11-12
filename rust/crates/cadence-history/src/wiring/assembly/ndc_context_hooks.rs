@@ -71,8 +71,11 @@ impl TransactionState for NdcStateBox {
     fn next_event_id(&self) -> i64 {
         self.ms.get_next_event_id()
     }
-    async fn start_transaction(&mut self, _incoming_version: i64) -> Result<bool, HistoryError> {
-        Ok(false)
+    fn update_current_version_from_active(&mut self, failover_version: i64) -> Result<(), HistoryError> {
+        self.ms.update_current_version(failover_version, false).map_err(ndc_err)
+    }
+    async fn start_transaction(&mut self, incoming_version: i64) -> Result<bool, HistoryError> {
+        self.ms.start_transaction_handle_decision_failover(incoming_version).map_err(ndc_err)
     }
     fn close_mutation(
         &mut self,
@@ -142,8 +145,38 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
             run_id: info.run_id.clone(),
         };
         let history_size = info.history_size;
-        let ms = state_from_snapshot(domain, &execution, self.core.clock.now(), snapshot).map_err(ndc_err)?;
+        let domain_id = info.domain_id.clone();
+        let mut ms = state_from_snapshot(domain, &execution, self.core.clock.now(), snapshot).map_err(ndc_err)?;
+        // Go `newMutableStateBuilder` receives the shard cluster metadata and domain entry.
+        if let Some(owned) = ms.as_any_mut().and_then(|a| a.downcast_mut::<super::ndc_state::OwnedNdcMutableState>()) {
+            let policy_multi_cluster = self
+                .core
+                .domains
+                .get_domain_by_id(&domain_id)
+                .map(|d| d.is_global_domain && d.clusters.len() > 1)
+                .unwrap_or(false);
+            let can_replicate = policy_multi_cluster
+                && (self.core.enable_replication_task_generation)(&domain_id, &execution.workflow_id);
+            let metadata = self.core.cluster_metadata.clone();
+            let params = (self.core.state_params)(&domain_id);
+            owned.set_failover_context(
+                crate::execution::mutable_state_failover::FailoverCluster {
+                    current_cluster: self.core.current_cluster.clone(),
+                    cluster_name_for_failover_version: Arc::new(move |v| {
+                        metadata.cluster_name_for_failover_version(v).map_err(|e| e.to_string())
+                    }),
+                    can_replicate_events: can_replicate,
+                },
+                params.normal_decision_s2s_timeout_nanos,
+                params.normal_decision_s2s_max_attempts,
+                self.core.clock.now(),
+            );
+        }
         Ok(NdcStateBox { ms, history_size })
+    }
+    /// Go `GetActiveClusterInfoByWorkflow(...).FailoverVersion` for `StartTransaction`.
+    async fn active_failover_version(&mut self, key: &WorkflowExecutionKey) -> Result<Option<i64>, HistoryError> {
+        self.core.active_cluster_manager.failover_version_by_workflow(&key.domain_id, &key.workflow_id, &key.run_id).await
     }
     /// Go `checksum.Verify`: the typed state carries no checksum and the Go
     /// default verify probability is 0, so nothing is verified or repaired.

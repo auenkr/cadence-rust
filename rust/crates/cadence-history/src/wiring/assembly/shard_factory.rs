@@ -164,6 +164,10 @@ impl crate::engine::runtime::ActiveClusterManager for DomainActiveClusterManager
         self.inner.get_active_cluster_info_by_workflow(domain_id, workflow_id, run_id).await.map(|i| i.active_cluster_name)
     }
 
+    async fn failover_version_by_workflow(&self, domain_id: &str, workflow_id: &str, run_id: &str) -> HResult<Option<i64>> {
+        self.inner.get_active_cluster_info_by_workflow(domain_id, workflow_id, run_id).await.map(|i| Some(i.failover_version))
+    }
+
     async fn active_cluster_selection_policy_for_workflow(
         &self,
         domain_id: &str,
