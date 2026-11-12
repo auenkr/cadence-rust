@@ -20,3 +20,7 @@
 ## CI evidence
 - rust-ci cadence-history: https://github.com/auenkr/cadence-rust/actions/runs/43177086953 (success, handler metrics head)
 - Gate lanes: see below.
+Head 09258fdd8 (memory note commit; code identical to the rust-ci run). All `GATE SUMMARY failed: []`, conclusion success:
+- mysql/grpc/true: https://github.com/auenkr/cadence-rust/actions/runs/43178295898
+- cassandra/grpc/true: https://github.com/auenkr/cadence-rust/actions/runs/43178300719
+- postgres/tchannel/false: https://github.com/auenkr/cadence-rust/actions/runs/43178304942
