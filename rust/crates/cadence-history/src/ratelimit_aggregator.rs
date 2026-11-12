@@ -159,7 +159,7 @@ impl RequestWeighted {
         self
     }
 
-    fn histogram(&self, name: &str, v: usize) {
+    fn histogram(&self, name: &'static str, v: usize) {
         use crate::task::deps::MetricsScope as _;
         if let Some(s) = &self.scope {
             s.record_histogram_value(name, v as f64);

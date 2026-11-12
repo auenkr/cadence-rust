@@ -690,7 +690,7 @@ mod start_handler_tests {
         assert_eq!(m.len(), 1);
         assert!(m.contains_key(&1));
         // `>=`: size == max is rejected
-        let resp = build_get_replication_messages_response(vec![shard_msgs(1, Some(1), 1)], one);
+        let resp = build_get_replication_messages_response(vec![shard_msgs(1, Some(1), 1)], one, &|_| {});
         assert!(resp.messages_by_shard.unwrap().is_empty());
     }
 
