@@ -291,6 +291,9 @@ mod tests {
         if in_flight {
             snapshot.execution_info.decision_schedule_id = 3;
             snapshot.execution_info.decision_started_id = 4;
+        } else {
+            snapshot.execution_info.decision_schedule_id = crate::engine::deps::EMPTY_EVENT_ID;
+            snapshot.execution_info.decision_started_id = crate::engine::deps::EMPTY_EVENT_ID;
         }
         let params = StateParams { max_buffered_events_batch: limit, ..StateParams::default() };
         let s = EngineMutableState::from_snapshot(snapshot, domain, 0, Arc::new(|| 1_700_000_000_000_000_000))
