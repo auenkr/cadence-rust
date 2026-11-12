@@ -38,3 +38,8 @@ scenario also sets `EmitMetric` (Rust copies Go behaviour).
 ## Post-merge master validation (master 2311d08df, 2026-11-12)
 - rust-ci full workspace: https://github.com/auenkr/cadence-rust/actions/runs/43158787847 success
 - All 12 history-mixed-gate combos (mysql/postgres/cassandra x grpc/tchannel x two_history true/false): runs 43158792499..43158842835, all success (GATE SUMMARY failed: []).
+
+## Re-run on final head 8de9e6309 (after master merge)
+- rust-ci https://github.com/auenkr/cadence-rust/actions/runs/43158756173 success; rust-check 43158721483 success
+- Gates, all `GATE SUMMARY failed: []`: 43158760149, 43158764179, 43158770542, 43160303957 (mysql/grpc/true, dispatched late after a GitHub HTTP 500)
+- Branch had been merged to master (2311d08df) and deleted remotely; re-pushed only to dispatch the last lane. Safe to delete again.
