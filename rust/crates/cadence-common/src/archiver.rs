@@ -199,6 +199,7 @@ impl ArchiverProvider {
         Self {
             configured_keys: configured_keys.into_iter().collect(),
             cloud: CloudBackends::default(),
+            archive_options: ArchiveOptions::default(),
         }
     }
 
