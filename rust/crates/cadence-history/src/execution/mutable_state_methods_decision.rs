@@ -970,7 +970,7 @@ mod decision_tests {
     fn completed_event(id: i64, checksum: &str) -> HistoryEvent {
         HistoryEvent {
             event_id: id,
-            decision_task_completed_event_attributes: Some(cadence_api::service_types::DecisionTaskCompletedEventAttributes {
+            decision_task_completed_event_attributes: Some(cadence_api::tasks::DecisionTaskCompletedEventAttributes {
                 binary_checksum: checksum.to_string(),
                 ..Default::default()
             }),
