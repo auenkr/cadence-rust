@@ -32,6 +32,7 @@ pub mod semaphore;
 pub mod cache;
 pub mod mutable_state_decision_task_manager;
 pub mod mutable_state_builder;
+pub mod mutable_state_failover;
 pub mod mutable_state_methods_common;
 pub mod mutable_state_methods_timer;
 pub mod mutable_state_methods_timedout;

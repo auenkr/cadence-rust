@@ -52,6 +52,8 @@ pub trait TransactionState {
     fn history_size(&self) -> i64;
     fn set_history_size(&mut self, size: i64);
     fn next_event_id(&self) -> i64;
+    /// Go `StartTransaction` first step: `UpdateCurrentVersion(activeClusterInfo.FailoverVersion, false)`.
+    fn update_current_version_from_active(&mut self, _failover_version: i64) -> Result<(), Self::Error> { Ok(()) }
     async fn start_transaction(&mut self, incoming_version: i64) -> Result<bool, Self::Error>;
     fn close_mutation(&mut self, now: i64, policy: TransactionPolicy) -> Result<(WorkflowMutation, Vec<WorkflowEvents>), Self::Error>;
     fn close_snapshot(&mut self, now: i64, policy: TransactionPolicy) -> Result<(WorkflowSnapshot, Vec<WorkflowEvents>), Self::Error>;
@@ -73,6 +75,9 @@ pub trait WorkflowContextStore<M: TransactionState> {
     fn log_request_validation_error(&mut self, message: &'static str);
     fn cleared(&mut self);
     async fn get_workflow_with_retry(&mut self, key: &WorkflowExecutionKey, domain: &str) -> Result<M, M::Error>;
+    /// Go `shard.GetActiveClusterManager().GetActiveClusterInfoByWorkflow(...).FailoverVersion`;
+    /// `None` when the store has no active cluster manager.
+    async fn active_failover_version(&mut self, _key: &WorkflowExecutionKey) -> Result<Option<i64>, M::Error> { Ok(None) }
     async fn verify_and_repair(&mut self, state: &mut M) -> Result<bool, M::Error>;
     async fn flush_as_active(&mut self, state: &mut M, now: i64) -> Result<(), M::Error>;
     async fn append_history_with_retry(&mut self, events: &WorkflowEvents, domain: &str, new_branch: bool, cleanup_info: Option<String>) -> Result<DataBlob, M::Error>;
@@ -112,6 +117,7 @@ impl<M: TransactionState, S: WorkflowContextStore<M>> WorkflowContext<M, S> {
             self.history_size = state.history_size(); self.store.emit_loaded_stats(&domain, state);
         }
         let state = self.mutable_state.as_mut().expect("loaded state");
+        if let Some(version) = self.store.active_failover_version(&self.key).await? { state.update_current_version_from_active(version)?; }
         if state.start_transaction(incoming_version).await? {
             let now = self.store.now_nanos(); self.store.flush_as_active(state, now).await?;
             if state.start_transaction(incoming_version).await? { return Err(self.store.internal_error("workflowExecutionContext counter flushBeforeReady status after loading mutable state from DB")); }

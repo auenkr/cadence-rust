@@ -32,6 +32,8 @@ use crate::wiring::persistence::engine_ndc::{to_history_error, SqlHistoryManager
 const CONDITIONAL_RETRY_COUNT: usize = 5;
 
 /// Shared collaborators of every context created for one shard.
+pub type EnableReplicationFn = Arc<dyn Fn(&str, &str) -> bool + Send + Sync>;
+
 pub struct EngineCore {
     pub shard: Arc<ShardContext>,
     pub executions: Arc<dyn GoExecutionStore>,
@@ -58,6 +60,10 @@ pub struct EngineCore {
     pub remote_admin_clients: Arc<crate::wiring::resources::replication_clients::RemoteAdminClients>,
     /// Go `semaphoreMetadataManager`.
     pub semaphore_metadata: Arc<dyn cadence_persistence::SemaphorePersistence>,
+    /// Go `shard.GetClusterMetadata()`.
+    pub cluster_metadata: Arc<dyn crate::engine::deps::ClusterMetadata>,
+    /// Go `config.EnableReplicationTaskGeneration(domainID, workflowID)`.
+    pub enable_replication_task_generation: EnableReplicationFn,
 }
 
 impl EngineCore {

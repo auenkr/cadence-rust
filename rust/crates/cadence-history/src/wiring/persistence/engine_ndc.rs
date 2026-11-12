@@ -435,6 +435,8 @@ pub trait WorkflowContextHooks<M: TransactionState> {
         new_workflow: Option<&mut WorkflowSnapshot>,
     ) -> Result<(), M::Error>;
     async fn reapply_events(&mut self, batches: &[WorkflowEvents]) -> Result<(), M::Error>;
+    /// Go `GetActiveClusterInfoByWorkflow(...).FailoverVersion` (None: not available).
+    async fn active_failover_version(&mut self, _key: &WorkflowExecutionKey) -> Result<Option<i64>, M::Error> { Ok(None) }
     /// Go shard `allocateTransferIDs` / `allocateTimerIDs`: assigns task IDs
     /// (and visibility timestamps) to the encoded tasks of one write image
     /// before the write. The hook remembers what to publish after commit.
@@ -520,6 +522,9 @@ where
         .await
         .map_err(|e| M::Error::from(to_history_error(e)))?;
         self.hooks.build_state(snapshot, domain)
+    }
+    async fn active_failover_version(&mut self, key: &WorkflowExecutionKey) -> Result<Option<i64>, M::Error> {
+        self.hooks.active_failover_version(key).await
     }
     async fn verify_and_repair(&mut self, state: &mut M) -> Result<bool, M::Error> {
         self.hooks.verify_and_repair(state).await

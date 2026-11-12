@@ -86,6 +86,19 @@ impl OwnedNdcMutableState {
         }
     }
 
+    /// Installs Go's `clusterMetadata` / `canReplicateEvents` and the decision config.
+    pub fn set_failover_context(
+        &mut self,
+        failover: crate::execution::mutable_state_failover::FailoverCluster,
+        normal_schedule_to_start_timeout_nanos: i64,
+        normal_schedule_to_start_max_attempts: i64,
+        now_nanos: i64,
+    ) {
+        self.typed.failover = Some(failover);
+        self.task_gen_env.normal_schedule_to_start_timeout_nanos = normal_schedule_to_start_timeout_nanos;
+        self.task_gen_env.normal_schedule_to_start_max_attempts = normal_schedule_to_start_max_attempts;
+        self.now_nanos = now_nanos;
+    }
     pub fn typed(&self) -> &TypedMutableState { &self.typed }
     pub fn typed_mut(&mut self) -> &mut TypedMutableState { &mut self.typed }
     pub fn now_nanos(&self) -> i64 { self.now_nanos }
@@ -284,6 +297,18 @@ impl NdcMutableState for OwnedNdcMutableState {
             .map_err(|e| NdcError::internal(e.to_string()))
     }
 
+    fn start_transaction_handle_decision_failover(&mut self, incoming_task_version: i64) -> NdcResult<bool> {
+        let env = crate::execution::mutable_state_methods_decision::DecisionEnv {
+            now_nanos: self.now_nanos,
+            normal_schedule_to_start_timeout_nanos: self.task_gen_env.normal_schedule_to_start_timeout_nanos,
+            normal_schedule_to_start_max_attempts: self.task_gen_env.normal_schedule_to_start_max_attempts,
+            ..Default::default()
+        };
+        self.typed
+            .start_transaction_handle_decision_failover(&env, incoming_task_version)
+            .map_err(|e| NdcError::internal(e.to_string()))
+    }
+
     fn update_current_version(&mut self, version: i64, force: bool) -> NdcResult<()> {
         self.typed.update_current_version(version, force).map_err(|e| NdcError::internal(e.to_string()))
     }
@@ -314,7 +339,8 @@ impl TransactionState for OwnedNdcMutableState {
     fn history_size(&self) -> i64 { self.typed.history_size }
     fn set_history_size(&mut self, size: i64) { self.typed.history_size = size; }
     fn next_event_id(&self) -> i64 { self.typed.execution_info.next_event_id }
-    async fn start_transaction(&mut self, _incoming_version: i64) -> NdcResult<bool> { Ok(false) }
+    fn update_current_version_from_active(&mut self, failover_version: i64) -> NdcResult<()> { self.update_current_version(failover_version, false) }
+    async fn start_transaction(&mut self, incoming_version: i64) -> NdcResult<bool> { self.start_transaction_handle_decision_failover(incoming_version) }
     fn close_mutation(&mut self, now: i64, policy: TransactionPolicy) -> NdcResult<(cadence_persistence::history_contract::WorkflowMutation, Vec<WorkflowEvents>)> {
         let (typed, events) = self.typed.prepare_close_mutation(now, policy).map_err(|e| NdcError::internal(e.to_string()))?;
         let envelope = crate::execution::mutable_state_bridge::snapshot_to_envelope(WorkflowSnapshot::default()).map_err(|e| NdcError::internal(e.to_string()))?;

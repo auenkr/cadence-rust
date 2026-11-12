@@ -14,6 +14,8 @@ pub trait WorkflowUpdater: Send + Sync {
 #[async_trait]
 pub trait ActiveClusterManager: Send + Sync {
     async fn active_cluster_by_workflow(&self, domain_id: &str, workflow_id: &str, run_id: &str) -> HResult<String>;
+    /// `GetActiveClusterInfoByWorkflow(...).FailoverVersion`; `None` when the manager cannot tell.
+    async fn failover_version_by_workflow(&self, _domain_id: &str, _workflow_id: &str, _run_id: &str) -> HResult<Option<i64>> { Ok(None) }
     /// `GetActiveClusterSelectionPolicyForWorkflow`
     async fn active_cluster_selection_policy_for_workflow(&self, domain_id: &str, workflow_id: &str, run_id: &str) -> HResult<Option<ActiveClusterSelectionPolicy>>;
 }

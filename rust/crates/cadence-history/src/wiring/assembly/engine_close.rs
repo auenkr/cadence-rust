@@ -267,3 +267,73 @@ impl EngineMutableState {
         g.dirty = false;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::deps::{DomainCacheEntry, DomainInfo};
+    use crate::wiring::assembly::engine_state::StateParams;
+    use cadence_api::enums::EventType;
+    use std::sync::Arc;
+
+    /// Running workflow with decision 3 scheduled / 4 started (in flight) and `buffered` buffered events.
+    fn state(in_flight: bool, buffered: usize, limit: i64) -> EngineMutableState {
+        let domain = DomainCacheEntry {
+            info: DomainInfo { id: "domain-id".into(), name: "test-domain".into(), status: 0 },
+            ..Default::default()
+        };
+        let mut snapshot = pc::WorkflowSnapshot::default();
+        snapshot.execution_info.domain_id = "domain-id".into();
+        snapshot.execution_info.workflow_id = "wf".into();
+        snapshot.execution_info.run_id = "run".into();
+        snapshot.execution_info.task_list = "wf-tl".into();
+        snapshot.execution_info.next_event_id = 5;
+        if in_flight {
+            snapshot.execution_info.decision_schedule_id = 3;
+            snapshot.execution_info.decision_started_id = 4;
+        } else {
+            snapshot.execution_info.decision_schedule_id = crate::engine::deps::EMPTY_EVENT_ID;
+            snapshot.execution_info.decision_started_id = crate::engine::deps::EMPTY_EVENT_ID;
+        }
+        let params = StateParams { max_buffered_events_batch: limit, ..StateParams::default() };
+        let s = EngineMutableState::from_snapshot(snapshot, domain, 0, Arc::new(|| 1_700_000_000_000_000_000))
+            .unwrap()
+            .with_params(params);
+        {
+            let mut g = s.inner.lock().unwrap();
+            g.mirror_decision();
+            for _ in 0..buffered {
+                g.buffered.push(HistoryEvent { event_type: Some(EventType::WorkflowExecutionSignaled), ..Default::default() });
+            }
+        }
+        s
+    }
+
+    fn types(c: &ClosedTxn) -> Vec<EventType> {
+        c.events.iter().filter_map(|e| e.event_type).collect()
+    }
+
+    #[test]
+    fn buffered_limit_reached_force_closes_decision_and_reschedules() {
+        let s = state(true, 3, 3);
+        let c = s.close_transaction(1_700_000_000_000_000_000, true).unwrap();
+        let t = types(&c);
+        assert_eq!(t.first(), Some(&EventType::DecisionTaskFailed));
+        assert!(t.contains(&EventType::DecisionTaskScheduled));
+        assert_eq!(t.iter().filter(|e| **e == EventType::WorkflowExecutionSignaled).count(), 3);
+    }
+
+    #[test]
+    fn buffered_below_limit_leaves_decision_alone() {
+        let s = state(true, 2, 3);
+        let c = s.close_transaction(1_700_000_000_000_000_000, true).unwrap();
+        assert!(!types(&c).contains(&EventType::DecisionTaskFailed));
+    }
+
+    #[test]
+    fn buffered_limit_without_in_flight_decision_is_noop() {
+        let s = state(false, 3, 3);
+        let c = s.close_transaction(1_700_000_000_000_000_000, true).unwrap();
+        assert!(!types(&c).contains(&EventType::DecisionTaskFailed));
+    }
+}

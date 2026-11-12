@@ -95,6 +95,8 @@ pub fn build_core(env: &Arc<HistoryEnv>, shard: &Arc<ShardContext>) -> (Arc<Engi
     let core = Arc::new(EngineCore {
         engine_slot: Arc::new(std::sync::OnceLock::new()),
         semaphore_metadata: env.semaphore_metadata.clone(),
+        cluster_metadata: env.cluster.clone() as Arc<dyn crate::engine::deps::ClusterMetadata>,
+        enable_replication_task_generation: env.config.enable_replication_task_generation.clone(),
         strong_idempotency_sanity_check: env.config.enable_strong_idempotency_sanity_check.clone(),
         advanced_visibility_writing: {
             // Go `AdvancedVisibilityWritingMode() != "off"`: advanced store configured and written to.
