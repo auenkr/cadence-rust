@@ -8,6 +8,7 @@ pub mod service;
 pub mod common;
 pub mod config;
 pub mod config_collection;
+pub mod openfeature_dynamic;
 pub mod constants;
 pub mod shard_context;
 pub mod engine;

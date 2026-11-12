@@ -66,6 +66,8 @@ pub struct HistoryEnvParams {
 
 /// All process-wide shared dependencies.
 pub struct HistoryEnv {
+    /// Go `resource.GetArchiverClient`.
+    pub archiver_client: Arc<super::archiver_client::ArchiverClient>,
     pub config: Arc<Config>,
     pub config_adapter: Arc<ConfigAdapter>,
     pub persistence: HistoryPersistence,
@@ -189,20 +191,29 @@ impl HistoryEnv {
         let dlq_host_limiter = crate::taskdlq::new_host_limiter(
             (config.history_task_dlq_processor_host_concurrency)().clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
         );
+        let membership = Arc::new(MembershipResolver::new(who_am_i.clone(), hosts));
+        let cluster = Arc::new(ClusterMetadataImpl::new(cluster));
+        let archiver_client = Arc::new(super::archiver_wiring::build_client(
+            &config,
+            membership.clone(),
+            cluster.clone(),
+            persistence.history_nodes.clone(),
+        ));
         Ok(Arc::new(Self {
+            archiver_client,
             dlq_host_limiter,
             semaphore_metadata,
             config_adapter,
             config,
             persistence,
             clock,
-            cluster: Arc::new(ClusterMetadataImpl::new(cluster)),
+            cluster,
             domain_cache,
             matching_domain_cache,
             metrics,
             metrics_registry,
             domain_scope_cache: Arc::new(DomainMetricsScopeCacheImpl::default()),
-            membership: Arc::new(MembershipResolver::new(who_am_i.clone(), hosts)),
+            membership,
             client_checker: Arc::new(VersionChecker),
             query_matching: Arc::new(GrpcQueryMatchingClient::new(matching_resolver.clone())),
             visibility,

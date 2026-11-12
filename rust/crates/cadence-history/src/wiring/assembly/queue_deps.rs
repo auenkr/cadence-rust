@@ -331,7 +331,7 @@ impl TransferDependencies for TransferDepsImpl {
             attempt_archive_inline: true,
         };
         let limit = (self.env.config.transfer_processor_visibility_archival_time_limit)();
-        match tokio::time::timeout(limit, archiver_client::default_client().archive(request)).await {
+        match tokio::time::timeout(limit, self.env.archiver_client.archive(request)).await {
             Ok(r) => r.map(|_| ()).map_err(TaskError::Other),
             Err(_) => Err(TaskError::Other("context deadline exceeded".into())),
         }
@@ -460,7 +460,7 @@ impl CleanupDependencies for CleanupDepsImpl {
             attempt_archive_inline: request.attempt_archive_inline,
         };
         let limit = (self.env.config.timer_processor_archival_time_limit)();
-        match tokio::time::timeout(limit, archiver_client::default_client().archive(client_request)).await {
+        match tokio::time::timeout(limit, self.env.archiver_client.archive(client_request)).await {
             Ok(r) => r.map(|resp| resp.history_archived_inline).map_err(TaskError::Other),
             Err(_) => Err(TaskError::Other("context deadline exceeded".into())),
         }
