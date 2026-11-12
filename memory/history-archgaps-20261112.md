@@ -25,3 +25,6 @@ Final code head `5d435c05a33a3473117c8e74e61423b6ee32d8ba` (origin/master merged
 - gate mysql/grpc/true https://github.com/auenkr/cadence-rust/actions/runs/43176957502 : success, `GATE SUMMARY failed: []`
 - gate postgres/tchannel/false https://github.com/auenkr/cadence-rust/actions/runs/43176952046 : success, `GATE SUMMARY failed: []`
 (Earlier intermediate runs failed on compile/clippy and were fixed.)
+
+## Post-merge master validation (master eac60f24f, 2026-11-12)
+- Full workspace rust-ci + all 12 history-mixed-gate combos: runs 43178625674..43178680042, all completed success.
