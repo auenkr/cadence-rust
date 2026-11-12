@@ -14,6 +14,8 @@ pub trait WorkflowUpdater: Send + Sync {
 #[async_trait]
 pub trait ActiveClusterManager: Send + Sync {
     async fn active_cluster_by_workflow(&self, domain_id: &str, workflow_id: &str, run_id: &str) -> HResult<String>;
+    /// `GetActiveClusterSelectionPolicyForWorkflow`
+    async fn active_cluster_selection_policy_for_workflow(&self, domain_id: &str, workflow_id: &str, run_id: &str) -> HResult<Option<ActiveClusterSelectionPolicy>>;
 }
 #[derive(Clone, Copy)]
 pub enum QueueAction { Reset, GetState }

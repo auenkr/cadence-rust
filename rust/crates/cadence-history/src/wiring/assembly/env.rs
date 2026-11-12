@@ -77,6 +77,8 @@ pub struct HistoryEnv {
     pub cluster: Arc<ClusterMetadataImpl>,
     pub matching_domain_cache: Arc<MatchingDomainCache>,
     pub domain_cache: Arc<HistoryDomainCache>,
+    /// Go `resource.GetActiveClusterManager` (one shared manager and policy cache).
+    pub active_cluster_manager: Arc<super::shard_factory::DomainActiveClusterManager>,
     pub metrics_registry: Arc<MetricsRegistry>,
     pub metrics: Arc<MetricsClientImpl>,
     pub domain_scope_cache: Arc<DomainMetricsScopeCacheImpl>,
@@ -187,6 +189,11 @@ impl HistoryEnv {
         let clock = Arc::new(SystemClock);
         let domain_cache = Arc::new(HistoryDomainCache::new(matching_domain_cache.clone()));
         let metrics = Arc::new(MetricsClientImpl::new(metrics_registry.clone()));
+        let active_cluster_manager = Arc::new(super::shard_factory::DomainActiveClusterManager::new(
+            domain_cache.clone(),
+            persistence.executions.clone(),
+            config.number_of_shards.clamp(1, i64::from(i32::MAX)) as i32,
+        ));
         let failover_coordinator = super::failover::build_failover_coordinator(super::failover::FailoverDeps {
             domain_manager: Arc::new(crate::wiring::resources::failover_domain_manager::PersistenceDomainManager::new(
                 domain_persistence,
@@ -220,6 +227,7 @@ impl HistoryEnv {
             clock,
             cluster,
             domain_cache,
+            active_cluster_manager,
             matching_domain_cache,
             metrics,
             metrics_registry,

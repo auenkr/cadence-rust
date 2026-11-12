@@ -446,6 +446,9 @@ impl DomainCache for TestDomains {
 struct ActiveHere;
 #[async_trait]
 impl ActiveClusterManager for ActiveHere {
+    async fn active_cluster_selection_policy_for_workflow(&self, _: &str, _: &str, _: &str) -> HResult<Option<cadence_api::types::ActiveClusterSelectionPolicy>> {
+        Ok(None)
+    }
     async fn active_cluster_by_workflow(&self, _: &str, _: &str, _: &str) -> HResult<String> {
         Ok(CLUSTER.to_string())
     }

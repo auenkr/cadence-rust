@@ -31,7 +31,7 @@ use super::queue_policy::{processor_config, queue_config};
 use super::queues::QueueExec;
 use super::resender::HistoryResenderImpl;
 use super::shard_adapters::RealQueueShardContext;
-use super::shard_factory::{DomainActiveClusterManager, ShardClusterInfo, TaskShardContext};
+use super::shard_factory::{ShardClusterInfo, TaskShardContext};
 use crate::config::Config;
 use crate::queue::deps as q;
 use crate::queue::shard_deps::QueueShardContext;
@@ -264,7 +264,7 @@ impl HistoryQueueExecProvider {
         let assigner = new_priority_assigner(
             env.cluster.metadata().current_cluster_name.clone(),
             domains.clone(),
-            Arc::new(DomainActiveClusterManager::new(env.domain_cache.clone())),
+            env.active_cluster_manager.clone(),
             logger.clone(),
             env.metrics.clone(),
             env.config_adapter.clone(),
@@ -319,12 +319,13 @@ impl QueueExecProvider for HistoryQueueExecProvider {
             processor_config(&config),
             queue_config(&config),
             Arc::new(HistoryQueueDomainCache::new(env.domain_cache.clone())),
-            Arc::new(HistoryQueueActiveClusterManager::new(env.domain_cache.clone())),
+            Arc::new(HistoryQueueActiveClusterManager::new(env.active_cluster_manager.clone())),
         );
         let allocator_factory: Arc<dyn Fn() -> Arc<dyn crate::queue::task_allocator::TaskAllocator> + Send + Sync> = {
             let cluster = env.cluster.metadata().current_cluster_name.clone();
             let domains = env.domain_cache.clone();
-            Arc::new(move || new_history_task_allocator(cluster.clone(), domains.clone()) as Arc<dyn crate::queue::task_allocator::TaskAllocator>)
+            let manager = env.active_cluster_manager.clone();
+            Arc::new(move || new_history_task_allocator(cluster.clone(), domains.clone(), manager.clone()) as Arc<dyn crate::queue::task_allocator::TaskAllocator>)
         };
 
         let redispatcher_factory: TaskRedispatcherFactory = {

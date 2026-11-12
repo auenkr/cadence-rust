@@ -49,8 +49,8 @@ impl DomainCache for HistoryQueueDomainCache {
 pub struct HistoryQueueActiveClusterManager(Arc<DomainActiveClusterManager>);
 
 impl HistoryQueueActiveClusterManager {
-    pub fn new(domains: Arc<HistoryDomainCache>) -> Self {
-        Self(Arc::new(DomainActiveClusterManager::new(domains)))
+    pub fn new(manager: Arc<DomainActiveClusterManager>) -> Self {
+        Self(manager)
     }
 }
 
@@ -69,8 +69,8 @@ impl ActiveClusterManager for HistoryQueueActiveClusterManager {
 }
 
 /// Creates an allocator with real History cache and active-cluster projections.
-pub fn new_history_task_allocator(current_cluster: String, domains: Arc<HistoryDomainCache>) -> Arc<allocator::TaskAllocatorImpl> {
-    allocator::new_task_allocator(current_cluster, Arc::new(HistoryQueueDomainCache::new(domains.clone())), Arc::new(HistoryQueueActiveClusterManager::new(domains)))
+pub fn new_history_task_allocator(current_cluster: String, domains: Arc<HistoryDomainCache>, manager: Arc<DomainActiveClusterManager>) -> Arc<allocator::TaskAllocatorImpl> {
+    allocator::new_task_allocator(current_cluster, Arc::new(HistoryQueueDomainCache::new(domains.clone())), Arc::new(HistoryQueueActiveClusterManager::new(manager)))
 }
 
 #[cfg(test)]
