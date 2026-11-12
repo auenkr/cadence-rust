@@ -190,7 +190,7 @@ mod tests {
     }
 
     fn event_types(s: &TypedMutableState) -> Vec<EventType> {
-        s.history_events.iter().filter_map(|e| e.event_type.clone()).collect()
+        s.history_events.iter().filter_map(|e| e.event_type).collect()
     }
 
     #[test]
