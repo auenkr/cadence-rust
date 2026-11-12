@@ -24,4 +24,9 @@ Other non-history mismatches (not in archived blobs, left): `RequestCancelWorkfl
 `WorkflowExecutionInfo.parentInitiatedID`, `UpdateDomainRequest`/`SignalWithStart` request shapes.
 
 ## CI evidence
-(filled in below)
+Head SHA 075b5dfd1f6e7230db5ab0b5b6f178580c35c646 (origin/master merged); all conclusion success:
+- rust-ci: https://github.com/auenkr/cadence-rust/actions/runs/43217066682
+- gate mysql/grpc/two_history=true: https://github.com/auenkr/cadence-rust/actions/runs/43217072520 (GATE SUMMARY failed: [])
+- gate cassandra/grpc/true: https://github.com/auenkr/cadence-rust/actions/runs/43217078253 (GATE SUMMARY failed: [])
+- gate postgres/tchannel/false: https://github.com/auenkr/cadence-rust/actions/runs/43217084139 (GATE SUMMARY failed: [])
+
