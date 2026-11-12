@@ -596,6 +596,28 @@ impl TypedMutableState {
         self.history_events.clear();
     }
 
+    /// Go `DeleteTransferTasks`.
+    pub fn delete_transfer_tasks(&mut self) {
+        self.transfer_tasks.clear();
+    }
+
+    /// Go `DeleteTimerTasks`.
+    pub fn delete_timer_tasks(&mut self) {
+        self.timer_tasks.clear();
+    }
+
+    /// Go `logDataInconsistency`: error log with the workflow identity (the
+    /// `DataInconsistentCounter` metric is emitted by the callers that own a metrics scope).
+    pub fn log_data_inconsistency(&self) {
+        let info = &self.execution_info;
+        tracing::error!(
+            domain_id = info["domain_id"].as_str().unwrap_or_default(),
+            workflow_id = info["workflow_id"].as_str().unwrap_or_default(),
+            run_id = info["run_id"].as_str().unwrap_or_default(),
+            "encounter mutable state data inconsistency"
+        );
+    }
+
     /// Go `closeTransactionHandleActivityUserTimerTasks` (must run last in
     /// prepareCloseTransaction).
     pub fn close_transaction_handle_activity_user_timer_tasks(&mut self) -> Result<()> {
@@ -1025,6 +1047,15 @@ mod tests {
         assert_eq!(state.history_events.len(), 1);
         assert_eq!(state.next_event_id_in_db, 12);
         assert_eq!(state.insert_workflow_requests.len(), 1);
+    }
+
+    #[test]
+    fn delete_tasks_clear_pending_inserts() {
+        let mut s = TypedMutableState::new();
+        s.delete_transfer_tasks();
+        s.delete_timer_tasks();
+        s.log_data_inconsistency();
+        assert!(s.transfer_tasks.is_empty() && s.timer_tasks.is_empty());
     }
 
     #[test]

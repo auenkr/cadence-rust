@@ -43,6 +43,27 @@ pub fn failover_marker_is_stale(m: &MatchingDomainMetadata, current_cluster: &st
         || completed
 }
 
+/// Go `failoverMarkerSkipReason` (shard/context.go): reason text for a dropped marker.
+pub fn failover_marker_skip_reason(
+    is_active: bool,
+    failover_completed: bool,
+    domain_failover_version: i64,
+    marker_failover_version: i64,
+    deprecated: bool,
+) -> &'static str {
+    if deprecated {
+        "domain is deprecated"
+    } else if is_active {
+        "domain is active in current cluster"
+    } else if domain_failover_version > marker_failover_version {
+        "domain failover version is newer than marker"
+    } else if failover_completed {
+        "domain failover already completed"
+    } else {
+        "unknown"
+    }
+}
+
 /// `Ok(true)` when the domain does not exist (marker dropped), as in Go.
 pub fn marker_stale_by_cache(
     domains: &HistoryDomainCache,
@@ -50,7 +71,24 @@ pub fn marker_stale_by_cache(
     marker: &FailoverMarker,
 ) -> Result<bool, ShardContextError> {
     match domains.inner().get_domain_by_id(&marker.domain_id) {
-        Ok(m) => Ok(failover_marker_is_stale(&m, current_cluster, marker.failover_version)),
+        Ok(m) => {
+            let stale = failover_marker_is_stale(&m, current_cluster, marker.failover_version);
+            if stale {
+                let completed = m.failover_end_time_nanos.is_none() && m.failover_version >= marker.failover_version;
+                tracing::info!(
+                    domain = %m.info.name,
+                    reason = failover_marker_skip_reason(
+                        domain_is_active_in(&m, current_cluster),
+                        completed,
+                        m.failover_version,
+                        marker.failover_version,
+                        matches!(m.info.status, Some(DomainStatus::Deprecated)),
+                    ),
+                    "Dropped pending failover marker"
+                );
+            }
+            Ok(stale)
+        }
         Err(DomainCacheError::SourceClassified { class: DomainErrorClass::NotFound, .. }) => Ok(true),
         Err(e) => Err(ShardContextError::Other(e.to_string())),
     }
@@ -170,4 +208,18 @@ pub fn build_marker_notifier(
 ) -> Arc<dyn MarkerNotifier> {
     let adapter = Arc::new(FailoverShardAdapter { shard, domains, current_cluster });
     MarkerNotifierImpl::new(adapter, config, coordinator, metrics)
+}
+
+#[cfg(test)]
+mod skip_reason_tests {
+    use super::failover_marker_skip_reason as r;
+
+    #[test]
+    fn failover_marker_skip_reason_priority_matches_go() {
+        assert_eq!(r(true, true, 9, 1, true), "domain is deprecated");
+        assert_eq!(r(true, true, 9, 1, false), "domain is active in current cluster");
+        assert_eq!(r(false, true, 9, 1, false), "domain failover version is newer than marker");
+        assert_eq!(r(false, true, 1, 1, false), "domain failover already completed");
+        assert_eq!(r(false, false, 1, 1, false), "unknown");
+    }
 }

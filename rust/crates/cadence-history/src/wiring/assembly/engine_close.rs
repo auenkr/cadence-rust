@@ -30,6 +30,44 @@ fn blob(data: Vec<u8>) -> pc::DataBlob {
     pc::DataBlob { encoding: "thriftrw".to_string(), data }
 }
 
+/// Go `validateNoEventsAfterWorkflowFinish`: on an active close of a finished workflow the last
+/// event must be a workflow-finish event.
+fn validate_no_events_after_workflow_finish(active: bool, state: i32, events: &[HistoryEvent]) -> HResult<()> {
+    use cadence_api::enums::EventType as E;
+    if !active || events.is_empty() || state != WORKFLOW_STATE_COMPLETED {
+        return Ok(());
+    }
+    match events[events.len() - 1].event_type {
+        Some(
+            E::WorkflowExecutionCompleted
+            | E::WorkflowExecutionFailed
+            | E::WorkflowExecutionTimedOut
+            | E::WorkflowExecutionTerminated
+            | E::WorkflowExecutionContinuedAsNew
+            | E::WorkflowExecutionCanceled,
+        ) => Ok(()),
+        _ => Err(HistoryError::internal("error validating last event being workflow finish event")),
+    }
+}
+
+/// Go `checksum.Checksum` as serialised by `SerializeChecksum(..., EncodingTypeJSON)`:
+/// `{"Version":1,"Flavor":1,"Value":"<base64>"}`.
+fn checksum_json(sum: &crate::execution::checksum::Checksum) -> Vec<u8> {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut b64 = String::new();
+    for c in sum.value.chunks(3) {
+        let n = (u32::from(c[0]) << 16) | (u32::from(*c.get(1).unwrap_or(&0)) << 8) | u32::from(*c.get(2).unwrap_or(&0));
+        for i in 0..4 {
+            if i <= c.len() {
+                b64.push(T[((n >> (18 - 6 * i)) & 63) as usize] as char);
+            } else {
+                b64.push('=');
+            }
+        }
+    }
+    format!("{{\"Version\":{},\"Flavor\":{},\"Value\":\"{}\"}}", sum.version, sum.flavor, b64).into_bytes()
+}
+
 fn enc(s: &cadence_thrift::value::Struct) -> HResult<Vec<u8>> {
     Encoding::ThriftRW.encode(s).map_err(|e| HistoryError::internal(format!("encode mutable state blob: {e}")))
 }
@@ -40,6 +78,7 @@ impl EngineMutableState {
     /// is created.
     pub(super) fn close_transaction(&self, now_nanos: i64, active: bool) -> HResult<ClosedTxn> {
         if active {
+            self.close_transaction_with_policy_check()?;
             // Go `closeTransactionHandleBufferedEventsLimit`: too many persisted buffered events
             // force-close the in-flight decision and schedule a new one.
             let (running, over_limit, in_flight) = {
@@ -84,6 +123,13 @@ impl EngineMutableState {
             return Err(HistoryError::internal("cannot close a tasks-only transaction with new history events"));
         }
         let events = g.hist.clone();
+        validate_no_events_after_workflow_finish(active, g.exec.state, &events).map_err(|e| {
+            tracing::error!(
+                domain_id = %g.pc_exec.domain_id, workflow_id = %g.pc_exec.workflow_id, run_id = %g.pc_exec.run_id,
+                "encounter case where events appears after workflow finish."
+            );
+            e
+        })?;
         let mut last_write_version = self.snapshot.last_write_version;
         if let (Some(first), Some(last)) = (events.first(), events.last()) {
             g.last_first_event_id = first.event_id;
@@ -185,7 +231,40 @@ impl EngineMutableState {
             Some(blob(b.data))
         };
 
+        // Go `generateChecksum`: probabilistic, computed from the closed state.
+        let checksum = if self.params.checksum_gen_probability > 0
+            && rand::Rng::gen_range(&mut rand::thread_rng(), 0i64..100i64) < self.params.checksum_gen_probability
+        {
+            use crate::execution::checksum::{MutableStateChecksumPayload as P, MUTABLE_STATE_CHECKSUM_PAYLOAD_V1};
+            let mut timers: Vec<i64> = g.timers.values().map(|t| t.started_id).collect();
+            timers.sort_unstable();
+            let payload = P {
+                cancel_requested: g.pc_exec.cancel_requested,
+                state: g.pc_exec.state as i16,
+                last_first_event_id: g.pc_exec.last_first_event_id,
+                next_event_id: g.pc_exec.next_event_id,
+                last_processed_event_id: g.pc_exec.last_processed_event,
+                signal_count: i64::from(g.pc_exec.signal_count),
+                decision_attempt: g.pc_exec.decision_attempt as i32,
+                decision_version: g.pc_exec.decision_version,
+                decision_scheduled_id: g.pc_exec.decision_schedule_id,
+                decision_started_id: g.pc_exec.decision_started_id,
+                pending_timer_started_ids: timers,
+                pending_activity_scheduled_ids: g.pc_acts.keys().copied().collect(),
+                pending_signal_initiated_ids: g.pc_signals.keys().copied().collect(),
+                pending_req_cancel_initiated_ids: g.pc_cancels.keys().copied().collect(),
+                pending_child_initiated_ids: g.pc_children.keys().copied().collect(),
+                sticky_task_list_name: g.pc_exec.sticky_task_list.clone(),
+                version_histories: g.version_histories.clone(),
+            };
+            let _ = MUTABLE_STATE_CHECKSUM_PAYLOAD_V1;
+            Some(pc::DataBlob { encoding: "json".to_string(), data: checksum_json(&payload.generate()) })
+        } else {
+            None
+        };
+
         let mutation = pc::WorkflowMutation {
+            checksum,
             activity_heartbeats: heartbeats,
             execution_info: g.pc_exec.clone(),
             version_histories,
@@ -217,6 +296,29 @@ impl EngineMutableState {
             transfer: g.transfer_tasks.clone(),
             timer: g.timer_tasks.clone(),
         })
+    }
+
+    /// Go `closeTransactionWithPolicyCheck`: an active close of a multi-cluster domain whose current
+    /// version belongs to another cluster fails with DomainNotActive.
+    fn close_transaction_with_policy_check(&self) -> HResult<()> {
+        let Some(policy) = &self.params.close_policy else { return Ok(()) };
+        // Go `canReplicateEvents` (ReplicationPolicyMultiCluster).
+        if !(self.domain.is_global_domain && self.domain.clusters.len() > 1) {
+            return Ok(());
+        }
+        let (workflow_id, version) = {
+            let g = self.inner.lock().unwrap();
+            (g.pc_exec.workflow_id.clone(), g.current_version)
+        };
+        if !(policy.replication_enabled)(&self.domain.info.id, &workflow_id) {
+            return Ok(());
+        }
+        let active = policy.cluster.cluster_name_for_failover_version(version)?;
+        let current = policy.cluster.get_current_cluster_name();
+        if active != current {
+            return Err(self.domain.new_domain_not_active_error(&current, &active));
+        }
+        Ok(())
     }
 
     pub(super) fn history_size(&self) -> i64 {
@@ -311,6 +413,57 @@ mod tests {
 
     fn types(c: &ClosedTxn) -> Vec<EventType> {
         c.events.iter().filter_map(|e| e.event_type).collect()
+    }
+
+    #[test]
+    fn events_after_workflow_finish_rejected_only_for_active_completed() {
+        let ev = |t| vec![HistoryEvent { event_type: Some(t), ..Default::default() }];
+        let done = WORKFLOW_STATE_COMPLETED;
+        assert!(validate_no_events_after_workflow_finish(true, done, &ev(EventType::WorkflowExecutionCompleted)).is_ok());
+        assert!(validate_no_events_after_workflow_finish(true, done, &ev(EventType::WorkflowExecutionSignaled)).is_err());
+        assert!(validate_no_events_after_workflow_finish(false, done, &ev(EventType::WorkflowExecutionSignaled)).is_ok());
+        assert!(validate_no_events_after_workflow_finish(true, 1, &ev(EventType::WorkflowExecutionSignaled)).is_ok());
+        assert!(validate_no_events_after_workflow_finish(true, done, &[]).is_ok());
+    }
+
+    #[test]
+    fn checksum_json_matches_go_shape() {
+        let sum = crate::execution::checksum::Checksum { version: 1, flavor: 1, value: vec![0xde, 0xad, 0xbe, 0xef] };
+        assert_eq!(String::from_utf8(checksum_json(&sum)).unwrap(), r#"{"Version":1,"Flavor":1,"Value":"3q2+7w=="}"#);
+    }
+
+    struct FakeCluster;
+    impl crate::engine::deps::ClusterMetadata for FakeCluster {
+        fn get_current_cluster_name(&self) -> String {
+            "cluster-a".into()
+        }
+        fn cluster_name_for_failover_version(&self, _: i64) -> HResult<String> {
+            Ok("cluster-b".into())
+        }
+    }
+
+    #[test]
+    fn active_close_in_standby_version_is_domain_not_active() {
+        let mut s = state(false, 0, 3);
+        s.domain.is_global_domain = true;
+        s.domain.clusters = vec!["cluster-a".into(), "cluster-b".into()];
+        s.params.close_policy = Some(crate::wiring::assembly::engine_state::ClosePolicy {
+            cluster: Arc::new(FakeCluster),
+            replication_enabled: Arc::new(|_, _| true),
+        });
+        assert!(s.close_transaction(1_700_000_000_000_000_000, true).is_err());
+        // passive close and single-cluster domains skip the check
+        assert!(s.close_transaction(1_700_000_000_000_000_000, false).is_ok());
+        s.domain.clusters = vec!["cluster-a".into()];
+        assert!(s.close_transaction(1_700_000_000_000_000_000, true).is_ok());
+    }
+
+    #[test]
+    fn checksum_generated_when_probability_is_100() {
+        let mut s = state(false, 0, 3);
+        s.params.checksum_gen_probability = 100;
+        let c = s.close_transaction(1_700_000_000_000_000_000, true).unwrap();
+        assert_eq!(c.mutation.checksum.unwrap().encoding, "json");
     }
 
     #[test]

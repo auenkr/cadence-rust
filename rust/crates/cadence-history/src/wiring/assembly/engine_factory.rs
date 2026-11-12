@@ -123,11 +123,16 @@ pub fn build_core(env: &Arc<HistoryEnv>, shard: &Arc<ShardContext>) -> (Arc<Engi
             let domains = env.domain_cache.clone();
             let history_nodes = env.persistence.history_nodes.clone();
             let shard_id = shard.shard_id();
+            let cluster = env.cluster.clone();
             Arc::new(move |domain_id: &str| {
                 let mut p = StateParams {
                     history_nodes: Some(history_nodes.clone()),
                     shard_id,
                     max_buffered_events_batch: (cfg.maximum_buffered_events_batch)(),
+                    close_policy: Some(super::engine_state::ClosePolicy {
+                        cluster: cluster.clone() as Arc<dyn crate::engine::deps::ClusterMetadata>,
+                        replication_enabled: cfg.enable_replication_task_generation.clone(),
+                    }),
                     ..StateParams::default()
                 };
                 if let Ok(entry) = crate::task::deps::DomainCache::get_domain_by_id(&*domains, domain_id) {
@@ -137,6 +142,7 @@ pub fn build_core(env: &Arc<HistoryEnv>, shard: &Arc<ShardContext>) -> (Arc<Engi
                     p.normal_decision_s2s_timeout_nanos =
                         (cfg.normal_decision_schedule_to_start_timeout)(&name).as_nanos() as i64;
                     p.normal_decision_s2s_max_attempts = (cfg.normal_decision_schedule_to_start_max_attempts)(&name);
+                    p.checksum_gen_probability = (cfg.mutable_state_checksum_gen_probability)(&name);
                     p.deletion_jitter_range = (cfg.workflow_deletion_jitter_range)(&name);
                 }
                 p
