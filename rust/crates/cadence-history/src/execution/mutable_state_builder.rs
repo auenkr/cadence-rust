@@ -1046,7 +1046,14 @@ mod tests {
         let (m, _) = state.close_transaction_as_mutation().unwrap();
         assert_eq!(m.delete_activity_infos, vec![5]);
         assert!(state.update_activity_infos.is_empty());
-        assert!(state.delete_activity(5).is_err());
+        // Go DeleteActivity: a missing activity is a logged data inconsistency (counter), not an error.
+        let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let c = count.clone();
+        state.data_inconsistency = DataInconsistencyHook(Some(std::sync::Arc::new(move || {
+            c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        })));
+        assert!(state.delete_activity(5).is_ok());
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     #[test]
