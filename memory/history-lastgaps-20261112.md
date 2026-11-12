@@ -22,3 +22,6 @@ Final head a4df1c976d69526619bc818b4132329f568dfa83 (after merging origin/master
 - cassandra/grpc/true: https://github.com/auenkr/cadence-rust/actions/runs/43188368774 success, GATE SUMMARY failed: []
 - postgres/tchannel/false: https://github.com/auenkr/cadence-rust/actions/runs/43188373717 success, GATE SUMMARY failed: []
 - rust-ci full workspace: https://github.com/auenkr/cadence-rust/actions/runs/43188379294 success
+
+## Post-merge master validation (master 1960d1bbf, 2026-11-12)
+- Full workspace rust-ci + all 12 history-mixed-gate combos: runs 43190460471..43190529778, all success.
