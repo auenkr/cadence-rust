@@ -422,7 +422,8 @@ impl pc::GoHistoryV2Store for MemHistory {
 }
 
 #[derive(Default)]
-pub struct TestDomains(pub Arc<AtomicI32>, pub Arc<Mutex<Vec<(Option<cadence_api::types::ClusterAttribute>, String)>>>);
+pub type ActiveClusters = Arc<Mutex<Vec<(Option<cadence_api::types::ClusterAttribute>, String)>>>;
+pub struct TestDomains(pub Arc<AtomicI32>, pub ActiveClusters);
 impl DomainCache for TestDomains {
     fn get_domain_by_id(&self, id: &str) -> HResult<Arc<DomainCacheEntry>> {
         if id != DOMAIN_ID {
@@ -474,7 +475,7 @@ pub struct Harness {
     /// Domain status served by the test domain cache (0 registered, 1 deprecated).
     pub domain_status: Arc<AtomicI32>,
     /// Active-active cluster attributes served by the test domain cache (empty == plain local domain).
-    pub domain_active_clusters: Arc<Mutex<Vec<(Option<cadence_api::types::ClusterAttribute>, String)>>>,
+    pub domain_active_clusters: ActiveClusters,
 }
 
 impl Default for Harness {
