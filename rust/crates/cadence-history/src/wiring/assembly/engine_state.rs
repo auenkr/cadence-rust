@@ -79,6 +79,10 @@ impl Default for StateParams {
 pub struct QueryRegistryAdapter(pub Arc<Registry>);
 
 impl QueryRegistry for QueryRegistryAdapter {
+    #[cfg(test)]
+    fn raw_registry_for_test(&self) -> Option<Arc<Registry>> {
+        Some(self.0.clone())
+    }
     fn buffered_count(&self) -> usize {
         self.0.get_buffered_ids().len()
     }

@@ -193,6 +193,11 @@ pub trait QueryRegistry: Send + Sync {
     fn buffer_query(&self, query: Option<&cadence_api::tasks::WorkflowQuery>) -> (String, tokio::sync::oneshot::Receiver<()>);
     fn remove_query(&self, id: &str);
     fn get_termination_state(&self, id: &str) -> HResult<QueryTermination>;
+    /// Test-only access to the concrete registry (Go tests call SetTerminationState directly).
+    #[cfg(test)]
+    fn raw_registry_for_test(&self) -> Option<std::sync::Arc<crate::query::Registry>> {
+        None
+    }
 }
 #[async_trait]
 pub trait QueryMatchingClient: Send + Sync {
