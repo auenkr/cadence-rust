@@ -1,6 +1,7 @@
 //! History service assembly: shared environment, shard factory, per-shard
 //! engine factory, shard registry, queues, replication and failover.
 pub mod archiver_client;
+pub mod archiver_wiring;
 pub mod controller;
 pub mod engine_cache;
 pub mod engine_close;

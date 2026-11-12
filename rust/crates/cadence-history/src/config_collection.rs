@@ -23,6 +23,24 @@ pub struct Filters {
 /// Go `dynamicconfig.Client`: raw JSON-typed value lookup by key + filters.
 pub trait DynamicClient: Send + Sync {
     fn get_value(&self, key: &str, filters: &Filters) -> Option<Value>;
+
+    /// Typed lookup (Go `GetIntValue`/`GetBoolValue`/...). Clients that evaluate per type
+    /// (OpenFeature) override this; the default is the untyped lookup.
+    fn get_typed(&self, key: &str, filters: &Filters, _kind: DynKind) -> Option<Value> {
+        self.get_value(key, filters)
+    }
+}
+
+/// Go typed `dynamicconfig.Client` getter selected by the property type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DynKind {
+    Int,
+    Float,
+    Bool,
+    String,
+    Duration,
+    Map,
+    List,
 }
 
 /// Go `dynamicconfig.NewInMemoryClient`.
@@ -48,36 +66,43 @@ impl DynamicClient for InMemoryClient {
 
 /// Conversion of a raw JSON value into a typed property value.
 pub trait FromDynamic: Sized + Clone + Send + Sync + 'static {
+    const KIND: DynKind;
     fn from_dynamic(v: &Value) -> Option<Self>;
 }
 
 impl FromDynamic for i64 {
+    const KIND: DynKind = DynKind::Int;
     fn from_dynamic(v: &Value) -> Option<Self> {
         v.as_i64().or_else(|| v.as_f64().map(|f| f as i64))
     }
 }
 impl FromDynamic for bool {
+    const KIND: DynKind = DynKind::Bool;
     fn from_dynamic(v: &Value) -> Option<Self> {
         v.as_bool()
     }
 }
 impl FromDynamic for f64 {
+    const KIND: DynKind = DynKind::Float;
     fn from_dynamic(v: &Value) -> Option<Self> {
         v.as_f64()
     }
 }
 impl FromDynamic for String {
+    const KIND: DynKind = DynKind::String;
     fn from_dynamic(v: &Value) -> Option<Self> {
         v.as_str().map(str::to_owned)
     }
 }
 impl FromDynamic for Map {
+    const KIND: DynKind = DynKind::Map;
     fn from_dynamic(v: &Value) -> Option<Self> {
         v.as_object()
             .map(|o| o.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
     }
 }
 impl FromDynamic for Duration {
+    const KIND: DynKind = DynKind::Duration;
     /// Go `GetDurationValue`: strings use `time.ParseDuration`, numbers are
     /// interpreted as seconds.
     fn from_dynamic(v: &Value) -> Option<Self> {
@@ -163,7 +188,7 @@ impl Collection {
         default: &T,
     ) -> T {
         client
-            .get_value(key, filters)
+            .get_typed(key, filters, T::KIND)
             .and_then(|v| T::from_dynamic(&v))
             .unwrap_or_else(|| default.clone())
     }
