@@ -421,8 +421,8 @@ impl pc::GoHistoryV2Store for MemHistory {
     async fn get_all_history_tree_branches(&self, _: i32, _: i32, _: Vec<u8>) -> Result<pc::HistoryTreePage, PersistenceError> { Ok(Default::default()) }
 }
 
-#[derive(Default)]
 pub type ActiveClusters = Arc<Mutex<Vec<(Option<cadence_api::types::ClusterAttribute>, String)>>>;
+#[derive(Default)]
 pub struct TestDomains(pub Arc<AtomicI32>, pub ActiveClusters);
 impl DomainCache for TestDomains {
     fn get_domain_by_id(&self, id: &str) -> HResult<Arc<DomainCacheEntry>> {
