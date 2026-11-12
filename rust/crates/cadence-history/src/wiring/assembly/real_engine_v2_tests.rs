@@ -3,6 +3,7 @@
 //! in-memory stores of `real_engine_harness`. Go's gomock `.Return(nil, err)` persistence errors are injected via
 //! `Inner::create_errors` / `Inner::update_errors`.
 use cadence_api::enums::{DecisionType, WorkflowIDReusePolicy};
+use cadence_api::tasks::*;
 use cadence_api::tasktoken::{JsonTaskTokenSerializer, TaskToken};
 use cadence_api::errors::CadenceError;
 use cadence_api::service_types::SignalWithStartWorkflowExecutionRequest;
