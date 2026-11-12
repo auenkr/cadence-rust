@@ -30,4 +30,4 @@ None. No Rust-vs-Go divergence found.
 ## CI evidence (rust-ci.yml package=cadence-history)
 - First green on harness: https://github.com/auenkr/cadence-rust/actions/runs/43143602467
 - Green with batch 2: https://github.com/auenkr/cadence-rust/actions/runs/43144972810 (head before the master merge)
-- Final run on merged head: see the final commit message / below.
+- Final run on merged head c2ba9e9f9: https://github.com/auenkr/cadence-rust/actions/runs/43145991798 (success)
