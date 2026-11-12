@@ -3,7 +3,7 @@
 //! and the 10s / 1000 entry selection-policy cache.
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -40,64 +40,114 @@ impl PolicySource for Arc<dyn GoExecutionStore> {
     }
 }
 
-/// TTL + max-count cache (Go `cache.New` with `ActivelyEvict`, `Pin: false`).
-/// TTL counts from `put`; at capacity the least recently used entry goes.
+/// Port of Go `cache.lru` as used by the manager (`ActivelyEvict: true`, `Pin: false`, count based,
+/// `MaxCount` 1000, TTL 10s). The recency list is ordered by access: `Get` and `Put` move the
+/// entry to the front; expired entries are dropped from the back while they are expired
+/// (`evictExpiredItems`); after an insert the oldest-accessed entries go while `len > maxCount`.
+/// An entry is expired when `now > createTime + ttl`; `Put` on an existing key refreshes `createTime`.
 #[derive(Default)]
 pub struct PolicyCache {
-    entries: Mutex<HashMap<String, CacheEntry>>,
+    inner: Mutex<LruInner>,
+}
+
+#[derive(Default)]
+struct LruInner {
+    entries: HashMap<String, CacheEntry>,
+    /// access sequence -> key; the largest sequence is the list front, the smallest the back.
+    by_access: BTreeMap<u64, String>,
+    seq: u64,
 }
 
 struct CacheEntry {
     policy: ActiveClusterSelectionPolicy,
-    expires: Instant,
-    last_access: u64,
+    created: Instant,
+    seq: u64,
+}
+
+impl LruInner {
+    fn expired(created: Instant, now: Instant) -> bool {
+        now > created + WORKFLOW_POLICY_CACHE_TTL
+    }
+
+    fn remove(&mut self, key: &str) {
+        if let Some(e) = self.entries.remove(key) {
+            self.by_access.remove(&e.seq);
+        }
+    }
+
+    /// Go `evictExpiredItems`: stop at the first non-expired entry from the back.
+    fn evict_expired(&mut self, now: Instant) {
+        while let Some((_, key)) = self.by_access.iter().next().map(|(s, k)| (*s, k.clone())) {
+            let created = self.entries[&key].created;
+            if !Self::expired(created, now) {
+                break;
+            }
+            self.remove(&key);
+        }
+    }
+
+    fn move_to_front(&mut self, key: &str) {
+        self.seq += 1;
+        let seq = self.seq;
+        if let Some(e) = self.entries.get_mut(key) {
+            self.by_access.remove(&e.seq);
+            e.seq = seq;
+            self.by_access.insert(seq, key.to_owned());
+        }
+    }
 }
 
 impl PolicyCache {
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, CacheEntry>> {
-        self.entries.lock().unwrap_or_else(|e| e.into_inner())
+    fn lock(&self) -> std::sync::MutexGuard<'_, LruInner> {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// Go `lru.Get`.
     pub fn get(&self, key: &str, now: Instant) -> Option<ActiveClusterSelectionPolicy> {
-        let mut map = self.lock();
-        match map.get_mut(key) {
-            Some(e) if e.expires > now => {
-                e.last_access = next_tick();
-                Some(e.policy.clone())
-            }
-            Some(_) => {
-                map.remove(key);
-                None
-            }
-            None => None,
+        let mut c = self.lock();
+        c.evict_expired(now);
+        let created = c.entries.get(key)?.created;
+        if LruInner::expired(created, now) {
+            c.remove(key);
+            return None;
         }
+        c.move_to_front(key);
+        c.entries.get(key).map(|e| e.policy.clone())
     }
 
+    /// Go `lru.Put`.
     pub fn put(&self, key: String, policy: ActiveClusterSelectionPolicy, now: Instant) {
-        let mut map = self.lock();
-        if !map.contains_key(&key) && map.len() >= WORKFLOW_POLICY_CACHE_MAX_COUNT {
-            map.retain(|_, e| e.expires > now);
-            if map.len() >= WORKFLOW_POLICY_CACHE_MAX_COUNT {
-                if let Some(oldest) = map.iter().min_by_key(|(_, e)| e.last_access).map(|(k, _)| k.clone()) {
-                    map.remove(&oldest);
+        let mut c = self.lock();
+        c.evict_expired(now);
+        if let Some(created) = c.entries.get(&key).map(|e| e.created) {
+            if LruInner::expired(created, now) {
+                c.remove(&key);
+            } else {
+                if let Some(e) = c.entries.get_mut(&key) {
+                    e.policy = policy;
+                    e.created = now;
                 }
+                c.move_to_front(&key);
+                return;
             }
         }
-        map.insert(key, CacheEntry { policy, expires: now + WORKFLOW_POLICY_CACHE_TTL, last_access: next_tick() });
+        c.seq += 1;
+        let seq = c.seq;
+        c.by_access.insert(seq, key.clone());
+        c.entries.insert(key, CacheEntry { policy, created: now, seq });
+        while c.entries.len() > WORKFLOW_POLICY_CACHE_MAX_COUNT {
+            let Some(back) = c.by_access.values().next().cloned() else { break };
+            c.remove(&back);
+        }
     }
 
     pub fn len(&self) -> usize {
-        self.lock().len()
+        self.lock().entries.len()
     }
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
-}
-
-fn next_tick() -> u64 {
-    static C: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    C.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 /// Go `getClusterSelectionPolicy` errors: `NotExists` is `types.EntityNotExistsError`.
@@ -176,9 +226,7 @@ impl ActiveClusterManagerImpl {
     fn by_attribute(entry: &DomainCacheEntry, domain_id: &str, attribute: Option<&ClusterAttribute>) -> HResult<ActiveClusterInfo> {
         match entry.get_active_cluster_info_by_cluster_attribute(attribute) {
             Some((active_cluster_name, failover_version)) => Ok(ActiveClusterInfo { active_cluster_name, failover_version }),
-            None => Err(HistoryError::ClusterAttributeNotFound(format!(
-                "could not find cluster attribute {attribute:?} in the domain {domain_id}'s active cluster config"
-            ))),
+            None => Err(HistoryError::ClusterAttributeNotFound(crate::engine::deps::cluster_attribute_not_found_message(domain_id, attribute))),
         }
     }
 
@@ -402,5 +450,33 @@ mod tests {
             c.put(format!("k{i}"), ActiveClusterSelectionPolicy::default(), t0);
         }
         assert_eq!(c.len(), WORKFLOW_POLICY_CACHE_MAX_COUNT);
+    }
+
+    /// Go lru: Get moves to front; overflow evicts the least recently accessed; Put refreshes TTL.
+    #[test]
+    fn cache_evicts_in_access_order_like_go() {
+        let c = PolicyCache::default();
+        let t0 = Instant::now();
+        for i in 0..WORKFLOW_POLICY_CACHE_MAX_COUNT {
+            c.put(format!("k{i}"), ActiveClusterSelectionPolicy::default(), t0);
+        }
+        assert!(c.get("k0", t0).is_some()); // k0 now most recent, k1 is the back
+        c.put("new".into(), ActiveClusterSelectionPolicy::default(), t0);
+        assert!(c.get("k1", t0).is_none());
+        assert!(c.get("k0", t0).is_some());
+        // Put on an existing key refreshes createTime.
+        c.put("k0".into(), ActiveClusterSelectionPolicy::default(), t0 + Duration::from_secs(8));
+        assert!(c.get("k0", t0 + Duration::from_secs(15)).is_some());
+        assert!(c.get("k2", t0 + Duration::from_secs(15)).is_none());
+        // Strictly after ttl: exactly ttl is still alive.
+        c.put("edge".into(), ActiveClusterSelectionPolicy::default(), t0);
+        assert!(c.get("edge", t0 + WORKFLOW_POLICY_CACHE_TTL).is_some());
+    }
+
+    #[test]
+    fn cluster_attribute_not_found_message_matches_go() {
+        use crate::engine::deps::cluster_attribute_not_found_message as m;
+        assert_eq!(m("d", Some(&attr("region", "us"))), "could not find cluster attribute &{region us} in the domain d's active cluster config");
+        assert_eq!(m("d", None), "could not find cluster attribute %!s(*types.ClusterAttribute=<nil>) in the domain d's active cluster config");
     }
 }
