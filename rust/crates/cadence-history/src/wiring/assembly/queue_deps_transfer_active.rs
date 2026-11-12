@@ -52,10 +52,6 @@ use crate::task::transfer_active_task_executor::{
 use crate::wiring::resources::domain_cache::HistoryDomainCache;
 use crate::task::transfer_task_executor_base::{DecisionState, StartEvent};
 
-fn todo_err(what: &str) -> TaskError {
-    TaskError::Other(format!("{what} is not supported yet (TODO(link): transfer active executor dependency)"))
-}
-
 fn he(e: HistoryError) -> TaskError {
     match e {
         HistoryError::Cadence(c) => match *c {
@@ -69,6 +65,17 @@ fn he(e: HistoryError) -> TaskError {
         HistoryError::Canceled => TaskError::ContextCanceled,
         HistoryError::PersistenceShardOwnershipLost(m) => TaskError::ShardOwnershipLost(m),
         other => TaskError::InternalService(other.to_string()),
+    }
+}
+
+/// `he` plus Go's `*types.BadRequestError` (corrupted reset point; the executor treats it as non-retryable).
+fn reset_err(e: HistoryError) -> TaskError {
+    match e {
+        HistoryError::Cadence(c) => match *c {
+            CadenceError::BadRequest(x) => TaskError::BadRequest(x.message),
+            other => he(HistoryError::Cadence(Box::new(other))),
+        },
+        other => he(other),
     }
 }
 
@@ -183,6 +190,9 @@ fn event_type_of(event: &HistoryEvent) -> CloseEventType {
 
 #[async_trait]
 impl ActiveMutableState for EngineActiveMutableState {
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
     fn is_workflow_execution_running(&self) -> bool {
         EngineMs::is_workflow_execution_running(&*self.state)
     }
@@ -453,6 +463,10 @@ impl EngineActiveTransferContext {
 
 #[async_trait]
 impl ActiveTransferContext for EngineActiveTransferContext {
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+
     fn release(&self, error: Option<TaskError>) {
         if self.released.swap(true, Ordering::SeqCst) {
             return;
@@ -956,9 +970,39 @@ impl TransferActiveDependencies for TransferActiveDepsImpl {
         crate::wiring::assembly::parent_close_policy_client::send(&self.env, request).await
     }
 
-    async fn reset_workflow(&self, _request: WorkflowResetRequest) -> TaskResult<()> {
-        // TODO(link): reset.WorkflowResetter.
-        Err(todo_err("WorkflowResetter.ResetWorkflow"))
+    async fn reset_workflow(&self, request: WorkflowResetRequest) -> TaskResult<()> {
+        // Go `reset.WorkflowResetter.ResetWorkflow` (the caller holds the current run's lock).
+        let context = request
+            .current_context
+            .as_any()
+            .and_then(|a| a.downcast_ref::<EngineActiveTransferContext>())
+            .map(|c| c.context.clone())
+            .ok_or_else(|| TaskError::InternalService("reset workflow: current context is not an engine context".into()))?;
+        let state = request
+            .current_mutable_state
+            .as_any()
+            .and_then(|a| a.downcast_ref::<EngineActiveMutableState>())
+            .map(|s| s.state.clone())
+            .ok_or_else(|| TaskError::InternalService("reset workflow: current mutable state is not an engine state".into()))?;
+        let resetter = super::engine_resetter::EngineWorkflowResetter::new(self.cache.core(), self.cache.clone());
+        let reset = crate::engine::runtime::ResetWorkflow {
+            domain_id: request.domain_id,
+            workflow_id: request.workflow_id,
+            base_run_id: request.base_run_id,
+            base_branch_token: request.base_branch_token,
+            rebuild_last_event_id: request.base_rebuild_last_event_id,
+            rebuild_last_event_version: request.base_rebuild_last_event_version,
+            base_next_event_id: request.base_next_event_id,
+            reset_run_id: request.reset_run_id,
+            request_id: request.reset_request_id,
+            current_context: context,
+            current_state: state,
+            current_release: None, // execution.NoopReleaseFn
+            reason: request.reset_reason,
+            events: Vec::new(),
+            skip_signal_reapply: request.skip_signal_reapply,
+        };
+        crate::engine::runtime::WorkflowResetter::reset_workflow(&resetter, reset).await.map_err(reset_err)
     }
 
     async fn get_current_execution(&self, domain_id: &str, workflow_id: &str, _domain_name: &str, shard_id: i32) -> TaskResult<String> {
@@ -1002,5 +1046,20 @@ impl TransferActiveDependencies for TransferActiveDepsImpl {
 
     fn log_execute_history_task(&self, _shard_id: i32, _task: &dyn PersistenceTask) {
         // simulation.LogEvents is a test-only hook (no-op outside simulation).
+    }
+}
+
+#[cfg(test)]
+mod reset_err_tests {
+    use super::*;
+
+    #[test]
+    fn bad_request_stays_non_retryable_and_others_map_like_he() {
+        match reset_err(HistoryError::bad_request("Can not reset workflow with pending child workflows")) {
+            TaskError::BadRequest(m) => assert!(m.contains("pending child")),
+            other => panic!("unexpected {other:?}"),
+        }
+        assert!(matches!(reset_err(HistoryError::DeadlineExceeded), TaskError::ContextDeadlineExceeded));
+        assert!(matches!(reset_err(HistoryError::internal("x")), TaskError::InternalService(_)));
     }
 }
