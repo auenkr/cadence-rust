@@ -31,7 +31,7 @@ use super::queue_policy::{processor_config, queue_config};
 use super::queues::QueueExec;
 use super::resender::HistoryResenderImpl;
 use super::shard_adapters::RealQueueShardContext;
-use super::shard_factory::{DomainActiveClusterManager, ShardClusterInfo, TaskShardContext};
+use super::shard_factory::{ShardClusterInfo, TaskShardContext};
 use crate::config::Config;
 use crate::queue::deps as q;
 use crate::queue::shard_deps::QueueShardContext;

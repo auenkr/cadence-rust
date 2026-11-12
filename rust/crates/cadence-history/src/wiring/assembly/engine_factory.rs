@@ -16,7 +16,7 @@ use crate::engine::runtime::*;
 use crate::events::{Notification, Notifier, WorkflowIdentifier};
 use crate::shard_context::ShardContext;
 use crate::wiring::assembly::env::{HistoryEnv, ReplicationParts};
-use crate::wiring::assembly::shard_factory::{DomainActiveClusterManager, ShardClockAdapter};
+use crate::wiring::assembly::shard_factory::ShardClockAdapter;
 use crate::wiring::persistence::shard_events::{SqlCurrentExecutionReader, SqlHistoryReader};
 
 /// `HistoryEventNotifier` over the shard's `events::Notifier`.

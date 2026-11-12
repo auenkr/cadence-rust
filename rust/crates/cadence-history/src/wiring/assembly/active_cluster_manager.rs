@@ -379,8 +379,8 @@ mod tests {
         let m = manager(false, Fake::new(running(), Ok(Some(blob("region", "us")))));
         assert_eq!(m.get_active_cluster_selection_policy_for_current_workflow("d", "wf").await.unwrap(), (None, false));
         let m = manager(true, Fake::new(running(), Ok(Some(blob("region", "us")))));
-        let (p, running) = m.get_active_cluster_selection_policy_for_current_workflow("d", "wf").await.unwrap();
-        assert!(running);
+        let (p, is_running) = m.get_active_cluster_selection_policy_for_current_workflow("d", "wf").await.unwrap();
+        assert!(is_running);
         assert_eq!(p.unwrap().cluster_attribute, Some(attr("region", "us")));
         let closed = Ok(CurrentExecution { run_id: "r".into(), state: 2, ..Default::default() });
         let m = manager(true, Fake::new(closed, Ok(Some(blob("region", "us")))));
