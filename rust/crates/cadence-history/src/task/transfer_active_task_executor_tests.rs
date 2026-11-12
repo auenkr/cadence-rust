@@ -108,6 +108,17 @@ struct MsState {
     start: StartEvent,
     attrs: StartChildAttributes,
     calls: Vec<String>,
+    reset_point: Option<(String, ResetPointInfo)>,
+    with_version_history: bool,
+}
+struct FakeVersionHistory;
+impl ResetVersionHistory for FakeVersionHistory {
+    fn get_event_version(&self, event_id: i64) -> Result<i64> {
+        Ok(event_id * 10)
+    }
+    fn get_branch_token(&self) -> Vec<u8> {
+        b"branch".to_vec()
+    }
 }
 struct Ms(Mutex<MsState>);
 impl Ms {
@@ -143,6 +154,8 @@ impl Ms {
             start: StartEvent { timestamp: NOW - 100, ..Default::default() },
             attrs: StartChildAttributes { domain: "child-domain".into(), workflow_id: "child-wf".into(), ..Default::default() },
             calls: vec![],
+            reset_point: None,
+            with_version_history: false,
         })))
     }
     fn set(&self, f: impl FnOnce(&mut MsState)) {
@@ -209,10 +222,14 @@ impl ActiveMutableState for Ms {
         Ok(self.0.lock().unwrap().start_version)
     }
     fn current_version_history(&self) -> Result<Option<Arc<dyn ResetVersionHistory>>> {
-        Ok(None)
+        if self.0.lock().unwrap().with_version_history {
+            Ok(Some(Arc::new(FakeVersionHistory)))
+        } else {
+            Ok(None)
+        }
     }
     fn find_auto_reset_point(&self, _: &dyn TimeSource, _: &DomainCacheEntry) -> Option<(String, ResetPointInfo)> {
-        None
+        self.0.lock().unwrap().reset_point.clone()
     }
     fn add_child_workflow_execution_started_event(&self, domain: &str, ex: &WorkflowExecutionRef, _: &StartChildAttributes, init: i64) -> Result<()> {
         self.log(format!("child_started:{domain}:{}/{}@{init}", ex.workflow_id, ex.run_id))
@@ -400,8 +417,16 @@ impl TransferActiveDependencies for ADeps {
     async fn send_parent_close_policy_request(&self, r: ParentClosePolicyRequest) -> Result<()> {
         self.record(format!("parent_close_worker:{}:{}", r.domain_name, r.executions.len()), "worker")
     }
-    async fn reset_workflow(&self, _: WorkflowResetRequest) -> Result<()> {
-        Ok(())
+    async fn reset_workflow(&self, r: WorkflowResetRequest) -> Result<()> {
+        self.record(
+            format!(
+                "reset:{}:{}/{}:base={}:last={}@{}:next={}:branch={}:reason={}:skip_signal={}:new_run_set={}:req_set={}",
+                r.domain_id, r.workflow_id, r.reset_run_id.is_empty() as u8, r.base_run_id, r.base_rebuild_last_event_id,
+                r.base_rebuild_last_event_version, r.base_next_event_id, String::from_utf8_lossy(&r.base_branch_token),
+                r.reset_reason, r.skip_signal_reapply, !r.reset_run_id.is_empty(), !r.reset_request_id.is_empty()
+            ),
+            "reset",
+        )
     }
     async fn get_current_execution(&self, _: &str, _: &str, _: &str, _: i32) -> Result<String> {
         Ok("run".into())
@@ -1086,4 +1111,80 @@ async fn reset_workflow_skipped_with_pending_child_executions() {
     });
     h.exec.process_reset_workflow(&reset_task()).await.unwrap();
     assert!(h.deps.log().is_empty());
+}
+
+fn with_reset_point(h: &H) {
+    h.ms.set(|s| {
+        s.with_version_history = true;
+        s.reset_point = Some(("bad-binary".into(), ResetPointInfo { run_id: "run".into(), binary_checksum: "bin".into(), first_decision_completed_id: 4 }));
+    });
+}
+
+#[tokio::test]
+async fn reset_workflow_success_path_builds_request_from_reset_point() {
+    // Go TestProcessResetWorkflow success: rebuild up to firstDecisionCompletedID-1 on the base branch.
+    let h = harness();
+    with_reset_point(&h);
+    h.exec.process_reset_workflow(&reset_task()).await.unwrap();
+    assert_eq!(
+        h.deps.log(),
+        vec!["reset:domain:wf/0:base=run:last=3@30:next=10:branch=branch:reason=bad-binary:skip_signal=false:new_run_set=true:req_set=true".to_string()]
+    );
+    assert!(released_ok(&h));
+}
+
+#[tokio::test]
+async fn reset_workflow_bad_request_is_dropped() {
+    let h = harness();
+    with_reset_point(&h);
+    h.deps.errors.lock().unwrap().insert("reset", TaskError::BadRequest("corrupt".into()));
+    h.exec.process_reset_workflow(&reset_task()).await.unwrap();
+    assert_eq!(h.deps.log().len(), 1);
+}
+
+#[tokio::test]
+async fn reset_workflow_other_error_is_retried() {
+    let h = harness();
+    with_reset_point(&h);
+    h.deps.errors.lock().unwrap().insert("reset", TaskError::InternalService("boom".into()));
+    let err = h.exec.process_reset_workflow(&reset_task()).await.unwrap_err();
+    assert_eq!(err, TaskError::InternalService("boom".into()));
+}
+
+#[tokio::test]
+async fn reset_workflow_without_version_histories_errors() {
+    let h = harness();
+    h.ms.set(|s| {
+        s.reset_point = Some(("r".into(), ResetPointInfo { run_id: "run".into(), binary_checksum: "bin".into(), first_decision_completed_id: 4 }));
+    });
+    let err = h.exec.process_reset_workflow(&reset_task()).await.unwrap_err();
+    assert_eq!(err, TaskError::MissingVersionHistories);
+}
+
+#[tokio::test]
+async fn decision_ephemeral_task_list_kind_is_forwarded() {
+    // Same task list as mutable state: the kind comes from the execution info (Go: executionInfo.TaskList kind).
+    let h = harness();
+    h.ms.set(|s| {
+        s.decisions.insert(5, ActiveDecisionInfo { version: 0 });
+        s.info.task_list_kind = TaskListKind::Ephemeral;
+    });
+    h.exec.process_decision_task(&dtask("tl")).await.unwrap();
+    let pushed = h.tdeps.decision.lock().unwrap().clone();
+    assert_eq!(pushed.len(), 1);
+    assert_eq!(pushed[0].task_list.kind, TaskListKind::Ephemeral);
+    assert_eq!(pushed[0].schedule_to_start_timeout_seconds, 100);
+}
+
+#[test]
+fn copy_search_attributes_nil_and_deep_copy() {
+    assert!(copy_search_attributes(None).is_none());
+    let mut input = BytesMap::new();
+    input.insert("CustomKeywordField".to_string(), b"\"v\"".to_vec());
+    let mut out = copy_search_attributes(Some(&input)).unwrap();
+    assert_eq!(out, input);
+    out.get_mut("CustomKeywordField").unwrap().push(b'x');
+    assert_eq!(input.get("CustomKeywordField").unwrap(), &b"\"v\"".to_vec());
+    // empty (non-nil) input stays empty non-nil, as Go make(map) does.
+    assert_eq!(copy_search_attributes(Some(&BytesMap::new())), Some(BytesMap::new()));
 }

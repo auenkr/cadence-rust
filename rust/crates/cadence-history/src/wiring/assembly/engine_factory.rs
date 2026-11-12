@@ -2,20 +2,11 @@
 //!
 //! Fills every `HistoryEngine` field. Real implementations are used wherever one
 //! exists in the crate. The execution cache and workflow updater are real
-//! (`engine_cache`, over `EngineMutableState`). The decision handler, workflow
-//! resetter and task refresher still need the mutable-state builder / history
-//! builder port; they are explicit `Unwired*` stubs that return an internal
-//! error (never a silent no-op). See memory "Unit D5".
+//! (`engine_cache`, over `EngineMutableState`), as are the decision handler and
+//! workflow resetter (the former `Unwired*` placeholders were deleted).
 
 use std::collections::HashMap;
 use std::sync::Arc;
-
-use async_trait::async_trait;
-use crate::engine::types::{
-    HistoryRespondDecisionTaskCompletedRequest, HistoryRespondDecisionTaskCompletedResponse,
-    HistoryRespondDecisionTaskFailedRequest, RecordDecisionTaskStartedRequest,
-    RecordDecisionTaskStartedResponse, ScheduleDecisionTaskRequest,
-};
 
 use crate::engine::deps::{DomainCache, HResult, HistoryError, HistoryTaskCategory, TimeSource, WorkflowExecution};
 use crate::wiring::assembly::engine_cache::{EngineCore, EngineExecutionCache, EngineWorkflowUpdater};
@@ -27,54 +18,6 @@ use crate::shard_context::ShardContext;
 use crate::wiring::assembly::env::{HistoryEnv, ReplicationParts};
 use crate::wiring::assembly::shard_factory::{DomainActiveClusterManager, ShardClockAdapter};
 use crate::wiring::persistence::shard_events::{SqlCurrentExecutionReader, SqlHistoryReader};
-
-fn unwired<T>(what: &str) -> HResult<T> {
-    Err(HistoryError::internal(format!(
-        "{what} is not wired: the mutable-state engine port is not linked yet"
-    )))
-}
-
-pub struct UnwiredDecisionHandler;
-#[async_trait]
-impl DecisionHandler for UnwiredDecisionHandler {
-    async fn handle_decision_task_started(
-        &self,
-        _r: &RecordDecisionTaskStartedRequest,
-    ) -> HResult<RecordDecisionTaskStartedResponse> {
-        unwired("DecisionHandler")
-    }
-    async fn handle_decision_task_completed(
-        &self,
-        _r: &HistoryRespondDecisionTaskCompletedRequest,
-    ) -> HResult<HistoryRespondDecisionTaskCompletedResponse> {
-        unwired("DecisionHandler")
-    }
-    async fn handle_decision_task_failed(
-        &self,
-        _r: &HistoryRespondDecisionTaskFailedRequest,
-    ) -> HResult<()> {
-        unwired("DecisionHandler")
-    }
-    async fn handle_decision_task_scheduled(&self, _r: &ScheduleDecisionTaskRequest) -> HResult<()> {
-        unwired("DecisionHandler")
-    }
-}
-
-pub struct UnwiredWorkflowResetter;
-#[async_trait]
-impl WorkflowResetter for UnwiredWorkflowResetter {
-    async fn reset_workflow(&self, _request: ResetWorkflow) -> HResult<()> {
-        unwired("WorkflowResetter")
-    }
-}
-
-pub struct UnwiredTaskRefresher;
-#[async_trait]
-impl MutableStateTaskRefresher for UnwiredTaskRefresher {
-    async fn refresh_tasks(&self, _start_timestamp: i64, _state: crate::engine::deps::MutableStateRef) -> HResult<()> {
-        unwired("MutableStateTaskRefresher")
-    }
-}
 
 /// `HistoryEventNotifier` over the shard's `events::Notifier`.
 pub struct NotifierAdapter {
