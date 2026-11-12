@@ -611,9 +611,9 @@ impl TypedMutableState {
     pub fn log_data_inconsistency(&self) {
         let info = &self.execution_info;
         tracing::error!(
-            domain_id = info["domain_id"].as_str().unwrap_or_default(),
-            workflow_id = info["workflow_id"].as_str().unwrap_or_default(),
-            run_id = info["run_id"].as_str().unwrap_or_default(),
+            domain_id = %info.domain_id,
+            workflow_id = %info.workflow_id,
+            run_id = %info.run_id,
             "encounter mutable state data inconsistency"
         );
     }
