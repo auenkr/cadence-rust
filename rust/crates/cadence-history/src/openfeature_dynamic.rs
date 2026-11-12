@@ -68,11 +68,11 @@ impl DynamicClient for OpenFeatureDynamicClient {
             }
             DynKind::Bool => {
                 let (v, e) = self.client.get_bool_value(key, false, &ctx);
-                e.is_none().then(|| Value::Bool(v))
+                e.is_none().then_some(Value::Bool(v))
             }
             DynKind::String => {
                 let (v, e) = self.client.get_string_value(key, "", &ctx);
-                e.is_none().then(|| Value::String(v))
+                e.is_none().then_some(Value::String(v))
             }
             DynKind::Duration => {
                 let (v, e) = self.client.get_duration_value(key, 0, &ctx);
@@ -81,11 +81,11 @@ impl DynamicClient for OpenFeatureDynamicClient {
             }
             DynKind::Map => {
                 let (v, e) = self.client.get_map_value(key, Default::default(), &ctx);
-                e.is_none().then(|| Value::Object(v))
+                e.is_none().then_some(Value::Object(v))
             }
             DynKind::List => {
                 let (v, e) = self.client.get_list_value(key, Vec::new(), &ctx);
-                e.is_none().then(|| Value::Array(v))
+                e.is_none().then_some(Value::Array(v))
             }
         }
     }

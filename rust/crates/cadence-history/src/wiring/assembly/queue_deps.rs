@@ -17,7 +17,7 @@ use cadence_api::errors::CadenceError;
 use cadence_persistence::history_contract::{self as pc, PersistenceError};
 use cadence_thrift::{ToThrift, Writer};
 
-use super::archiver_client::{self, ArchivalTarget, ArchiveRequest as ArchiverRequest, ClientRequest};
+use super::archiver_client::{ArchivalTarget, ArchiveRequest as ArchiverRequest, ClientRequest};
 use super::engine_cache::{EngineExecutionCache, EngineExecutionContext};
 use super::engine_state::EngineMutableState;
 use super::env::HistoryEnv;
