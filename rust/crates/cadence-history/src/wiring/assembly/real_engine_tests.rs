@@ -964,7 +964,6 @@ mod query_ports {
                 query: Some(WorkflowQuery::default()),
                 query_reject_condition: reject,
                 query_consistency_level: level,
-                ..Default::default()
             }),
         }
     }
