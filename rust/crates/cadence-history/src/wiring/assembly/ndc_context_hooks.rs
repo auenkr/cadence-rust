@@ -11,8 +11,7 @@
 //!
 //! Gaps (recorded in memory/history-ndcpersist2-20261111.md): `verify_and_repair`
 //! and `flush_as_active` (error), history notifier
-//! (no-op), strong idempotency (Go default false), request type decoding (always Start),
-//! continued-as-new two-run writes (error).
+//! (no-op), strong idempotency (Go default false), continued-as-new two-run writes (error).
 
 #![allow(clippy::result_large_err)]
 

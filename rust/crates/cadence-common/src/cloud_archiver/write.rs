@@ -130,6 +130,19 @@ fn rfc3339_utc(ts: i64) -> String {
         .to_string()
 }
 
+/// Go `time.Time.MarshalJSON` of a UTC time: RFC3339Nano (fraction without trailing zeros).
+fn go_rfc3339_nano_utc(ts: i64) -> String {
+    let dt = chrono::DateTime::from_timestamp_nanos(ts);
+    let base = dt.format("%Y-%m-%dT%H:%M:%S").to_string();
+    let frac = format!("{:09}", ts.rem_euclid(1_000_000_000));
+    let frac = frac.trim_end_matches('0');
+    if frac.is_empty() {
+        format!("{base}Z")
+    } else {
+        format!("{base}.{frac}Z")
+    }
+}
+
 fn event_i64(batch: &Value, last: bool, field: &str) -> i64 {
     let events = batch.get("events").and_then(Value::as_array);
     let ev = events.and_then(|e| if last { e.last() } else { e.first() });
@@ -210,7 +223,7 @@ pub fn go_json_bytes(v: &Value) -> Vec<u8> {
 
 /// Go `types.HistoryEvent` tags `eventId,omitempty`, `version,omitempty`, `taskId,omitempty`:
 /// zero values are not part of Go's encoding (Rust always serialises them).
-fn go_history_batch(mut batch: Value) -> Value {
+pub fn go_history_batch(mut batch: Value) -> Value {
     if let Some(events) = batch.get_mut("events").and_then(Value::as_array_mut) {
         for e in events {
             if let Some(m) = e.as_object_mut() {
@@ -226,6 +239,19 @@ fn go_history_batch(mut batch: Value) -> Value {
                 {
                     if a.get("attempt").and_then(Value::as_i64) == Some(0) {
                         a.remove("attempt");
+                    }
+                    // Go `types.WorkflowExecutionStartedEventAttributes.FirstScheduleTime` is a
+                    // `*time.Time` tagged `firstScheduleTimeNano,omitempty`: Go reads an RFC3339Nano
+                    // string, the Rust/thrift field is `firstScheduledTimeNano` (i64 nanos).
+                    if let Some(v) = a.remove("firstScheduledTimeNano") {
+                        match v.as_i64() {
+                            Some(nanos) => {
+                                a.insert("firstScheduleTimeNano".into(), Value::String(go_rfc3339_nano_utc(nanos)));
+                            }
+                            None => {
+                                a.insert("firstScheduleTimeNano".into(), v);
+                            }
+                        }
                     }
                 }
             }
@@ -1292,5 +1318,21 @@ mod tests {
         let rec = Arc::new(Rec::default());
         let e = s3_archive_history(&store, "r", &uri, &bad, &Src(None), &opts_with(&rec)).unwrap_err();
         assert_eq!(e.message(), crate::archiver::ERR_INVALID_ARCHIVE_REQUEST);
+    }
+
+    #[test]
+    fn go_history_batch_uses_go_first_schedule_time_tag_and_rfc3339() {
+        let batch = serde_json::json!({"events": [{
+            "eventId": 1,
+            "workflowExecutionStartedEventAttributes": {
+                "firstScheduledTimeNano": 1_700_000_000_123_000_000_i64, "attempt": 0
+            }
+        }]});
+        let out = go_history_batch(batch);
+        let a = &out["events"][0]["workflowExecutionStartedEventAttributes"];
+        assert!(a.get("firstScheduledTimeNano").is_none());
+        assert!(a.get("attempt").is_none());
+        assert_eq!(a["firstScheduleTimeNano"], "2023-11-14T22:13:20.123Z");
+        assert_eq!(go_rfc3339_nano_utc(1_700_000_000_000_000_000), "2023-11-14T22:13:20Z");
     }
 }

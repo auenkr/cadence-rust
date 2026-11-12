@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use cadence_api::{enums::WorkflowIDReusePolicy, service_types as st, types as t};
+use cadence_common::cloud_archiver::go_history_batch;
 use cadence_common::archiver::{ArchiveHistoryRequest, ArchiverError, HistoryBatchSource};
 use cadence_persistence::history_reader::{read_history_branch, HistoryNodeStore, HistoryReadError, ReadHistoryBranchRequest};
 use serde_json::{json, Value};
@@ -64,7 +65,9 @@ impl HistoryBatchSource for HistoryNodeBatchSource {
             })?;
             for b in resp.batches.into_iter().filter(|b| !b.is_empty()) {
                 events += b.len() as i64;
-                batches.push(serde_json::to_value(st::History { events: b }).map_err(|e| ArchiverError::Other(e.to_string()))?);
+                batches.push(go_history_batch(
+                    serde_json::to_value(st::History { events: b }).map_err(|e| ArchiverError::Other(e.to_string()))?,
+                ));
             }
             if events >= HISTORY_PAGE_SIZE || resp.next_page_token.is_empty() {
                 return Ok(batches);
@@ -112,7 +115,11 @@ impl HistoryBatchSource for HistoryNodeBatchSource {
         }
         batches
             .into_iter()
-            .map(|events| serde_json::to_value(st::History { events }).map_err(|e| ArchiverError::Other(e.to_string())))
+            .map(|events| {
+                serde_json::to_value(st::History { events })
+                    .map(go_history_batch)
+                    .map_err(|e| ArchiverError::Other(e.to_string()))
+            })
             .collect::<Result<Vec<_>, _>>()
             .map(Some)
     }
