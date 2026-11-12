@@ -470,6 +470,8 @@ mod retry_workflow_tests {
         snapshot.execution_info.run_id = "run".into();
         snapshot.execution_info.task_list = "tl".into();
         snapshot.execution_info.next_event_id = 5;
+        snapshot.execution_info.decision_schedule_id = EMPTY_EVENT_ID;
+        snapshot.execution_info.decision_started_id = EMPTY_EVENT_ID;
         let s = EngineMutableState::from_snapshot(snapshot, domain, 0, Arc::new(|| 1_700_000_000_000_000_000)).unwrap();
         s.inner.lock().unwrap().prev_start_event = Some(HistoryEvent {
             event_id: 1,
