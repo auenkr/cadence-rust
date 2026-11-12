@@ -5,6 +5,7 @@
 use cadence_api::enums::WorkflowIDReusePolicy;
 use cadence_api::errors::CadenceError;
 use cadence_api::service_types::SignalWithStartWorkflowExecutionRequest;
+use cadence_api::service_types::RequestCancelWorkflowExecutionRequest;
 use cadence_api::types::*;
 use cadence_persistence::history_contract::{CurrentExecution, PersistenceError};
 
