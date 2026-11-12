@@ -20,3 +20,6 @@ Final head 1f734f7792569cb5c46ec8653c6161abc5edc8b5 (after merging origin/master
 - postgres/tchannel/false: https://github.com/auenkr/cadence-rust/actions/runs/43193309875 success, GATE SUMMARY failed: []
 - rust-ci full workspace: https://github.com/auenkr/cadence-rust/actions/runs/43193315246 success
 (The evidence commit itself only touches memory/.)
+
+## Post-merge master validation (master 62016da50, 2026-11-12)
+- Full workspace rust-ci + all 12 history-mixed-gate combos: runs 43195643764..43195708772, all success.
