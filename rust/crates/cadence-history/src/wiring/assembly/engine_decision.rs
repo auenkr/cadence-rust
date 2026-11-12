@@ -252,8 +252,8 @@ impl EngineMutableState {
 
     /// Go `AddDecisionTaskCompletedEvent` (+ `BeforeAddDecisionTaskCompletedEvent`
     /// for a transient decision, + `AfterAddDecisionTaskCompletedEvent`). Returns
-    /// the id of the DecisionTaskCompleted event. Auto-reset-point handling of the
-    /// binary checksum is not ported.
+    /// the id of the DecisionTaskCompleted event (binary-checksum reset points via
+    /// `add_binary_checksum_if_not_exists`).
     #[allow(clippy::too_many_arguments)]
     pub fn add_decision_task_completed(
         &self,
@@ -951,7 +951,10 @@ impl DecisionHandler for EngineDecisionHandler {
 impl super::engine_state::Inner {
     /// Go `CheckResettable`.
     fn is_resettable(&self) -> bool {
-        self.pc_children.is_empty() && self.pc_cancels.is_empty() && self.pc_signals.is_empty()
+        self.pc_children.is_empty()
+            && self.pc_cancels.is_empty()
+            && self.pc_signals.is_empty()
+            && self.semaphores.pending.is_empty()
     }
 
     /// Go `addBinaryCheckSumIfNotExists` + `trimBinaryChecksums`.

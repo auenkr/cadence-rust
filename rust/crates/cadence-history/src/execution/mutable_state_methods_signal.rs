@@ -62,21 +62,28 @@ impl TypedMutableState {
             .as_ref()
             .map(|a| a.request_id.clone())
             .unwrap_or_default();
-        self.insert_signal_workflow_request(&request_id);
+        self.insert_signal_workflow_request(&request_id, event.version);
         Ok(())
     }
 
     /// Go `insertWorkflowRequest`: only when strong idempotency is enabled and
     /// the request id is non-empty; duplicates are kept once.
-    pub(crate) fn insert_signal_workflow_request(&mut self, request_id: &str) {
+    pub(crate) fn insert_signal_workflow_request(&mut self, request_id: &str, version: i64) {
+        self.insert_workflow_request(request_id, version, cadence_persistence::history_contract::WORKFLOW_REQUEST_TYPE_SIGNAL);
+    }
+
+    /// Go `insertWorkflowRequest` for any request type.
+    pub(crate) fn insert_workflow_request(&mut self, request_id: &str, version: i64, signal: i32) {
         if !self.task_gen_env.enable_strong_idempotency || request_id.is_empty() {
             return;
         }
-        if self.insert_workflow_requests.iter().any(|r| r.request_id == request_id) {
+        if self.insert_workflow_requests.iter().any(|r| r.request_id == request_id && r.version == version && r.request_type == signal) {
             return;
         }
         self.insert_workflow_requests.push(cadence_persistence::history_contract::WorkflowRequest {
             request_id: request_id.to_string(),
+            version,
+            request_type: signal,
             data: Default::default(),
         });
     }
@@ -271,5 +278,21 @@ mod insert_request_tests {
         assert_eq!(s.execution_info.signal_count, 3);
         assert_eq!(s.insert_workflow_requests.len(), 1);
         assert_eq!(s.insert_workflow_requests[0].request_id, "r1");
+        assert_eq!(s.insert_workflow_requests[0].request_type, 1);
+    }
+
+    #[test]
+    fn signal_request_keeps_version_and_dedups_on_full_key() {
+        let mut s = TypedMutableState::new();
+        s.task_gen_env.enable_strong_idempotency = true;
+        let mut e = signaled("r1");
+        e.version = 7;
+        s.replicate_workflow_execution_signaled(&e).unwrap();
+        s.replicate_workflow_execution_signaled(&e).unwrap();
+        e.version = 8;
+        s.replicate_workflow_execution_signaled(&e).unwrap();
+        assert_eq!(s.insert_workflow_requests.len(), 2);
+        assert_eq!(s.insert_workflow_requests[0].version, 7);
+        assert_eq!(s.insert_workflow_requests[1].version, 8);
     }
 }

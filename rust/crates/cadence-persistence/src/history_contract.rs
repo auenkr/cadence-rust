@@ -356,8 +356,17 @@ pub struct Task {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct WorkflowRequest {
     pub request_id: String,
+    /// Go `WorkflowRequest.Version` (failover version of the generating event).
+    pub version: i64,
+    /// Go `WorkflowRequestType` (0 start, 1 signal, 2 cancel, 3 reset).
+    pub request_type: i32,
     pub data: DataBlob,
 }
+
+pub const WORKFLOW_REQUEST_TYPE_START: i32 = 0;
+pub const WORKFLOW_REQUEST_TYPE_SIGNAL: i32 = 1;
+pub const WORKFLOW_REQUEST_TYPE_CANCEL: i32 = 2;
+pub const WORKFLOW_REQUEST_TYPE_RESET: i32 = 3;
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct HistoryTaskKey {
     pub task_id: i64,
