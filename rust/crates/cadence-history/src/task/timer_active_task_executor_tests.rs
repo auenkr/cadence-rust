@@ -822,16 +822,17 @@ async fn global_domain_decision_timeout_version_mismatch_is_noop() {
 }
 
 #[tokio::test]
-async fn global_domain_activity_timeout_version_mismatch_is_noop() {
+async fn global_domain_activity_retry_timer_version_mismatch_is_noop() {
+    // Go: only the activity retry timer verifies the activity version (the timeout task does not).
     let w = W::new();
     w.set(|s| {
-        s.activity_timers = vec![seq(5, TimerType::StartToClose, NOW - secs(1), 0)];
         s.activity_infos.insert(5, ainfo(5));
     });
-    let e = executor(Arc::new(deps(&w)));
-    let t = ActivityTimeoutTask { workflow_identifier: gwf(), task_data: gtd(2), event_id: 5, attempt: 0, timeout_type: 0 };
-    e.execute_activity_timeout_task(&t).await.unwrap();
-    assert!(w.calls().is_empty());
+    let d = Arc::new(deps(&w));
+    let e = executor(d.clone());
+    let t = ActivityRetryTimerTask { workflow_identifier: gwf(), task_data: gtd(2), event_id: 5, attempt: 0 };
+    e.execute_activity_retry_timer_task(&t).await.unwrap();
+    assert!(d.pushed.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
