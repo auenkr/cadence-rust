@@ -21,7 +21,7 @@ use crate::wiring::assembly::engine_decision::EngineDecisionHandler;
 use crate::wiring::assembly::engine_start::EngineStartHost;
 use crate::wiring::assembly::engine_state::StateParams;
 
-pub const DOMAIN_ID: &str = "domain-id-0000-0000-000000000001";
+pub const DOMAIN_ID: &str = "d0a1b2c3-0000-4000-8000-000000000001";
 pub const DOMAIN_NAME: &str = "test-domain";
 pub const CLUSTER: &str = "cluster-a";
 
@@ -394,6 +394,7 @@ impl Harness {
         let cache = EngineExecutionCache::new(core.clone());
         let mut engine = nop_engine();
         engine.current_cluster_name = CLUSTER.into();
+        engine.cluster_metadata = Arc::new(TestClusterMetadata);
         engine.domain_cache = domains;
         engine.active_cluster_manager = Arc::new(ActiveHere);
         engine.time_source = clock.clone();
@@ -406,5 +407,15 @@ impl Harness {
         let engine = Arc::new(engine);
         let _ = core.engine_slot.set(Arc::downgrade(&engine));
         Self { engine, execs, history, clock }
+    }
+}
+
+struct TestClusterMetadata;
+impl crate::engine::deps::ClusterMetadata for TestClusterMetadata {
+    fn get_current_cluster_name(&self) -> String {
+        CLUSTER.into()
+    }
+    fn cluster_name_for_failover_version(&self, _: i64) -> crate::engine::deps::HResult<String> {
+        Ok(CLUSTER.into())
     }
 }
