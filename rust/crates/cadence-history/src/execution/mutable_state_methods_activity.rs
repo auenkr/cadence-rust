@@ -130,8 +130,8 @@ impl TypedMutableState {
         Ok(())
     }
 
-    /// Go `AddActivityTaskScheduledEvent` (pending-count limits, events cache,
-    /// local dispatch and `GenerateActivityTransferTasks` are not wired).
+    /// Go `AddActivityTaskScheduledEvent` (pending-count limits and events cache
+    /// are not wired here; production local dispatch lives in `engine_decision_ops`).
     pub fn add_activity_task_scheduled_event(
         &mut self,
         timestamp_unix_nanos: i64,
@@ -161,7 +161,7 @@ impl TypedMutableState {
             });
         })?;
         // Go: ReplicateActivityTaskScheduledEvent(.., true) skips task generation, then
-        // (unless local dispatch, which is not wired) GenerateActivityTransferTasks.
+        // GenerateActivityTransferTasks (the production decision path skips it for local dispatch).
         let ai = self.replicate_activity_task_scheduled_event(
             decision_completed_event_id,
             &event,

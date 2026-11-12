@@ -15,8 +15,7 @@
 //! machinery (`ndc_context_hooks`). `reapply_events` goes through the engine (Go
 //! `contextImpl.ReapplyEvents`).
 //! Not ported here: `StartTransaction` (active-cluster `UpdateCurrentVersion`
-//! and decision failover on load), pending activity/timer/child/cancel/signal
-//! maps in the loaded snapshot (explicit error), and event-generating policy
+//! and decision failover on load) and event-generating policy
 //! operations (decision fail/schedule, terminate) in `OwnedNdcMutableState`.
 
 #![allow(clippy::result_large_err)]
@@ -30,7 +29,7 @@ use cadence_persistence::history_contract as pc;
 
 use crate::engine::deps::{HResult, HistoryError, ReleaseFunc, TimeSource};
 use crate::execution::context::{PersistedBlob, WorkflowEvents, WorkflowExecutionKey};
-use crate::execution::mutable_state_bridge::snapshot_to_envelope;
+use crate::execution::mutable_state_bridge::{snapshot_to_envelope, typed_pending_maps};
 use crate::execution::mutable_state_methods_common::TaskGenEnv;
 use crate::execution::workflow::{
     workflow_happens_after, TransactionPolicy, Workflow, WorkflowState, WorkflowStateAccess, WorkflowVectorClock,
@@ -131,42 +130,32 @@ fn lend_other(w: &mut Option<&mut dyn NdcWorkflow>) -> NdcResult<Option<(Workflo
 // ------------------------------------------------------------------ state loading
 
 /// Go `mutableStateBuilder.Load` over the clean persisted snapshot. Pending
-/// maps are refused (explicitly) until the lossless codec lands: dropping them
-/// would lose data.
+/// maps (activity/timer/child/cancel/signal/semaphore) are decoded and installed.
 pub(super) fn state_from_snapshot(
     domain_id: &str,
     execution: &WorkflowExecution,
     now_nanos: i64,
     snapshot: pc::WorkflowSnapshot,
 ) -> NdcResult<Box<dyn NdcMutableState>> {
-    if !snapshot.activity_infos.is_empty()
-        || !snapshot.timer_infos.is_empty()
-        || !snapshot.child_execution_infos.is_empty()
-        || !snapshot.request_cancel_infos.is_empty()
-        || !snapshot.signal_infos.is_empty()
-        || !snapshot.semaphore_infos.is_empty()
-    {
-        return Err(NdcError::internal(
-            "TODO(ndc-persistence): loading pending activity/timer/child/cancel/signal/semaphore maps into NDC state is not implemented",
-        ));
-    }
     let envelope = snapshot_to_envelope(snapshot.clone()).map_err(history_to_ndc)?;
     let info = snapshot.execution_info.clone();
     let next_event_id = info.next_event_id;
     let history_size = info.history_size;
+    let pending = typed_pending_maps(&envelope).map_err(history_to_ndc)?;
     let mut state = OwnedNdcMutableState::new(domain_id, execution, now_nanos, TaskGenEnv::default());
     state.typed_mut().load(
         info,
-        vec![],
-        vec![],
-        vec![],
-        vec![],
-        vec![],
+        pending.activities,
+        pending.timers,
+        pending.children,
+        pending.request_cancels,
+        pending.signals,
         snapshot.signal_requested_ids.clone(),
         envelope.buffered_events,
         envelope.version_histories,
         history_size,
     );
+    state.typed_mut().load_semaphores(pending.semaphores);
     state.set_update_condition(next_event_id);
     Ok(Box::new(state))
 }
@@ -688,7 +677,53 @@ mod tests {
 
     use super::*;
     use crate::engine::deps::ClusterMetadata;
+    use crate::execution::mutable_state_bridge::typed_pending_maps;
     use crate::execution::mutable_state_methods_common::WORKFLOW_STATE_ZOMBIE;
+
+    #[test]
+    fn state_from_snapshot_loads_pending_maps_and_semaphores() {
+        use cadence_persistence::sqlblobs as sb;
+        fn row<K>(key: K, st: cadence_thrift::value::Struct) -> pc::KeyedBlob<K> {
+            pc::KeyedBlob {
+                key,
+                value: pc::DataBlob { encoding: "thriftrw".into(), data: sb::Encoding::ThriftRW.encode(&st).unwrap() },
+            }
+        }
+        let mut snap = pc::WorkflowSnapshot::default();
+        snap.execution_info.next_event_id = 20;
+        snap.activity_infos.push(row(5, sb::activity_info_to_struct(&pc::ActivityInfo {
+            version: 3, activity_id: "act".into(), started_id: -23, attempt: 2, ..Default::default()
+        })));
+        snap.activity_heartbeats.insert(5, pc::ActivityHeartbeat { details: vec![1, 2], updated_time_unix_nanos: 77 });
+        snap.timer_infos.push(row("t1".to_string(), sb::timer_info_to_struct(&pc::TimerInfo {
+            version: 3, started_id: 8, expiry_time_unix_nanos: 100, task_id: 1,
+        })));
+        snap.child_execution_infos.push(row(9, sb::child_execution_info_to_struct(&pc::ChildExecutionInfo {
+            version: 3, started_id: -23, create_request_id: "req".into(), parent_close_policy: 2, ..Default::default()
+        })));
+        snap.request_cancel_infos.push(row(11, sb::request_cancel_info_to_struct(&pc::RequestCancelInfo {
+            version: 3, initiated_event_batch_id: 10, cancel_request_id: "c".into(),
+        })));
+        snap.signal_infos.push(row(12, sb::signal_info_to_struct(&pc::SignalInfo {
+            version: 3, initiated_event_batch_id: 10, request_id: "sr".into(), name: "sig".into(), ..Default::default()
+        })));
+        snap.signal_requested_ids.push("sid".into());
+        snap.semaphore_infos.push(pc::SemaphoreInfoRecord {
+            version: 3, initiated_id: 14, semaphore_name: "sem".into(), owner_id: "o".into(), token_id: 1, acquire_deadline_unix_nanos: 5,
+        });
+        let exec = WorkflowExecution { workflow_id: "w".into(), run_id: "r".into() };
+        state_from_snapshot("d", &exec, 0, snap.clone()).expect("pending maps load");
+        let maps = typed_pending_maps(&snapshot_to_envelope(snap).unwrap()).unwrap();
+        assert_eq!(maps.activities.len(), 1);
+        assert_eq!((maps.activities[0].schedule_id, maps.activities[0].attempt, maps.activities[0].last_heartbeat_updated_time), (5, 2, 77));
+        assert_eq!(maps.activities[0].details, vec![1, 2]);
+        assert_eq!((maps.timers[0].timer_id.as_str(), maps.timers[0].started_id), ("t1", 8));
+        assert_eq!(maps.children[0].initiated_id, 9);
+        assert_eq!(maps.children[0].parent_close_policy, Some(cadence_api::enums::ParentClosePolicy::Terminate));
+        assert_eq!((maps.request_cancels[0].initiated_id, maps.request_cancels[0].cancel_request_id.as_str()), (11, "c"));
+        assert_eq!((maps.signals[0].initiated_id, maps.signals[0].signal_name.as_str()), (12, "sig"));
+        assert_eq!(maps.semaphores[0].semaphore_name, "sem");
+    }
 
     struct FakeContext {
         persisted: Mutex<pc::WorkflowSnapshot>,
