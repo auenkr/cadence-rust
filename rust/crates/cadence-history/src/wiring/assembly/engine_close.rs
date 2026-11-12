@@ -123,12 +123,11 @@ impl EngineMutableState {
             return Err(HistoryError::internal("cannot close a tasks-only transaction with new history events"));
         }
         let events = g.hist.clone();
-        validate_no_events_after_workflow_finish(active, g.exec.state, &events).map_err(|e| {
+        validate_no_events_after_workflow_finish(active, g.exec.state, &events).inspect_err(|_| {
             tracing::error!(
                 domain_id = %g.pc_exec.domain_id, workflow_id = %g.pc_exec.workflow_id, run_id = %g.pc_exec.run_id,
                 "encounter case where events appears after workflow finish."
             );
-            e
         })?;
         let mut last_write_version = self.snapshot.last_write_version;
         if let (Some(first), Some(last)) = (events.first(), events.last()) {

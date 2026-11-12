@@ -42,12 +42,14 @@ pub(super) fn decode(blob: &pc::DataBlob) -> HResult<cadence_thrift::value::Stru
         .map_err(|e| HistoryError::internal(format!("decode mutable state blob: {e}")))
 }
 
+type ReplicationEnabledFn = Arc<dyn Fn(&str, &str) -> bool + Send + Sync>;
+
 /// Inputs of Go `closeTransactionWithPolicyCheck` (`clusterMetadata` and
 /// `EnableReplicationTaskGeneration`).
 #[derive(Clone)]
 pub struct ClosePolicy {
     pub cluster: Arc<dyn crate::engine::deps::ClusterMetadata>,
-    pub replication_enabled: Arc<dyn Fn(&str, &str) -> bool + Send + Sync>,
+    pub replication_enabled: ReplicationEnabledFn,
 }
 
 /// Config and domain derived values a state needs (Go reads these from the shard
