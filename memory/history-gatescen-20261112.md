@@ -34,3 +34,7 @@ scenario also sets `EmitMetric` (Rust copies Go behaviour).
   - postgres/grpc/false https://github.com/auenkr/cadence-rust/actions/runs/43157278983
   - mysql/tchannel/false https://github.com/auenkr/cadence-rust/actions/runs/43157282323
 - Earlier failing runs (history): 43146761013.., 43149572998.., 43155162147.. (autoreset only).
+
+## Post-merge master validation (master 2311d08df, 2026-11-12)
+- rust-ci full workspace: https://github.com/auenkr/cadence-rust/actions/runs/43158787847 success
+- All 12 history-mixed-gate combos (mysql/postgres/cassandra x grpc/tchannel x two_history true/false): runs 43158792499..43158842835, all success (GATE SUMMARY failed: []).
