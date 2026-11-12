@@ -26,6 +26,8 @@ impl DomainCache for Domains {
     fn get_domain_by_id(&self, id: &str) -> Result<Arc<DomainCacheEntry>> {
         Ok(Arc::new(DomainCacheEntry {
             info: DomainInfo { id: id.into(), name: "domain".into() },
+            is_global_domain: id == "global-domain",
+            failover_version: 5,
             ..Default::default()
         }))
     }
@@ -798,4 +800,46 @@ async fn load_none_is_noop_and_busy_mapped() {
     d.load_err = Some(TaskError::Other("boom".into()));
     let e = executor(Arc::new(d));
     assert_eq!(e.execute_workflow_timeout_task(&wf_timeout()).await, Err(TaskError::Other("boom".into())));
+}
+
+// ---- global domain version mismatch paths ----
+
+fn gwf() -> WorkflowIdentifier {
+    WorkflowIdentifier { domain_id: "global-domain".into(), workflow_id: "wid".into(), run_id: "rid".into() }
+}
+fn gtd(version: i64) -> TaskData {
+    TaskData { version, task_id: 100, visibility_timestamp: Time(NOW) }
+}
+
+#[tokio::test]
+async fn global_domain_decision_timeout_version_mismatch_is_noop() {
+    let w = W::new();
+    w.set(|s| s.decision = Some(dinfo(0, EMPTY_EVENT_ID)));
+    let e = executor(Arc::new(deps(&w)));
+    let t = DecisionTimeoutTask { workflow_identifier: gwf(), task_data: gtd(2), event_id: 5, schedule_attempt: 0, timeout_type: 0 };
+    e.execute_decision_timeout_task(&t).await.unwrap();
+    assert!(w.calls().is_empty());
+}
+
+#[tokio::test]
+async fn global_domain_activity_timeout_version_mismatch_is_noop() {
+    let w = W::new();
+    w.set(|s| {
+        s.activity_timers = vec![seq(5, TimerType::StartToClose, NOW - secs(1), 0)];
+        s.activity_infos.insert(5, ainfo(5));
+    });
+    let e = executor(Arc::new(deps(&w)));
+    let t = ActivityTimeoutTask { workflow_identifier: gwf(), task_data: gtd(2), event_id: 5, attempt: 0, timeout_type: 0 };
+    e.execute_activity_timeout_task(&t).await.unwrap();
+    assert!(w.calls().is_empty());
+}
+
+#[tokio::test]
+async fn global_domain_workflow_timeout_version_mismatch_is_noop() {
+    // fake start_version() is 1
+    let w = W::new();
+    let e = executor(Arc::new(deps(&w)));
+    let t = WorkflowTimeoutTask { workflow_identifier: gwf(), task_data: gtd(2) };
+    e.execute_workflow_timeout_task(&t).await.unwrap();
+    assert!(w.calls().is_empty());
 }
