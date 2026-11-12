@@ -73,11 +73,13 @@ fn fail(table: &[(&'static str, i16)], e: &HistoryError) -> Outcome {
         st = Struct::default();
     }
     let fid = table.iter().find(|(n, _)| *n == name).map(|(_, i)| *i).unwrap_or(2);
+    // Declared exceptions with a rich body must carry the application-error flag (`Outcome::Rich`),
+    // otherwise the caller decodes the exception struct as an empty successful reply.
     match name {
-        "EntityNotExistsError" | "DomainNotActiveError" => {
+        "EntityNotExistsError" | "DomainNotActiveError" | "CurrentBranchChangedError" => {
             let mut r = Struct::default();
             r.fields.push((fid, Value::Struct(st)));
-            Outcome::Ok(r)
+            Outcome::Rich(name, msg, r)
         }
         "ShardOwnershipLostError" => {
             let mut inner = Struct::default();
@@ -85,12 +87,7 @@ fn fail(table: &[(&'static str, i16)], e: &HistoryError) -> Outcome {
             inner.fields.push((20, s_bytes("")));
             let mut r = Struct::default();
             r.fields.push((fid, Value::Struct(inner)));
-            Outcome::Ok(r)
-        }
-        "CurrentBranchChangedError" => {
-            let mut r = Struct::default();
-            r.fields.push((fid, Value::Struct(st)));
-            Outcome::Ok(r)
+            Outcome::Rich(name, msg, r)
         }
         _ => Outcome::Exception(name, fid, msg),
     }

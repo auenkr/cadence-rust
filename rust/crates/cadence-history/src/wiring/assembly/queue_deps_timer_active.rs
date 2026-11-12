@@ -59,7 +59,7 @@ fn he(e: HistoryError) -> TaskError {
         HistoryError::PersistenceShardOwnershipLost(m) => TaskError::ShardOwnershipLost(m),
         other => {
             let text = other.to_string();
-            if text.contains("not exist") {
+            if text.contains("not exist") || text.starts_with("Workflow execution not found") {
                 TaskError::EntityNotExists(text)
             } else {
                 TaskError::InternalService(text)
@@ -216,6 +216,8 @@ impl TimerWorkflow for EngineTimerWorkflow {
         self.state.add_timeout_workflow(first_event_id).map_err(he)
     }
     async fn retry_workflow(&self, first_event_id: i64, backoff: Duration, cron: bool, reason: &str) -> TaskResult<()> {
+        // Go `GetStartEvent`: the synchronous builder needs the start event loaded (found by the history-gatescen gate).
+        self.state.preload_start_event().await;
         let new_run = self.state.retry_workflow_new_run(first_event_id, backoff, cron, reason).map_err(he)?;
         *self.new_run.lock().unwrap() = Some(new_run);
         Ok(())

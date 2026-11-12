@@ -271,6 +271,8 @@ impl Inner {
 pub struct EngineMutableState {
     pub(super) inner: Mutex<Inner>,
     pub(super) domain: DomainCacheEntry,
+    /// Live bad binaries (refreshed from the domain cache on every load).
+    pub(super) live_bad_binaries: Mutex<Vec<String>>,
     pub(super) queries: Arc<QueryRegistryAdapter>,
     pub(super) snapshot: pc::WorkflowSnapshot,
     pub(super) sticky_ttl_nanos: i64,
@@ -426,6 +428,7 @@ impl EngineMutableState {
         };
         Ok(Self {
             inner: Mutex::new(inner),
+            live_bad_binaries: Mutex::new(domain.bad_binaries.clone()),
             domain,
             queries: Arc::new(QueryRegistryAdapter(Arc::new(Registry::new()))),
             snapshot,
@@ -433,6 +436,14 @@ impl EngineMutableState {
             now_nanos,
             params: StateParams::default(),
         })
+    }
+
+    pub(super) fn is_bad_binary(&self, checksum: &str) -> bool {
+        self.live_bad_binaries.lock().unwrap().iter().any(|b| b == checksum)
+    }
+
+    pub(super) fn set_bad_binaries(&self, b: Vec<String>) {
+        *self.live_bad_binaries.lock().unwrap() = b;
     }
 
     /// Sets the config / domain derived parameters.
