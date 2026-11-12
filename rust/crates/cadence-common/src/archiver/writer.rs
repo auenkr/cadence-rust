@@ -13,6 +13,7 @@ use serde_json::Value;
 
 use super::{
     filestore_validate_uri, history_filename, visibility_filename, ArchiverError, ArchiverUri,
+    ERR_HISTORY_NOT_EXIST,
 };
 
 pub const ERR_INVALID_FILE_MODE: &str = "invalid file mode";
@@ -105,6 +106,47 @@ pub struct ArchiveHistoryRequest {
 /// (Go `EntityNotExistsError`: the archive is skipped, not failed).
 pub trait HistoryBatchSource {
     fn read_all(&self, request: &ArchiveHistoryRequest) -> Result<Option<Vec<Value>>, ArchiverError>;
+
+    /// Go `historyIterator.readHistory`: one full page (`ReadFullPageV2EventsByBatch`, page size
+    /// [`HISTORY_PAGE_SIZE`]) of batches starting at `first_event_id`. A branch without events
+    /// from there is `EntityNotExists`. The default slices [`Self::read_all`]; persistence-backed
+    /// sources override it to page through the store.
+    fn read_page(&self, request: &ArchiveHistoryRequest, first_event_id: i64) -> Result<Vec<Value>, ArchiverError> {
+        let all = self.read_all(request)?.unwrap_or_default();
+        let page = page_from(&all, first_event_id);
+        if page.is_empty() {
+            return Err(ArchiverError::EntityNotExists(ERR_HISTORY_NOT_EXIST.into()));
+        }
+        Ok(page)
+    }
+
+    /// Go `featureCatalog.ArchiveIncompleteHistory()`.
+    fn archive_incomplete_history(&self) -> bool {
+        false
+    }
+}
+
+/// Go `historyPageSize`.
+pub const HISTORY_PAGE_SIZE: i64 = 250;
+
+/// In-memory equivalent of a `ReadFullPageV2EventsByBatch` page: batches whose first event id is
+/// at least `first_event_id`, until [`HISTORY_PAGE_SIZE`] events were collected.
+pub(crate) fn page_from(all: &[Value], first_event_id: i64) -> Vec<Value> {
+    let mut events = 0_i64;
+    let mut out = Vec::new();
+    for b in all {
+        let evs = b.get("events").and_then(Value::as_array);
+        let first = evs.and_then(|e| e.first()).and_then(|e| e.get("eventId")).and_then(Value::as_i64).unwrap_or(0);
+        if first < first_event_id {
+            continue;
+        }
+        events += evs.map_or(0, |e| e.len() as i64);
+        out.push(b.clone());
+        if events >= HISTORY_PAGE_SIZE {
+            break;
+        }
+    }
+    out
 }
 
 pub(crate) fn validate_history_request(r: &ArchiveHistoryRequest) -> Result<(), ArchiverError> {

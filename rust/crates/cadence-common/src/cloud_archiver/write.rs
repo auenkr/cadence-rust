@@ -22,7 +22,7 @@ use super::{
 use crate::archiver::{
     validate_history_request, validate_visibility_request, ArchiveHistoryRequest,
     ArchiveVisibilityRequest, ArchiverError, ArchiverUri, HistoryBatchSource, ERR_INVALID_URI,
-    ERR_URI_SCHEME_MISMATCH,
+    ERR_URI_SCHEME_MISMATCH, ERR_HISTORY_NOT_EXIST,
 };
 
 /// Go `targetHistoryBlobSize` (s3store / gcloud): 2MB.
@@ -162,32 +162,115 @@ impl IteratorState {
     }
 }
 
-/// Go `archiver.historyIterator` over batches already read from the history store. Mirrors
-/// `readHistoryBatches`: batches are appended (`jsonSizeEstimator`) until the estimated size
+/// Go `json.Marshal` bytes of a JSON value: compact, with Go's HTML-safe string escaping
+/// (`<`, `>`, `&`, U+2028, U+2029 as `\u00xx`/`\u202x`).
+pub fn go_json_bytes(v: &Value) -> Vec<u8> {
+    fn string(out: &mut Vec<u8>, s: &str) {
+        let enc = serde_json::to_string(s).unwrap_or_default();
+        let enc = enc
+            .replace('<', "\\u003c")
+            .replace('>', "\\u003e")
+            .replace('&', "\\u0026")
+            .replace('\u{2028}', "\\u2028")
+            .replace('\u{2029}', "\\u2029");
+        out.extend_from_slice(enc.as_bytes());
+    }
+    fn walk(out: &mut Vec<u8>, v: &Value) {
+        match v {
+            Value::String(s) => string(out, s),
+            Value::Array(a) => {
+                out.push(b'[');
+                for (i, x) in a.iter().enumerate() {
+                    if i > 0 {
+                        out.push(b',');
+                    }
+                    walk(out, x);
+                }
+                out.push(b']');
+            }
+            Value::Object(m) => {
+                out.push(b'{');
+                for (i, (k, x)) in m.iter().enumerate() {
+                    if i > 0 {
+                        out.push(b',');
+                    }
+                    string(out, k);
+                    out.push(b':');
+                    walk(out, x);
+                }
+                out.push(b'}');
+            }
+            other => out.extend_from_slice(other.to_string().as_bytes()),
+        }
+    }
+    let mut out = Vec::new();
+    walk(&mut out, v);
+    out
+}
+
+/// Go `types.HistoryEvent` tags `eventId,omitempty`, `version,omitempty`, `taskId,omitempty`:
+/// zero values are not part of Go's encoding (Rust always serialises them).
+fn go_history_batch(mut batch: Value) -> Value {
+    if let Some(events) = batch.get_mut("events").and_then(Value::as_array_mut) {
+        for e in events {
+            if let Some(m) = e.as_object_mut() {
+                for f in ["eventId", "version", "taskId"] {
+                    if m.get(f).and_then(Value::as_i64) == Some(0) {
+                        m.remove(f);
+                    }
+                }
+            }
+        }
+    }
+    batch
+}
+
+/// Go `jsonSizeEstimator.EstimateSize`: length of the Go-compatible JSON encoding.
+pub fn estimate_size(batch: &Value) -> usize {
+    go_json_bytes(batch).len()
+}
+
+/// Go `archiver.IsHistoryMutated` over JSON batches.
+pub fn is_history_mutated(request: &ArchiveHistoryRequest, batches: &[Value], is_last: bool) -> bool {
+    let Some(last) = batches.last() else {
+        return false;
+    };
+    let version = event_i64(last, true, "version");
+    if version > request.close_failover_version {
+        return true;
+    }
+    if !is_last {
+        return false;
+    }
+    version != request.close_failover_version || event_i64(last, true, "eventId") + 1 != request.next_event_id
+}
+
+/// Go `archiver.historyIterator`: pages through the history through the source
+/// (`ReadHistoryBranch` pages, like `readHistory`) and closes a blob once the Go-encoded size
 /// reaches the target; the iteration is finished when no batch follows the blob.
 pub struct HistoryIterator<'a> {
     request: &'a ArchiveHistoryRequest,
-    batches: Vec<Value>,
+    source: &'a dyn HistoryBatchSource,
     target: usize,
     state: IteratorState,
 }
 
 impl<'a> HistoryIterator<'a> {
     /// Go `NewHistoryIterator`.
-    pub fn new(request: &'a ArchiveHistoryRequest, batches: Vec<Value>, target: usize) -> Self {
-        Self { request, batches, target, state: IteratorState { next_event_id: 1, finished: false } }
+    pub fn new(request: &'a ArchiveHistoryRequest, source: &'a dyn HistoryBatchSource, target: usize) -> Self {
+        Self { request, source, target, state: IteratorState { next_event_id: 1, finished: false } }
     }
 
     /// Go `NewHistoryIteratorFromState`; undecodable state is an error (caller falls back to a
     /// fresh iterator like Go's `loadHistoryIterator`).
     pub fn from_state(
         request: &'a ArchiveHistoryRequest,
-        batches: Vec<Value>,
+        source: &'a dyn HistoryBatchSource,
         target: usize,
         state: &[u8],
     ) -> Result<Self, String> {
         let state = IteratorState::decode(state).ok_or("invalid iterator state")?;
-        Ok(Self { request, batches, target, state })
+        Ok(Self { request, source, target, state })
     }
 
     /// Go `HasNext`.
@@ -200,35 +283,73 @@ impl<'a> HistoryIterator<'a> {
         self.state.encode()
     }
 
+    /// Go `readHistory`.
+    fn read_history(&self, first_event_id: i64) -> Result<Vec<Value>, ArchiverError> {
+        Ok(self
+            .source
+            .read_page(self.request, first_event_id)?
+            .into_iter()
+            .map(go_history_batch)
+            .collect())
+    }
+
+    /// Go `readHistoryBatches`.
+    fn read_history_batches(&self, first_event_id: i64) -> Result<(Vec<Value>, IteratorState), ArchiverError> {
+        let mut first = first_event_id;
+        let mut size = 0_usize;
+        let mut out: Vec<Value> = Vec::new();
+        // Go: `newIterState := historyIteratorState{}` (NextEventID 0 once finished).
+        let finished = IteratorState { next_event_id: 0, finished: true };
+        while size < self.target {
+            let curr = match self.read_history(first) {
+                Err(ArchiverError::EntityNotExists(_)) if first != 1 => return Ok((out, finished)),
+                Err(e) => return Err(e),
+                Ok(c) => c,
+            };
+            if curr.is_empty() {
+                return Err(ArchiverError::EntityNotExists(ERR_HISTORY_NOT_EXIST.into()));
+            }
+            let n = curr.len();
+            for (idx, batch) in curr.into_iter().enumerate() {
+                size += estimate_size(&batch);
+                first = event_i64(&batch, true, "eventId") + 1;
+                out.push(batch);
+                // Target reached before the end of this page: return immediately.
+                if size >= self.target && idx != n - 1 {
+                    return Ok((out, IteratorState { next_event_id: first, finished: false }));
+                }
+            }
+        }
+        // Target met after the last batch read: look ahead for more history.
+        match self.read_history(first) {
+            Err(ArchiverError::EntityNotExists(_)) if first != 1 => Ok((out, finished)),
+            Err(e) => Err(e),
+            Ok(_) => Ok((out, IteratorState { next_event_id: first, finished: false })),
+        }
+    }
+
     /// Go `Next`: the next `HistoryBlob` (`header` + `body`) as JSON.
     pub fn next_blob(&mut self) -> Result<Value, ArchiverError> {
         if self.state.finished {
             return Err(ArchiverError::Other("iterator depleted".to_owned()));
         }
-        let mut size = 0_usize;
-        let mut taken: Vec<Value> = Vec::new();
-        let mut next_id = self.state.next_event_id;
-        let mut idx = 0;
-        while idx < self.batches.len() && size < self.target {
-            let b = &self.batches[idx];
-            idx += 1;
-            if event_i64(b, false, "eventId") < self.state.next_event_id {
-                continue; // already archived (resumed from saved state)
-            }
-            size += serde_json::to_vec(b).map_err(|e| ArchiverError::Other(e.to_string()))?.len();
-            next_id = event_i64(b, true, "eventId") + 1;
-            taken.push(b.clone());
-        }
+        let (taken, state) = self.read_history_batches(self.state.next_event_id)?;
         if taken.is_empty() {
-            // Go: EntityNotExists with firstEventID != 1 finishes, otherwise it is an error.
-            return Err(ArchiverError::EntityNotExists("history not exist".to_owned()));
+            // Go would index an empty slice here; surface it as a vanished history.
+            return Err(ArchiverError::EntityNotExists(ERR_HISTORY_NOT_EXIST.into()));
         }
-        let finished = !self.batches[idx..]
-            .iter()
-            .any(|b| event_i64(b, false, "eventId") >= next_id);
-        self.state = IteratorState { next_event_id: next_id, finished };
-        Ok(history_blob(self.request, &taken, finished))
+        self.state = state;
+        Ok(history_blob(self.request, &taken, state.finished))
     }
+}
+
+/// `ErrHistoryMutated` text.
+pub const ERR_HISTORY_MUTATED: &str = "history was mutated";
+
+/// `IsHistoryMutated(request, blob.Body, *blob.Header.IsLast)`.
+fn blob_mutated(request: &ArchiveHistoryRequest, blob: &Value) -> bool {
+    let body: Vec<Value> = blob["body"].as_array().cloned().unwrap_or_default();
+    is_history_mutated(request, &body, blob["header"]["is_last"].as_bool().unwrap_or(false))
 }
 
 /// Go `archiver.HistoryBlob` (`header` + `body`) as JSON, matching the Go struct tags.
@@ -256,7 +377,8 @@ fn history_blob(request: &ArchiveHistoryRequest, batches: &[Value], is_last: boo
 }
 
 fn encode(v: &impl serde::Serialize) -> Result<Vec<u8>, ArchiverError> {
-    serde_json::to_vec(v).map_err(|e| ArchiverError::Other(e.to_string()))
+    let v = serde_json::to_value(v).map_err(|e| ArchiverError::Other(e.to_string()))?;
+    Ok(go_json_bytes(&v))
 }
 
 /// Failure of an inner archive step with the Go retryability classification.
@@ -333,7 +455,7 @@ fn s3_upload(
 /// Go `loadHistoryIterator` + `uploadProgress` handling shared by s3 (and gcs).
 fn load_iterator<'a>(
     request: &'a ArchiveHistoryRequest,
-    batches: Vec<Value>,
+    source: &'a dyn HistoryBatchSource,
     opts: &ArchiveOptions,
     progress: &mut ArchiveProgress,
 ) -> HistoryIterator<'a> {
@@ -343,7 +465,7 @@ fn load_iterator<'a>(
                 if let Some(state) = &loaded.iterator_state {
                     if let Ok(it) = HistoryIterator::from_state(
                         request,
-                        batches.clone(),
+                        source,
                         TARGET_HISTORY_BLOB_SIZE,
                         state,
                     ) {
@@ -355,7 +477,7 @@ fn load_iterator<'a>(
             *progress = ArchiveProgress::default();
         }
     }
-    HistoryIterator::new(request, batches, TARGET_HISTORY_BLOB_SIZE)
+    HistoryIterator::new(request, source, TARGET_HISTORY_BLOB_SIZE)
 }
 
 /// Go `saveHistoryIteratorState` (best effort).
@@ -401,17 +523,9 @@ fn s3_archive_history_inner(
     s3_soft_validate_uri(uri).map_err(|m| fail(ArchiverError::Other(m)))?;
     validate_history_request(request).map_err(fail)?;
     let mut progress = ArchiveProgress::default();
-    let batches = match source.read_all(request).map_err(fail)? {
-        Some(b) if !b.is_empty() => b,
-        _ => {
-            // history gone (duplicate archival signal): skipped like Go
-            scoped.inc(metric::HISTORY_DUPLICATE_ARCHIVALS);
-            return Ok(());
-        }
-    };
     let bucket = s3_bucket(uri, region).map_err(|m| fail(ArchiverError::Other(m)))?;
     let path = s3_key_path(uri);
-    let mut it = load_iterator(request, batches, opts, &mut progress);
+    let mut it = load_iterator(request, source, opts, &mut progress);
     let (mut uploaded_size, mut history_size) = (0_i64, 0_i64);
     while it.has_next() {
         let blob = match it.next_blob() {
@@ -422,6 +536,10 @@ fn s3_archive_history_inner(
             }
             Err(e) => return Err(fail(e)),
         };
+        if blob_mutated(request, &blob) && !source.archive_incomplete_history() {
+            // Go returns the plain `ErrHistoryMutated` (neither transient nor retryable).
+            return Err(Failure::new(ArchiverError::Other(ERR_HISTORY_MUTATED.into()), false));
+        }
         let encoded = encode(&blob).map_err(fail)?;
         let key = s3_history_key(
             &path,
@@ -562,19 +680,7 @@ fn gcs_archive_history_inner(
     gcs_validate_uri(store, uri).map_err(|_| non_retriable())?;
     validate_history_request(request).map_err(|_| non_retriable())?;
     let mut progress = ArchiveProgress::default();
-    let batches = match source.read_all(request) {
-        Ok(Some(b)) if !b.is_empty() => b,
-        Ok(_) => {
-            scoped.inc(metric::HISTORY_DUPLICATE_ARCHIVALS);
-            return Ok(());
-        }
-        // Go: non-transient read errors are errUploadNonRetriable, transient ones are returned.
-        Err(e @ ArchiverError::Internal(_)) => return Err(Failure::new(e, true)),
-        // Go returns ErrHistoryMutated as is (not errUploadNonRetriable): counted as transient.
-        Err(e) if e.message() == "history was mutated" => return Err(Failure::new(e, true)),
-        Err(_) => return Err(non_retriable()),
-    };
-    let mut it = load_iterator(request, batches, opts, &mut progress);
+    let mut it = load_iterator(request, source, opts, &mut progress);
     let mut total_upload_size = 0_i64;
     while it.has_next() {
         let part = progress.batch_idx;
@@ -584,8 +690,14 @@ fn gcs_archive_history_inner(
                 scoped.inc(metric::HISTORY_DUPLICATE_ARCHIVALS);
                 return Ok(());
             }
+            // Go: transient (internal) read errors are returned, others are errUploadNonRetriable.
+            Err(e @ ArchiverError::Internal(_)) => return Err(Failure::new(e, true)),
             Err(_) => return Err(non_retriable()),
         };
+        if blob_mutated(request, &blob) && !source.archive_incomplete_history() {
+            // Go returns ErrHistoryMutated as is (not errUploadNonRetriable): counted as transient.
+            return Err(Failure::new(ArchiverError::Other(ERR_HISTORY_MUTATED.into()), true));
+        }
         let encoded = encode(&blob["body"]).map_err(|_| non_retriable())?; // Go encodes Body only
         let filename = gcs_history_filename(
             &request.domain_id,
@@ -783,23 +895,24 @@ mod tests {
     #[test]
     fn iterator_closes_blob_at_target_and_tracks_state() {
         let req = hist_req();
-        let one = serde_json::to_vec(&batches()[0]).unwrap().len();
-        let mut it = HistoryIterator::new(&req, batches(), usize::MAX);
+        let one = estimate_size(&batches()[0]);
+        let src = Src(Some(batches()));
+        let mut it = HistoryIterator::new(&req, &src, usize::MAX);
         let blob = it.next_blob().unwrap();
         assert_eq!(blob["header"]["is_last"], json!(true));
         assert!(!it.has_next());
-        let mut it = HistoryIterator::new(&req, batches(), one);
+        let mut it = HistoryIterator::new(&req, &src, one);
         let b1 = it.next_blob().unwrap();
         assert_eq!(b1["header"]["is_last"], json!(false));
         assert_eq!(b1["header"]["last_event_id"], json!(2));
         assert_eq!(it.state(), br#"{"NextEventID":3,"FinishedIteration":false}"#.to_vec());
         // resume from state
-        let mut it2 = HistoryIterator::from_state(&req, batches(), one, &it.state()).unwrap();
+        let mut it2 = HistoryIterator::from_state(&req, &src, one, &it.state()).unwrap();
         let b2 = it2.next_blob().unwrap();
         assert_eq!(b2["header"]["first_event_id"], json!(3));
         assert_eq!(b2["header"]["is_last"], json!(true));
         assert!(!it2.has_next());
-        assert!(HistoryIterator::from_state(&req, batches(), one, b"x").is_err());
+        assert!(HistoryIterator::from_state(&req, &src, one, b"x").is_err());
     }
 
     #[test]
@@ -1068,5 +1181,107 @@ mod tests {
         r.run_id.clear();
         let e = gcs_archive_history(&store, &uri, &r, &Src(None), &ArchiveOptions::default()).unwrap_err();
         assert_eq!(e.message(), GCS_ERR_UPLOAD_NON_RETRIABLE);
+    }
+
+    /// Source that serves pages like persistence and records each requested first event id.
+    struct Paged {
+        all: Vec<Value>,
+        calls: Mutex<Vec<i64>>,
+    }
+    impl HistoryBatchSource for Paged {
+        fn read_all(&self, _r: &ArchiveHistoryRequest) -> Result<Option<Vec<Value>>, ArchiverError> {
+            panic!("the iterator must page, not read everything up front");
+        }
+        fn read_page(&self, _r: &ArchiveHistoryRequest, first: i64) -> Result<Vec<Value>, ArchiverError> {
+            self.calls.lock().unwrap().push(first);
+            let page = crate::archiver::page_from(&self.all, first);
+            if page.is_empty() {
+                return Err(ArchiverError::EntityNotExists("gone".into()));
+            }
+            Ok(page)
+        }
+    }
+
+    #[test]
+    fn iterator_pages_through_source_like_go() {
+        let req = hist_req();
+        let big: Vec<Value> = (0..3)
+            .map(|i| json!({"events":[{"eventId": i + 1, "version": 7, "pad": "x".repeat(1000)}]}))
+            .collect();
+        let src = Paged { all: big, calls: Mutex::default() };
+        // target below one batch: each blob has one batch, lookahead read decides `finished`.
+        let mut it = HistoryIterator::new(&req, &src, 10);
+        let b1 = it.next_blob().unwrap();
+        assert_eq!(b1["header"]["is_last"], json!(false));
+        assert_eq!(it.state(), br#"{"NextEventID":2,"FinishedIteration":false}"#.to_vec());
+        it.next_blob().unwrap();
+        let b3 = it.next_blob().unwrap();
+        assert_eq!(b3["header"]["is_last"], json!(true));
+        assert!(!it.has_next());
+        // Go: a finished iteration encodes NextEventID 0.
+        assert_eq!(it.state(), br#"{"NextEventID":0,"FinishedIteration":true}"#.to_vec());
+        // read(1) -> blob1 returns mid-page; read(2); read(3) + lookahead read(4).
+        assert_eq!(*src.calls.lock().unwrap(), vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn iterator_first_page_not_found_is_entity_not_exists() {
+        let req = hist_req();
+        let src = Paged { all: vec![], calls: Mutex::default() };
+        let mut it = HistoryIterator::new(&req, &src, 10);
+        assert!(matches!(it.next_blob(), Err(ArchiverError::EntityNotExists(_))));
+    }
+
+    #[test]
+    fn size_estimate_is_go_json_encoding() {
+        // Go omits zero eventId/version/taskId and HTML-escapes strings.
+        let b = json!({"events":[{"eventId":1,"version":0,"taskId":0,"note":"a<b>&c"}]});
+        let req = hist_req();
+        let src = Src(Some(vec![b.clone()]));
+        let mut it = HistoryIterator::new(&req, &src, usize::MAX);
+        let blob = it.next_blob().unwrap();
+        let body = &blob["body"][0]["events"][0];
+        assert!(body.get("eventId").is_some() && body.get("version").is_none() && body.get("taskId").is_none());
+        let go = br#"{"events":[{"note":"a\u003cb\u003e\u0026c"}]}"#;
+        assert_eq!(go_json_bytes(&json!({"events":[{"note":"a<b>&c"}]})), go.to_vec());
+        assert_eq!(estimate_size(&json!({"events":[{"note":"a<b>&c"}]})), go.len());
+        // blob bytes are the Go-compatible encoding of the blob
+        let enc = encode(&blob).unwrap();
+        assert!(String::from_utf8(enc).unwrap().contains("a\\u003cb\\u003e\\u0026c"));
+    }
+
+    #[test]
+    fn mutated_history_is_checked_per_blob() {
+        let store = Mock { bucket: "b".into(), ..Default::default() };
+        let uri = parse_uri("s3://b/p").unwrap();
+        let mut r = hist_req();
+        r.next_event_id = 99; // last event 3 + 1 != 99
+        let e = s3_archive_history(&store, "r", &uri, &r, &Src(Some(batches())), &ArchiveOptions::default()).unwrap_err();
+        assert_eq!(e.message(), ERR_HISTORY_MUTATED);
+        assert!(store.objects.lock().unwrap().is_empty());
+        // Source allowing incomplete history archives anyway.
+        struct Lax(Vec<Value>);
+        impl HistoryBatchSource for Lax {
+            fn read_all(&self, _: &ArchiveHistoryRequest) -> Result<Option<Vec<Value>>, ArchiverError> {
+                Ok(Some(self.0.clone()))
+            }
+            fn archive_incomplete_history(&self) -> bool {
+                true
+            }
+        }
+        s3_archive_history(&store, "r", &uri, &r, &Lax(batches()), &ArchiveOptions::default()).unwrap();
+        assert_eq!(store.objects.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn inline_style_options_pass_errors_through_without_progress() {
+        // Go inline archival: no NonRetriableError (error unchanged) and no ProgressManager.
+        let store = Mock { bucket: "b".into(), ..Default::default() };
+        let uri = parse_uri("s3://b/p").unwrap();
+        let mut bad = hist_req();
+        bad.run_id.clear();
+        let rec = Arc::new(Rec::default());
+        let e = s3_archive_history(&store, "r", &uri, &bad, &Src(None), &opts_with(&rec)).unwrap_err();
+        assert_eq!(e.message(), crate::archiver::ERR_INVALID_ARCHIVE_REQUEST);
     }
 }

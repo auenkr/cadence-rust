@@ -42,6 +42,41 @@ pub struct HistoryNodeBatchSource {
 }
 
 impl HistoryBatchSource for HistoryNodeBatchSource {
+    /// Go `readHistory` = `ReadFullPageV2EventsByBatch`: reads `ReadHistoryBranch` pages from
+    /// `first_event_id` until `historyPageSize` events were read or the token is exhausted.
+    fn read_page(&self, request: &ArchiveHistoryRequest, first_event_id: i64) -> Result<Vec<Value>, ArchiverError> {
+        let mut batches: Vec<Value> = Vec::new();
+        let mut events = 0_i64;
+        let mut token = Vec::new();
+        loop {
+            let req = ReadHistoryBranchRequest {
+                branch_token: request.branch_token.clone(),
+                min_event_id: first_event_id,
+                max_event_id: END_EVENT_ID,
+                page_size: HISTORY_PAGE_SIZE,
+                next_page_token: token,
+                shard_id: self.shard_id,
+            };
+            let resp = read_history_branch(self.store.as_ref(), &req).map_err(|e| match e {
+                HistoryReadError::EntityNotExists(m) => ArchiverError::EntityNotExists(m),
+                HistoryReadError::InvalidRequest(m) => ArchiverError::BadRequest(m),
+                e => ArchiverError::Internal(e.to_string()),
+            })?;
+            for b in resp.batches.into_iter().filter(|b| !b.is_empty()) {
+                events += b.len() as i64;
+                batches.push(serde_json::to_value(st::History { events: b }).map_err(|e| ArchiverError::Other(e.to_string()))?);
+            }
+            if events >= HISTORY_PAGE_SIZE || resp.next_page_token.is_empty() {
+                return Ok(batches);
+            }
+            token = resp.next_page_token;
+        }
+    }
+
+    fn archive_incomplete_history(&self) -> bool {
+        self.allow_incomplete
+    }
+
     fn read_all(&self, request: &ArchiveHistoryRequest) -> Result<Option<Vec<Value>>, ArchiverError> {
         let mut batches: Vec<Vec<st::HistoryEvent>> = Vec::new();
         let mut token = Vec::new();
@@ -81,6 +116,12 @@ impl HistoryBatchSource for HistoryNodeBatchSource {
             .collect::<Result<Vec<_>, _>>()
             .map(Some)
     }
+}
+
+/// Archive options of the inline archivers (Go `archiveHistoryInline`): only the metrics client of
+/// the archiver container; no `ProgressManager` and no `NonRetriableError` option is passed.
+pub fn inline_archive_options(metrics: Arc<dyn cadence_common::cloud_archiver::ArchiverMetrics>) -> cadence_common::cloud_archiver::ArchiveOptions {
+    cadence_common::cloud_archiver::ArchiveOptions { metrics, non_retriable_error: None, progress_manager: None }
 }
 
 /// Go `archiver.IsHistoryMutated` with `isLast = true` (the whole history is read).
@@ -265,6 +306,13 @@ mod tests {
         assert!(is_history_mutated(&req(4, 2), &b), "last version below close version");
         assert!(is_history_mutated(&req(4, 0), &b), "last version above close version");
         assert!(!is_history_mutated(&req(4, 1), &[]));
+    }
+
+    #[test]
+    fn inline_options_have_no_progress_manager_or_non_retriable_error() {
+        let o = inline_archive_options(Arc::new(cadence_common::cloud_archiver::NoopArchiverMetrics));
+        assert!(o.progress_manager.is_none());
+        assert!(o.non_retriable_error.is_none());
     }
 
     #[test]

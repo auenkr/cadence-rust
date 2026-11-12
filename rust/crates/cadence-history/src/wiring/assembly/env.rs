@@ -178,10 +178,9 @@ impl HistoryEnv {
         // Go archiver container `MetricsClient`: the cloud archivers report into this registry.
         let archiver_provider = Arc::new(
             archiver_provider.as_ref().clone().with_archive_options(
-                cadence_common::cloud_archiver::ArchiveOptions {
-                    metrics: Arc::new(crate::wiring::resources::metrics::ArchiverMetricsAdapter(metrics_registry.clone())),
-                    ..Default::default()
-                },
+                super::archiver_wiring::inline_archive_options(Arc::new(
+                    crate::wiring::resources::metrics::ArchiverMetricsAdapter(metrics_registry.clone()),
+                )),
             ),
         );
         let config_adapter = Arc::new(ConfigAdapter::new(config.clone()));
