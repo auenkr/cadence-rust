@@ -516,6 +516,11 @@ pub enum PersistenceError {
         last_write_version: i64,
     },
     CurrentWorkflowConditionFailed(String),
+    /// Go `persistence.DuplicateRequestError` (request type 0 start, 1 signal, 2 cancel, 3 reset).
+    DuplicateRequest {
+        request_type: i32,
+        run_id: String,
+    },
     EntityNotExists(String),
     AlreadyExists(String),
     InvalidPersistenceRequest(String),

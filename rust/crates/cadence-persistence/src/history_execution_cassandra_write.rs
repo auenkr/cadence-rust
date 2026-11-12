@@ -1178,7 +1178,7 @@ fn lwv(row: &RowMap) -> i64 {
 
 pub(crate) fn cas_error(rows: &[RowMap], c: &CasContext<'_>) -> E {
     let mut range_mismatch: Option<i64> = None;
-    let mut dup_request: Option<i32> = None;
+    let mut dup_request: Option<(i32, String)> = None;
     let mut current_exists: Option<&RowMap> = None;
     let mut concrete_exists: Option<&RowMap> = None;
     let mut run_mismatch: Option<String> = None;
@@ -1195,7 +1195,7 @@ pub(crate) fn cas_error(rows: &[RowMap], c: &CasContext<'_>) -> E {
                 break;
             }
         } else if (ROW_TYPE_REQUEST_START..=ROW_TYPE_REQUEST_START + 3).contains(&row_type) {
-            dup_request = Some(row_type);
+            dup_request = Some((row_type - ROW_TYPE_REQUEST_START, get_str(cell(row, "current_run_id"))));
         } else if row_type == ROW_TYPE_EXECUTION {
             let row_run = get_str(cell(row, "run_id"));
             if row_run == PERMANENT_RUN_ID.to_string() {
@@ -1236,8 +1236,9 @@ pub(crate) fn cas_error(rows: &[RowMap], c: &CasContext<'_>) -> E {
     if let Some(actual) = range_mismatch {
         return E::ShardOwnershipLost { shard_id: c.shard, expected_range_id: c.request_range_id, actual_range_id: actual };
     }
-    if let Some(row_type) = dup_request {
-        return E::ConditionFailed(format!("Workflow request already exists. WorkflowId: {}, request row type: {row_type}", c.workflow_id));
+    if let Some((request_type, run_id)) = dup_request {
+        // Go `DuplicateRequestError{RequestType, RunID}` from the existing request row.
+        return E::DuplicateRequest { request_type, run_id };
     }
     if let (Some(row), Some(info)) = (current_exists, c.create) {
         let exec = udt_map(cell(row, "execution"));

@@ -26,6 +26,8 @@ pub mod parent_close_policy_client;
 pub mod real_engine_harness;
 #[cfg(test)]
 mod real_engine_tests;
+#[cfg(test)]
+mod real_engine_v2_tests;
 pub mod ndc_context_hooks;
 pub mod ndc_rebuild;
 pub mod ndc_state;
