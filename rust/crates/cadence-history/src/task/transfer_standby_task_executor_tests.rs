@@ -392,9 +392,19 @@ async fn activity_noop_when_activity_missing_or_workflow_not_loaded() {
     let h = harness();
     h.exec.process_activity_task(&atask(GLOBAL_DOMAIN, VERSION)).await.unwrap();
     assert!(h.tdeps.activity.lock().unwrap().is_empty());
-    let mut h2 = harness();
-    Arc::get_mut(&mut h2.deps).unwrap().w = None;
-    h2.exec.process_activity_task(&atask(GLOBAL_DOMAIN, VERSION)).await.unwrap();
+    let tdeps = Arc::new(TDeps::default());
+    let deps = Arc::new(SDeps {
+        w: None,
+        now: AtomicI64::new(fetch_time()),
+        v2: false,
+        advanced: false,
+        resent: Mutex::new(vec![]),
+        dlq: Arc::new(Dlq::default()),
+    });
+    let base = new_transfer_task_executor_base(shard(), tdeps.clone(), Logger::new());
+    let exec = TransferStandbyTaskExecutor { base, cluster_name: STANDBY_CLUSTER.into(), dependencies: deps };
+    exec.process_activity_task(&atask(GLOBAL_DOMAIN, VERSION)).await.unwrap();
+    assert!(tdeps.activity.lock().unwrap().is_empty());
 }
 
 #[tokio::test]

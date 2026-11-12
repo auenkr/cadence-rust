@@ -317,10 +317,14 @@ struct Deps {
     resurrection_delay: Duration,
     advanced_visibility: bool,
     pushed: Mutex<Vec<AddMatchingTaskRequest>>,
+    load_err: Option<TaskError>,
 }
 #[async_trait]
 impl TimerActiveDependencies for Deps {
     async fn load_workflow(&self, _: &dyn PersistenceTask, _: i64) -> Result<Option<Arc<dyn TimerWorkflow>>> {
+        if let Some(e) = &self.load_err {
+            return Err(e.clone());
+        }
         Ok(self.w.clone().map(|w| w as Arc<dyn TimerWorkflow>))
     }
     fn resurrection_check_min_delay(&self, _: &str) -> Duration {
@@ -355,6 +359,7 @@ fn deps(w: &Arc<W>) -> Deps {
         resurrection_delay: Duration::from_secs(3600),
         advanced_visibility: false,
         pushed: Mutex::new(vec![]),
+        load_err: None,
     }
 }
 
@@ -782,4 +787,15 @@ async fn load_none_is_noop_and_busy_mapped() {
     let e = executor(Arc::new(d));
     e.execute_workflow_timeout_task(&wf_timeout()).await.unwrap();
     assert!(w.calls().is_empty());
+
+    // context deadline while loading is surfaced as WorkflowBusy
+    let mut d = deps(&w);
+    d.load_err = Some(TaskError::ContextDeadlineExceeded);
+    let e = executor(Arc::new(d));
+    assert_eq!(e.execute_workflow_timeout_task(&wf_timeout()).await, Err(TaskError::WorkflowBusy));
+    // other load errors pass through unchanged
+    let mut d = deps(&w);
+    d.load_err = Some(TaskError::Other("boom".into()));
+    let e = executor(Arc::new(d));
+    assert_eq!(e.execute_workflow_timeout_task(&wf_timeout()).await, Err(TaskError::Other("boom".into())));
 }

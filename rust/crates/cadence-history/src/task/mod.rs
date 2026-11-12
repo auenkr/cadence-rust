@@ -37,3 +37,6 @@ mod standby_test_support;
 
 #[cfg(test)]
 mod transfer_standby_task_executor_tests;
+
+#[cfg(test)]
+mod timer_standby_task_executor_tests;
