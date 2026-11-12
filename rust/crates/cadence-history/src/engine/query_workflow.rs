@@ -39,8 +39,8 @@ impl HistoryEngine {
             let state = context.load_workflow_execution().await?;
             if self.check_for_history_corruptions(&*state).await? { return Err(HistoryError::entity_not_exists("Workflow execution corrupted.")); }
             let attribute = state.get_execution_info().active_cluster_selection_policy.and_then(|p| p.cluster_attribute);
-            let active = domain.active_clusters.iter().find(|(a, _)| a == &attribute)
-                .map(|(_, cluster)| cluster == &self.cluster_metadata.get_current_cluster_name()).unwrap_or_else(|| {
+            let active = domain.get_active_cluster_info_by_cluster_attribute(attribute.as_ref())
+                .map(|(cluster, _)| cluster == self.cluster_metadata.get_current_cluster_name()).unwrap_or_else(|| {
                     tracing::warn!("Failed to get active cluster info by cluster attribute, default to active"); true
                 });
             let direct = !active || !state.is_workflow_execution_running()

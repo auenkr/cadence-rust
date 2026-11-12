@@ -48,6 +48,17 @@ fn status_i32(m: &MatchingDomainMetadata) -> i32 {
 }
 
 fn engine_entry(m: &MatchingDomainMetadata) -> eng::DomainCacheEntry {
+    let mut active_clusters = vec![(None, m.replication.active_cluster_name.clone())];
+    let mut active_cluster_versions = Vec::new();
+    if let Some(ac) = m.replication.active_clusters.as_ref() {
+        for (scope, s) in ac.active_clusters_by_cluster_attribute.iter().flatten() {
+            for (name, info) in s.cluster_attributes.iter().flatten() {
+                let attr = cadence_api::types::ClusterAttribute { scope: scope.clone(), name: name.clone() };
+                active_clusters.push((Some(attr.clone()), info.active_cluster_name.clone()));
+                active_cluster_versions.push((attr, info.failover_version));
+            }
+        }
+    }
     eng::DomainCacheEntry {
         info: eng::DomainInfo {
             id: m.info.uuid.clone(),
@@ -55,7 +66,9 @@ fn engine_entry(m: &MatchingDomainMetadata) -> eng::DomainCacheEntry {
             status: status_i32(m),
         },
         is_global_domain: m.is_global_domain,
-        active_clusters: vec![(None, m.replication.active_cluster_name.clone())],
+        active_clusters,
+        failover_version: m.failover_version,
+        active_cluster_versions,
         failover_end_time: m.failover_end_time_nanos,
         clusters: m.replication.clusters.iter().map(|c| c.cluster_name.clone()).collect(),
         bad_binaries: m

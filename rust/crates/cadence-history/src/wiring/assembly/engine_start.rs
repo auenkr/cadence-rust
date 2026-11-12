@@ -457,16 +457,17 @@ impl WorkflowStartHost for EngineStartHost {
     async fn active_cluster_info_by_cluster_attribute(
         &self,
         domain_id: &str,
-        _attribute: Option<&ClusterAttribute>,
+        attribute: Option<&ClusterAttribute>,
     ) -> HResult<ActiveClusterInfo> {
+        // activecluster.managerImpl.GetActiveClusterInfoByClusterAttribute
         let entry = self.core.domains.get_domain_by_id(domain_id)?;
-        let params = (self.core.state_params)(domain_id);
-        let active = entry
-            .active_clusters
-            .first()
-            .map(|(_, c)| c.clone())
-            .unwrap_or_else(|| self.core.current_cluster.clone());
-        Ok(ActiveClusterInfo { active_cluster_name: active, failover_version: params.failover_version })
+        match entry.get_active_cluster_info_by_cluster_attribute(attribute) {
+            Some((active_cluster_name, failover_version)) => Ok(ActiveClusterInfo { active_cluster_name, failover_version }),
+            None => Err(HistoryError::ClusterAttributeNotFound(format!(
+                "could not find cluster attribute {:?} in the domain {}'s active cluster config",
+                attribute, domain_id
+            ))),
+        }
     }
 
     async fn active_cluster_selection_policy_for_workflow(

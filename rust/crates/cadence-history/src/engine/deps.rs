@@ -301,12 +301,34 @@ pub struct DomainCacheEntry {
     pub info: DomainInfo,
     pub is_global_domain: bool,
     pub active_clusters: Vec<(Option<cadence_api::types::ClusterAttribute>, String)>,
+    /// `GetFailoverVersion()`.
+    pub failover_version: i64,
+    /// Per cluster attribute `ActiveClusterInfo.FailoverVersion` of `ActiveClusters.AttributeScopes`.
+    pub active_cluster_versions: Vec<(cadence_api::types::ClusterAttribute, i64)>,
     /// `failoverEndTime`; non-nil means the domain is pending active.
     pub failover_end_time: Option<i64>,
     /// `GetReplicationConfig().Clusters` names.
     pub clusters: Vec<String>,
     /// Checksums of `GetConfig().BadBinaries.Binaries`.
     pub bad_binaries: Vec<String>,
+}
+
+impl DomainCacheEntry {
+    /// `DomainCacheEntry.GetActiveClusterInfoByClusterAttribute`: returns `(ActiveClusterName, FailoverVersion)`.
+    /// A nil attribute yields the domain-level active cluster; an unknown attribute yields `None`.
+    pub fn get_active_cluster_info_by_cluster_attribute(
+        &self,
+        attribute: Option<&cadence_api::types::ClusterAttribute>,
+    ) -> Option<(String, i64)> {
+        match attribute {
+            None => self.active_clusters.iter().find(|(a, _)| a.is_none()).map(|(_, c)| (c.clone(), self.failover_version)),
+            Some(attr) => {
+                let (_, cluster) = self.active_clusters.iter().find(|(a, _)| a.as_ref() == Some(attr))?;
+                let version = self.active_cluster_versions.iter().find(|(a, _)| a == attr).map(|(_, v)| *v).unwrap_or(self.failover_version);
+                Some((cluster.clone(), version))
+            }
+        }
+    }
 }
 impl DomainCacheEntry {
     /// `IsDomainPendingActive`
@@ -390,3 +412,32 @@ pub type Fut<'a, T> = BoxFuture<'a, HResult<T>>;
 pub type Map<K, V> = HashMap<K, V>;
 
 impl From<CadenceError> for HistoryError { fn from(error: CadenceError) -> Self { Self::Cadence(Box::new(error)) } }
+
+#[cfg(test)]
+mod active_cluster_lookup_tests {
+    use super::*;
+    use cadence_api::types::ClusterAttribute;
+
+    fn attr(scope: &str, name: &str) -> ClusterAttribute {
+        ClusterAttribute { scope: scope.into(), name: name.into() }
+    }
+
+    /// activecluster manager_test: GetActiveClusterInfoByClusterAttribute table.
+    #[test]
+    fn get_active_cluster_info_by_cluster_attribute() {
+        let entry = DomainCacheEntry {
+            active_clusters: vec![(None, "c0".into()), (Some(attr("region", "us")), "c1".into()), (Some(attr("region", "eu")), "c2".into())],
+            failover_version: 7,
+            active_cluster_versions: vec![(attr("region", "us"), 11), (attr("region", "eu"), 12)],
+            ..Default::default()
+        };
+        assert_eq!(entry.get_active_cluster_info_by_cluster_attribute(None), Some(("c0".into(), 7)));
+        assert_eq!(entry.get_active_cluster_info_by_cluster_attribute(Some(&attr("region", "us"))), Some(("c1".into(), 11)));
+        assert_eq!(entry.get_active_cluster_info_by_cluster_attribute(Some(&attr("region", "eu"))), Some(("c2".into(), 12)));
+        assert_eq!(entry.get_active_cluster_info_by_cluster_attribute(Some(&attr("region", "asia"))), None);
+        assert_eq!(entry.get_active_cluster_info_by_cluster_attribute(Some(&attr("zone", "us"))), None);
+        let plain = DomainCacheEntry { active_clusters: vec![(None, "c0".into())], failover_version: 3, ..Default::default() };
+        assert_eq!(plain.get_active_cluster_info_by_cluster_attribute(Some(&attr("region", "us"))), None);
+        assert_eq!(plain.get_active_cluster_info_by_cluster_attribute(None), Some(("c0".into(), 3)));
+    }
+}

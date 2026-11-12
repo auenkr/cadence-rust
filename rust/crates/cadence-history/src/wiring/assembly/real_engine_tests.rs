@@ -1144,6 +1144,78 @@ mod query_ports {
         assert!(!reg.has_completed_query());
     }
 
+    fn active_active_attr() -> ClusterAttribute {
+        ClusterAttribute { scope: crate::constants::TEST_ACTIVE_CLUSTER_ATTRIBUTE.0.into(), name: crate::constants::TEST_ACTIVE_CLUSTER_ATTRIBUTE.1.into() }
+    }
+
+    /// Starts a run carrying `TestActiveClusterSelectionPolicy` on an active-active domain active in this cluster.
+    async fn active_active_in_flight_decision(h: &Harness) -> String {
+        *h.domain_active_clusters.lock().unwrap() = vec![(None, CLUSTER.into()), (Some(active_active_attr()), CLUSTER.into())];
+        let mut req = start_req("start-req");
+        req.start_request.as_mut().unwrap().active_cluster_selection_policy = Some(ActiveClusterSelectionPolicy { cluster_attribute: Some(active_active_attr()) });
+        let run = h.engine.start_workflow_execution(&req).await.expect("start").run_id;
+        decision_started(h, &run, 2, "dec-req").await.expect("decision started");
+        decision_completed(h, &run, 2, vec![schedule_activity_decision("act-1")]).await.expect("decision completed");
+        signal(h, &run).await;
+        decision_started(h, &run, 7, "dec-req-2").await.expect("decision started");
+        run
+    }
+
+    /// TestQueryWorkflow_DecisionTaskDispatch_Complete_ActiveActive
+    #[tokio::test]
+    async fn query_decision_task_dispatch_complete_active_active() {
+        let h = Harness::new();
+        let run = active_active_in_flight_decision(&h).await;
+        let reg = raw_registry(&h, &run).await;
+        let updater = {
+            let reg = reg.clone();
+            async move {
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                let ids = reg.get_buffered_ids();
+                assert_eq!(ids.len(), 1);
+                for id in ids {
+                    let state = TerminationState {
+                        termination_type: TerminationType::Completed,
+                        query_result: Some(RegResult { result_type: Some(QueryResultType::Answered), answer: Some(vec![1, 2, 3]), error_message: String::new() }),
+                        failure: None,
+                    };
+                    reg.set_termination_state(&id, state).unwrap();
+                }
+            }
+        };
+        let started = Instant::now();
+        let req = qreq(&run, Some(QueryConsistencyLevel::Strong), None);
+        let (res, _) = tokio::join!(h.engine.query_workflow(&req, None), updater);
+        assert!(started.elapsed() >= Duration::from_millis(300));
+        assert_eq!(res.expect("query").response.unwrap().query_result, vec![1, 2, 3]);
+        assert!(!reg.has_buffered_query());
+        assert!(!reg.has_completed_query());
+    }
+
+    /// Active in another cluster: the strong query is not buffered and goes straight through matching (standby path).
+    #[tokio::test]
+    async fn query_active_active_attribute_active_elsewhere_goes_direct() {
+        let matching = Arc::new(FakeMatching { answer: vec![4, 5], ..Default::default() });
+        let h = harness_with(matching.clone(), Arc::new(FakeMatching::default()));
+        let run = active_active_in_flight_decision(&h).await;
+        *h.domain_active_clusters.lock().unwrap() = vec![(None, CLUSTER.into()), (Some(active_active_attr()), "cluster-b".into())];
+        let reg = raw_registry(&h, &run).await;
+        let req = qreq(&run, Some(QueryConsistencyLevel::Strong), None);
+        let _ = h.engine.query_workflow(&req, Some(Instant::now() + Duration::from_secs(2))).await;
+        assert!(!reg.has_buffered_query());
+    }
+
+    /// Start with a cluster attribute the domain does not define: Go `ClusterAttributeNotFoundError` -> errClusterAttributeNotFound.
+    #[tokio::test]
+    async fn start_unknown_cluster_attribute_is_rejected() {
+        let h = Harness::new();
+        *h.domain_active_clusters.lock().unwrap() = vec![(None, CLUSTER.into())];
+        let mut req = start_req("start-req");
+        req.start_request.as_mut().unwrap().active_cluster_selection_policy = Some(ActiveClusterSelectionPolicy { cluster_attribute: Some(active_active_attr()) });
+        let err = h.engine.start_workflow_execution(&req).await.unwrap_err();
+        assert_eq!(err.to_string(), crate::engine::start_workflow_execution::err_cluster_attribute_not_found().to_string());
+    }
+
     #[tokio::test]
     async fn query_decision_task_dispatch_unblocked() {
         let matching = Arc::new(FakeMatching { answer: vec![1, 2, 3], ..Default::default() });
