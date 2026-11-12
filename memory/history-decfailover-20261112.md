@@ -26,3 +26,8 @@ Head SHA: 6f4b7003f55e6a127f93785b2750634785f8882f (merged origin/master). Evide
 - gate cassandra/grpc/true: https://github.com/auenkr/cadence-rust/actions/runs/43212365030 (GATE SUMMARY failed: [])
 - gate postgres/tchannel/false: https://github.com/auenkr/cadence-rust/actions/runs/43212369767 (GATE SUMMARY failed: [])
 Earlier fixes: clippy type_complexity / clone_on_copy, and no-in-flight test setup (EMPTY_EVENT_ID).
+
+## Post-merge master validation
+
+Master e607ced11: full rust-ci + 12 history-mixed-gate runs all success (2026-11-12).
+Run IDs: 43214321615 43214316492 43214311541 43214306198 43214300779 43214295989 43214290569 43214285505 43214280302 43214275255 43214269808 43214264060 43214259223 
