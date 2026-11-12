@@ -1077,7 +1077,21 @@ impl MatchingDomainCache {
             }
         }
         records.sort_by_key(|record| record.notification_version);
-        let old = self.cache.read().expect("domain cache lock");
+        if true {
+            eprintln!(
+                "DOMAIN-REFRESH metadata_version={metadata_version} records={:?}",
+                records
+                    .iter()
+                    .map(|r| (
+                        r.info.name.clone(),
+                        r.notification_version,
+                        r.decoded_bad_binaries.as_ref().and_then(|b| b.binaries.as_ref()).map(|b| b.len()),
+                        r.bad_binaries.as_ref().map(|b| b.data.len())
+                    ))
+                    .collect::<Vec<_>>()
+            );
+        }
+        let old =self.cache.read().expect("domain cache lock");
         let mut next = CacheState {
             by_id: old.by_id.clone(),
             name_to_id: old.name_to_id.clone(),
