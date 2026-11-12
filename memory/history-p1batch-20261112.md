@@ -30,3 +30,7 @@ Head SHA 075b5dfd1f6e7230db5ab0b5b6f178580c35c646 (origin/master merged); all co
 - gate cassandra/grpc/true: https://github.com/auenkr/cadence-rust/actions/runs/43217078253 (GATE SUMMARY failed: [])
 - gate postgres/tchannel/false: https://github.com/auenkr/cadence-rust/actions/runs/43217084139 (GATE SUMMARY failed: [])
 
+
+## Post-merge master validation
+
+Master 105718ea8 (2026-11-12): 43219217659: success 43219222667: success 43219228450: success 43219234732: success 43219243068: success 43219249430: success 43219255077: success 43219260412: success 43219267650: success 43219274014: success 43219279853: success 43219285521: success 43219292171: success 
