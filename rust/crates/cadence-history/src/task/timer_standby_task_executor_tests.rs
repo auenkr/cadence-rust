@@ -671,3 +671,88 @@ async fn standby_cluster_time_adds_standby_delay() {
     let h = harness();
     assert_eq!(h.exec.get_standby_cluster_time(), Time(NOW + 5 * SEC));
 }
+
+// Go TestProcessRetryTimeout: ActivityRetryTimerTask on the standby executor is dropped (nil error,
+// mutable state never loaded).
+#[derive(Debug)]
+struct WrappedTask(Arc<dyn PersistenceTask>);
+impl PersistenceTask for WrappedTask {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self.0.as_any()
+    }
+    fn get_task_category(&self) -> HistoryTaskCategory {
+        self.0.get_task_category()
+    }
+    fn get_task_type(&self) -> i32 {
+        self.0.get_task_type()
+    }
+    fn get_domain_id(&self) -> &str {
+        self.0.get_domain_id()
+    }
+    fn get_workflow_id(&self) -> &str {
+        self.0.get_workflow_id()
+    }
+    fn get_run_id(&self) -> &str {
+        self.0.get_run_id()
+    }
+    fn get_version(&self) -> i64 {
+        self.0.get_version()
+    }
+    fn get_task_id(&self) -> i64 {
+        self.0.get_task_id()
+    }
+    fn get_visibility_timestamp(&self) -> Time {
+        self.0.get_visibility_timestamp()
+    }
+    fn clone_arc(&self) -> Arc<dyn PersistenceTask> {
+        self.0.clone()
+    }
+}
+#[async_trait]
+impl super::interface::Task for WrappedTask {
+    async fn execute(&self) -> Result<()> {
+        unimplemented!()
+    }
+    fn handle_err(&self, _: Option<TaskError>) -> Option<TaskError> {
+        unimplemented!()
+    }
+    fn retry_err(&self, _: &TaskError) -> bool {
+        unimplemented!()
+    }
+    fn ack(&self) {}
+    async fn nack(&self, _: Option<TaskError>) {}
+    fn cancel(&self) {}
+    fn state(&self) -> super::interface::TaskState {
+        unimplemented!()
+    }
+    fn priority(&self) -> i32 {
+        0
+    }
+    fn set_priority(&self, _: i32) {}
+    fn get_queue_type(&self) -> super::interface::QueueType {
+        super::interface::QueueType::StandbyTimer
+    }
+    fn get_shard(&self) -> Arc<dyn ShardContext> {
+        unimplemented!()
+    }
+    fn get_attempt(&self) -> i32 {
+        0
+    }
+    fn get_info(&self) -> Arc<dyn PersistenceTask> {
+        self.0.clone()
+    }
+    fn set_initial_submit_time(&self, _: Time) {}
+}
+
+#[tokio::test]
+async fn execute_activity_retry_timer_task_is_dropped_on_standby() {
+    use super::interface::Executor;
+    let h = harness();
+    let inner: Arc<dyn PersistenceTask> =
+        Arc::new(ActivityRetryTimerTask { workflow_identifier: wi(GLOBAL_DOMAIN), task_data: td(VERSION, NOW), event_id: 5, attempt: 1 });
+    let task: Arc<dyn super::interface::Task> = Arc::new(WrappedTask(inner));
+    let (resp, result) = h.exec.execute(task).await;
+    assert!(result.is_ok());
+    assert!(!resp.is_active_task);
+    assert!(h.w.calls().is_empty());
+}

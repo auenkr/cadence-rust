@@ -8,8 +8,7 @@
 //!
 //! Deviations (documented in memory/history-port-wiring-20261105.md, Unit D8):
 //! * Processors / DLQ handler / metrics emitter are started by `HistoryEngine::start`.
-//! * `Replicator` (NDC apply-events / sync-activity) is not wired: the execution
-//!   cache is still `Unwired*`, so `UnwiredReplicator` returns an internal error.
+//! * `Replicator` is `ndc_adapters::NdcReplicator` (the `UnwiredReplicator` placeholder was deleted).
 //! * `MutableStateProvider` reads the persisted snapshot directly (no execution
 //!   cache lock, so the release fn is a no-op).
 //! * `ReplicationMessagesSizeFn` uses the JSON length, not the protobuf size.
@@ -23,9 +22,8 @@ use cadence_api::types::{ReplicationTask, VersionHistories};
 use cadence_persistence::history_contract::{ActivityInfo as PActivityInfo, GoExecutionStore};
 use cadence_persistence::sqlblobs::{activity_info_from_struct, Encoding};
 
-use crate::engine::deps::{HResult, HistoryError};
-use crate::engine::runtime::{HistoryEngine, ReplicationHydrator, Replicator, Task};
-use crate::engine::types as et;
+use crate::engine::deps::HResult;
+use crate::engine::runtime::{HistoryEngine, ReplicationHydrator, Task};
 use crate::mutable_state_activity::ActivityInfo;
 use crate::replication::deps::{
     ClientBean, Daemon, DomainCache as ReplDomainCache, Engine as ReplEngine, ExecutionManager, HistoryClient,
@@ -300,20 +298,6 @@ pub struct EngineTaskStore {
 impl crate::engine::runtime::ReplicationTaskStore for EngineTaskStore {
     fn put(&self, task: ReplicationTask) {
         self.inner.put(Some(Arc::new(task)));
-    }
-}
-
-/// Former placeholder for the NDC `Replicator`; superseded by
-/// `ndc_adapters::NdcReplicator` (kept for tests / fallback).
-pub struct UnwiredReplicator;
-
-#[async_trait]
-impl Replicator for UnwiredReplicator {
-    async fn apply_events(&self, _request: &et::ReplicateEventsV2Request) -> HResult<()> {
-        Err(HistoryError::internal("ndc replicator is not wired (execution cache is unwired)"))
-    }
-    async fn sync_activity(&self, _request: &et::SyncActivityRequest) -> HResult<()> {
-        Err(HistoryError::internal("ndc replicator is not wired (execution cache is unwired)"))
     }
 }
 

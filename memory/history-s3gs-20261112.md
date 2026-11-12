@@ -19,3 +19,6 @@ Branch `history-s3gs`: Go `common/archiver/s3store` and `common/archiver/gcloud`
   - rust-ci https://github.com/auenkr/cadence-rust/actions/runs/43171709207 : success
   - gate mysql/grpc/true https://github.com/auenkr/cadence-rust/actions/runs/43171701389 : success, GATE SUMMARY failed: []
   - gate postgres/tchannel/false https://github.com/auenkr/cadence-rust/actions/runs/43171705232 : success, GATE SUMMARY failed: []
+
+## Post-merge master validation (master eeec9044f, 2026-11-12)
+- Full workspace rust-ci + all 12 history-mixed-gate combos: runs 43173389214..43173438803: 12 exit 0; rust-ci 43173389214 success (watch exited 1 due to GitHub API rate limit; rechecked).
