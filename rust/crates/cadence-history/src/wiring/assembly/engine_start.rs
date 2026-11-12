@@ -472,11 +472,11 @@ impl WorkflowStartHost for EngineStartHost {
 
     async fn active_cluster_selection_policy_for_workflow(
         &self,
-        _domain_id: &str,
-        _workflow_id: &str,
-        _run_id: &str,
+        domain_id: &str,
+        workflow_id: &str,
+        run_id: &str,
     ) -> HResult<Option<cadence_api::types::ActiveClusterSelectionPolicy>> {
-        Ok(None)
+        self.core.active_cluster_manager.active_cluster_selection_policy_for_workflow(domain_id, workflow_id, run_id).await
     }
 
     fn new_mutable_state(

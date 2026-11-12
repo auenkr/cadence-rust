@@ -485,6 +485,9 @@ impl TimeSource for FixedTime {
 pub struct FixedActiveCluster(pub String);
 #[async_trait]
 impl ActiveClusterManager for FixedActiveCluster {
+    async fn active_cluster_selection_policy_for_workflow(&self, _: &str, _: &str, _: &str) -> HResult<Option<ActiveClusterSelectionPolicy>> {
+        Ok(None)
+    }
     async fn active_cluster_by_workflow(&self, _: &str, _: &str, _: &str) -> HResult<String> {
         Ok(self.0.clone())
     }
@@ -564,6 +567,9 @@ impl TimeSource for Nop {
 }
 #[async_trait]
 impl ActiveClusterManager for Nop {
+    async fn active_cluster_selection_policy_for_workflow(&self, _: &str, _: &str, _: &str) -> HResult<Option<ActiveClusterSelectionPolicy>> {
+        Ok(None)
+    }
     async fn active_cluster_by_workflow(&self, _: &str, _: &str, _: &str) -> HResult<String> {
         unimplemented!()
     }

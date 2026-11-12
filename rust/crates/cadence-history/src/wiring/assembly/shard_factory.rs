@@ -123,27 +123,54 @@ impl ShardClock for ShardClockAdapter {
 // Active cluster manager (engine + task traits)
 // ---------------------------------------------------------------------------
 
-/// Non active-active domains only: the active cluster of a workflow is the
-/// domain's active cluster.
+/// Go `activecluster.Manager` over the History domain cache and execution
+/// persistence (see `active_cluster_manager`).
 pub struct DomainActiveClusterManager {
-    domains: Arc<HistoryDomainCache>,
+    inner: crate::wiring::assembly::active_cluster_manager::ActiveClusterManagerImpl,
 }
 
 impl DomainActiveClusterManager {
-    pub fn new(domains: Arc<HistoryDomainCache>) -> Self {
-        Self { domains }
+    pub fn new(domains: Arc<HistoryDomainCache>, executions: Arc<dyn GoExecutionStore>, num_shards: i32) -> Self {
+        let domain_fn: crate::wiring::assembly::active_cluster_manager::DomainIdToDomainFn = Arc::new(move |id: &str| {
+            let entry = crate::engine::deps::DomainCache::get_domain_by_id(&*domains, id)?;
+            let active_active = domains
+                .inner()
+                .get_domain_by_id(id)
+                .map_err(|e| HistoryError::internal(e.to_string()))?
+                .replication
+                .active_clusters
+                .as_ref()
+                .and_then(|ac| ac.active_clusters_by_cluster_attribute.as_ref())
+                .is_some_and(|scopes| !scopes.is_empty());
+            Ok((entry, active_active))
+        });
+        Self {
+            inner: crate::wiring::assembly::active_cluster_manager::ActiveClusterManagerImpl::new(domain_fn, Arc::new(executions), num_shards),
+        }
+    }
+}
+
+fn history_to_task_error(e: HistoryError) -> task::TaskError {
+    if e.is_entity_not_exists() {
+        task::TaskError::EntityNotExists(e.to_string())
+    } else {
+        task::TaskError::InternalService(e.to_string())
     }
 }
 
 #[async_trait]
 impl crate::engine::runtime::ActiveClusterManager for DomainActiveClusterManager {
-    async fn active_cluster_by_workflow(&self, domain_id: &str, _workflow_id: &str, _run_id: &str) -> HResult<String> {
-        let entry = crate::engine::deps::DomainCache::get_domain_by_id(&*self.domains, domain_id)?;
-        entry
-            .active_clusters
-            .first()
-            .map(|(_, name)| name.clone())
-            .ok_or_else(|| HistoryError::internal(format!("domain {domain_id} has no active cluster")))
+    async fn active_cluster_by_workflow(&self, domain_id: &str, workflow_id: &str, run_id: &str) -> HResult<String> {
+        self.inner.get_active_cluster_info_by_workflow(domain_id, workflow_id, run_id).await.map(|i| i.active_cluster_name)
+    }
+
+    async fn active_cluster_selection_policy_for_workflow(
+        &self,
+        domain_id: &str,
+        workflow_id: &str,
+        run_id: &str,
+    ) -> HResult<Option<cadence_api::types::ActiveClusterSelectionPolicy>> {
+        self.inner.get_active_cluster_selection_policy_for_workflow(domain_id, workflow_id, run_id).await
     }
 }
 
@@ -152,23 +179,31 @@ impl task::ActiveClusterManager for DomainActiveClusterManager {
     async fn get_active_cluster_info_by_workflow(
         &self,
         domain_id: &str,
-        _workflow_id: &str,
-        _run_id: &str,
+        workflow_id: &str,
+        run_id: &str,
     ) -> task::Result<task::ActiveClusterInfo> {
-        let entry = task::DomainCache::get_domain_by_id(&*self.domains, domain_id)?;
-        Ok(task::ActiveClusterInfo {
-            active_cluster_name: entry.replication_config.active_cluster_name.clone(),
-            failover_version: entry.failover_version,
-        })
+        self.inner
+            .get_active_cluster_info_by_workflow(domain_id, workflow_id, run_id)
+            .await
+            .map(|i| task::ActiveClusterInfo { active_cluster_name: i.active_cluster_name, failover_version: i.failover_version })
+            .map_err(history_to_task_error)
     }
 
     async fn get_active_cluster_selection_policy_for_workflow(
         &self,
-        _domain_id: &str,
-        _workflow_id: &str,
-        _run_id: &str,
+        domain_id: &str,
+        workflow_id: &str,
+        run_id: &str,
     ) -> task::Result<Option<task::ActiveClusterSelectionPolicy>> {
-        Ok(None)
+        self.inner
+            .get_active_cluster_selection_policy_for_workflow(domain_id, workflow_id, run_id)
+            .await
+            .map(|p| {
+                p.map(|p| task::ActiveClusterSelectionPolicy {
+                    cluster_attribute: p.cluster_attribute.map(|a| task::ClusterAttribute { scope: a.scope, name: a.name }),
+                })
+            })
+            .map_err(history_to_task_error)
     }
 }
 
@@ -491,7 +526,7 @@ impl TaskShardContext {
             dlq: Arc::new(crate::wiring::persistence::shard_events::SqlHistoryTaskDLQManager),
         });
         Arc::new(Self {
-            active: Arc::new(DomainActiveClusterManager::new(env.domain_cache.clone())),
+            active: env.active_cluster_manager.clone(),
             reinjector: Arc::new(ReinjectorSlot::default()),
             shard,
             env,
