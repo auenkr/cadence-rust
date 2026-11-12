@@ -429,7 +429,7 @@ impl DomainCache for TestDomains {
         if id != DOMAIN_ID {
             return Err(HistoryError::internal(format!("domain {id} not found")));
         }
-        Ok(Arc::new(DomainCacheEntry { info: DomainInfo { id: DOMAIN_ID.into(), name: DOMAIN_NAME.into(), status: self.0.load(Ordering::SeqCst) }, active_clusters: self.1.lock().unwrap().clone(), ..Default::default() }))
+        Ok(Arc::new(DomainCacheEntry { info: DomainInfo { id: DOMAIN_ID.into(), name: DOMAIN_NAME.into(), status: self.0.load(Ordering::SeqCst) }, active_clusters: { let mut a = self.1.lock().unwrap().clone(); if !a.iter().any(|(k, _)| k.is_none()) { a.insert(0, (None, CLUSTER.to_string())); } a }, ..Default::default() }))
     }
     fn get_domain(&self, name: &str) -> HResult<Arc<DomainCacheEntry>> {
         if name != DOMAIN_NAME {
