@@ -393,9 +393,6 @@ fn ainfo(id: i64) -> TimerActivityInfo {
 fn dinfo(attempt: i64, started: i64) -> TimerDecisionInfo {
     TimerDecisionInfo { schedule_id: 5, started_id: started, attempt, version: 1 }
 }
-fn has(w: &W, c: &str) -> bool {
-    w.calls().iter().any(|x| x == c)
-}
 
 // ---- user timer ----
 
