@@ -14,7 +14,7 @@ Closes the remaining gaps of `history-archgaps-20261112.md` (s3store / gcloud hi
 paged iteration call sequence `[1,2,3,4]` and state encoding, first-page EntityNotExists, Go JSON size/escaping/omitempty, per-blob mutated check with and without incomplete-history, inline options have no progress manager / non-retriable error.
 
 ## Evidence
-- rust-ci (clippy + test) on code head 3c-pushed commit: https://github.com/auenkr/cadence-rust/actions/runs/43180611187 (clippy, format, test steps success)
+- rust-ci (clippy + test) on code head 8c37f862: https://github.com/auenkr/cadence-rust/actions/runs/43180611187 (clippy, format, test steps success)
 - gate mysql/grpc/true: https://github.com/auenkr/cadence-rust/actions/runs/43182140040
 - gate postgres/tchannel/false: https://github.com/auenkr/cadence-rust/actions/runs/43182145355
-(final results appended below)
+Results: rust-ci success; both gates success with `GATE SUMMARY failed: []`. Head 8c37f862 differs from the final head only by this memory file (and merged master memory).
