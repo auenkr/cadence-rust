@@ -258,7 +258,7 @@ async fn signal_with_start_workflow_not_exist_duplicate_request_error() {
 #[tokio::test]
 async fn signal_with_start_workflow_not_exist_duplicate_request_error_type_mismatch() {
     let h = Harness::new();
-    push_create_error(&h, PersistenceError::DuplicateRequest { request_type: 0, run_id: "test-run-id".into() });
+    push_create_error(&h, PersistenceError::DuplicateRequest { request_type: 2, run_id: "test-run-id".into() });
     let err = h.engine.signal_with_start_workflow_execution(&sws_req("req-1")).await.unwrap_err();
     assert!(matches!(err, HistoryError::DuplicateRequest { .. }), "{err}");
 }
