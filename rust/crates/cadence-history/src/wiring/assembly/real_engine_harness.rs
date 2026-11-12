@@ -114,6 +114,18 @@ impl MemExecutions {
     pub fn snapshot(&self, wf: &str, run: &str) -> Option<pc::WorkflowSnapshot> {
         self.inner.lock().unwrap().runs.get(&(DOMAIN_ID.into(), wf.into(), run.into())).cloned()
     }
+    /// Decoded child execution infos of a run (ordered by initiated event id).
+    pub fn child_infos(&self, wf: &str, run: &str) -> Vec<pc::ChildExecutionInfo> {
+        let snap = self.snapshot(wf, run).expect("snapshot");
+        snap.child_execution_infos
+            .iter()
+            .map(|b| {
+                let enc = cadence_persistence::sqlblobs::Encoding::parse(&b.value.encoding).expect("encoding");
+                let st = enc.decode(&b.value.data).expect("decode");
+                cadence_persistence::sqlblobs::child_execution_info_from_struct(&st).expect("child info")
+            })
+            .collect()
+    }
     pub fn current_run(&self, wf: &str) -> Option<pc::CurrentExecution> {
         self.inner.lock().unwrap().current.get(&(DOMAIN_ID.to_string(), wf.to_string())).cloned()
     }
@@ -410,13 +422,13 @@ impl pc::GoHistoryV2Store for MemHistory {
 }
 
 #[derive(Default)]
-pub struct TestDomains(pub Arc<AtomicI32>);
+pub struct TestDomains(pub Arc<AtomicI32>, pub Arc<Mutex<Vec<(Option<cadence_api::types::ClusterAttribute>, String)>>>);
 impl DomainCache for TestDomains {
     fn get_domain_by_id(&self, id: &str) -> HResult<Arc<DomainCacheEntry>> {
         if id != DOMAIN_ID {
             return Err(HistoryError::internal(format!("domain {id} not found")));
         }
-        Ok(Arc::new(DomainCacheEntry { info: DomainInfo { id: DOMAIN_ID.into(), name: DOMAIN_NAME.into(), status: self.0.load(Ordering::SeqCst) }, ..Default::default() }))
+        Ok(Arc::new(DomainCacheEntry { info: DomainInfo { id: DOMAIN_ID.into(), name: DOMAIN_NAME.into(), status: self.0.load(Ordering::SeqCst) }, active_clusters: self.1.lock().unwrap().clone(), ..Default::default() }))
     }
     fn get_domain(&self, name: &str) -> HResult<Arc<DomainCacheEntry>> {
         if name != DOMAIN_NAME {
@@ -461,6 +473,8 @@ pub struct Harness {
     pub cache: Arc<EngineExecutionCache>,
     /// Domain status served by the test domain cache (0 registered, 1 deprecated).
     pub domain_status: Arc<AtomicI32>,
+    /// Active-active cluster attributes served by the test domain cache (empty == plain local domain).
+    pub domain_active_clusters: Arc<Mutex<Vec<(Option<cadence_api::types::ClusterAttribute>, String)>>>,
 }
 
 impl Default for Harness {
@@ -494,7 +508,8 @@ impl Harness {
         .unwrap_or_else(|_| panic!("shard"));
         let config = Arc::new(Config::new_for_test());
         let domain_status = Arc::new(AtomicI32::new(0));
-        let domains: Arc<dyn DomainCache> = Arc::new(TestDomains(domain_status.clone()));
+        let domain_active_clusters = Arc::new(Mutex::new(Vec::new()));
+        let domains: Arc<dyn DomainCache> = Arc::new(TestDomains(domain_status.clone(), domain_active_clusters.clone()));
         let core = Arc::new(EngineCore {
             engine_slot: Arc::new(std::sync::OnceLock::new()),
             semaphore_metadata: Arc::new(cadence_persistence::InMemoryExecutionStore::new()),
@@ -530,7 +545,7 @@ impl Harness {
         configure(&mut engine);
         let engine = Arc::new(engine);
         let _ = core.engine_slot.set(Arc::downgrade(&engine));
-        Self { engine, execs, history, clock, cache, domain_status }
+        Self { engine, execs, history, clock, cache, domain_status, domain_active_clusters }
     }
 }
 
