@@ -79,6 +79,8 @@ dyn = (root / 'go/config/dynamicconfig/development.yaml').read_text()
 if args.es_url:
     assert 'value: "db"' in dyn
     dyn = dyn.replace('value: "db"', 'value: "es"')
+# retention-0 archival scenario: delete/archive tasks are jittered by up to this many minutes (default 60)
+dyn += '\nsystem.workflowDeletionJitterRange:\n- value: 1\n  constraints: {}\n'
 (work / 'dynamic-config.yaml').write_text(dyn)
 (work / 'rust-dynamic-config.yaml').write_text(dyn + f'\nsystem.enableGRPCOutbound:\n  - value: {str(args.rust_outbound == "grpc").lower()}\nfrontend.sendRawWorkflowHistory:\n  - value: true\n')
 (work / 'config/base.yaml').write_text((root / 'go/config/base.yaml').read_text())
@@ -537,6 +539,28 @@ try:
             record('admin-probe-run', False, pr.stdout + pr.stderr)
     except Exception as e:
         record('admin-probe-run', False, repr(e))
+    # ---- history scenarios phase: retry/cron timeout, strong idempotency, retention-0 archival, bad-binary auto-reset
+    dom_sc = 'fe-gate-scen-' + secrets.token_hex(3)
+    scen_hist_uri, scen_vis_uri = f'file://{work / "scen-history-archive"}', f'file://{work / "scen-visibility-archive"}'
+    ok_sc = run('scen-register-archival-domain', [*cli_t, '--domain', dom_sc, 'domain', 'register', '--retention', '0',
+        '--history_archival_status', 'enabled', '--history_uri', scen_hist_uri,
+        '--visibility_archival_status', 'disabled'])
+    time.sleep(12)  # domain cache refresh in Go History/Worker
+    senv = {**env, 'FE_MODE': 'scen', 'FE_DOMAIN_ARCH': dom_sc if ok_sc else '', 'FE_ARCH_DIR': str(work / 'scen-history-archive')}
+    sdrv = subprocess.Popen([str(args.driver)], cwd=work, stdout=(work / 'sdk-scen.log').open('w'), stderr=subprocess.STDOUT, env=senv, start_new_session=True)
+    procs['sdk-scen-driver'] = sdrv
+    try:
+        sdrv.wait(timeout=1500)
+    except subprocess.TimeoutExpired:
+        record('sdk-scen-driver-timeout', False, 'exceeded 1500s')
+        kill('sdk-scen-driver')
+    for line in (work / 'sdk-scen.log').read_text().splitlines():
+        m = re.match(r'STEP (\S+) (ok|FAIL)\s*(.*)', line)
+        if m:
+            record('sdk-' + m.group(1), m.group(2) == 'ok', m.group(3))
+    print('SCEN SDK LOG TAIL\n' + '\n'.join((work / 'sdk-scen.log').read_text().splitlines()[-40:]), flush=True)
+    record('sdk-scen-driver-exit', sdrv.returncode == 0, f'exit={sdrv.returncode}')
+    record_services_alive('after-scen-sdk')
     # ---- archival phase: Go History/Worker archive (filestore), Rust Frontend registers/reads
     hist_uri, vis_uri = f'file://{work / "history-archive"}', f'file://{work / "visibility-archive"}'
     dom_ar = 'fe-gate-arch-' + secrets.token_hex(3)
