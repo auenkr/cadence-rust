@@ -15,7 +15,7 @@ use std::sync::Arc;
 use crate::cloud_archiver::{
     gcs_archive_history, gcs_archive_visibility, s3_archive_history, s3_archive_visibility,
     gcs_get_history, gcs_query_visibility, gcs_validate_uri, s3_get_history, s3_query_visibility,
-    s3_validate_uri, CloudBackends, ObjectStore, S3_ACCESS_POINT_SCHEME,
+    s3_validate_uri, ArchiveOptions, CloudBackends, ObjectStore, S3_ACCESS_POINT_SCHEME,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -176,6 +176,7 @@ pub fn parse_uri(s: &str) -> Result<ArchiverUri, String> {
 pub struct ArchiverProvider {
     configured_keys: BTreeSet<String>,
     cloud: CloudBackends,
+    archive_options: ArchiveOptions,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -231,6 +232,13 @@ impl ArchiverProvider {
     /// Attach the s3store / gstorage backends built from the server config.
     pub fn with_cloud(mut self, cloud: CloudBackends) -> Self {
         self.cloud = cloud;
+        self
+    }
+
+    /// Metrics sink / `NonRetriableError` / `ProgressManager` handed to the cloud archivers
+    /// (Go `archiver.ArchiveOption`s + the container `MetricsClient`).
+    pub fn with_archive_options(mut self, options: ArchiveOptions) -> Self {
+        self.archive_options = options;
         self
     }
 
@@ -296,12 +304,19 @@ impl ArchiverProvider {
             S3_SCHEME | S3_ACCESS_POINT_SCHEME => {
                 self.resolve(Kind::History, &parsed.scheme)?;
                 let store = self.s3_store(Kind::History, &parsed.scheme)?;
-                s3_archive_history(store.as_ref(), &self.cloud.s3_region, &parsed, request, source)
+                s3_archive_history(
+                    store.as_ref(),
+                    &self.cloud.s3_region,
+                    &parsed,
+                    request,
+                    source,
+                    &self.archive_options,
+                )
             }
             GCLOUD_SCHEME => {
                 self.resolve(Kind::History, &parsed.scheme)?;
                 let store = self.gcs_store(Kind::History, &parsed.scheme)?;
-                gcs_archive_history(store.as_ref(), &parsed, request, source)
+                gcs_archive_history(store.as_ref(), &parsed, request, source, &self.archive_options)
             }
             FILESTORE_SCHEME => filestore_archive_history(filestore, &parsed, request, source),
             other => Err(ArchiverError::Other(format!(
@@ -323,12 +338,18 @@ impl ArchiverProvider {
             S3_SCHEME | S3_ACCESS_POINT_SCHEME => {
                 self.resolve(Kind::Visibility, &parsed.scheme)?;
                 let store = self.s3_store(Kind::Visibility, &parsed.scheme)?;
-                s3_archive_visibility(store.as_ref(), &self.cloud.s3_region, &parsed, request)
+                s3_archive_visibility(
+                    store.as_ref(),
+                    &self.cloud.s3_region,
+                    &parsed,
+                    request,
+                    &self.archive_options,
+                )
             }
             GCLOUD_SCHEME => {
                 self.resolve(Kind::Visibility, &parsed.scheme)?;
                 let store = self.gcs_store(Kind::Visibility, &parsed.scheme)?;
-                gcs_archive_visibility(store.as_ref(), &parsed, request)
+                gcs_archive_visibility(store.as_ref(), &parsed, request, &self.archive_options)
             }
             FILESTORE_SCHEME => filestore_archive_visibility(filestore, &parsed, request),
             other => Err(ArchiverError::Other(format!(

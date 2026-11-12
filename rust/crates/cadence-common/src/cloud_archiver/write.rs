@@ -3,22 +3,29 @@
 //! Mirrors `go/common/archiver/s3store/{historyArchiver,visibilityArchiver,util}.go` `Archive`
 //! and `go/common/archiver/gcloud/{historyArchiver,visibilityArchiver,util}.go` `Archive`
 //! (uploads through `connector.Client.Upload`/`Exist`). History batches come from the same
-//! [`HistoryBatchSource`] the filestore archiver uses; they are re-split into blobs of the Go
-//! `targetHistoryBlobSize` (2MB of JSON) exactly like `archiver.HistoryIterator`.
+//! [`HistoryBatchSource`] the filestore archiver uses; [`HistoryIterator`] re-splits them into
+//! blobs exactly like Go's `archiver.historyIterator` (state `NextEventID`/`FinishedIteration`,
+//! JSON size estimator, 2MB target) and the archivers drive it with the Go `ProgressManager`
+//! protocol, metrics and `NonRetriableError` substitution.
+
+use std::fmt;
+use std::sync::Arc;
+use std::time::Instant;
 
 use serde_json::{json, Value};
 
 use super::{
-    gcs_hash, gcs_history_filename, gcs_object, gcs_validate_uri,
-    s3_bucket, s3_history_key, s3_key_path, s3_soft_validate_uri, s3_visibility_prefix,
-    ObjectStore, StoreError, StoreErrorKind, ERR_BUCKET_NOT_EXISTS,
+    gcs_hash, gcs_history_filename, gcs_object, gcs_validate_uri, s3_bucket, s3_history_key,
+    s3_key_path, s3_soft_validate_uri, s3_visibility_prefix, ObjectStore, StoreError,
+    StoreErrorKind, ERR_BUCKET_NOT_EXISTS, GCS_ERR_BUCKET_NOT_EXIST,
 };
 use crate::archiver::{
     validate_history_request, validate_visibility_request, ArchiveHistoryRequest,
-    ArchiveVisibilityRequest, ArchiverError, ArchiverUri, HistoryBatchSource,
+    ArchiveVisibilityRequest, ArchiverError, ArchiverUri, HistoryBatchSource, ERR_INVALID_URI,
+    ERR_URI_SCHEME_MISMATCH,
 };
 
-/// Go `targetHistoryBlobSize` (s3store / archiver iterator): 2MB.
+/// Go `targetHistoryBlobSize` (s3store / gcloud): 2MB.
 pub const TARGET_HISTORY_BLOB_SIZE: usize = 2 * 1024 * 1024;
 /// Go gcloud `errUploadNonRetriable`.
 pub const GCS_ERR_UPLOAD_NON_RETRIABLE: &str = "upload non-retriable error";
@@ -32,6 +39,90 @@ const S3_PRIMARY_ID: &str = "workflowID";
 const GCS_INDEX_CLOSE: &str = "closeTimeout";
 const GCS_INDEX_START: &str = "startTimeout";
 
+/// Go metrics scope operation names (`metrics.HistoryArchiverScope` / `VisibilityArchiverScope`).
+pub const HISTORY_ARCHIVER_SCOPE: &str = "HistoryArchiver";
+pub const VISIBILITY_ARCHIVER_SCOPE: &str = "VisibilityArchiver";
+
+/// Go metric names (`common/metrics/defs.go`) emitted by the s3/gcloud archivers.
+pub mod metric {
+    pub const CADENCE_LATENCY: &str = "cadence_latency";
+    pub const CADENCE_LATENCY_HISTOGRAM: &str = "cadence_latency_ns";
+    pub const HISTORY_ARCHIVE_NON_RETRYABLE_ERROR: &str = "history_archiver_archive_non_retryable_error";
+    pub const HISTORY_ARCHIVE_TRANSIENT_ERROR: &str = "history_archiver_archive_transient_error";
+    pub const HISTORY_ARCHIVE_SUCCESS: &str = "history_archiver_archive_success";
+    pub const HISTORY_TOTAL_UPLOAD_SIZE: &str = "history_archiver_total_upload_size";
+    pub const HISTORY_TOTAL_UPLOAD_SIZE_HISTOGRAM: &str = "history_archiver_total_upload_size_counts";
+    pub const HISTORY_SIZE: &str = "history_archiver_history_size";
+    pub const HISTORY_SIZE_HISTOGRAM: &str = "history_archiver_history_size_counts";
+    pub const HISTORY_DUPLICATE_ARCHIVALS: &str = "history_archiver_duplicate_archivals";
+    pub const HISTORY_BLOB_EXISTS: &str = "history_archiver_blob_exists";
+    pub const HISTORY_BLOB_SIZE: &str = "history_archiver_blob_size";
+    pub const HISTORY_BLOB_SIZE_HISTOGRAM: &str = "history_archiver_blob_size_counts";
+    pub const VISIBILITY_ARCHIVE_NON_RETRYABLE_ERROR: &str = "visibility_archiver_archive_non_retryable_error";
+    pub const VISIBILITY_ARCHIVE_TRANSIENT_ERROR: &str = "visibility_archiver_archive_transient_error";
+    pub const VISIBILITY_ARCHIVE_SUCCESS: &str = "visibility_archiver_archive_success";
+}
+
+/// Go `metrics.Scope` as used by the archivers (`MetricsClient.Scope(scope, DomainTag(domain))`).
+pub trait ArchiverMetrics: Send + Sync {
+    fn inc_counter(&self, scope: &str, domain: &str, name: &str);
+    fn add_counter(&self, scope: &str, domain: &str, name: &str, delta: i64);
+    /// Go `RecordTimer(name, time.Duration(v))` (also used for byte sizes).
+    fn record_timer(&self, scope: &str, domain: &str, name: &str, value: i64);
+    /// Go `IntExponentialHistogram`.
+    fn int_histogram(&self, scope: &str, domain: &str, name: &str, value: i64);
+}
+
+/// Metrics sink that drops everything (Go `metrics.NoopClient`).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct NoopArchiverMetrics;
+
+impl ArchiverMetrics for NoopArchiverMetrics {
+    fn inc_counter(&self, _: &str, _: &str, _: &str) {}
+    fn add_counter(&self, _: &str, _: &str, _: &str, _: i64) {}
+    fn record_timer(&self, _: &str, _: &str, _: &str, _: i64) {}
+    fn int_histogram(&self, _: &str, _: &str, _: &str, _: i64) {}
+}
+
+/// Go `archiver.ProgressManager` payload shared by the s3 `uploadProgress` (`BatchIdx`) and the
+/// gcloud `progress` (`CurrentPageNumber`) structs; `IteratorState` is the encoded iterator state.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ArchiveProgress {
+    pub batch_idx: usize,
+    pub iterator_state: Option<Vec<u8>>,
+}
+
+/// Go `archiver.ProgressManager`.
+pub trait ProgressManager: Send + Sync {
+    fn has_progress(&self) -> bool;
+    fn load_progress(&self) -> Result<ArchiveProgress, String>;
+    fn record_progress(&self, progress: &ArchiveProgress) -> Result<(), String>;
+}
+
+/// Go `archiver.ArchiveFeatureCatalog` + the metrics client of the archiver container.
+#[derive(Clone)]
+pub struct ArchiveOptions {
+    pub metrics: Arc<dyn ArchiverMetrics>,
+    /// Go `NonRetriableError`: replaces any non-retryable error returned by `Archive`.
+    pub non_retriable_error: Option<Arc<dyn Fn() -> ArchiverError + Send + Sync>>,
+    pub progress_manager: Option<Arc<dyn ProgressManager>>,
+}
+
+impl Default for ArchiveOptions {
+    fn default() -> Self {
+        Self { metrics: Arc::new(NoopArchiverMetrics), non_retriable_error: None, progress_manager: None }
+    }
+}
+
+impl fmt::Debug for ArchiveOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ArchiveOptions")
+            .field("non_retriable_error", &self.non_retriable_error.is_some())
+            .field("progress_manager", &self.progress_manager.is_some())
+            .finish()
+    }
+}
+
 /// Go `time.Unix(0, ts).UTC().Format(time.RFC3339)`.
 fn rfc3339_utc(ts: i64) -> String {
     chrono::DateTime::from_timestamp_nanos(ts)
@@ -39,30 +130,105 @@ fn rfc3339_utc(ts: i64) -> String {
         .to_string()
 }
 
-/// Go `archiver.historyIterator.readHistoryBatches`: a blob is closed as soon as its estimated
-/// JSON size reaches `target`; the last blob is the one flagged `isLast`.
-pub fn split_history_blobs(batches: Vec<Value>, target: usize) -> Vec<Vec<Value>> {
-    let mut blobs = Vec::new();
-    let mut cur = Vec::new();
-    let mut size = 0_usize;
-    for batch in batches {
-        size += serde_json::to_vec(&batch).map_or(0, |v| v.len());
-        cur.push(batch);
-        if size >= target {
-            blobs.push(std::mem::take(&mut cur));
-            size = 0;
-        }
-    }
-    if !cur.is_empty() {
-        blobs.push(cur);
-    }
-    blobs
-}
-
 fn event_i64(batch: &Value, last: bool, field: &str) -> i64 {
     let events = batch.get("events").and_then(Value::as_array);
     let ev = events.and_then(|e| if last { e.last() } else { e.first() });
     ev.and_then(|e| e.get(field)).and_then(Value::as_i64).unwrap_or(0)
+}
+
+/// Go `historyIteratorState` (JSON without tags: Go field names).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IteratorState {
+    pub next_event_id: i64,
+    pub finished: bool,
+}
+
+impl IteratorState {
+    /// Go `GetState` (`json.Marshal(historyIteratorState)`).
+    pub fn encode(&self) -> Vec<u8> {
+        format!(
+            "{{\"NextEventID\":{},\"FinishedIteration\":{}}}",
+            self.next_event_id, self.finished
+        )
+        .into_bytes()
+    }
+
+    pub fn decode(bytes: &[u8]) -> Option<Self> {
+        let v: Value = serde_json::from_slice(bytes).ok()?;
+        Some(Self {
+            next_event_id: v.get("NextEventID")?.as_i64()?,
+            finished: v.get("FinishedIteration")?.as_bool()?,
+        })
+    }
+}
+
+/// Go `archiver.historyIterator` over batches already read from the history store. Mirrors
+/// `readHistoryBatches`: batches are appended (`jsonSizeEstimator`) until the estimated size
+/// reaches the target; the iteration is finished when no batch follows the blob.
+pub struct HistoryIterator<'a> {
+    request: &'a ArchiveHistoryRequest,
+    batches: Vec<Value>,
+    target: usize,
+    state: IteratorState,
+}
+
+impl<'a> HistoryIterator<'a> {
+    /// Go `NewHistoryIterator`.
+    pub fn new(request: &'a ArchiveHistoryRequest, batches: Vec<Value>, target: usize) -> Self {
+        Self { request, batches, target, state: IteratorState { next_event_id: 1, finished: false } }
+    }
+
+    /// Go `NewHistoryIteratorFromState`; undecodable state is an error (caller falls back to a
+    /// fresh iterator like Go's `loadHistoryIterator`).
+    pub fn from_state(
+        request: &'a ArchiveHistoryRequest,
+        batches: Vec<Value>,
+        target: usize,
+        state: &[u8],
+    ) -> Result<Self, String> {
+        let state = IteratorState::decode(state).ok_or("invalid iterator state")?;
+        Ok(Self { request, batches, target, state })
+    }
+
+    /// Go `HasNext`.
+    pub fn has_next(&self) -> bool {
+        !self.state.finished
+    }
+
+    /// Go `GetState`.
+    pub fn state(&self) -> Vec<u8> {
+        self.state.encode()
+    }
+
+    /// Go `Next`: the next `HistoryBlob` (`header` + `body`) as JSON.
+    pub fn next_blob(&mut self) -> Result<Value, ArchiverError> {
+        if self.state.finished {
+            return Err(ArchiverError::Other("iterator depleted".to_owned()));
+        }
+        let mut size = 0_usize;
+        let mut taken: Vec<Value> = Vec::new();
+        let mut next_id = self.state.next_event_id;
+        let mut idx = 0;
+        while idx < self.batches.len() && size < self.target {
+            let b = &self.batches[idx];
+            idx += 1;
+            if event_i64(b, false, "eventId") < self.state.next_event_id {
+                continue; // already archived (resumed from saved state)
+            }
+            size += serde_json::to_vec(b).map_err(|e| ArchiverError::Other(e.to_string()))?.len();
+            next_id = event_i64(b, true, "eventId") + 1;
+            taken.push(b.clone());
+        }
+        if taken.is_empty() {
+            // Go: EntityNotExists with firstEventID != 1 finishes, otherwise it is an error.
+            return Err(ArchiverError::EntityNotExists("history not exist".to_owned()));
+        }
+        let finished = !self.batches[idx..]
+            .iter()
+            .any(|b| event_i64(b, false, "eventId") >= next_id);
+        self.state = IteratorState { next_event_id: next_id, finished };
+        Ok(history_blob(self.request, &taken, finished))
+    }
 }
 
 /// Go `archiver.HistoryBlob` (`header` + `body`) as JSON, matching the Go struct tags.
@@ -93,6 +259,60 @@ fn encode(v: &impl serde::Serialize) -> Result<Vec<u8>, ArchiverError> {
     serde_json::to_vec(v).map_err(|e| ArchiverError::Other(e.to_string()))
 }
 
+/// Failure of an inner archive step with the Go retryability classification.
+struct Failure {
+    err: ArchiverError,
+    retryable: bool,
+}
+
+impl Failure {
+    fn new(err: ArchiverError, retryable: bool) -> Self {
+        Self { err, retryable }
+    }
+}
+
+/// Go `startTimer`/deferred block shared by all four `Archive` methods: records latency, counts
+/// transient vs non-retryable errors and substitutes `NonRetriableError`.
+struct Scoped<'a> {
+    opts: &'a ArchiveOptions,
+    scope: &'static str,
+    domain: &'a str,
+    start: Instant,
+}
+
+impl<'a> Scoped<'a> {
+    fn new(opts: &'a ArchiveOptions, scope: &'static str, domain: &'a str) -> Self {
+        Self { opts, scope, domain, start: Instant::now() }
+    }
+    fn inc(&self, name: &str) {
+        self.opts.metrics.inc_counter(self.scope, self.domain, name);
+    }
+    fn finish(
+        self,
+        result: Result<(), Failure>,
+        transient_metric: &str,
+        non_retryable_metric: &str,
+    ) -> Result<(), ArchiverError> {
+        let ns = i64::try_from(self.start.elapsed().as_nanos()).unwrap_or(i64::MAX);
+        self.opts.metrics.record_timer(self.scope, self.domain, metric::CADENCE_LATENCY, ns);
+        self.opts.metrics.int_histogram(self.scope, self.domain, metric::CADENCE_LATENCY_HISTOGRAM, ns);
+        match result {
+            Ok(()) => Ok(()),
+            Err(f) if f.retryable => {
+                self.inc(transient_metric);
+                Err(f.err)
+            }
+            Err(f) => {
+                self.inc(non_retryable_metric);
+                Err(match &self.opts.non_retriable_error {
+                    Some(sub) => sub(),
+                    None => f.err,
+                })
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------- S3
 
 /// Go s3store `upload`: `NoSuchBucket` becomes a `BadRequestError`.
@@ -101,11 +321,49 @@ fn s3_upload(
     bucket: &str,
     key: &str,
     data: &[u8],
-) -> Result<(), ArchiverError> {
+) -> Result<(), Failure> {
     store.put_object(bucket, key, data).map_err(|e| match e.kind {
-        StoreErrorKind::NoSuchBucket => ArchiverError::BadRequest(ERR_BUCKET_NOT_EXISTS.to_owned()),
-        _ => ArchiverError::Other(e.message),
+        StoreErrorKind::NoSuchBucket => {
+            Failure::new(ArchiverError::BadRequest(ERR_BUCKET_NOT_EXISTS.to_owned()), false)
+        }
+        kind => Failure::new(ArchiverError::Other(e.message), kind == StoreErrorKind::Retryable),
     })
+}
+
+/// Go `loadHistoryIterator` + `uploadProgress` handling shared by s3 (and gcs).
+fn load_iterator<'a>(
+    request: &'a ArchiveHistoryRequest,
+    batches: Vec<Value>,
+    opts: &ArchiveOptions,
+    progress: &mut ArchiveProgress,
+) -> HistoryIterator<'a> {
+    if let Some(pm) = &opts.progress_manager {
+        if pm.has_progress() {
+            if let Ok(loaded) = pm.load_progress() {
+                if let Some(state) = &loaded.iterator_state {
+                    if let Ok(it) = HistoryIterator::from_state(
+                        request,
+                        batches.clone(),
+                        TARGET_HISTORY_BLOB_SIZE,
+                        state,
+                    ) {
+                        *progress = loaded;
+                        return it;
+                    }
+                }
+            }
+            *progress = ArchiveProgress::default();
+        }
+    }
+    HistoryIterator::new(request, batches, TARGET_HISTORY_BLOB_SIZE)
+}
+
+/// Go `saveHistoryIteratorState` (best effort).
+fn save_state(opts: &ArchiveOptions, it: &HistoryIterator<'_>, progress: &mut ArchiveProgress) {
+    if let Some(pm) = &opts.progress_manager {
+        progress.iterator_state = Some(it.state());
+        let _ = pm.record_progress(progress);
+    }
 }
 
 /// Go s3store `historyArchiver.Archive` (one `HistoryBlob` object per key `.../<version>/<batchIdx>`).
@@ -115,34 +373,87 @@ pub fn s3_archive_history(
     uri: &ArchiverUri,
     request: &ArchiveHistoryRequest,
     source: &dyn HistoryBatchSource,
+    opts: &ArchiveOptions,
 ) -> Result<(), ArchiverError> {
-    s3_soft_validate_uri(uri).map_err(ArchiverError::Other)?;
-    validate_history_request(request)?;
-    let Some(batches) = source.read_all(request)? else {
-        return Ok(()); // history gone (duplicate archival signal): skipped like Go
+    let scoped = Scoped::new(opts, HISTORY_ARCHIVER_SCOPE, &request.domain_name);
+    let r = s3_archive_history_inner(&scoped, store, region, uri, request, source);
+    scoped.finish(
+        r,
+        metric::HISTORY_ARCHIVE_TRANSIENT_ERROR,
+        metric::HISTORY_ARCHIVE_NON_RETRYABLE_ERROR,
+    )
+}
+
+fn s3_archive_history_inner(
+    scoped: &Scoped<'_>,
+    store: &dyn ObjectStore,
+    region: &str,
+    uri: &ArchiverUri,
+    request: &ArchiveHistoryRequest,
+    source: &dyn HistoryBatchSource,
+) -> Result<(), Failure> {
+    let (opts, scope, domain) = (scoped.opts, scoped.scope, scoped.domain);
+    let fail = |e: ArchiverError| {
+        // Go: persistence.IsTransientError (internal service error) || isRetryableError.
+        let retryable = matches!(e, ArchiverError::Internal(_));
+        Failure::new(e, retryable)
     };
-    let bucket = s3_bucket(uri, region).map_err(ArchiverError::Other)?;
+    s3_soft_validate_uri(uri).map_err(|m| fail(ArchiverError::Other(m)))?;
+    validate_history_request(request).map_err(fail)?;
+    let mut progress = ArchiveProgress::default();
+    let batches = match source.read_all(request).map_err(fail)? {
+        Some(b) if !b.is_empty() => b,
+        _ => {
+            // history gone (duplicate archival signal): skipped like Go
+            scoped.inc(metric::HISTORY_DUPLICATE_ARCHIVALS);
+            return Ok(());
+        }
+    };
+    let bucket = s3_bucket(uri, region).map_err(|m| fail(ArchiverError::Other(m)))?;
     let path = s3_key_path(uri);
-    let blobs = split_history_blobs(batches, TARGET_HISTORY_BLOB_SIZE);
-    let count = blobs.len();
-    for (idx, blob) in blobs.iter().enumerate() {
-        let encoded = encode(&history_blob(request, blob, idx + 1 == count))?;
+    let mut it = load_iterator(request, batches, opts, &mut progress);
+    let (mut uploaded_size, mut history_size) = (0_i64, 0_i64);
+    while it.has_next() {
+        let blob = match it.next_blob() {
+            Ok(b) => b,
+            Err(ArchiverError::EntityNotExists(_)) => {
+                scoped.inc(metric::HISTORY_DUPLICATE_ARCHIVALS);
+                return Ok(());
+            }
+            Err(e) => return Err(fail(e)),
+        };
+        let encoded = encode(&blob).map_err(fail)?;
         let key = s3_history_key(
             &path,
             &request.domain_id,
             &request.workflow_id,
             &request.run_id,
             request.close_failover_version,
-            idx as i64,
+            progress.batch_idx as i64,
         );
         // Go keyExists: HeadObject; NotFound = false.
         let exists = store
             .head_object(&bucket, &key)
-            .map_err(|e| ArchiverError::Other(e.message))?;
-        if !exists {
+            .map_err(|e| Failure::new(ArchiverError::Other(e.message), e.kind == StoreErrorKind::Retryable))?;
+        let blob_size = encoded.len() as i64;
+        if exists {
+            scoped.inc(metric::HISTORY_BLOB_EXISTS);
+        } else {
             s3_upload(store, &bucket, &key, &encoded)?;
+            uploaded_size += blob_size;
+            opts.metrics.record_timer(scope, domain, metric::HISTORY_BLOB_SIZE, blob_size);
+            opts.metrics.int_histogram(scope, domain, metric::HISTORY_BLOB_SIZE_HISTOGRAM, blob_size);
         }
+        history_size += blob_size;
+        progress.batch_idx += 1;
+        save_state(opts, &it, &mut progress);
     }
+    let m = &opts.metrics;
+    m.record_timer(scope, domain, metric::HISTORY_TOTAL_UPLOAD_SIZE, uploaded_size);
+    m.int_histogram(scope, domain, metric::HISTORY_TOTAL_UPLOAD_SIZE_HISTOGRAM, uploaded_size);
+    m.record_timer(scope, domain, metric::HISTORY_SIZE, history_size);
+    m.int_histogram(scope, domain, metric::HISTORY_SIZE_HISTOGRAM, history_size);
+    scoped.inc(metric::HISTORY_ARCHIVE_SUCCESS);
     Ok(())
 }
 
@@ -152,29 +463,40 @@ pub fn s3_archive_visibility(
     region: &str,
     uri: &ArchiverUri,
     request: &ArchiveVisibilityRequest,
+    opts: &ArchiveOptions,
 ) -> Result<(), ArchiverError> {
-    s3_soft_validate_uri(uri).map_err(ArchiverError::Other)?;
-    validate_visibility_request(request)?;
-    let encoded = encode(request)?;
-    let path = s3_key_path(uri);
-    let indexes = [
-        (S3_PRIMARY_TYPE, &request.workflow_type_name, S3_INDEX_CLOSE, request.close_timestamp),
-        (S3_PRIMARY_TYPE, &request.workflow_type_name, S3_INDEX_START, request.start_timestamp),
-        (S3_PRIMARY_ID, &request.workflow_id, S3_INDEX_CLOSE, request.close_timestamp),
-        (S3_PRIMARY_ID, &request.workflow_id, S3_INDEX_START, request.start_timestamp),
-    ];
-    for (primary, value, secondary, ts) in indexes {
-        // Go constructTimestampIndex.
-        let key = format!(
-            "{}/{}/{}",
-            s3_visibility_prefix(&path, &request.domain_id, primary, value, secondary),
-            rfc3339_utc(ts),
-            request.run_id
-        );
-        let bucket = s3_bucket(uri, region).map_err(ArchiverError::Other)?;
-        s3_upload(store, &bucket, &key, &encoded)?;
-    }
-    Ok(())
+    let scoped = Scoped::new(opts, VISIBILITY_ARCHIVER_SCOPE, &request.domain_name);
+    let r = (|| {
+        let fail = |e: ArchiverError| Failure::new(e, false);
+        s3_soft_validate_uri(uri).map_err(|m| fail(ArchiverError::Other(m)))?;
+        validate_visibility_request(request).map_err(fail)?;
+        let encoded = encode(request).map_err(fail)?;
+        let path = s3_key_path(uri);
+        let indexes = [
+            (S3_PRIMARY_TYPE, &request.workflow_type_name, S3_INDEX_CLOSE, request.close_timestamp),
+            (S3_PRIMARY_TYPE, &request.workflow_type_name, S3_INDEX_START, request.start_timestamp),
+            (S3_PRIMARY_ID, &request.workflow_id, S3_INDEX_CLOSE, request.close_timestamp),
+            (S3_PRIMARY_ID, &request.workflow_id, S3_INDEX_START, request.start_timestamp),
+        ];
+        for (primary, value, secondary, ts) in indexes {
+            // Go constructTimestampIndex.
+            let key = format!(
+                "{}/{}/{}",
+                s3_visibility_prefix(&path, &request.domain_id, primary, value, secondary),
+                rfc3339_utc(ts),
+                request.run_id
+            );
+            let bucket = s3_bucket(uri, region).map_err(|m| fail(ArchiverError::Other(m)))?;
+            s3_upload(store, &bucket, &key, &encoded)?;
+        }
+        scoped.inc(metric::VISIBILITY_ARCHIVE_SUCCESS);
+        Ok(())
+    })();
+    scoped.finish(
+        r,
+        metric::VISIBILITY_ARCHIVE_TRANSIENT_ERROR,
+        metric::VISIBILITY_ARCHIVE_NON_RETRYABLE_ERROR,
+    )
 }
 
 // --------------------------------------------------------------------- GCS
@@ -200,58 +522,136 @@ fn gcs_upload(
     store.put_object(&uri.host, &gcs_object(uri, file), data)
 }
 
-/// Go gcloud `historyArchiver.Archive`. Like Go without a progress manager (inline archival),
-/// every blob is written to part 0 (`CurrentPageNumber` is only advanced by the progress
-/// manager) and `Exist` checks the bare file name (no sink path), so it effectively never skips.
+/// Go gcloud `isRetryableError`: everything but bucket-not-found / scheme mismatch / invalid URI.
+fn gcs_is_retryable(e: &ArchiverError) -> bool {
+    !matches!(
+        e.message(),
+        GCS_ERR_BUCKET_NOT_EXIST | ERR_URI_SCHEME_MISMATCH | ERR_INVALID_URI
+    )
+}
+
+/// Go gcloud `historyArchiver.Archive`. Like Go, `Exist` checks the bare file name (no sink
+/// path), so it effectively never skips; the part number is only advanced by the progress
+/// manager (`CurrentPageNumber`), so without one every blob is written to part 0.
 pub fn gcs_archive_history(
     store: &dyn ObjectStore,
     uri: &ArchiverUri,
     request: &ArchiveHistoryRequest,
     source: &dyn HistoryBatchSource,
+    opts: &ArchiveOptions,
 ) -> Result<(), ArchiverError> {
-    let non_retriable = || ArchiverError::Other(GCS_ERR_UPLOAD_NON_RETRIABLE.to_owned());
+    let scoped = Scoped::new(opts, HISTORY_ARCHIVER_SCOPE, &request.domain_name);
+    let r = gcs_archive_history_inner(&scoped, store, uri, request, source);
+    scoped.finish(
+        r,
+        metric::HISTORY_ARCHIVE_TRANSIENT_ERROR,
+        metric::HISTORY_ARCHIVE_NON_RETRYABLE_ERROR,
+    )
+}
+
+fn gcs_archive_history_inner(
+    scoped: &Scoped<'_>,
+    store: &dyn ObjectStore,
+    uri: &ArchiverUri,
+    request: &ArchiveHistoryRequest,
+    source: &dyn HistoryBatchSource,
+) -> Result<(), Failure> {
+    let (opts, scope, domain) = (scoped.opts, scoped.scope, scoped.domain);
+    let non_retriable =
+        || Failure::new(ArchiverError::Other(GCS_ERR_UPLOAD_NON_RETRIABLE.to_owned()), false);
     gcs_validate_uri(store, uri).map_err(|_| non_retriable())?;
     validate_history_request(request).map_err(|_| non_retriable())?;
-    let Some(batches) = source.read_all(request)? else {
-        return Ok(());
+    let mut progress = ArchiveProgress::default();
+    let batches = match source.read_all(request) {
+        Ok(Some(b)) if !b.is_empty() => b,
+        Ok(_) => {
+            scoped.inc(metric::HISTORY_DUPLICATE_ARCHIVALS);
+            return Ok(());
+        }
+        // Go: non-transient read errors are errUploadNonRetriable, transient ones are returned.
+        Err(e @ ArchiverError::Internal(_)) => return Err(Failure::new(e, true)),
+        // Go returns ErrHistoryMutated as is (not errUploadNonRetriable): counted as transient.
+        Err(e) if e.message() == "history was mutated" => return Err(Failure::new(e, true)),
+        Err(_) => return Err(non_retriable()),
     };
-    for blob in split_history_blobs(batches, TARGET_HISTORY_BLOB_SIZE) {
-        let encoded = encode(&blob)?; // Go encodes historyBlob.Body only
+    let mut it = load_iterator(request, batches, opts, &mut progress);
+    let mut total_upload_size = 0_i64;
+    while it.has_next() {
+        let part = progress.batch_idx;
+        let blob = match it.next_blob() {
+            Ok(b) => b,
+            Err(ArchiverError::EntityNotExists(_)) => {
+                scoped.inc(metric::HISTORY_DUPLICATE_ARCHIVALS);
+                return Ok(());
+            }
+            Err(_) => return Err(non_retriable()),
+        };
+        let encoded = encode(&blob["body"]).map_err(|_| non_retriable())?; // Go encodes Body only
         let filename = gcs_history_filename(
             &request.domain_id,
             &request.workflow_id,
             &request.run_id,
             request.close_failover_version,
-            0,
+            part as i64,
         );
         // Go: `exist, _ := Exist(ctx, URI, filename)`; errors count as not existing.
         let exist = store.head_object(&uri.host, &filename).unwrap_or(false);
         if !exist {
-            gcs_upload(store, uri, &filename, &encoded)
-                .map_err(|e| ArchiverError::Other(e.message))?;
+            if let Err(e) = gcs_upload(store, uri, &filename, &encoded) {
+                // Go counts the transient error here and again in the deferred block.
+                scoped.inc(metric::HISTORY_ARCHIVE_TRANSIENT_ERROR);
+                return Err(Failure::new(ArchiverError::Other(e.message), true));
+            }
+            total_upload_size += encoded.len() as i64;
         }
+        // Go saveHistoryIteratorState: CurrentPageNumber = part + 1 (only with a ProgressManager).
+        if opts.progress_manager.is_some() {
+            progress.batch_idx = part + 1;
+        }
+        save_state(opts, &it, &mut progress);
     }
+    let m = &opts.metrics;
+    m.add_counter(scope, domain, metric::HISTORY_TOTAL_UPLOAD_SIZE, total_upload_size);
+    m.add_counter(scope, domain, metric::HISTORY_SIZE, total_upload_size);
+    m.int_histogram(scope, domain, metric::HISTORY_TOTAL_UPLOAD_SIZE_HISTOGRAM, total_upload_size);
+    m.int_histogram(scope, domain, metric::HISTORY_SIZE_HISTOGRAM, total_upload_size);
+    scoped.inc(metric::HISTORY_ARCHIVE_SUCCESS);
     Ok(())
 }
 
-/// Go gcloud `visibilityArchiver.Archive`: close-time record then start-time record.
+/// Go gcloud `visibilityArchiver.Archive`: close-time record then start-time record. Go emits
+/// these metrics on `HistoryArchiverScope` (kept as is).
 pub fn gcs_archive_visibility(
     store: &dyn ObjectStore,
     uri: &ArchiverUri,
     request: &ArchiveVisibilityRequest,
+    opts: &ArchiveOptions,
 ) -> Result<(), ArchiverError> {
-    gcs_validate_uri(store, uri)?;
-    validate_visibility_request(request)?;
-    let encoded = encode(request)?;
-    for (tag, ts) in [
-        (GCS_INDEX_CLOSE, request.close_timestamp),
-        (GCS_INDEX_START, request.start_timestamp),
-    ] {
-        let filename = gcs_visibility_filename(request, tag, ts);
-        gcs_upload(store, uri, &filename, &encoded)
-            .map_err(|_| ArchiverError::Other(GCS_ERR_RETRIABLE.to_owned()))?;
-    }
-    Ok(())
+    let scoped = Scoped::new(opts, HISTORY_ARCHIVER_SCOPE, &request.domain_name);
+    let r = (|| {
+        let fail = |e: ArchiverError| {
+            let retryable = gcs_is_retryable(&e);
+            Failure::new(e, retryable)
+        };
+        gcs_validate_uri(store, uri).map_err(fail)?;
+        validate_visibility_request(request).map_err(fail)?;
+        let encoded = encode(request).map_err(fail)?;
+        for (tag, ts) in [
+            (GCS_INDEX_CLOSE, request.close_timestamp),
+            (GCS_INDEX_START, request.start_timestamp),
+        ] {
+            let filename = gcs_visibility_filename(request, tag, ts);
+            gcs_upload(store, uri, &filename, &encoded)
+                .map_err(|_| fail(ArchiverError::Other(GCS_ERR_RETRIABLE.to_owned())))?;
+        }
+        scoped.inc(metric::VISIBILITY_ARCHIVE_SUCCESS);
+        Ok(())
+    })();
+    scoped.finish(
+        r,
+        metric::VISIBILITY_ARCHIVE_TRANSIENT_ERROR,
+        metric::VISIBILITY_ARCHIVE_NON_RETRYABLE_ERROR,
+    )
 }
 
 #[cfg(test)]
@@ -359,22 +759,180 @@ mod tests {
         ]
     }
 
+    #[derive(Default)]
+    struct Rec(Mutex<Vec<String>>);
+    impl ArchiverMetrics for Rec {
+        fn inc_counter(&self, scope: &str, domain: &str, name: &str) {
+            self.0.lock().unwrap().push(format!("inc {scope}/{domain}/{name}"));
+        }
+        fn add_counter(&self, _: &str, _: &str, name: &str, d: i64) {
+            self.0.lock().unwrap().push(format!("add {name}={d}"));
+        }
+        fn record_timer(&self, _: &str, _: &str, name: &str, v: i64) {
+            self.0.lock().unwrap().push(format!("timer {name}={v}"));
+        }
+        fn int_histogram(&self, _: &str, _: &str, name: &str, v: i64) {
+            self.0.lock().unwrap().push(format!("hist {name}={v}"));
+        }
+    }
+
+    fn opts_with(rec: &Arc<Rec>) -> ArchiveOptions {
+        ArchiveOptions { metrics: rec.clone(), ..Default::default() }
+    }
+
     #[test]
-    fn split_blobs_closes_at_target_size() {
-        let b = batches();
-        let one = serde_json::to_vec(&b[0]).unwrap().len();
-        assert_eq!(split_history_blobs(b.clone(), usize::MAX).len(), 1);
-        let blobs = split_history_blobs(b.clone(), one);
-        assert_eq!(blobs.len(), 2);
-        assert_eq!(blobs[0].len(), 1);
-        assert!(split_history_blobs(vec![], 1).is_empty());
+    fn iterator_closes_blob_at_target_and_tracks_state() {
+        let req = hist_req();
+        let one = serde_json::to_vec(&batches()[0]).unwrap().len();
+        let mut it = HistoryIterator::new(&req, batches(), usize::MAX);
+        let blob = it.next_blob().unwrap();
+        assert_eq!(blob["header"]["is_last"], json!(true));
+        assert!(!it.has_next());
+        let mut it = HistoryIterator::new(&req, batches(), one);
+        let b1 = it.next_blob().unwrap();
+        assert_eq!(b1["header"]["is_last"], json!(false));
+        assert_eq!(b1["header"]["last_event_id"], json!(2));
+        assert_eq!(it.state(), br#"{"NextEventID":3,"FinishedIteration":false}"#.to_vec());
+        // resume from state
+        let mut it2 = HistoryIterator::from_state(&req, batches(), one, &it.state()).unwrap();
+        let b2 = it2.next_blob().unwrap();
+        assert_eq!(b2["header"]["first_event_id"], json!(3));
+        assert_eq!(b2["header"]["is_last"], json!(true));
+        assert!(!it2.has_next());
+        assert!(HistoryIterator::from_state(&req, batches(), one, b"x").is_err());
+    }
+
+    #[test]
+    fn s3_multi_blob_uses_batch_idx_and_emits_metrics() {
+        let store = Mock { bucket: "b".into(), ..Default::default() };
+        let uri = parse_uri("s3://b/p").unwrap();
+        let rec = Arc::new(Rec::default());
+        // events of two batches never fit one blob when the target is tiny: use big batches.
+        let big: Vec<Value> = (0..3)
+            .map(|i| json!({"events":[{"eventId": i + 1, "version": 7, "pad": "x".repeat(TARGET_HISTORY_BLOB_SIZE)}]}))
+            .collect();
+        let mut r = hist_req();
+        r.next_event_id = 4;
+        s3_archive_history(&store, "r", &uri, &r, &Src(Some(big)), &opts_with(&rec)).unwrap();
+        assert_eq!(store.objects.lock().unwrap().len(), 3);
+        for idx in 0..3 {
+            assert!(store.objects.lock().unwrap().contains_key(&s3_history_key("/p", "d", "w", "r", 7, idx)));
+        }
+        let log = rec.0.lock().unwrap().clone();
+        assert!(log.contains(&"inc HistoryArchiver/dn/history_archiver_archive_success".to_owned()), "{log:?}");
+        assert_eq!(log.iter().filter(|l| l.starts_with("timer history_archiver_blob_size=")).count(), 3);
+        assert!(log.iter().any(|l| l.starts_with("timer history_archiver_total_upload_size=")));
+        assert!(log.iter().any(|l| l.starts_with("timer cadence_latency=")));
+    }
+
+    #[test]
+    fn s3_blob_exists_counter_and_nonretriable_substitution() {
+        let store = Mock { bucket: "b".into(), ..Default::default() };
+        let uri = parse_uri("s3://b/p").unwrap();
+        store.objects.lock().unwrap().insert(s3_history_key("/p", "d", "w", "r", 7, 0), b"old".to_vec());
+        let rec = Arc::new(Rec::default());
+        s3_archive_history(&store, "r", &uri, &hist_req(), &Src(Some(batches())), &opts_with(&rec)).unwrap();
+        assert!(rec.0.lock().unwrap().contains(&"inc HistoryArchiver/dn/history_archiver_blob_exists".to_owned()));
+        // duplicate archival: history gone
+        let rec = Arc::new(Rec::default());
+        s3_archive_history(&store, "r", &uri, &hist_req(), &Src(None), &opts_with(&rec)).unwrap();
+        assert!(rec.0.lock().unwrap().contains(&"inc HistoryArchiver/dn/history_archiver_duplicate_archivals".to_owned()));
+        // non-retryable error is substituted and counted
+        let rec = Arc::new(Rec::default());
+        let mut opts = opts_with(&rec);
+        opts.non_retriable_error = Some(Arc::new(|| ArchiverError::Other("sub".into())));
+        let mut bad = hist_req();
+        bad.run_id.clear();
+        let e = s3_archive_history(&store, "r", &uri, &bad, &Src(None), &opts).unwrap_err();
+        assert_eq!(e.message(), "sub");
+        assert!(rec.0.lock().unwrap().contains(&"inc HistoryArchiver/dn/history_archiver_archive_non_retryable_error".to_owned()));
+        // retryable (internal) error: transient counter, not substituted
+        struct Failing;
+        impl HistoryBatchSource for Failing {
+            fn read_all(&self, _: &ArchiveHistoryRequest) -> Result<Option<Vec<Value>>, ArchiverError> {
+                Err(ArchiverError::Internal("db".into()))
+            }
+        }
+        let rec = Arc::new(Rec::default());
+        let mut opts = opts_with(&rec);
+        opts.non_retriable_error = Some(Arc::new(|| ArchiverError::Other("sub".into())));
+        let e = s3_archive_history(&store, "r", &uri, &hist_req(), &Failing, &opts).unwrap_err();
+        assert_eq!(e, ArchiverError::Internal("db".into()));
+        assert!(rec.0.lock().unwrap().contains(&"inc HistoryArchiver/dn/history_archiver_archive_transient_error".to_owned()));
+        // visibility metrics
+        let rec = Arc::new(Rec::default());
+        s3_archive_visibility(&store, "r", &uri, &vis_req(), &opts_with(&rec)).unwrap();
+        assert!(rec.0.lock().unwrap().contains(&"inc VisibilityArchiver/dn/visibility_archiver_archive_success".to_owned()));
+    }
+
+    #[test]
+    fn gcs_metrics_substitution_and_progress_parts() {
+        struct Pm(Mutex<Vec<ArchiveProgress>>);
+        impl ProgressManager for Pm {
+            fn has_progress(&self) -> bool {
+                false
+            }
+            fn load_progress(&self) -> Result<ArchiveProgress, String> {
+                Err("none".into())
+            }
+            fn record_progress(&self, p: &ArchiveProgress) -> Result<(), String> {
+                self.0.lock().unwrap().push(p.clone());
+                Ok(())
+            }
+        }
+        let store = Mock { bucket: "bkt".into(), ..Default::default() };
+        let uri = parse_uri("gs://bkt/p").unwrap();
+        let big: Vec<Value> = (0..2)
+            .map(|i| json!({"events":[{"eventId": i + 1, "version": 7, "pad": "x".repeat(TARGET_HISTORY_BLOB_SIZE)}]}))
+            .collect();
+        let mut r = hist_req();
+        r.next_event_id = 3;
+        // Without a progress manager every blob goes to part 0 (Go quirk): one object.
+        let rec = Arc::new(Rec::default());
+        gcs_archive_history(&store, &uri, &r, &Src(Some(big.clone())), &opts_with(&rec)).unwrap();
+        assert_eq!(store.objects.lock().unwrap().len(), 1);
+        let log = rec.0.lock().unwrap().clone();
+        assert!(log.iter().any(|l| l.starts_with("add history_archiver_total_upload_size=")), "{log:?}");
+        assert!(log.contains(&"inc HistoryArchiver/dn/history_archiver_archive_success".to_owned()));
+        // With a progress manager the part number advances.
+        let store2 = Mock { bucket: "bkt".into(), ..Default::default() };
+        let pm = Arc::new(Pm(Mutex::default()));
+        let opts = ArchiveOptions { progress_manager: Some(pm.clone()), ..Default::default() };
+        gcs_archive_history(&store2, &uri, &r, &Src(Some(big)), &opts).unwrap();
+        assert_eq!(store2.objects.lock().unwrap().len(), 2);
+        let saved = pm.0.lock().unwrap().clone();
+        assert_eq!(saved.iter().map(|p| p.batch_idx).collect::<Vec<_>>(), [1, 2]);
+        // errUploadNonRetriable is non-retryable (substituted); other errors are transient.
+        let rec = Arc::new(Rec::default());
+        let mut opts = opts_with(&rec);
+        opts.non_retriable_error = Some(Arc::new(|| ArchiverError::Other("sub".into())));
+        let missing = parse_uri("gs://nope/p").unwrap();
+        let e = gcs_archive_history(&store, &missing, &hist_req(), &Src(None), &opts).unwrap_err();
+        assert_eq!(e.message(), "sub");
+        assert!(rec.0.lock().unwrap().contains(&"inc HistoryArchiver/dn/history_archiver_archive_non_retryable_error".to_owned()));
+        let failing = Mock { bucket: "bkt".into(), fail_put: true, ..Default::default() };
+        let rec = Arc::new(Rec::default());
+        let e = gcs_archive_history(&failing, &uri, &hist_req(), &Src(Some(batches())), &opts_with(&rec)).unwrap_err();
+        assert_eq!(e.message(), "put failed");
+        let n = rec.0.lock().unwrap().iter().filter(|l| l.ends_with("history_archiver_archive_transient_error")).count();
+        assert_eq!(n, 2, "Go counts the transient upload error twice");
+        // visibility: bucket-not-found is non-retryable -> substituted; metrics on the history scope
+        let rec = Arc::new(Rec::default());
+        let mut opts = opts_with(&rec);
+        opts.non_retriable_error = Some(Arc::new(|| ArchiverError::Other("sub".into())));
+        let e = gcs_archive_visibility(&store, &missing, &vis_req(), &opts).unwrap_err();
+        assert_eq!(e.message(), "sub");
+        assert!(rec.0.lock().unwrap().contains(&"inc HistoryArchiver/dn/visibility_archiver_archive_non_retryable_error".to_owned()));
+        let rec = Arc::new(Rec::default());
+        gcs_archive_visibility(&store, &uri, &vis_req(), &opts_with(&rec)).unwrap();
+        assert!(rec.0.lock().unwrap().contains(&"inc HistoryArchiver/dn/visibility_archiver_archive_success".to_owned()));
     }
 
     #[test]
     fn s3_history_archive_writes_blob_and_roundtrips() {
         let store = Mock { bucket: "b".into(), ..Default::default() };
         let uri = parse_uri("s3://b/prefix").unwrap();
-        s3_archive_history(&store, "us-east-1", &uri, &hist_req(), &Src(Some(batches()))).unwrap();
+        s3_archive_history(&store, "us-east-1", &uri, &hist_req(), &Src(Some(batches())), &ArchiveOptions::default()).unwrap();
         let key = s3_history_key("/prefix", "d", "w", "r", 7, 0);
         let blob: Value = serde_json::from_slice(&store.objects.lock().unwrap()[&key]).unwrap();
         assert_eq!(blob["header"]["is_last"], json!(true));
@@ -406,10 +964,10 @@ mod tests {
         let uri = parse_uri("s3://b/prefix").unwrap();
         let key = s3_history_key("/prefix", "d", "w", "r", 7, 0);
         store.objects.lock().unwrap().insert(key.clone(), b"old".to_vec());
-        s3_archive_history(&store, "r", &uri, &hist_req(), &Src(Some(batches()))).unwrap();
+        s3_archive_history(&store, "r", &uri, &hist_req(), &Src(Some(batches())), &ArchiveOptions::default()).unwrap();
         assert_eq!(store.objects.lock().unwrap()[&key], b"old".to_vec());
         let empty = Mock { bucket: "b".into(), ..Default::default() };
-        s3_archive_history(&empty, "r", &uri, &hist_req(), &Src(None)).unwrap();
+        s3_archive_history(&empty, "r", &uri, &hist_req(), &Src(None), &ArchiveOptions::default()).unwrap();
         assert!(empty.objects.lock().unwrap().is_empty());
     }
 
@@ -417,17 +975,17 @@ mod tests {
     fn s3_history_errors_like_go() {
         let store = Mock { bucket: "b".into(), ..Default::default() };
         let bad = parse_uri("file:///tmp/x").unwrap();
-        assert!(s3_archive_history(&store, "r", &bad, &hist_req(), &Src(None)).is_err());
+        assert!(s3_archive_history(&store, "r", &bad, &hist_req(), &Src(None), &ArchiveOptions::default()).is_err());
         let uri = parse_uri("s3://b/p").unwrap();
         let mut r = hist_req();
         r.domain_id.clear();
-        assert!(s3_archive_history(&store, "r", &uri, &r, &Src(None)).is_err());
+        assert!(s3_archive_history(&store, "r", &uri, &r, &Src(None), &ArchiveOptions::default()).is_err());
         let missing = parse_uri("s3://other/p").unwrap();
-        let e = s3_archive_history(&store, "r", &missing, &hist_req(), &Src(Some(batches())))
+        let e = s3_archive_history(&store, "r", &missing, &hist_req(), &Src(Some(batches())), &ArchiveOptions::default())
             .unwrap_err();
         assert_eq!(e, ArchiverError::BadRequest(ERR_BUCKET_NOT_EXISTS.into()));
         let failing = Mock { bucket: "b".into(), fail_put: true, ..Default::default() };
-        let e = s3_archive_history(&failing, "r", &uri, &hist_req(), &Src(Some(batches())))
+        let e = s3_archive_history(&failing, "r", &uri, &hist_req(), &Src(Some(batches())), &ArchiveOptions::default())
             .unwrap_err();
         assert_eq!(e.message(), "put failed");
     }
@@ -436,7 +994,7 @@ mod tests {
     fn s3_visibility_archive_writes_four_indexes() {
         let store = Mock { bucket: "b".into(), ..Default::default() };
         let uri = parse_uri("s3://b/prefix").unwrap();
-        s3_archive_visibility(&store, "r", &uri, &vis_req()).unwrap();
+        s3_archive_visibility(&store, "r", &uri, &vis_req(), &ArchiveOptions::default()).unwrap();
         let keys: Vec<String> = store.objects.lock().unwrap().keys().cloned().collect();
         assert_eq!(
             keys,
@@ -449,7 +1007,7 @@ mod tests {
         );
         let mut bad = vis_req();
         bad.close_timestamp = 0;
-        assert!(s3_archive_visibility(&store, "r", &uri, &bad).is_err());
+        assert!(s3_archive_visibility(&store, "r", &uri, &bad, &ArchiveOptions::default()).is_err());
     }
 
     #[test]
@@ -471,8 +1029,8 @@ mod tests {
     fn gcs_history_and_visibility_archive() {
         let store = Mock { bucket: "bkt".into(), ..Default::default() };
         let uri = parse_uri("gs://bkt/cadence_archival/dev").unwrap();
-        gcs_archive_history(&store, &uri, &hist_req(), &Src(Some(batches()))).unwrap();
-        gcs_archive_visibility(&store, &uri, &vis_req()).unwrap();
+        gcs_archive_history(&store, &uri, &hist_req(), &Src(Some(batches())), &ArchiveOptions::default()).unwrap();
+        gcs_archive_visibility(&store, &uri, &vis_req(), &ArchiveOptions::default()).unwrap();
         let keys: Vec<String> = store.objects.lock().unwrap().keys().cloned().collect();
         assert_eq!(keys.len(), 3);
         assert!(keys.iter().all(|k| k.starts_with("cadence_archival/dev/")));
@@ -496,19 +1054,19 @@ mod tests {
     fn gcs_errors_like_go() {
         let store = Mock { bucket: "bkt".into(), ..Default::default() };
         let missing = parse_uri("gs://nope/p").unwrap();
-        let e = gcs_archive_history(&store, &missing, &hist_req(), &Src(None)).unwrap_err();
+        let e = gcs_archive_history(&store, &missing, &hist_req(), &Src(None), &ArchiveOptions::default()).unwrap_err();
         assert_eq!(e.message(), GCS_ERR_UPLOAD_NON_RETRIABLE);
-        let e = gcs_archive_visibility(&store, &missing, &vis_req()).unwrap_err();
+        let e = gcs_archive_visibility(&store, &missing, &vis_req(), &ArchiveOptions::default()).unwrap_err();
         assert_eq!(e.message(), GCS_ERR_BUCKET_NOT_EXIST);
         let uri = parse_uri("gs://bkt/p").unwrap();
         let failing = Mock { bucket: "bkt".into(), fail_put: true, ..Default::default() };
-        let e = gcs_archive_visibility(&failing, &uri, &vis_req()).unwrap_err();
+        let e = gcs_archive_visibility(&failing, &uri, &vis_req(), &ArchiveOptions::default()).unwrap_err();
         assert_eq!(e.message(), GCS_ERR_RETRIABLE);
-        let e = gcs_archive_history(&failing, &uri, &hist_req(), &Src(Some(batches()))).unwrap_err();
+        let e = gcs_archive_history(&failing, &uri, &hist_req(), &Src(Some(batches())), &ArchiveOptions::default()).unwrap_err();
         assert_eq!(e.message(), "put failed");
         let mut r = hist_req();
         r.run_id.clear();
-        let e = gcs_archive_history(&store, &uri, &r, &Src(None)).unwrap_err();
+        let e = gcs_archive_history(&store, &uri, &r, &Src(None), &ArchiveOptions::default()).unwrap_err();
         assert_eq!(e.message(), GCS_ERR_UPLOAD_NON_RETRIABLE);
     }
 }

@@ -175,6 +175,15 @@ impl HistoryEnv {
             .clone()
             .ok_or_else(|| anyhow::anyhow!("configured default store has no domain metadata persistence"))?;
         let metrics_registry = MetricsRegistry::new();
+        // Go archiver container `MetricsClient`: the cloud archivers report into this registry.
+        let archiver_provider = Arc::new(
+            archiver_provider.as_ref().clone().with_archive_options(
+                cadence_common::cloud_archiver::ArchiveOptions {
+                    metrics: Arc::new(crate::wiring::resources::metrics::ArchiverMetricsAdapter(metrics_registry.clone())),
+                    ..Default::default()
+                },
+            ),
+        );
         let config_adapter = Arc::new(ConfigAdapter::new(config.clone()));
         let clock = Arc::new(SystemClock);
         let domain_cache = Arc::new(HistoryDomainCache::new(matching_domain_cache.clone()));
