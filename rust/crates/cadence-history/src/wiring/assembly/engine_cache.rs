@@ -64,6 +64,8 @@ pub struct EngineCore {
     pub cluster_metadata: Arc<dyn crate::engine::deps::ClusterMetadata>,
     /// Go `config.EnableReplicationTaskGeneration(domainID, workflowID)`.
     pub enable_replication_task_generation: EnableReplicationFn,
+    /// Go `shard.GetMetricsClient()`.
+    pub metrics: Arc<dyn crate::task::deps::MetricsClient>,
 }
 
 impl EngineCore {
@@ -187,6 +189,8 @@ impl EngineExecutionContext {
             Arc::new(move || clock.now()),
         )?
         .with_params((core.state_params)(&self.domain_id)));
+        // Go `Load` checksum invalidation + `VerifyAndRepairWorkflowIfNeeded` detection.
+        state.verify_loaded_checksum(core);
         *self.state.lock().unwrap() = Some(state.clone());
         Ok(state)
     }

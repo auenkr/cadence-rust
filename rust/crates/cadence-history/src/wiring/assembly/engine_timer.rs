@@ -141,8 +141,10 @@ impl EngineMutableState {
     /// Go `DeleteUserTimer`.
     pub fn delete_user_timer(&self, timer_id: &str) -> HResult<()> {
         let mut g = self.inner.lock().unwrap();
+        // Go DeleteUserTimer: log a data inconsistency and continue.
         if g.timers.remove(timer_id).is_none() {
-            return Err(HistoryError::internal(format!("unable to find user timer {timer_id} in mutable state")));
+            tracing::error!("unable to find timer ID: {timer_id} in mutable state");
+            g.log_data_inconsistency();
         }
         g.upsert_timers.remove(timer_id);
         g.delete_timers.insert(timer_id.to_string());
