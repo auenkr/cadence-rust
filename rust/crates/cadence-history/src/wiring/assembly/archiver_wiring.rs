@@ -176,7 +176,6 @@ fn build_request(workflow_id: &str, request: &ArchiveRequest) -> st::SignalWithS
         signal_input: encode_archive_request(request),
         ..Default::default()
     }
-    }
 }
 
 #[async_trait]
