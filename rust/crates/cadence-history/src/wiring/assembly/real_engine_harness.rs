@@ -349,6 +349,12 @@ pub struct Harness {
     pub clock: Arc<TestClock>,
 }
 
+impl Default for Harness {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Harness {
     pub fn new() -> Self {
         let execs = Arc::new(MemExecutions::default());
@@ -366,8 +372,7 @@ impl Harness {
             Arc::new(move || c.0.load(Ordering::SeqCst)),
             Arc::new(|_| {}),
         )
-        .ok()
-        .expect("shard");
+        .unwrap_or_else(|_| panic!("shard"));
         let config = Arc::new(Config::new_for_test());
         let domains: Arc<dyn DomainCache> = Arc::new(TestDomains);
         let core = Arc::new(EngineCore {
