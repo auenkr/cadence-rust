@@ -22,6 +22,10 @@ pub mod env;
 pub mod failover;
 pub mod ndc_adapters;
 pub mod parent_close_policy_client;
+#[cfg(test)]
+pub mod real_engine_harness;
+#[cfg(test)]
+mod real_engine_tests;
 pub mod ndc_context_hooks;
 pub mod ndc_rebuild;
 pub mod ndc_state;
