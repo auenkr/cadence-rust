@@ -205,16 +205,13 @@ impl GoExecutionStore for CassandraExecutionStore {
     async fn complete_replication_task(&self, s: i32, id: i64) -> Result<(), PersistenceError> {
         self.blocking(move |d| t::complete_replication_task(&d, s, id)).await
     }
-    async fn get_replication_dlq_size(&self, c: String) -> Result<i64, PersistenceError> {
-        let s = self.shard_id;
+    async fn get_replication_dlq_size(&self, s: i32, c: String) -> Result<i64, PersistenceError> {
         self.blocking(move |d| t::get_replication_dlq_size(&d, s, &c)).await
     }
-    async fn delete_replication_task_from_dlq(&self, c: String, id: i64) -> Result<(), PersistenceError> {
-        let s = self.shard_id;
+    async fn delete_replication_task_from_dlq(&self, s: i32, c: String, id: i64) -> Result<(), PersistenceError> {
         self.blocking(move |d| t::delete_replication_task_from_dlq(&d, s, &c, id)).await
     }
-    async fn put_replication_task_to_dlq(&self, c: String, task: ReplicationTask) -> Result<(), PersistenceError> {
-        let s = self.shard_id;
+    async fn put_replication_task_to_dlq(&self, s: i32, c: String, task: ReplicationTask) -> Result<(), PersistenceError> {
         self.blocking(move |d| t::put_replication_task_to_dlq(&d, s, &c, task)).await
     }
     async fn get_replication_tasks_from_dlq(&self, c: String, a: i64, b: i64, size: i32) -> Result<Vec<ReplicationTask>, PersistenceError> {

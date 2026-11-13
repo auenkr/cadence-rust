@@ -191,7 +191,7 @@ impl Operations for EngineOps<'_> {
         let d = &self.domain_name;
         if size > (self.config.history_size_limit_error)(d) || count > (self.config.history_count_limit_error)(d) {
             let completed = self.state.inner.lock().unwrap().next_event_id - 1;
-            self.fail_workflow(completed, "FAILURE_REASON_HISTORY_SIZE_EXCEEDS_LIMIT", b"Workflow history size / count exceeds limit.")?;
+            self.fail_workflow(completed, crate::decision::FAILURE_REASON_HISTORY_SIZE_EXCEEDS_LIMIT, b"Workflow history size / count exceeds limit.")?;
             return Ok(true);
         }
         Ok(false)
@@ -1014,6 +1014,32 @@ mod tests {
 
     fn event_types(state: &EngineMutableState) -> Vec<EventType> {
         state.inner.lock().unwrap().hist.iter().filter_map(|e| e.event_type).collect()
+    }
+
+    #[test]
+    fn history_limit_failure_uses_go_reason() {
+        let s = state();
+        let mut config = Config::new_for_test();
+        config.history_count_limit_error = Arc::new(|_| 1);
+        let ops = EngineOps {
+            state: &s,
+            config: Arc::new(config),
+            domains: Arc::new(Domains),
+            domain_name: "test-domain".into(),
+            identity: "id".into(),
+            semaphore_lookups: Default::default(),
+        };
+        let mut h = TaskHandler::new(ops, "id".into(), 4);
+        let mut d = vec![];
+        h.handle_decisions(b"", &mut d).unwrap();
+        let g = s.inner.lock().unwrap();
+        let reason = g
+            .hist
+            .iter()
+            .filter_map(|e| e.workflow_execution_failed_event_attributes.as_ref())
+            .filter_map(|a| a.reason.clone())
+            .next();
+        assert_eq!(reason.as_deref(), Some("HISTORY_EXCEEDS_LIMIT"));
     }
 
     #[test]

@@ -662,15 +662,18 @@ pub trait GoExecutionStore: Send + Sync {
     ) -> Result<(), PersistenceError>;
     async fn get_replication_dlq_size(
         &self,
+        shard_id: i32,
         source_cluster: String,
     ) -> Result<i64, PersistenceError>;
     async fn delete_replication_task_from_dlq(
         &self,
+        shard_id: i32,
         source_cluster: String,
         task_id: i64,
     ) -> Result<(), PersistenceError>;
     async fn put_replication_task_to_dlq(
         &self,
+        shard_id: i32,
         source_cluster: String,
         task: ReplicationTask,
     ) -> Result<(), PersistenceError>;

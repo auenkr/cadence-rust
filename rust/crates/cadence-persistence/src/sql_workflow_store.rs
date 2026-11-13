@@ -1425,23 +1425,32 @@ impl GoExecutionStore for SqlWorkflowStore {
     }
     async fn get_replication_dlq_size(
         &self,
+        shard_id: i32,
         source_cluster: String,
     ) -> Result<i64, PersistenceError> {
-        self.task_store().dlq_size(&source_cluster)
+        let mut store = self.task_store();
+        store.shard_id = shard_id;
+        store.dlq_size(&source_cluster)
     }
     async fn delete_replication_task_from_dlq(
         &self,
+        shard_id: i32,
         source_cluster: String,
         task_id: i64,
     ) -> Result<(), PersistenceError> {
-        self.task_store().delete_dlq(&source_cluster, task_id)
+        let mut store = self.task_store();
+        store.shard_id = shard_id;
+        store.delete_dlq(&source_cluster, task_id)
     }
     async fn put_replication_task_to_dlq(
         &self,
+        shard_id: i32,
         source_cluster: String,
         task: ReplicationTask,
     ) -> Result<(), PersistenceError> {
-        self.task_store().put_dlq(&source_cluster, &task)
+        let mut store = self.task_store();
+        store.shard_id = shard_id;
+        store.put_dlq(&source_cluster, &task)
     }
     async fn get_replication_tasks_from_dlq(
         &self,

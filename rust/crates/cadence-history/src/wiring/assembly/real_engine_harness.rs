@@ -46,6 +46,8 @@ pub struct Inner {
     pub conflict_hooks: std::collections::VecDeque<ConflictHook>,
     /// Recorded create requests: (mode name, previous run id, previous last write version).
     pub create_calls: Vec<(&'static str, String, i64)>,
+    /// Recorded DLQ calls: (operation, shard id).
+    pub dlq_calls: Vec<(&'static str, i32)>,
 }
 
 /// In-memory execution store: create/get/update/current-execution plus task capture.
@@ -366,9 +368,9 @@ impl pc::GoExecutionStore for MemExecutions {
     async fn create_replication_tasks(&self, _: i32, _: Vec<pc::ReplicationTask>) -> Result<(), PersistenceError> { Ok(()) }
     async fn get_replication_tasks(&self, _: i32, _: i64, _: i64, _: i32) -> Result<Vec<pc::ReplicationTask>, PersistenceError> { Ok(vec![]) }
     async fn complete_replication_task(&self, _: i32, _: i64) -> Result<(), PersistenceError> { Ok(()) }
-    async fn get_replication_dlq_size(&self, _: String) -> Result<i64, PersistenceError> { Ok(0) }
-    async fn delete_replication_task_from_dlq(&self, _: String, _: i64) -> Result<(), PersistenceError> { Ok(()) }
-    async fn put_replication_task_to_dlq(&self, _: String, _: pc::ReplicationTask) -> Result<(), PersistenceError> { Ok(()) }
+    async fn get_replication_dlq_size(&self, s: i32, _: String) -> Result<i64, PersistenceError> { self.inner.lock().unwrap().dlq_calls.push(("size", s)); Ok(0) }
+    async fn delete_replication_task_from_dlq(&self, _: i32, _: String, _: i64) -> Result<(), PersistenceError> { Ok(()) }
+    async fn put_replication_task_to_dlq(&self, s: i32, _: String, _: pc::ReplicationTask) -> Result<(), PersistenceError> { self.inner.lock().unwrap().dlq_calls.push(("put", s)); Ok(()) }
     async fn get_replication_tasks_from_dlq(&self, _: String, _: i64, _: i64, _: i32) -> Result<Vec<pc::ReplicationTask>, PersistenceError> { Ok(vec![]) }
     async fn range_delete_replication_tasks_from_dlq(&self, _: String, _: i64, _: i32) -> Result<u64, PersistenceError> { Ok(0) }
     async fn create_cross_cluster_tasks(&self, _: i32, _: Vec<pc::CrossClusterTask>) -> Result<(), PersistenceError> { Ok(()) }
