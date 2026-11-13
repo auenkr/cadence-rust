@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${GITHUB_ACTIONS:-}" != true || "${GITHUB_REPOSITORY:-}" != auenkr/cadence-rust ]]; then
+  echo "Builds and mixed gates must run on auenkr/cadence-rust GitHub Actions." >&2
+  exit 2
+fi
 cd "$(dirname "$0")/.."
 mkdir -p Benchmark/evidence/run Benchmark/bin
 exec > >(tee Benchmark/evidence/run/ci.log) 2>&1

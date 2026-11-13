@@ -1,0 +1,13 @@
+{
+  "status": "pending_ci",
+  "benchmark_run_url": "https://github.com/auenkr/cadence-rust/actions/runs/43460144386",
+  "benchmark_tested_head": "a13dfb8d4df2da2deeea0803e789e16787a03c52",
+  "benchmark_conclusion": null,
+  "rust_workspace_run_url": "https://github.com/auenkr/cadence-rust/actions/runs/43459163938",
+  "rust_workspace_tested_head": "16cf42cee1697a5a50cf9712e1fec19cbafe08eb",
+  "rust_workspace_conclusion": null,
+  "rust_workspace_note": "Unchanged Rust sources; requested clean_target=true (clippy then workspace tests).",
+  "local_checks": "Seven Python evidence-validator tests passed; Python syntax and git diff --check passed. No local Cargo or Go builds/tests.",
+  "performance_results": null,
+  "next_required_action": "Inspect completed CI, fix failures, retain raw samples/configs/hashes and actual results here before artifacts expire. A queued job is not validation."
+}
