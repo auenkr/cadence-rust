@@ -391,6 +391,10 @@ try:
                     break
                 time.sleep(5)
             (work / 'rs3-objects.log').write_text(json.dumps({'history': hist_keys, 'visibility': vis_keys}, indent=1))
+            for wid, keys in hist_keys.items():
+                for kx in keys:
+                    st, blob = s3c('GET', f'/{bkt}/{kx}')
+                    (work / f'rs3-blob-{wid}-{kx.rsplit("/", 1)[-1]}.json').write_text(blob)
             record('rs3-rust-wrote-history-blobs', bool(runs) and all(hist_keys.values()), json.dumps(hist_keys)[:500])
             record('rs3-rust-wrote-visibility-records', len(vis_keys) >= len(runs) > 0, '\n'.join(vis_keys[:10]))
             # 2) wait for retention deletion (describe fails once the run left persistence)
