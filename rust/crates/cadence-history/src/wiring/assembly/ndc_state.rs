@@ -34,6 +34,7 @@ pub struct OwnedNdcMutableState {
 
 /// Go `prepareEventsAndReplicationTasks` (`eventsToReplicationTask` + `syncActivityToReplicationTask`)
 /// for the active policy; empty unless `canReplicateEvents()`.
+#[allow(clippy::result_large_err)]
 fn active_replication_rows(
     typed: &TypedMutableState,
     domain_id: &str,
@@ -48,6 +49,7 @@ fn active_replication_rows(
         return Ok(Vec::new());
     };
     let mut tasks = Vec::new();
+    #[allow(clippy::result_large_err)]
     let mut push = |t: pc::ReplicationTask| -> NdcResult<()> {
         let s = replication_task_to_struct(&t).map_err(|e| NdcError::internal(e.to_string()))?;
         let data = super::engine_cache::task_blob(cadence_persistence::sqlblobs::Encoding::ThriftRW.encode(&s))
