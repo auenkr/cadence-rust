@@ -15,7 +15,7 @@ use crate::wiring::resources::membership::MembershipResolver;
 /// Go `peerResolver.FromDomainID`.
 pub trait DomainPeerResolver: Send + Sync {
     /// Returns the owning host (its gRPC address is the dial target).
-    fn from_domain_id(&self, domain_id: &str) -> Result<Host, String>;
+    fn resolve_domain(&self, domain_id: &str) -> Result<Host, String>;
 }
 
 /// Go `common.DomainIDToHistoryShard`.
@@ -30,7 +30,7 @@ pub struct MembershipPeerResolver {
 }
 
 impl DomainPeerResolver for MembershipPeerResolver {
-    fn from_domain_id(&self, domain_id: &str) -> Result<Host, String> {
+    fn resolve_domain(&self, domain_id: &str) -> Result<Host, String> {
         let shard = domain_id_to_history_shard(domain_id, self.number_of_shards);
         crate::lookup::history_server_by_shard_id(&self.membership, shard).map_err(|e| e.to_string())
     }
@@ -45,7 +45,7 @@ pub fn group_tokens_by_peer(
     let mut by_peer: BTreeMap<String, (Host, Vec<FailoverMarkerToken>)> = BTreeMap::new();
     for token in tokens {
         let domain_id = token.failover_marker.domain_id.clone().unwrap_or_default();
-        let host = resolver.from_domain_id(&domain_id)?;
+        let host = resolver.resolve_domain(&domain_id)?;
         by_peer.entry(host.address.clone()).or_insert_with(|| (host, Vec::new())).1.push(token);
     }
     Ok(by_peer)
@@ -118,7 +118,7 @@ mod tests {
 
     struct Fixed(BTreeMap<String, Host>);
     impl DomainPeerResolver for Fixed {
-        fn from_domain_id(&self, d: &str) -> Result<Host, String> {
+        fn resolve_domain(&self, d: &str) -> Result<Host, String> {
             self.0.get(d).cloned().ok_or_else(|| format!("no peer for {d}"))
         }
     }
@@ -162,9 +162,9 @@ mod tests {
     fn membership_resolver_routes_domain_via_shard_owner() {
         let m = Arc::new(MembershipResolver::new("h1", vec![host("h1")]));
         let r = MembershipPeerResolver { membership: m, number_of_shards: 4 };
-        assert_eq!(r.from_domain_id("any-domain").unwrap().address, "h1");
+        assert_eq!(r.resolve_domain("any-domain").unwrap().address, "h1");
         let empty = MembershipPeerResolver { membership: Arc::new(MembershipResolver::new("x", vec![])), number_of_shards: 4 };
-        assert!(empty.from_domain_id("any-domain").is_err());
+        assert!(empty.resolve_domain("any-domain").is_err());
     }
 
     #[test]
