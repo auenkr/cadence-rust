@@ -37,7 +37,7 @@ my_addr = os.environ.get('CADENCE_MYSQL_ADDR', '127.0.0.1:3306')
 my_user = os.environ.get('CADENCE_MYSQL_USER', 'root')
 my_pass = os.environ.get('CADENCE_MYSQL_PASSWORD', 'cadence')
 
-keys = ['A_FE', 'A_FE_GRPC', 'A_HIST', 'A_HIST_GRPC', 'A_WORKER', 'A_RMATCH', 'A_RMATCH_GRPC',
+keys = ['A_FE', 'A_FE_GRPC', 'A_HIST', 'A_HIST_GRPC', 'A_WORKER', 'A_RMATCH', 'A_RMATCH_GRPC', 'A_MATCH', 'A_MATCH_GRPC',
         'A_PPROF1', 'A_PPROF2', 'A_PPROF3', 'A_PPROF4',
         'B_FE', 'B_FE_GRPC', 'B_MATCH', 'B_MATCH_GRPC', 'B_HIST', 'B_HIST_GRPC', 'B_WORKER',
         'B_PPROF1', 'B_PPROF2', 'B_PPROF3', 'B_PPROF4']
@@ -94,7 +94,7 @@ def go_config(dirname, prefix, db, vis, seeds, current):
     (d / 'development_mysql.yaml').write_text(persistence(db, vis))
     return d, text
 
-a_seeds = ', '.join(f'"127.0.0.1:{P[k]}"' for k in ['A_FE', 'A_HIST', 'A_WORKER', 'A_RMATCH'])
+a_seeds = ', '.join(f'"127.0.0.1:{P[k]}"' for k in ['A_FE', 'A_HIST', 'A_WORKER', 'A_MATCH' if (args.rust_history_binary and args.rust_history_side == 'active') else 'A_RMATCH'])
 b_seeds = ', '.join(f'"127.0.0.1:{P[k]}"' for k in ['B_FE', 'B_HIST', 'B_MATCH', 'B_WORKER'])
 a_dir, _ = go_config('config-a', 'A_', 'cadence_a', 'cadence_a_visibility', a_seeds, 'cluster0')
 b_dir, _ = go_config('config-b', 'B_', 'cadence_b', 'cadence_b_visibility', b_seeds, 'cluster1')
