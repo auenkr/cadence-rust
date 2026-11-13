@@ -33,3 +33,7 @@ cron rows already covered those SDK paths.
   postgres-grpc 43436464431, postgres-tchannel 43436469942, postgres-grpc 43436475273, postgres-tchannel 43436479974,
   cassandra-grpc 43436485113, cassandra-tchannel 43436490120, cassandra-grpc 43436495411, cassandra-tchannel 43436500373.
   Base URL: https://github.com/auenkr/cadence-rust/actions/runs/<id>
+
+## Post-merge master validation
+
+Master 68620ea11 (2026-11-13): 43442329521: success  43442335393: success GATESUMMARYfailed: 43442342733: success GATESUMMARYfailed: 43442350894: success GATESUMMARYfailed: 43442356646: success GATESUMMARYfailed: 43442363304: success GATESUMMARYfailed: 43442371824: success GATESUMMARYfailed: 43442377378: success GATESUMMARYfailed: 43442382534: success GATESUMMARYfailed: 43442389454: success GATESUMMARYfailed: 43442399074: success GATESUMMARYfailed: 43442406768: success GATESUMMARYfailed: 43442414752: success GATESUMMARYfailed: 
