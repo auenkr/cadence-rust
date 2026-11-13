@@ -513,6 +513,9 @@ fn failed_cause(name: &str) -> Option<DecisionTaskFailedCause> {
     })
 }
 
+/// Go `common.FailureReasonTransactionSizeExceedsLimit`.
+const TRANSACTION_SIZE_EXCEEDS_LIMIT: &str = "TRANSACTION_SIZE_EXCEEDS_LIMIT";
+
 /// Go `failDecisionHelper` message (`%v` of cause and details bytes).
 fn decision_attempts_exceeded_message(cause: Option<&str>, details: &[u8]) -> String {
     format!(
