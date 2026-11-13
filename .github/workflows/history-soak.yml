@@ -102,6 +102,7 @@ jobs:
           mkdir -p out/up/logs
           for f in out/gate/run/*.log; do [ -f "$f" ] && tail -n 400 "$f" > "out/up/logs/$(basename "$f")"; done
           for f in out/gate/run/*.log; do [ -f "$f" ] && head -n 300 "$f" | cut -c1-400 > "out/up/logs/head-$(basename "$f")"; done
+          for f in rust-history rust-history-2 rust-matching; do [ -f "out/gate/run/$f.log" ] && grep -vE 'Ringpop|locking task|unlocking task|readAndFilterTasks|Submitted [0-9]+ timer|CancelOutstandingPoll' "out/gate/run/$f.log" | cut -c1-300 | gzip -c > "out/up/logs/full-$f.log.gz"; done
           cp out/gate/run/{steps.json,summary.json,soak-result.json,samples.jsonl,soak-driver.log,rust-binary.sha256,rust-history-binary.sha256} out/up/ 2>/dev/null || true
           cp out/head-sha.txt out/rust-binaries.sha256 out/gate.exit out/up/
           {
