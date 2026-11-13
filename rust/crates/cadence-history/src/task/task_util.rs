@@ -247,10 +247,7 @@ pub async fn should_push_to_matching(shard: &Arc<dyn ShardContext>, task_info: &
             task_info.get_run_id(),
         )
         .await?;
-    if info.active_cluster_name != shard.get_cluster_metadata().get_current_cluster_name() {
-        return Ok(false);
-    }
-    Ok(true)
+    Ok(info.active_cluster_name == shard.get_cluster_metadata().get_current_cluster_name())
 }
 
 /// `getClusterAttributesForTask`
