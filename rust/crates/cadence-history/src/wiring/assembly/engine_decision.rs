@@ -808,8 +808,11 @@ impl EngineDecisionHandler {
         execution: &WorkflowExecution,
         mut action: impl FnMut(&Arc<EngineMutableState>) -> HResult<Outcome<T>>,
     ) -> HResult<T> {
+        let __t0 = std::time::Instant::now();
         let (context, release) = self.cache.get_or_create(domain_id, execution).await?;
+        eprintln!("SOAKDBG update locked wf={} {}ms", execution.workflow_id, __t0.elapsed().as_millis());
         let result = self.run(&context, &mut action).await;
+        eprintln!("SOAKDBG update done wf={} {}ms err={:?}", execution.workflow_id, __t0.elapsed().as_millis(), result.as_ref().err().map(|e| e.to_string()));
         release(result.as_ref().err());
         result
     }
