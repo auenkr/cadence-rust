@@ -300,7 +300,7 @@ try:
                 owned = {}
                 details = []
                 for name, address in hosts.items():
-                    rc, out = cli(B_T, 'tchannel', 'admin', 'history', 'host', 'describe',
+                    rc, out = cli(B_T, 'tchannel', 'admin', 'history_host', 'describe',
                                   '--had', address, '--pf')
                     try:
                         shard_ids = json.loads(out).get('shardIds', []) if rc == 0 else []
