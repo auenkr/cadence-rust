@@ -22,8 +22,15 @@ fn gate(state: &ServerState) -> Result<(), Status> {
     }
 }
 
+/// Go mapper/proto ToTaskType: admin.v1.TaskType -> internal TaskType (2/3/4/6); INVALID -> nil.
 fn task_type(v: i32) -> Option<i32> {
-    if v == 0 { None } else { Some(v) }
+    match v {
+        1 => Some(2),
+        2 => Some(3),
+        3 => Some(4),
+        4 => Some(6),
+        _ => None,
+    }
 }
 
 #[tonic::async_trait]

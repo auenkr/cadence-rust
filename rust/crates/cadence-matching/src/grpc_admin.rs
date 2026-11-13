@@ -27,6 +27,20 @@ impl Admin {
         Ok(cadence_proto::history::history_api_client::HistoryApiClient::new(channel))
     }
 
+    /// Go client/history routes shard-keyed calls to the shard owner.
+    fn history_client_for_shard(
+        &self,
+        shard: i32,
+    ) -> Result<
+        cadence_proto::history::history_api_client::HistoryApiClient<tonic::transport::Channel>,
+        Status,
+    > {
+        let channel = crate::admin::history_channel_for(&self.frontend.state, shard, None)
+            .map_err(Status::internal)?
+            .ok_or_else(|| Status::internal("History client is not configured."))?;
+        Ok(cadence_proto::history::history_api_client::HistoryApiClient::new(channel))
+    }
+
     async fn call<Req: serde::Serialize, Resp: serde::de::DeserializeOwned>(
         &self,
         path: &str,
@@ -901,7 +915,9 @@ impl a::admin_api_server::AdminApi for Admin {
                 "Replication task info is not set.",
             ));
         }
-        let mut history = self.history_client()?;
+        let shard = (cadence_common::membership::fingerprint32(r.task_infos[0].workflow_execution.as_ref().map(|e| e.workflow_id.as_str()).unwrap_or_default().as_bytes())
+            % crate::admin::shard_count(&self.frontend.state).max(1) as u32) as i32;
+        let mut history = self.history_client_for_shard(shard)?;
         let response = history
             .get_dlq_replication_messages(crate::admin::history_admin_request(
                 cadence_proto::history::GetDlqReplicationMessagesRequest {
@@ -917,11 +933,25 @@ impl a::admin_api_server::AdminApi for Admin {
 
     async fn get_domain_replication_messages(
         &self,
-        _request: Request<a::GetDomainReplicationMessagesRequest>,
+        request: Request<a::GetDomainReplicationMessagesRequest>,
     ) -> Result<Response<a::GetDomainReplicationMessagesResponse>, Status> {
-        Err(Status::internal(
-            "domain replication queue not enabled for cluster",
-        ))
+        let r = request.into_inner();
+        let req = cadence_api::admin::GetDomainReplicationMessagesRequest {
+            last_retrieved_message_id: r.last_retrieved_message_id,
+            last_processed_message_id: r.last_processed_message_id,
+            cluster_name: r.cluster_name,
+        };
+        let response =
+            cadence_service_core::admin::domain_replication_messages_response(
+                &self.frontend.state,
+                req,
+            )
+            .map_err(Status::internal)?;
+        Ok(Response::new(a::GetDomainReplicationMessagesResponse {
+            messages: response
+                .messages
+                .map(cadence_service_core::replication_convert::replication_messages_out),
+        }))
     }
 
     async fn count_dlq_messages(
@@ -975,7 +1005,7 @@ impl a::admin_api_server::AdminApi for Admin {
             }
             _ => return Err(Status::invalid_argument("The DLQ type is not supported.")),
         }
-        let mut history = self.history_client()?;
+        let mut history = self.history_client_for_shard(r.shard_id)?;
         let response = history
             .read_dlq_messages(crate::admin::history_admin_request(
                 cadence_proto::history::ReadDlqMessagesRequest {
@@ -1010,7 +1040,7 @@ impl a::admin_api_server::AdminApi for Admin {
             2 => return Ok(Response::new(a::PurgeDlqMessagesResponse {})),
             _ => return Err(Status::invalid_argument("The DLQ type is not supported.")),
         }
-        let mut history = self.history_client()?;
+        let mut history = self.history_client_for_shard(r.shard_id)?;
         history
             .purge_dlq_messages(crate::admin::history_admin_request(
                 cadence_proto::history::PurgeDlqMessagesRequest {
@@ -1041,7 +1071,7 @@ impl a::admin_api_server::AdminApi for Admin {
             }
             _ => return Err(Status::invalid_argument("The DLQ type is not supported.")),
         }
-        let mut history = self.history_client()?;
+        let mut history = self.history_client_for_shard(r.shard_id)?;
         let response = history
             .merge_dlq_messages(crate::admin::history_admin_request(
                 cadence_proto::history::MergeDlqMessagesRequest {

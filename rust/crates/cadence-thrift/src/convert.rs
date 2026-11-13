@@ -6484,7 +6484,7 @@ impl ToThrift for HistoryEvent {
         if self.event_id != 0 {
             f.fields.push((10, Value::I64(self.event_id)));
         }
-        f.oi64(20, millis_to_nanos(self.timestamp));
+        f.oi64(20, self.timestamp);
         f.oenum(30, self.event_type);
         if self.version != 0 {
             f.fields.push((35, Value::I64(self.version)));
@@ -7431,7 +7431,7 @@ mod tests {
         round_trip(&e);
 
         let timestamp = HistoryEvent {
-            timestamp: Some(1_700_000_000_123),
+            timestamp: Some(1_700_000_000_123_000_000),
             ..Default::default()
         }
         .to_thrift();

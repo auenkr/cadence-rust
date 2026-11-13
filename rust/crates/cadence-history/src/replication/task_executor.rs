@@ -310,6 +310,7 @@ impl TaskExecutorImpl {
             }
         };
         attrs.creation_time = task.creation_time;
+        tracing::info!(domain_id = ?attrs.domain_id, failover_version = ?attrs.failover_version, "failover-marker-task-received: replication FailoverMarker task");
         self.shard.adding_pending_failover_marker(attrs)
     }
 

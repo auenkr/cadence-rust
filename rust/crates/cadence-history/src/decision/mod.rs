@@ -12,6 +12,8 @@ pub const ACTIVITY_CANCELLATION_MSG_ACTIVITY_ID_UNKNOWN: &str = "ACTIVITY_ID_UNK
 pub const ACTIVITY_CANCELLATION_MSG_ACTIVITY_NOT_STARTED: &str = "ACTIVITY_ID_NOT_STARTED";
 pub const FAILURE_REASON_HISTORY_SIZE_EXCEEDS_LIMIT: &str = "HISTORY_EXCEEDS_LIMIT";
 pub const FAILURE_REASON_DECISION_BLOB_SIZE_EXCEEDS_LIMIT: &str = "DECISION_BLOB_SIZE_EXCEEDS_LIMIT";
+/// Go `execution.ErrTooManyPendingActivities` message.
+pub const ERR_TOO_MANY_PENDING_ACTIVITIES: &str = "Too many pending activities";
 pub const FAILURE_REASON_SEMAPHORE_NOT_FOUND: &str = "SEMAPHORE_NOT_FOUND";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecisionError {

@@ -140,6 +140,11 @@ fn to_row(record: &VisibilityRecord, closed: bool) -> VisibilityWriteRow {
         task_list: record.task_list.clone(),
         workflow_timeout_seconds: record.workflow_timeout,
         retention_seconds: record.retention_seconds,
+        task_id: record.task_id,
+        request_execution_status: visibility_execution_status(record.execution_status),
+        cluster_attribute_scope: record.cluster_attribute.as_ref().map(|a| a.scope.clone()).unwrap_or_default(),
+        cluster_attribute_name: record.cluster_attribute.as_ref().map(|a| a.name.clone()).unwrap_or_default(),
+        search_attributes: record.search_attributes.clone(),
     }
 }
 
@@ -285,9 +290,9 @@ impl TransferDependencies for TransferDepsImpl {
         (self.env.config.enable_record_workflow_execution_uninitialized)(domain)
     }
 
-    async fn record_workflow_execution_uninitialized(&self, _record: &VisibilityRecord) -> TaskResult<()> {
-        // Go sql visibility store: no-op.
-        self.env.visibility.record_uninitialized().map_err(pe)
+    async fn record_workflow_execution_uninitialized(&self, record: &VisibilityRecord) -> TaskResult<()> {
+        // Go sql visibility store: no-op; the ES store publishes a Create message.
+        self.env.visibility.record_uninitialized_row(to_row(record, false)).await.map_err(pe)
     }
 
     async fn record_workflow_execution_started(&self, record: VisibilityRecord) -> TaskResult<()> {
@@ -301,7 +306,7 @@ impl TransferDependencies for TransferDepsImpl {
         }
         // Go sql visibility store: UpsertWorkflowExecution returns the
         // *types.BadRequestError ErrVisibilityOperationNotSupported.
-        self.env.visibility.upsert().map_err(|e| match e {
+        self.env.visibility.upsert_row(to_row(&record, false)).await.map_err(|e| match e {
             PersistenceError::Internal(m) if m == crate::wiring::persistence::visibility::VISIBILITY_OPERATION_NOT_SUPPORTED => {
                 TaskError::BadRequest(m)
             }
@@ -326,9 +331,9 @@ impl TransferDependencies for TransferDepsImpl {
                 workflow_id: record.workflow_id.clone(),
                 run_id: record.run_id.clone(),
                 workflow_type_name: record.workflow_type_name.clone(),
-                start_timestamp: archive_nanos(record.start_timestamp),
+                start_timestamp: record.start_timestamp,
                 execution_timestamp: record.execution_timestamp,
-                close_timestamp: archive_nanos(record.close_timestamp),
+                close_timestamp: record.close_timestamp,
                 close_status: thrift_close_status(record.close_status),
                 history_length: record.history_length,
                 memo: record.memo.clone(),
@@ -527,7 +532,12 @@ impl CleanupDependencies for CleanupDepsImpl {
     async fn delete_workflow_visibility(&self, task: &dyn PersistenceTask, _domain_name: &str) -> TaskResult<()> {
         self.env
             .visibility
-            .delete_async(task.get_domain_id().to_string(), task.get_run_id().to_string())
+            .delete_row(
+                task.get_domain_id().to_string(),
+                task.get_workflow_id().to_string(),
+                task.get_run_id().to_string(),
+                task.get_task_id(),
+            )
             .await
             .map_err(pe)
     }
@@ -551,28 +561,6 @@ impl CleanupDependencies for CleanupDepsImpl {
     }
 }
 
-/// Go `ArchiveRequest.StartTimestamp/CloseTimestamp` are Unix nanoseconds (s3store/gcloud index keys,
-/// `time.Unix(0, ts)`). The visibility record carries history-event timestamps, which arrive here in
-/// milliseconds: normalise values in the millisecond range to nanoseconds, leave nanosecond values alone.
-fn archive_nanos(ts: i64) -> i64 {
-    if ts != 0 && ts.abs() < 100_000_000_000_000 {
-        ts.saturating_mul(1_000_000)
-    } else {
-        ts
-    }
-}
-
-#[cfg(test)]
-mod archive_nanos_tests {
-    use super::archive_nanos;
-
-    #[test]
-    fn millis_become_nanos_and_nanos_are_kept() {
-        assert_eq!(archive_nanos(1_794_000_000_000), 1_794_000_000_000_000_000);
-        assert_eq!(archive_nanos(1_794_000_000_000_000_000), 1_794_000_000_000_000_000);
-        assert_eq!(archive_nanos(0), 0);
-    }
-}
 
 #[cfg(test)]
 mod matching_metadata_tests {

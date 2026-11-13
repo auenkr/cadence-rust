@@ -198,7 +198,7 @@ impl<O: Operations> TaskHandler<O> {
                 },
                 Ok(_) => {},
                 Err(e) if e.kind == ErrorKind::BadRequest => self.handler_fail_decision("SCHEDULE_ACTIVITY_DUPLICATE_ID", ""),
-                Err(e) if e.kind == ErrorKind::Internal && e.message == "Too many pending activities" => self.handle_fail_workflow_error("PENDING_ACTIVITY_EXCEEDS_LIMIT", &e.message)?,
+                Err(e) if e.kind == ErrorKind::Internal && e.message == super::ERR_TOO_MANY_PENDING_ACTIVITIES => self.handle_fail_workflow_error("PENDING_ACTIVITY_EXCEEDS_LIMIT", &e.message)?,
                 Err(e) => return Err(e),
             },
             D::RequestCancelActivityTask => {

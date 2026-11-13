@@ -909,21 +909,26 @@ async fn handle_reset_queue(state: &AppState, body: &Struct) -> HandlerResult {
             "Cluster name is not set.".to_string(),
         ));
     }
-    let channel = state
-        .history_admin_channel
-        .clone()
+    let channel = crate::admin::history_channel_for(state, req.shard_id, None)
+        .map_err(AppError::internal)?
         .ok_or_else(|| AppError::internal("History client is not configured.".to_string()))?;
     let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
-    client
-        .reset_queue(crate::admin::history_admin_request(
-            cadence_proto::history::ResetQueueRequest {
-                shard_id: req.shard_id,
-                cluster_name: req.cluster_name,
-                task_type,
-            },
-        ))
-        .await
-        .map_err(|error| AppError::internal(error.message().to_string()))?;
+    let request = cadence_proto::history::ResetQueueRequest {
+        shard_id: req.shard_id,
+        cluster_name: req.cluster_name,
+        task_type,
+    };
+    crate::admin::shard_redirect(
+        state,
+        req.shard_id,
+        &request,
+        |mut c, r| async move { c.reset_queue(crate::admin::history_admin_request(r)).await },
+        client
+            .reset_queue(crate::admin::history_admin_request(request.clone()))
+            .await,
+    )
+    .await
+    .map_err(|error| AppError::internal(error.message().to_string()))?;
     Ok(wrap_success(&cadence_api::admin::ResetQueueResponse {}))
 }
 
@@ -969,21 +974,29 @@ async fn handle_describe_queue(state: &AppState, body: &Struct) -> HandlerResult
             "Cluster name is not set.".to_string(),
         ));
     }
-    let channel = state
-        .history_admin_channel
-        .clone()
+    let channel = crate::admin::history_channel_for(state, req.shard_id, None)
+        .map_err(AppError::internal)?
         .ok_or_else(|| AppError::internal("History client is not configured.".to_string()))?;
     let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
-    let response = client
-        .describe_queue(crate::admin::history_admin_request(
-            cadence_proto::history::DescribeQueueRequest {
-                shard_id: req.shard_id,
-                cluster_name: req.cluster_name,
-                task_type,
-            },
-        ))
-        .await
-        .map_err(|error| AppError::internal(error.message().to_string()))?
+    let request = cadence_proto::history::DescribeQueueRequest {
+        shard_id: req.shard_id,
+        cluster_name: req.cluster_name,
+        task_type,
+    };
+    let response = crate::admin::shard_redirect(
+        state,
+        req.shard_id,
+        &request,
+        |mut c, r| async move {
+            c.describe_queue(crate::admin::history_admin_request(r))
+                .await
+        },
+        client
+            .describe_queue(crate::admin::history_admin_request(request.clone()))
+            .await,
+    )
+    .await
+    .map_err(|error| AppError::internal(error.message().to_string()))?
         .into_inner();
     Ok(wrap_success(&cadence_api::admin::DescribeQueueResponse {
         processing_queue_states: response.processing_queue_states,

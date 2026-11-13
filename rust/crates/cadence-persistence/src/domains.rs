@@ -372,6 +372,14 @@ pub trait FrontendDomainManager: std::fmt::Debug + Send + Sync {
         name: &str,
         config: Option<cadence_api::types::AsyncWorkflowConfiguration>,
     ) -> Result<(), FrontendDomainError>;
+
+    /// Replace and persist a domain's isolation groups (Go `UpdateIsolationGroups`:
+    /// config version +1, domain row updated, replication task for global domains).
+    fn update_isolation_groups(
+        &self,
+        name: &str,
+        groups: Option<cadence_api::types::IsolationGroupConfiguration>,
+    ) -> Result<(), FrontendDomainError>;
 }
 
 /// Errors for domain failover: unknown domains are `EntityNotExists`,
@@ -1529,6 +1537,14 @@ impl FrontendDomainManager for InMemoryDomainStore {
         Ok(self.update_domain_async_workflow_config(name, config)?)
     }
 
+    fn update_isolation_groups(
+        &self,
+        name: &str,
+        groups: Option<cadence_api::types::IsolationGroupConfiguration>,
+    ) -> Result<(), FrontendDomainError> {
+        Ok(self.update_domain_isolation_groups(name, groups)?)
+    }
+
     fn create_with_version(
         &self,
         info: DomainInfo,
@@ -1816,6 +1832,34 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
             self.cache.restore_record(old);
             return Err(error);
         }
+        // Go UpdateAsyncWorkflowConfiguraton: global domains publish an Update task.
+        self.publish_replication_task(&updated, cadence_api::enums::DomainOperation::Update)?;
+        Ok(())
+    }
+
+    fn update_isolation_groups(
+        &self,
+        name: &str,
+        groups: Option<cadence_api::types::IsolationGroupConfiguration>,
+    ) -> Result<(), FrontendDomainError> {
+        let _guard = self.mutation_lock.lock().expect("domain manager lock");
+        self.describe(&DescribeDomainRequest {
+            name: Some(name.to_owned()),
+            uuid: None,
+        })?;
+        let old = self.cache.record_by_name(name)?;
+        let version = self.current_metadata_version()?;
+        self.cache.update_domain_isolation_groups(name, groups)?;
+        let mut updated = self.cache.record_by_name(name)?;
+        updated.config_version += 1;
+        updated.last_updated_time_nanos = now_nanos();
+        self.cache.restore_record(updated.clone());
+        if let Err(error) = self.persist_record(&updated, version, false) {
+            self.cache.restore_record(old);
+            return Err(error);
+        }
+        // Go UpdateIsolationGroups: global domains publish an Update task.
+        self.publish_replication_task(&updated, cadence_api::enums::DomainOperation::Update)?;
         Ok(())
     }
 

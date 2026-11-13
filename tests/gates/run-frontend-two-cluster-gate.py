@@ -28,19 +28,28 @@ ap.add_argument('--rust-binary', type=Path, required=True)
 ap.add_argument('--go-server', type=Path, required=True)
 ap.add_argument('--go-cli', type=Path, required=True)
 ap.add_argument('--rust-root', type=Path, required=True)
+ap.add_argument('--database', choices=['mysql', 'postgres', 'cassandra'], default='mysql')
 ap.add_argument('--rust-history-binary', type=Path, help='run cluster A History as Rust History (replication from Go cluster B)')
 ap.add_argument('--rust-history-side', choices=['standby', 'active'], default='standby', help='with --rust-history-binary: Rust History on standby cluster A (default) or on active cluster B (A all Go)')
+ap.add_argument('--two-history-graceful', action='store_true', help='with --rust-history-side active: run TWO Rust History hosts on active cluster B, do a graceful failover to A and assert cross-host failover markers')
+ap.add_argument('--rust-frontend-active', action='store_true', help='Rust Frontend serves ACTIVE/source cluster B (Go history/matching/worker); cluster A all Go. Asserts domain register+update replicate B->A')
 args = ap.parse_args()
+if args.two_history_graceful and not (args.rust_history_binary and args.rust_history_side == 'active'):
+    ap.error('--two-history-graceful needs --rust-history-binary and --rust-history-side active')
 root = Path(__file__).resolve().parents[2]
 work = args.out.resolve(); work.mkdir(parents=True, exist_ok=True)
-my_addr = os.environ.get('CADENCE_MYSQL_ADDR', '127.0.0.1:3306')
-my_user = os.environ.get('CADENCE_MYSQL_USER', 'root')
-my_pass = os.environ.get('CADENCE_MYSQL_PASSWORD', 'cadence')
+plugin = args.database
+_pfx = 'CADENCE_' + plugin.upper()
+my_addr = os.environ.get(_pfx + '_ADDR', '127.0.0.1:5432' if plugin == 'postgres' else '127.0.0.1:3306')
+my_user = os.environ.get(_pfx + '_USER', 'postgres' if plugin == 'postgres' else 'root')
+my_pass = os.environ.get(_pfx + '_PASSWORD', 'cadence')
+cass_host = os.environ.get('CADENCE_CASSANDRA_CONTACT_POINTS', '127.0.0.1')
+cass_port = int(os.environ.get('CADENCE_CASSANDRA_PORT', '9042'))
 
 keys = ['A_FE', 'A_FE_GRPC', 'A_HIST', 'A_HIST_GRPC', 'A_WORKER', 'A_RMATCH', 'A_RMATCH_GRPC', 'A_MATCH', 'A_MATCH_GRPC',
         'A_PPROF1', 'A_PPROF2', 'A_PPROF3', 'A_PPROF4',
         'B_FE', 'B_FE_GRPC', 'B_MATCH', 'B_MATCH_GRPC', 'B_HIST', 'B_HIST_GRPC', 'B_WORKER',
-        'B_PPROF1', 'B_PPROF2', 'B_PPROF3', 'B_PPROF4']
+        'B_PPROF1', 'B_PPROF2', 'B_PPROF3', 'B_PPROF4', 'B_HIST2', 'B_HIST2_GRPC', 'B_PPROF5']
 socks = [socket.socket() for _ in keys]
 for s in socks:
     s.bind(('127.0.0.1', 0))
@@ -57,12 +66,20 @@ if 'worker.enableScheduler' not in dyn:
 (work / 'rust-dynamic-config.yaml').write_text(dyn + '\nsystem.enableGRPCOutbound:\n  - value: true\n')
 
 def persistence(db, vis):
+    if plugin == 'cassandra':
+        def cstore(name, ks):
+            return (f'    {name}:\n      nosql:\n        pluginName: cassandra\n'
+                    f'        hosts: {json.dumps(cass_host)}\n        port: {cass_port}\n'
+                    f'        keyspace: {json.dumps(ks)}\n        connectTimeout: 2s\n        timeout: 5s\n'
+                    '        consistency: LOCAL_QUORUM\n        serialConsistency: LOCAL_SERIAL\n')
+        return ('persistence:\n  defaultStore: cass-default\n  visibilityStore: cass-visibility\n  numHistoryShards: 4\n  datastores:\n'
+                + cstore('cass-default', db) + cstore('cass-visibility', vis))
     def store(name, d, conns):
-        return (f'    {name}:\n      sql:\n        pluginName: mysql\n        databaseName: {json.dumps(d)}\n'
+        return (f'    {name}:\n      sql:\n        pluginName: {plugin}\n        databaseName: {json.dumps(d)}\n'
                 f'        connectAddr: {json.dumps(my_addr)}\n        connectProtocol: tcp\n        user: {json.dumps(my_user)}\n'
                 f'        password: {json.dumps(my_pass)}\n        nShards: 1\n        maxConns: {conns}\n        maxIdleConns: {conns}\n')
-    return ('persistence:\n  defaultStore: mysql-default\n  visibilityStore: mysql-visibility\n  numHistoryShards: 4\n  datastores:\n'
-            + store('mysql-default', db, 20) + store('mysql-visibility', vis, 2))
+    return (f'persistence:\n  defaultStore: {plugin}-default\n  visibilityStore: {plugin}-visibility\n  numHistoryShards: 4\n  datastores:\n'
+            + store(plugin + '-default', db, 20) + store(plugin + '-visibility', vis, 2))
 
 def group_block(current, a_transport, b_transport, policy, target=''):
     """clusterGroupMetadata for a process; Go always sees gRPC, Rust Frontend gets the variant."""
@@ -91,11 +108,17 @@ def go_config(dirname, prefix, db, vis, seeds, current):
     text = re.sub(r'(?ms)^clusterGroupMetadata:.*?(?=^archival:)', group_block(current, 'grpc', 'grpc', 'noop'), text, count=1)
     text = text.replace('/tmp/cadence_archival/development', str(work / 'arch-h')).replace('/tmp/cadence_vis_archival/development', str(work / 'arch-v')).replace('/tmp/blobstore', str(work / 'blob'))
     (d / 'development.yaml').write_text(text)
-    (d / 'development_mysql.yaml').write_text(persistence(db, vis))
+    if plugin == 'cassandra':
+        g = text.replace('hosts: "127.0.0.1"', f'hosts: {json.dumps(cass_host)}')
+        g = g.replace('keyspace: "cadence_visibility"', f'keyspace: {json.dumps(vis)}').replace('keyspace: "cadence"', f'keyspace: {json.dumps(db)}')
+        g = re.sub(r'(?m)^(\s+port:) 9042$', rf'\1 {cass_port}', g)
+        (d / 'development_cassandra.yaml').write_text(g)
+    else:
+        (d / f'development_{plugin}.yaml').write_text(persistence(db, vis))
     return d, text
 
-a_seeds = ', '.join(f'"127.0.0.1:{P[k]}"' for k in ['A_FE', 'A_HIST', 'A_WORKER', 'A_MATCH' if (args.rust_history_binary and args.rust_history_side == 'active') else 'A_RMATCH'])
-b_seeds = ', '.join(f'"127.0.0.1:{P[k]}"' for k in ['B_FE', 'B_HIST', 'B_MATCH', 'B_WORKER'])
+a_seeds = ', '.join(f'"127.0.0.1:{P[k]}"' for k in ['A_FE', 'A_HIST', 'A_WORKER', 'A_MATCH' if ((args.rust_history_binary and args.rust_history_side == 'active') or args.rust_frontend_active) else 'A_RMATCH'])
+b_seeds = ', '.join(f'"127.0.0.1:{P[k]}"' for k in ['B_FE', 'B_HIST', 'B_MATCH', 'B_WORKER'] + (['B_HIST2'] if args.two_history_graceful else []))
 a_dir, _ = go_config('config-a', 'A_', 'cadence_a', 'cadence_a_visibility', a_seeds, 'cluster0')
 b_dir, _ = go_config('config-b', 'B_', 'cadence_b', 'cadence_b_visibility', b_seeds, 'cluster1')
 
@@ -177,22 +200,84 @@ def prom():
 status = 0
 try:
     (work / 'rust-binary.sha256').write_text(subprocess.run(['sha256sum', str(args.rust_binary)], capture_output=True, text=True).stdout)
+    if args.rust_frontend_active:
+        # Rust Frontend is the domain-replication SOURCE (cluster B frontend); everything else is Go.
+        start('go-a', [args.go_server, '--config', a_dir, '--zone', plugin, 'start', '--auto-setup'])
+        start('go-b-hmw', [args.go_server, '--config', b_dir, '--zone', plugin, 'start', '--auto-setup', '--services', 'history,matching,worker'])
+        ok = wait_port(P['A_FE_GRPC'], 300, 'go-a') and wait_port(P['B_HIST_GRPC'], 300, 'go-b-hmw') and wait_port(P['B_MATCH_GRPC'], 300, 'go-b-hmw')
+        (work / 'rust-frontend-b.yaml').write_text(rust_yaml('noop', '', 'grpc', 'B_', ('cadence_b', 'cadence_b_visibility'), b_seeds, 'cluster1'))
+        env_b = {**os.environ, 'CADENCE_HISTORY_TCHANNEL_ADDR': f'127.0.0.1:{P["B_HIST"]}', 'CADENCE_MATCHING_TCHANNEL_ADDR': f'127.0.0.1:{P["B_MATCH"]}'}
+        start('rust-frontend-b', [args.rust_binary, 'start', '--config', work / 'rust-frontend-b.yaml', '--root', work, '--services', 'frontend',
+                                  '--history-grpc-port', P['B_HIST_GRPC'], '--data-dir', work / 'rust-frontend-b-data'], env=env_b)
+        ok = ok and wait_port(P['B_FE'], 120, 'rust-frontend-b') and wait_port(P['B_FE_GRPC'], 10, 'rust-frontend-b')
+        record('go-clusters-and-rust-frontend-b-listening', ok)
+        if not ok:
+            raise SystemExit(1)
+        time.sleep(20)
+        dom = 'fr-src-' + secrets.token_hex(3)
+        rc, out = cli(B_T, 'tchannel', '--domain', dom, 'domain', 'register', '--retention', '1', '--global_domain', 'true', '--description', 'd0',
+                      '--active_cluster', 'cluster1', '--cl', 'cluster0', '--cl', 'cluster1')
+        record('register-global-domain-on-rust-frontend-B', rc == 0, out)
+        def a_dom(token):
+            def f():
+                rc, out = cli(A_T, 'tchannel', '--domain', dom, 'domain', 'describe')
+                return rc == 0 and token in out, out
+            return f
+        poll('domain-registered-replicated-to-A', a_dom('d0'), 240)
+        def retry_cooldown(*a):
+            # Go domain handler rejects updates inside FailoverCoolDown ("Domain update too frequent")
+            for _ in range(20):
+                rc, out = cli(B_T, 'tchannel', '--domain', dom, *a)
+                if rc == 0 or 'too frequent' not in out:
+                    break
+                time.sleep(5)
+            return rc, out
+        rc, out = retry_cooldown('domain', 'update', '--description', 'd1-updated', '--retention', '2')
+        record('update-global-domain-on-rust-frontend-B', rc == 0, out)
+        poll('domain-update-replicated-to-A', a_dom('d1-updated'), 240)
+        # Isolation-group + async-workflow config set on Rust Frontend B must replicate to A
+        # (Go UpdateIsolationGroups / UpdateAsyncWorkflowConfiguraton publish Update tasks;
+        # Go FromDescribeDomainResponseDomain maps both into the Domain proto).
+        rc, out = retry_cooldown('admin', 'isolation-groups', 'update-domain', '--set-drains', 'zone-gate-1')
+        record('set-isolation-groups-on-rust-frontend-B', rc == 0, out)
+        def a_ig():
+            rc, out = cli(A_T, 'tchannel', '--domain', dom, 'admin', 'isolation-groups', 'get-domain')
+            return rc == 0 and 'zone-gate-1' in out, out
+        poll('isolation-groups-replicated-to-A', a_ig, 240)
+        rc, out = retry_cooldown('admin', 'async-wf-queue', 'update', '--json',
+                      '{"Enabled":false,"PredefinedQueueName":"gate-queue","QueueType":"kafka"}')
+        record('set-async-workflow-config-on-rust-frontend-B', rc == 0, out)
+        def a_async():
+            rc, out = cli(A_T, 'tchannel', '--domain', dom, 'admin', 'async-wf-queue', 'get')
+            return rc == 0 and 'gate-queue' in out, out
+        poll('async-workflow-config-replicated-to-A', a_async, 240)
+        for n in ['go-a', 'go-b-hmw', 'rust-frontend-b']:
+            record(f'{n}-alive-at-end', procs[n].poll() is None, f'exit={procs[n].poll()}')
+        raise SystemExit(0)
     if args.rust_history_binary and args.rust_history_side == 'active':
         # Rust History is the ACTIVE source (cluster B); cluster A is all Go (standby).
-        start('go-a', [args.go_server, '--config', a_dir, '--zone', 'mysql', 'start', '--auto-setup'])
-        start('go-b-fmw', [args.go_server, '--config', b_dir, '--zone', 'mysql', 'start', '--auto-setup', '--services', 'frontend,matching,worker'])
+        start('go-a', [args.go_server, '--config', a_dir, '--zone', plugin, 'start', '--auto-setup'])
+        start('go-b-fmw', [args.go_server, '--config', b_dir, '--zone', plugin, 'start', '--auto-setup', '--services', 'frontend,matching,worker'])
         ok = wait_port(P['A_FE_GRPC'], 300, 'go-a') and wait_port(P['B_FE_GRPC'], 300, 'go-b-fmw') and wait_port(P['B_WORKER'], 300, 'go-b-fmw')
         (work / 'rust-history.yaml').write_text(rust_yaml('noop', '', 'grpc', 'B_', ('cadence_b', 'cadence_b_visibility'), b_seeds, 'cluster1'))
         (work / 'rust-history-binary.sha256').write_text(subprocess.run(['sha256sum', str(args.rust_history_binary)], capture_output=True, text=True).stdout)
-        start('rust-history', [args.rust_history_binary, '--config', work / 'rust-history.yaml', '--root', work, 'start', '--services', 'history'])
+        start('rust-history', [args.rust_history_binary, '--config', work / 'rust-history.yaml', '--root', work, 'start', '--services', 'history'], env={**os.environ, 'RUST_LOG': 'info'})
         ok = ok and wait_port(P['B_HIST_GRPC'], 240, 'rust-history')
         record('go-clusters-listening', ok)
         if not ok:
             raise SystemExit(1)
+        if args.two_history_graceful:
+            y2 = (work / 'rust-history.yaml').read_text()
+            for a, b in [('B_HIST_GRPC', 'B_HIST2_GRPC'), ('B_PPROF3', 'B_PPROF5'), ('B_HIST', 'B_HIST2')]:
+                y2 = re.sub(r'(?m)^(      (?:port|grpcPort): )' + P[a] + r'$', lambda m: m.group(1) + P[b], y2)
+            (work / 'rust-history2.yaml').write_text(y2)
+            start('rust-history-2', [args.rust_history_binary, '--config', work / 'rust-history2.yaml', '--root', work, 'start', '--services', 'history'], env={**os.environ, 'RUST_LOG': 'info'})
+            ok = ok and wait_port(P['B_HIST2_GRPC'], 240, 'rust-history-2')
+            record('rust-history-2-listening', ok)
         time.sleep(20)
         dom = 'tc-act-' + secrets.token_hex(3)
         rc, out = cli(B_T, 'tchannel', '--domain', dom, 'domain', 'register', '--retention', '1', '--global_domain', 'true',
-                      '--active_cluster', 'cluster1', '--cl', 'cluster0', '--cl', 'cluster1')
+                      '--active_cluster', 'cluster0' if args.two_history_graceful else 'cluster1', '--cl', 'cluster0', '--cl', 'cluster1')
         record('register-global-domain-on-B', rc == 0, out)
         def a_dom():
             rc, out = cli(A_T, 'tchannel', '--domain', dom, 'domain', 'describe')
@@ -200,6 +285,49 @@ try:
         if not poll('domain-replicated-to-A', a_dom, 240):
             raise SystemExit(1)
         time.sleep(12)
+        if args.two_history_graceful:
+            # domain is active on Go cluster A; graceful failover to Rust-History cluster B (to-be-active) is requested on B
+            for i in range(4):
+                rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'start', '--tl', 'tc-tl', '--wt', 'TcType', '--wid', f'tc-grace-{i}-' + secrets.token_hex(2), '--et', '600', '--dt', '10')
+                record(f'grace-start-{i}-on-A', rc == 0, out)
+            time.sleep(10)
+            rc, out = cli(B_T, 'tchannel', '--domain', dom, 'domain', 'update', '--active_cluster', 'cluster1', '--failover_type', 'grace', '--failover_timeout_seconds', '300')
+            record('grace-failover-update-on-B', rc == 0, out)
+            def done_on(addr):
+                def f():
+                    rc, out = cli(addr, 'tchannel', '--domain', dom, 'domain', 'describe')
+                    return rc == 0 and re.search(r'ActiveClusterName:\s*cluster1', out) is not None and 'pending' not in out.lower(), out
+                return f
+            poll('grace-failover-complete-on-B', done_on(B_T), 300)
+            poll('grace-failover-complete-on-A', done_on(A_T), 300)
+            time.sleep(10)
+            def rd(n):
+                p = work / f'{n}.log'
+                return p.read_text(errors='replace').splitlines() if p.exists() else []
+            sends, recvs = [], []
+            for n in ['rust-history', 'rust-history-2']:
+                for l in rd(n):
+                    if 'failover-marker-send' in l: sends.append((n, l))
+                    if 'failover-marker-recv' in l: recvs.append((n, l))
+            (work / 'failover-marker-lines.txt').write_text('\n'.join(f'{n}: {l}' for n, l in sends + recvs))
+            self_host = {'rust-history': P['B_HIST_GRPC'], 'rust-history-2': P['B_HIST2_GRPC']}
+            cross = [(n, l) for n, l in sends if (m := re.search(r'target_grpc[=:"\s]+([\w.:\[\]-]+)', l)) and m.group(1).strip('"') != f'127.0.0.1:{self_host[n]}']
+            recv_hosts = {n for n, _ in recvs}
+            other = {'rust-history': 'rust-history-2', 'rust-history-2': 'rust-history'}
+            record('grace-marker-send-cross-host', bool(cross), f'sends={len(sends)} cross={len(cross)} e.g. {(cross or sends or [("", "none")])[0][1][-300:]}')
+            record('grace-marker-recv-on-other-host', any(other[n] in recv_hosts for n, _ in cross), f'recv hosts={sorted(recv_hosts)} count={len(recvs)}')
+            wid = 'tc-grace-after-' + secrets.token_hex(2)
+            rc, out = cli(B_T, 'tchannel', '--domain', dom, 'workflow', 'start', '--tl', 'tc-tl', '--wt', 'TcType', '--wid', wid, '--et', '600', '--dt', '10')
+            record('grace-after-start-on-new-active-B', rc == 0, out)
+            rc, out = cli(B_T, 'tchannel', '--domain', dom, 'workflow', 'signal', '--wid', wid, '--name', 'sig', '--input', '"y"')
+            record('grace-after-signal-on-B', rc == 0, out)
+            def a_sig():
+                rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'show', '--wid', wid)
+                return rc == 0 and 'WorkflowExecutionSignaled' in out, out
+            poll('grace-after-signal-replicated-to-A', a_sig, 240)
+            for n in ['go-a', 'go-b-fmw', 'rust-history', 'rust-history-2']:
+                record(f'{n}-alive-at-end', procs[n].poll() is None, f'exit={procs[n].poll()}')
+            raise SystemExit(0)
         rwid = 'tc-act-wf-' + secrets.token_hex(3)
         rc, out = cli(B_T, 'tchannel', '--domain', dom, 'workflow', 'start', '--tl', 'tc-tl', '--wt', 'TcType', '--wid', rwid, '--et', '600', '--dt', '10')
         record('act-start-on-rust-active-B', rc == 0, out)
@@ -225,11 +353,51 @@ try:
             return re.findall(r'WorkflowExecution\w+|DecisionTask\w+', out)
         ea, eb = ev(A_T), ev(B_T)
         record('act-standby-history-equals-active', ea == eb and len(ea) >= 3, f'A={ea} B={eb}')
-        for n in ['go-a', 'go-b-fmw', 'rust-history']:
+        if args.two_history_graceful:
+            gw = []
+            for i in range(4):
+                rc, out = cli(B_T, 'tchannel', '--domain', dom, 'workflow', 'start', '--tl', 'tc-tl', '--wt', 'TcType', '--wid', f'tc-grace-{i}-' + secrets.token_hex(2), '--et', '600', '--dt', '10')
+                record(f'grace-start-{i}-on-B', rc == 0, out)
+            time.sleep(10)
+            rc, out = cli(B_T, 'tchannel', '--domain', dom, 'domain', 'update', '--active_cluster', 'cluster0', '--failover_type', 'grace', '--failover_timeout_seconds', '300')
+            record('grace-failover-update-on-B', rc == 0, out)
+            def done_on(addr):
+                def f():
+                    rc, out = cli(addr, 'tchannel', '--domain', dom, 'domain', 'describe')
+                    return rc == 0 and re.search(r'ActiveClusterName:\s*cluster0', out) is not None and 'pending' not in out.lower(), out
+                return f
+            poll('grace-failover-complete-on-A', done_on(A_T), 300)
+            poll('grace-failover-complete-on-B', done_on(B_T), 300)
+            def rd(n):
+                p = work / f'{n}.log'
+                return p.read_text(errors='replace').splitlines() if p.exists() else []
+            sends, recvs = [], []
+            for n in ['rust-history', 'rust-history-2']:
+                for l in rd(n):
+                    if 'failover-marker-send' in l: sends.append((n, l))
+                    if 'failover-marker-recv' in l: recvs.append((n, l))
+            (work / 'failover-marker-lines.txt').write_text('\n'.join(f'{n}: {l}' for n, l in sends + recvs))
+            self_host = {'rust-history': P['B_HIST_GRPC'], 'rust-history-2': P['B_HIST2_GRPC']}
+            cross = [(n, l) for n, l in sends if (m := re.search(r'target_grpc[=:"\s]+([\w.:\[\]-]+)', l)) and m.group(1).strip('"') != f'127.0.0.1:{self_host[n]}']
+            recv_hosts = {n for n, _ in recvs}
+            other = {'rust-history': 'rust-history-2', 'rust-history-2': 'rust-history'}
+            record('grace-marker-send-cross-host', bool(cross), f'sends={len(sends)} cross={len(cross)} e.g. {(cross or sends or [("", "none")])[0][1][-300:]}')
+            record('grace-marker-recv-on-other-host', any(other[n] in recv_hosts for n, _ in cross), f'recv hosts={sorted(recv_hosts)} count={len(recvs)}')
+            # workflows continue on the new active side A
+            wid = 'tc-grace-after-' + secrets.token_hex(2)
+            rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'start', '--tl', 'tc-tl', '--wt', 'TcType', '--wid', wid, '--et', '600', '--dt', '10')
+            record('grace-after-start-on-new-active-A', rc == 0, out)
+            rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'signal', '--wid', wid, '--name', 'sig', '--input', '"y"')
+            record('grace-after-signal-on-A', rc == 0, out)
+            def b_sig():
+                rc, out = cli(B_T, 'tchannel', '--domain', dom, 'workflow', 'show', '--wid', wid)
+                return rc == 0 and 'WorkflowExecutionSignaled' in out, out
+            poll('grace-after-signal-replicated-to-B', b_sig, 240)
+        for n in ['go-a', 'go-b-fmw', 'rust-history'] + (['rust-history-2'] if args.two_history_graceful else []):
             record(f'{n}-alive-at-end', procs[n].poll() is None, f'exit={procs[n].poll()}')
         raise SystemExit(0)
-    start('go-b', [args.go_server, '--config', b_dir, '--zone', 'mysql', 'start', '--auto-setup'])
-    start('go-a-history-worker', [args.go_server, '--config', a_dir, '--zone', 'mysql', 'start', '--auto-setup', '--services', 'worker' if args.rust_history_binary else 'history,worker'])
+    start('go-b', [args.go_server, '--config', b_dir, '--zone', plugin, 'start', '--auto-setup'])
+    start('go-a-history-worker', [args.go_server, '--config', a_dir, '--zone', plugin, 'start', '--auto-setup', '--services', 'worker' if args.rust_history_binary else 'history,worker'])
     if args.rust_history_binary:
         # schema is created by go-a's --auto-setup before its worker listens; then Rust History serves cluster A
         ok = wait_port(P['B_FE_GRPC'], 300, 'go-b') and wait_port(P['A_WORKER'], 300, 'go-a-history-worker')

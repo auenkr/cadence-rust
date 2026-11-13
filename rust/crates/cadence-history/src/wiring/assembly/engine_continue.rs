@@ -80,7 +80,7 @@ impl EngineMutableState {
         // Go `AddContinuedAsNewEvent` + `ReplicateWorkflowExecutionContinuedAsNewEvent`.
         let attrs = a.clone();
         let run = new_run_id.clone();
-        let event = g.push_event(EventType::WorkflowExecutionContinuedAsNew, ms, |e| {
+        let event = g.push_event(EventType::WorkflowExecutionContinuedAsNew, ms * 1_000_000, |e| {
             e.workflow_execution_continued_as_new_event_attributes =
                 Some(WorkflowExecutionContinuedAsNewEventAttributes {
                     new_execution_run_id: run,

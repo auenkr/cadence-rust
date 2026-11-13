@@ -227,6 +227,17 @@ fn client(state: &AppState) -> Result<HistoryApiClient<tonic::transport::Channel
     Ok(HistoryApiClient::new(channel))
 }
 
+/// Go client/history routes shard-keyed admin calls to the shard owner.
+fn client_for_shard(
+    state: &AppState,
+    shard_id: i32,
+) -> Result<HistoryApiClient<tonic::transport::Channel>, ProxyError> {
+    let channel = crate::admin::history_channel_for(state, shard_id, None)
+        .map_err(ProxyError::Internal)?
+        .ok_or_else(|| ProxyError::Internal("History client is not configured.".to_string()))?;
+    Ok(HistoryApiClient::new(channel))
+}
+
 pub async fn get_replication_messages(
     state: &AppState,
     request: api_admin::GetReplicationMessagesRequest,
@@ -270,7 +281,11 @@ pub async fn get_dlq_replication_messages(
             "Replication task info is not set.".to_string(),
         ));
     }
-    let mut history = client(state)?;
+    // Go client/history routes by the first task info's workflow ID.
+    let workflow_id = request.task_infos[0].workflow_id.as_str();
+    let shard = (cadence_common::membership::fingerprint32(workflow_id.as_bytes())
+        % crate::admin::shard_count(state).max(1) as u32) as i32;
+    let mut history = client_for_shard(state, shard)?;
     let response = history
         .get_dlq_replication_messages(history_admin_request(
             ph::GetDlqReplicationMessagesRequest {
@@ -327,7 +342,7 @@ pub async fn read_dlq_messages(
     state: &AppState,
     request: api_admin::ReadDLQMessagesRequest,
 ) -> Result<api_admin::ReadDLQMessagesResponse, ProxyError> {
-    let mut history = client(state)?;
+    let mut history = client_for_shard(state, request.shard_id)?;
     let maximum_page_size = if request.maximum_page_size <= 0 {
         READ_DLQ_PAGE_SIZE
     } else {
@@ -366,7 +381,7 @@ pub async fn purge_dlq_messages(
     state: &AppState,
     request: api_admin::PurgeDLQMessagesRequest,
 ) -> Result<api_admin::PurgeDLQMessagesResponse, ProxyError> {
-    let mut history = client(state)?;
+    let mut history = client_for_shard(state, request.shard_id)?;
     history
         .purge_dlq_messages(history_admin_request(ph::PurgeDlqMessagesRequest {
             r#type: request.dlq_type.map_or(0, convert::dlq_type_out),
@@ -387,7 +402,7 @@ pub async fn merge_dlq_messages(
     state: &AppState,
     request: api_admin::MergeDLQMessagesRequest,
 ) -> Result<api_admin::MergeDLQMessagesResponse, ProxyError> {
-    let mut history = client(state)?;
+    let mut history = client_for_shard(state, request.shard_id)?;
     let response = history
         .merge_dlq_messages(history_admin_request(ph::MergeDlqMessagesRequest {
             r#type: request.dlq_type.map_or(0, convert::dlq_type_out),
@@ -501,7 +516,7 @@ pub async fn respond_cross_cluster_tasks_completed(
             "Cluster name is not set.".to_string(),
         ));
     }
-    let mut history = client(state)?;
+    let mut history = client_for_shard(state, request.shard_id)?;
     let response = history
         .respond_cross_cluster_tasks_completed(history_admin_request(
             ph::RespondCrossClusterTasksCompletedRequest {

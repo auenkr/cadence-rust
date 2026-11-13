@@ -117,6 +117,7 @@ fn data(workflow: &[u8], group: &[u8]) -> TaskDataBytes {
 }
 fn lifecycle(group: &[u8]) -> NativePollLifecycle {
     NativePollLifecycle {
+        claim: None,
         manager: Arc::default(),
         id: gs(b"poller"),
         cancel: None,

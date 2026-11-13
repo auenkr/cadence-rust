@@ -243,11 +243,26 @@ impl Handler for HandlerImpl {
     }
 
     async fn describe_history_host(&self, _r: Option<&adm::DescribeHistoryHostRequest>) -> HResult<adm::DescribeHistoryHostResponse> {
+        // Go handler.DescribeHistoryHost: total shard count, owned shard ids, domain cache
+        // sizes, shard controller status and this host's address.
+        let env = self.registry.env();
         let ids = self.registry.owned_shard_ids();
+        let (by_id, by_name) = env.matching_domain_cache.get_cache_size();
+        let status = if self.shutting_down.load(Ordering::SeqCst) {
+            "stopped"
+        } else if self.started.load(Ordering::SeqCst) {
+            "started"
+        } else {
+            "initialized"
+        };
+        let who = env.membership.who_am_i().to_string();
+        let address = env.membership.members().into_iter().find(|h| h.identity() == who).map(|h| h.address).unwrap_or_default();
         Ok(adm::DescribeHistoryHostResponse {
-            number_of_shards: ids.len() as i32,
+            number_of_shards: env.config.number_of_shards as i32,
             shard_ids: ids.into_iter().map(|i| i as i32).collect(),
-            ..Default::default()
+            domain_cache: Some(adm::DomainCacheInfo { num_of_items_in_cache_by_id: by_id as i64, num_of_items_in_cache_by_name: by_name as i64 }),
+            shard_controller_status: status.to_string(),
+            address,
         })
     }
 
@@ -357,6 +372,12 @@ impl Handler for HandlerImpl {
         let r = nil(request)?;
         let coordinator = &self.registry.env().failover_coordinator;
         for token in &r.failover_marker_tokens {
+            tracing::info!(
+                shard_ids = ?token.shard_ids,
+                domain_id = ?token.failover_marker.as_ref().and_then(|m| m.domain_id.clone()),
+                failover_version = ?token.failover_marker.as_ref().and_then(|m| m.failover_version),
+                "failover-marker-recv: NotifyFailoverMarkers applied on this history host"
+            );
             if let Some(marker) = token.failover_marker.clone() {
                 crate::failover::Coordinator::receive_failover_markers(&**coordinator, token.shard_ids.clone(), marker);
             }

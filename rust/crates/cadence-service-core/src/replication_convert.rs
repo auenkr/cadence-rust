@@ -236,18 +236,132 @@ fn ts_out(v: Option<i64>) -> Option<prost_types::Timestamp> {
     v.map(timestamp_from_nanos)
 }
 
+/// Go `FromDomainTaskAttributes` / `FromDescribeDomainResponseDomain`. Go builds a
+/// DescribeDomainResponse with only info/config/replication config, so
+/// failover_version and is_global_domain stay zero.
+fn domain_out(a: &t::DomainTaskAttributes) -> cadence_proto::api::Domain {
+    let info = a.info.clone().unwrap_or_default();
+    let config = a.config.clone().unwrap_or_default();
+    let repl = a.replication_config.clone().unwrap_or_default();
+    let archival = |v: Option<e::ArchivalStatus>| v.map_or(0, |v| v as i32 + 1);
+    cadence_proto::api::Domain {
+        id: info.uuid,
+        name: info.name,
+        status: info.status.map_or(0, |v| v as i32 + 1),
+        description: info.description,
+        owner_email: info.owner_email,
+        data: info.data.unwrap_or_default(),
+        workflow_execution_retention_period: Some(cadence_proto::convert::duration(
+            i64::from(config.workflow_execution_retention_period_in_days) * 86400,
+        )),
+        bad_binaries: config.bad_binaries.map(|b| cadence_proto::api::BadBinaries {
+            binaries: b
+                .binaries
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(k, v)| {
+                    let v = v.unwrap_or_default();
+                    (
+                        k,
+                        cadence_proto::api::BadBinaryInfo {
+                            reason: v.reason,
+                            operator: v.operator,
+                            created_time: v.created_time_nano.map(timestamp_from_nanos),
+                        },
+                    )
+                })
+                .collect(),
+        }),
+        history_archival_status: archival(config.history_archival_status),
+        history_archival_uri: config.history_archival_uri,
+        visibility_archival_status: archival(config.visibility_archival_status),
+        visibility_archival_uri: config.visibility_archival_uri,
+        active_cluster_name: repl.active_cluster_name,
+        clusters: repl
+            .clusters
+            .into_iter()
+            .map(|c| cadence_proto::api::ClusterReplicationConfiguration {
+                cluster_name: c.cluster_name,
+            })
+            .collect(),
+        // Go FromIsolationGroupConfig: nil/absent -> None, otherwise sorted by name.
+        isolation_groups: config.isolation_groups.map(|c| {
+            let mut groups: Vec<_> = c
+                .isolation_groups
+                .into_iter()
+                .map(|g| cadence_proto::api::IsolationGroupPartition {
+                    name: g.name,
+                    state: g.state.map_or(0, |s| s as i32),
+                })
+                .collect();
+            groups.sort_by(|a, b| a.name.cmp(&b.name));
+            cadence_proto::api::IsolationGroupConfiguration {
+                isolation_groups: groups,
+            }
+        }),
+        // Go FromDomainAsyncWorkflowConfiguraton.
+        async_workflow_config: config.async_workflow_config.map(|c| {
+            cadence_proto::api::AsyncWorkflowConfiguration {
+                enabled: c.enabled,
+                predefined_queue_name: c.predefined_queue_name,
+                queue_type: c.queue_type,
+                queue_config: c.queue_config.map(data_blob_out),
+            }
+        }),
+        // Go FromActiveClusters: only the by-cluster-attribute map is mapped; an
+        // empty attribute map becomes None (Go `len > 0`).
+        active_clusters: repl.active_clusters.map(|ac| cadence_proto::api::ActiveClusters {
+            active_clusters_by_cluster_attribute: ac
+                .active_clusters_by_cluster_attribute
+                .map(|m| {
+                    m.into_iter()
+                        .map(|(k, scope)| {
+                            (
+                                k,
+                                cadence_proto::api::ClusterAttributeScope {
+                                    cluster_attributes: scope
+                                        .cluster_attributes
+                                        .filter(|a| !a.is_empty())
+                                        .map(|a| {
+                                            a.into_iter()
+                                                .map(|(n, i)| {
+                                                    (
+                                                        n,
+                                                        cadence_proto::api::ActiveClusterInfo {
+                                                            active_cluster_name: i
+                                                                .active_cluster_name,
+                                                            failover_version: i.failover_version,
+                                                        },
+                                                    )
+                                                })
+                                                .collect()
+                                        })
+                                        .unwrap_or_default(),
+                                },
+                            )
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            ..Default::default()
+        }),
+        // failover_info: Go's DescribeDomainResponse built from task attributes has no
+        // FailoverInfo, so it stays None.
+        ..Default::default()
+    }
+}
+
 /// Go `FromReplicationTask` (proto enums are the Go enums shifted by one).
 pub fn replication_task_out(task: t::ReplicationTask) -> pa::ReplicationTask {
     use pa::replication_task::Attributes;
     let attributes = if let Some(a) = task.domain_task_attributes {
-        // History never emits domain tasks; only the scalar attributes are mapped.
         Some(Attributes::DomainTaskAttributes(pa::DomainTaskAttributes {
             domain_operation: a.domain_operation.map_or(0, |v| v as i32 + 1),
-            id: a.id,
+            id: a.id.clone(),
+            domain: Some(domain_out(&a)),
             config_version: a.config_version,
             failover_version: a.failover_version,
             previous_failover_version: a.previous_failover_version,
-            ..Default::default()
         }))
     } else if let Some(a) = task.sync_shard_status_task_attributes {
         Some(Attributes::SyncShardStatusTaskAttributes(

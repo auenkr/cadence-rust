@@ -367,6 +367,10 @@ impl ActiveMutableState for EngineActiveMutableState {
     }
 
     fn schedule_decision(&self) -> TaskResult<()> {
+        // Go `execution.ScheduleDecision` (mutable_state_util.go): no-op when a decision is already pending.
+        if EngineMs::has_pending_decision(&*self.state) {
+            return Ok(());
+        }
         EngineMs::add_decision_task_scheduled_event(&*self.state, false).map_err(he)
     }
 
@@ -619,7 +623,10 @@ impl TransferActiveDepsImpl {
             partition_config: r.partition_config.iter().map(|(k, v)| (k.clone(), String::from_utf8_lossy(v).into_owned())).collect(),
             ..Default::default()
         };
-        match client.start_workflow_execution(request).await {
+        // yarpc requires a TTL on outbound calls (Go sets a context deadline).
+        let mut rpc = tonic::Request::new(request);
+        rpc.set_timeout(crate::task::transfer_task_executor_base::TASK_RPC_CALL_TIMEOUT);
+        match client.start_workflow_execution(rpc).await {
             Ok(resp) => Ok(resp.into_inner().run_id),
             Err(s) => {
                 let m = s.message().to_string();

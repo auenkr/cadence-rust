@@ -144,7 +144,7 @@ impl EngineOps<'_> {
                 g.next_event_id
             )));
         }
-        let ev = g.push_event(ty, ms, fill);
+        let ev = g.push_event(ty, ms * 1_000_000, fill);
         g.exec.state = WORKFLOW_STATE_COMPLETED;
         g.exec.close_status = status;
         g.pc_exec.state = WORKFLOW_STATE_COMPLETED;
@@ -253,7 +253,8 @@ impl Operations for EngineOps<'_> {
             return Err(bad(format!("activity id {} is already pending", a.activity_id)));
         }
         if limit_enabled && g.pc_acts.len() as i64 >= limit {
-            return Err(internal("Too many pending activities."));
+            // Go execution.ErrTooManyPendingActivities (no trailing dot; task_handler compares the text).
+            return Err(internal(crate::decision::ERR_TOO_MANY_PENDING_ACTIVITIES));
         }
         let ev_attrs = ActivityTaskScheduledEventAttributes {
             activity_id: a.activity_id.clone(),
@@ -269,7 +270,7 @@ impl Operations for EngineOps<'_> {
             retry_policy: a.retry_policy.clone(),
             header: a.header.clone(),
         };
-        let ev = g.push_event(EventType::ActivityTaskScheduled, ms, |e| {
+        let ev = g.push_event(EventType::ActivityTaskScheduled, ms * 1_000_000, |e| {
             e.activity_task_scheduled_event_attributes = Some(ev_attrs);
         });
         let sid = ev.event_id;
@@ -368,7 +369,7 @@ impl Operations for EngineOps<'_> {
             return Err(bad(format!("activity {id} cancellation already requested")));
         }
         let activity_id = id.to_string();
-        let ev = g.push_event(EventType::ActivityTaskCancelRequested, ms, |e| {
+        let ev = g.push_event(EventType::ActivityTaskCancelRequested, ms * 1_000_000, |e| {
             e.activity_task_cancel_requested_event_attributes = Some(ActivityTaskCancelRequestedEventAttributes {
                 activity_id,
                 decision_task_completed_event_id: completed_id,
@@ -399,7 +400,7 @@ impl Operations for EngineOps<'_> {
         let ms = self.state.now_millis();
         let (activity_id, cause) = (id.to_string(), cause.to_string());
         let mut g = self.state.inner.lock().unwrap();
-        g.push_event(EventType::RequestCancelActivityTaskFailed, ms, |e| {
+        g.push_event(EventType::RequestCancelActivityTaskFailed, ms * 1_000_000, |e| {
             e.request_cancel_activity_task_failed_event_attributes = Some(RequestCancelActivityTaskFailedEventAttributes {
                 activity_id,
                 cause,
@@ -421,7 +422,7 @@ impl Operations for EngineOps<'_> {
         }
         let fire = a.start_to_fire_timeout_seconds;
         let timer_id = a.timer_id.clone();
-        let ev = g.push_event(EventType::TimerStarted, ms, |e| {
+        let ev = g.push_event(EventType::TimerStarted, ms * 1_000_000, |e| {
             e.timer_started_event_attributes = Some(TimerStartedEventAttributes {
                 timer_id,
                 start_to_fire_timeout_seconds: fire,
@@ -462,7 +463,7 @@ impl Operations for EngineOps<'_> {
             }
         };
         let timer_id = a.timer_id.clone();
-        g.push_event(EventType::TimerCanceled, ms, |e| {
+        g.push_event(EventType::TimerCanceled, ms * 1_000_000, |e| {
             e.timer_canceled_event_attributes = Some(TimerCanceledEventAttributes {
                 timer_id,
                 started_event_id: started_id,
@@ -484,7 +485,7 @@ impl Operations for EngineOps<'_> {
         let ms = self.state.now_millis();
         let identity = identity.to_string();
         let mut g = self.state.inner.lock().unwrap();
-        g.push_event(EventType::CancelTimerFailed, ms, |e| {
+        g.push_event(EventType::CancelTimerFailed, ms * 1_000_000, |e| {
             e.cancel_timer_failed_event_attributes = Some(CancelTimerFailedEventAttributes {
                 timer_id,
                 cause: "TIMER_ID_UNKNOWN".to_string(),
@@ -626,7 +627,7 @@ impl Operations for EngineOps<'_> {
             .ok_or_else(|| bad("RecordMarkerDecisionAttributes is not set on decision."))?;
         let ms = self.state.now_millis();
         let mut g = self.state.inner.lock().unwrap();
-        g.push_event(EventType::MarkerRecorded, ms, |e| {
+        g.push_event(EventType::MarkerRecorded, ms * 1_000_000, |e| {
             e.marker_recorded_event_attributes = Some(MarkerRecordedEventAttributes {
                 marker_name: a.marker_name,
                 details: a.details,
@@ -646,7 +647,7 @@ impl Operations for EngineOps<'_> {
         let ms = self.state.now_millis();
         let mut g = self.state.inner.lock().unwrap();
         let attrs = a.clone();
-        let ev = g.push_event(EventType::RequestCancelExternalWorkflowExecutionInitiated, ms, |e| {
+        let ev = g.push_event(EventType::RequestCancelExternalWorkflowExecutionInitiated, ms * 1_000_000, |e| {
             e.request_cancel_external_workflow_execution_initiated_event_attributes =
                 Some(RequestCancelExternalWorkflowExecutionInitiatedEventAttributes {
                     decision_task_completed_event_id: completed_id,
@@ -683,7 +684,7 @@ impl Operations for EngineOps<'_> {
         let ms = self.state.now_millis();
         let mut g = self.state.inner.lock().unwrap();
         let attrs = a.clone();
-        let ev = g.push_event(EventType::SignalExternalWorkflowExecutionInitiated, ms, |e| {
+        let ev = g.push_event(EventType::SignalExternalWorkflowExecutionInitiated, ms * 1_000_000, |e| {
             e.signal_external_workflow_execution_initiated_event_attributes =
                 Some(SignalExternalWorkflowExecutionInitiatedEventAttributes {
                     decision_task_completed_event_id: completed_id,
@@ -720,7 +721,7 @@ impl Operations for EngineOps<'_> {
         let ms = self.state.now_millis();
         let mut g = self.state.inner.lock().unwrap();
         let attrs = a.clone();
-        let ev = g.push_event(EventType::StartChildWorkflowExecutionInitiated, ms, |e| {
+        let ev = g.push_event(EventType::StartChildWorkflowExecutionInitiated, ms * 1_000_000, |e| {
             e.start_child_workflow_execution_initiated_event_attributes =
                 Some(StartChildWorkflowExecutionInitiatedEventAttributes {
                     domain: attrs.domain,
@@ -790,7 +791,7 @@ impl Operations for EngineOps<'_> {
         let fields = a.search_attributes.as_ref().and_then(|s| s.indexed_fields.clone()).unwrap_or_default();
         let ms = self.state.now_millis();
         let mut g = self.state.inner.lock().unwrap();
-        g.push_event(EventType::UpsertWorkflowSearchAttributes, ms, |e| {
+        g.push_event(EventType::UpsertWorkflowSearchAttributes, ms * 1_000_000, |e| {
             e.upsert_workflow_search_attributes_event_attributes = Some(UpsertWorkflowSearchAttributesEventAttributes {
                 decision_task_completed_event_id: completed_id,
                 search_attributes: a.search_attributes,
@@ -1172,6 +1173,29 @@ mod tests {
             }),
             ..Default::default()
         }]
+    }
+
+    #[test]
+    fn too_many_pending_activities_fails_workflow_with_go_reason() {
+        let s = state();
+        let mut config = Config::new_for_test();
+        config.pending_activity_validation_enabled = Arc::new(|| true);
+        config.pending_activities_count_limit_error = Arc::new(|_| 0);
+        let ops = EngineOps {
+            state: &s,
+            config: Arc::new(config),
+            domains: Arc::new(Domains),
+            domain_name: "test-domain".into(),
+            identity: "id".into(),
+            completed_id: 4,
+            semaphore_lookups: Default::default(),
+        };
+        let mut h = TaskHandler::new(ops, "id".into(), 4);
+        let mut d = schedule_activity_decision(false);
+        h.handle_decisions(b"", &mut d).unwrap();
+        assert!(!h.fail_decision);
+        assert_eq!(event_types(&s), vec![EventType::WorkflowExecutionFailed]);
+        assert_eq!(crate::decision::ERR_TOO_MANY_PENDING_ACTIVITIES, "Too many pending activities");
     }
 
     #[test]

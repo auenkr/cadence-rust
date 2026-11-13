@@ -409,6 +409,62 @@ impl QueryChannel {
         }
     }
 
+    /// Like `next`, but a poll whose delivery worker already holds a task stops
+    /// accepting offers (Go getTask yields a task or a query, never both).
+    pub async fn next_unless_claimed(
+        &self,
+        claim: &crate::matching_dispatch_native::PollClaim,
+    ) -> PendingQuery {
+        struct Waiter<'a>(&'a QueryChannel, bool);
+        impl Drop for Waiter<'_> {
+            fn drop(&mut self) {
+                if self.1 {
+                    let mut pending = self.0.pending.lock().expect("matching query lock");
+                    pending.pollers -= 1;
+                    drop(pending);
+                    self.0.notify.notify_waiters();
+                }
+            }
+        }
+        let mut waiter = Waiter(self, false);
+        loop {
+            let notified = self.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            let claim_changed = claim.notify.notified();
+            tokio::pin!(claim_changed);
+            claim_changed.as_mut().enable();
+            if claim.is_set() {
+                if waiter.1 {
+                    waiter.1 = false;
+                    self.pending.lock().expect("matching query lock").pollers -= 1;
+                    self.notify.notify_waiters();
+                }
+                claim_changed.await;
+                continue;
+            }
+            if !waiter.1 {
+                self.pending.lock().expect("matching query lock").pollers += 1;
+                waiter.1 = true;
+            }
+            let query = {
+                let mut pending = self.pending.lock().expect("matching query lock");
+                if claim.is_set() {
+                    None
+                } else {
+                    pending.offers.pop_front().map(|(_, query, accepted)| {
+                        let _ = accepted.send(());
+                        query
+                    })
+                }
+            };
+            if let Some(query) = query {
+                return query;
+            }
+            tokio::select! { _ = &mut notified => {}, _ = &mut claim_changed => {} }
+        }
+    }
+
     /// Go `deliverQueryResult`.
     pub fn complete(&self, task_id: &GoString, outcome: QueryOutcome) -> Result<(), Status> {
         match self.take_waiter(task_id, None) {
