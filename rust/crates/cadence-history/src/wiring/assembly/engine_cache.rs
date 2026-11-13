@@ -207,6 +207,7 @@ impl EngineExecutionContext {
             if let Ok(d) = self.core.domains.get_domain_by_id(&self.domain_id) {
                 state.set_bad_binaries(d.bad_binaries.clone());
             }
+            self.start_transaction_version(&state).await?;
             return Ok(state);
         }
         let core = &self.core;
@@ -253,7 +254,23 @@ impl EngineExecutionContext {
             break state;
         };
         *self.state.lock().unwrap() = Some(state.clone());
+        self.start_transaction_version(&state).await?;
         Ok(state)
+    }
+
+    /// Go `mutableStateBuilder.StartTransaction`: `UpdateCurrentVersion(activeClusterInfo.FailoverVersion, false)`
+    /// so a workflow that failed over is written (and policy-checked) at the domain's active version.
+    /// (The decision-failover flush of `startTransactionHandleDecisionFailover` is not ported here.)
+    async fn start_transaction_version(&self, state: &Arc<EngineMutableState>) -> HResult<()> {
+        let version = self
+            .core
+            .active_cluster_manager
+            .failover_version_by_workflow(&self.domain_id, &self.execution.workflow_id, &self.execution.run_id)
+            .await?;
+        if let Some(v) = version {
+            state.update_current_version(v, false)?;
+        }
+        Ok(())
     }
 
     /// NDC checkout must happen while the caller owns this context's cache
