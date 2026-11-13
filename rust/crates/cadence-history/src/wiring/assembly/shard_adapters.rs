@@ -9,7 +9,7 @@
 //! * failover levels carry no domain ids in the shard; the adapter keeps them
 //!   in-process (a restart drops failover levels in Go too: they are not persisted);
 //! * queuev2 queue states keep every virtual queue id, slice range and predicate (Go `types.QueueState`).
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;

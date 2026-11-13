@@ -318,8 +318,6 @@ mod tests {
         assert!(matches!(convert_shard_ownership_lost(HistoryError::internal("i"), "me", |_| None), HistoryError::Cadence(_)));
     }
 
-    use super::*;
-
     fn host(identity: &str, address: &str) -> Host {
         Host { address: address.into(), identity: identity.into(), grpc_address: String::new() }
     }
