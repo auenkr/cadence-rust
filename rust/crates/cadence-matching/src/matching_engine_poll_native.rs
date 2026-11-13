@@ -194,7 +194,9 @@ impl NativeMatchingEngine {
                 ..Default::default()
             });
         }
+        let claim = Arc::new(crate::matching_dispatch_native::PollClaim::default());
         let lifecycle = NativePollLifecycle {
+            claim: Some(claim.clone()),
             manager: queue.pollers.clone(),
             id: request.poller_id,
             cancel: Some(registration.cancel.clone()),
@@ -218,7 +220,7 @@ impl NativeMatchingEngine {
         let query_lifecycle = lifecycle.clone();
         let mut response = tokio::select! {
             biased;
-            query = queue.queries.next() => {
+            query = queue.queries.next_unless_claimed(&claim) => {
                 let _wait = query_lifecycle.begin();
                 if let Some(observer) = &query_lifecycle.observer { observer.poll_success(true); observer.poll_match(false, false, None); }
                 if !query.shape.is_valid() { return Err(Status::unknown(crate::matching_panic::NIL_DEREFERENCE_MESSAGE)); }
@@ -304,7 +306,9 @@ impl NativeMatchingEngine {
             .task_list_metadata
             .as_ref()
             .and_then(|m| m.max_tasks_per_second);
+        let claim = Arc::new(crate::matching_dispatch_native::PollClaim::default());
         let lifecycle = NativePollLifecycle {
+            claim: Some(claim.clone()),
             manager: queue.pollers.clone(),
             id: request.poller_id,
             cancel: Some(registration.cancel.clone()),
