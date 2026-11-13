@@ -31,6 +31,13 @@
       "headSha": "e7dcc4bedf8a533ff80dc652172c47d1b2989289",
       "status": "completed",
       "url": "https://github.com/auenkr/cadence-rust/actions/runs/43465066608"
+    },
+    "frontend_mixed": {
+      "conclusion": "",
+      "databaseId": 43466508274,
+      "headSha": "ebd8588fc1d30ebbe55af58f84c0811b162403f5",
+      "status": "in_progress",
+      "url": "https://github.com/auenkr/cadence-rust/actions/runs/43466508274"
     }
   },
   "next_check_utc": "2026-11-13T16:19:39.673Z",
@@ -64,6 +71,14 @@
       "workflow": "matching-mixed-gate.yml",
       "inputs": [],
       "at": "2026-11-13T16:40:25.567200+00:00"
+    },
+    "frontend_mixed": {
+      "workflow": "frontend-mixed-gate.yml",
+      "inputs": [
+        "database=mysql",
+        "kafka=true"
+      ],
+      "at": "2026-11-13T16:49:01.452090+00:00"
     }
   }
 }
