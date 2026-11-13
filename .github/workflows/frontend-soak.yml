@@ -8,6 +8,9 @@ on:
       duration_minutes:
         description: Soak duration in minutes (Frontend restarts at the halfway point)
         default: "70"
+      go_debug:
+        description: Set to 1 for Go debug logging
+        default: ''
       lanes:
         description: 'JSON list of lanes: go-baseline, rust, rust-fe (Rust FE + Go MT), rust-mt (Go FE + Rust MT)'
         default: '["go-baseline","rust"]'
@@ -17,6 +20,7 @@ concurrency:
 env:
   SOAK_RATE: ${{ inputs.rate || '10' }}
   SOAK_MINUTES: ${{ inputs.duration_minutes || '70' }}
+  SOAK_GO_DEBUG: ${{ inputs.go_debug }}
 jobs:
   build:
     runs-on: ubuntu-latest
