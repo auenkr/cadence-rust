@@ -191,6 +191,10 @@ impl TimerWorkflow for EngineTimerWorkflow {
         Ok(())
     }
     fn schedule_decision(&self) -> TaskResult<()> {
+        // Go `workflow.ScheduleDecision`: no-op when a decision is already pending.
+        if self.state.has_pending_decision() {
+            return Ok(());
+        }
         self.state.add_decision_task_scheduled_event(false).map_err(he)
     }
     async fn update_workflow_execution_as_active(&self, now: Time) -> TaskResult<()> {
