@@ -367,7 +367,7 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
     fn write_failed(&mut self, error: &HistoryError) {
         self.pending = PendingTasks::default();
         self.task_write_gate = None;
-        if matches!(error, HistoryError::PersistenceShardOwnershipLost(_)) {
+        if matches!(error, HistoryError::PersistenceShardOwnershipLost { .. }) {
             self.core.shard.close_shard(None);
         }
     }

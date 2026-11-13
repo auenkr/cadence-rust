@@ -8,7 +8,9 @@ use crate::handler::Handler;
 use crate::task::deps::MetricsScope as _;
 use crate::wiring::resources::metrics::{MetricsRegistry, Scope};
 
-pub struct MetricsHandler { pub wrapped: Arc<dyn Handler>, pub registry: Arc<MetricsRegistry> }
+pub type ErrorConverter = Arc<dyn Fn(HistoryError) -> HistoryError + Send + Sync>;
+
+pub struct MetricsHandler { pub wrapped: Arc<dyn Handler>, pub registry: Arc<MetricsRegistry>, pub convert_error: Option<ErrorConverter> }
 
 fn snake_to_pascal(s: &str) -> String {
     s.split('_').map(|p| { let mut c = p.chars(); c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default() }).collect()
@@ -20,6 +22,8 @@ impl MetricsHandler {
         scope.inc_counter("CadenceRequests");
         let start = Instant::now();
         let res = fut.await;
+        // Go handler methods return `h.convertError(err)` before `updateErrorMetric`.
+        let res = match (res, &self.convert_error) { (Err(e), Some(c)) => Err(c(e)), (r, _) => r };
         let d = start.elapsed();
         scope.record_timer("CadenceLatency", d);
         scope.record_histogram_duration("CadenceLatencyHistogram", d);

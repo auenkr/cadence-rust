@@ -57,11 +57,47 @@ pub struct TaskKey {
     pub scheduled_time_nano: i64,
 }
 
-/// `types.QueueState`; each virtual slice is reduced to its inclusive-min key.
+/// `types.Predicate`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum QueuePredicate {
+    Universal,
+    Empty,
+    DomainId { domain_ids: Vec<String>, is_exclusive: Option<bool> },
+}
+
+/// `types.VirtualSliceState`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct VirtualSliceState {
+    pub inclusive_min: TaskKey,
+    pub exclusive_max: TaskKey,
+    pub predicate: Option<QueuePredicate>,
+}
+
+/// `types.QueueState`: virtual queue id -> slices (Go `VirtualQueueStates[id].VirtualSliceStates`).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct QueueState {
     pub exclusive_max_read_level: TaskKey,
-    pub virtual_slice_inclusive_mins: Vec<TaskKey>,
+    pub virtual_queue_states: std::collections::BTreeMap<i64, Vec<VirtualSliceState>>,
+}
+
+impl QueueState {
+    /// Every slice's inclusive-min key, in queue-id order (the ack-level scan of `UpdateQueueState`).
+    pub fn slice_inclusive_mins(&self) -> impl Iterator<Item = &TaskKey> {
+        self.virtual_queue_states.values().flatten().map(|s| &s.inclusive_min)
+    }
+    /// One universal-predicate virtual queue 0 whose slices start at `mins` (up to `exclusive_max_read_level`).
+    pub fn with_slice_mins(exclusive_max_read_level: TaskKey, mins: Vec<TaskKey>) -> Self {
+        let mut virtual_queue_states = std::collections::BTreeMap::new();
+        if !mins.is_empty() {
+            virtual_queue_states.insert(
+                0,
+                mins.into_iter()
+                    .map(|m| VirtualSliceState { inclusive_min: m, exclusive_max: exclusive_max_read_level, predicate: Some(QueuePredicate::Universal) })
+                    .collect(),
+            );
+        }
+        Self { exclusive_max_read_level, virtual_queue_states }
+    }
 }
 
 /// `types.ProcessingQueueState` (reverse-match domain filter only is used by the shard).
@@ -417,7 +453,7 @@ impl ShardContext {
                     HistoryTaskCategory::Transfer.id(),
                     QueueState {
                         exclusive_max_read_level: TaskKey { task_id: ack_level.task_id + 1, scheduled_time_nano: 0 },
-                        virtual_slice_inclusive_mins: vec![],
+                        ..Default::default()
                     },
                 );
             }
@@ -430,7 +466,7 @@ impl ShardContext {
                             task_id: 0,
                             scheduled_time_nano: ack_level.scheduled_time_nanos,
                         },
-                        virtual_slice_inclusive_mins: vec![],
+                        ..Default::default()
                     },
                 );
             }
@@ -490,11 +526,11 @@ impl ShardContext {
         match category {
             HistoryTaskCategory::Transfer => Ok(QueueState {
                 exclusive_max_read_level: TaskKey { task_id: g.shard_info.transfer_ack_level + 1, scheduled_time_nano: 0 },
-                virtual_slice_inclusive_mins: vec![],
+                ..Default::default()
             }),
             HistoryTaskCategory::Timer => Ok(QueueState {
                 exclusive_max_read_level: TaskKey { task_id: 0, scheduled_time_nano: g.shard_info.timer_ack_level },
-                virtual_slice_inclusive_mins: vec![],
+                ..Default::default()
             }),
             HistoryTaskCategory::Replication => {
                 Err(ShardContextError::UnknownCategory(format!("{:?}", category)))
@@ -513,7 +549,7 @@ impl ShardContext {
         match category {
             HistoryTaskCategory::Transfer => {
                 let mut ack = state.exclusive_max_read_level.task_id;
-                for m in &state.virtual_slice_inclusive_mins {
+                for m in state.slice_inclusive_mins() {
                     ack = ack.min(m.task_id);
                 }
                 ack -= 1; // exclusive to inclusive
@@ -527,7 +563,7 @@ impl ShardContext {
             }
             HistoryTaskCategory::Timer => {
                 let mut ack = state.exclusive_max_read_level.scheduled_time_nano;
-                for m in &state.virtual_slice_inclusive_mins {
+                for m in state.slice_inclusive_mins() {
                     ack = ack.min(m.scheduled_time_nano);
                 }
                 g.shard_info.timer_ack_level = ack;
@@ -934,7 +970,7 @@ mod tests {
             HistoryTaskCategory::Transfer,
             QueueState {
                 exclusive_max_read_level: TaskKey { task_id: 20, scheduled_time_nano: 0 },
-                virtual_slice_inclusive_mins: vec![TaskKey { task_id: 12, scheduled_time_nano: 0 }],
+                virtual_queue_states: QueueState::with_slice_mins(TaskKey::default(), vec![TaskKey { task_id: 12, scheduled_time_nano: 0 }]).virtual_queue_states,
             },
         )
         .unwrap();

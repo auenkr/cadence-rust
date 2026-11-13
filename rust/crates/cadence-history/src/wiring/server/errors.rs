@@ -25,7 +25,7 @@ pub fn thrift_exception(e: &HistoryError) -> (&'static str, String) {
             other => ("InternalServiceError", other.to_string()),
         },
         HistoryError::EventAlreadyStarted(x) => ("EventAlreadyStartedError", x.to_string()),
-        HistoryError::PersistenceShardOwnershipLost(m) => ("ShardOwnershipLostError", m.clone()),
+        HistoryError::PersistenceShardOwnershipLost { message: m, .. } => ("ShardOwnershipLostError", m.clone()),
         HistoryError::CurrentBranchChanged { message, .. } => ("CurrentBranchChangedError", message.clone()),
         other => ("InternalServiceError", other.to_string()),
     }
@@ -179,7 +179,7 @@ fn detail_package(name: &str) -> &'static str {
 fn grpc_detail(e: &HistoryError) -> Option<(&'static str, Vec<u8>)> {
     match e {
         HistoryError::EventAlreadyStarted(_) => return Some(("EventAlreadyStartedError", EmptyDetail {}.encode_to_vec())),
-        HistoryError::PersistenceShardOwnershipLost(_) => {
+        HistoryError::PersistenceShardOwnershipLost { .. } => {
             return Some(("ShardOwnershipLostError", ShardOwnershipLostDetail::default().encode_to_vec()))
         }
         HistoryError::CurrentBranchChanged { current_branch_token, .. } => {
@@ -323,7 +323,7 @@ mod typed_detail_tests {
 
     #[test]
     fn persistence_shard_lost_is_aborted_not_internal() {
-        let st = grpc_status(&HistoryError::PersistenceShardOwnershipLost("lost".into()));
+        let st = grpc_status(&HistoryError::PersistenceShardOwnershipLost { message: "lost".into(), shard_id: None });
         assert_eq!(st.code(), Code::Aborted);
         assert!(first_detail(&st).type_url.ends_with("shared.v1.ShardOwnershipLostError"));
     }

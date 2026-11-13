@@ -1031,6 +1031,25 @@ mod tests {
     use crate::history_contract::{HistoryTreeInfo, ReplicationTask};
     use cadence_thrift::Value;
 
+    /// types.QueueState keeps queue ids, slice ranges and predicates through the thrift shard blob (Go context.go UpdateQueueState).
+    #[test]
+    fn shard_queue_state_roundtrip_is_lossless() {
+        let mut rec = ShardInfoRecord::default();
+        let mut q = ShardQueueStateRecord { exclusive_max_read_level: (9, 100), ..Default::default() };
+        q.virtual_queue_states.insert(0, vec![
+            ShardVirtualSliceRecord { inclusive_min: (1, 10), exclusive_max: (2, 20), predicate: Some(ShardPredicateRecord::Universal) },
+            ShardVirtualSliceRecord { inclusive_min: (3, 30), exclusive_max: (4, 40), predicate: Some(ShardPredicateRecord::Empty) },
+        ]);
+        q.virtual_queue_states.insert(5, vec![ShardVirtualSliceRecord {
+            inclusive_min: (5, 50), exclusive_max: (6, 60),
+            predicate: Some(ShardPredicateRecord::DomainId { domain_ids: vec!["a".into(), "b".into()], is_exclusive: Some(true) }),
+        }]);
+        q.virtual_queue_states.insert(7, vec![]);
+        rec.queue_states.insert(3, q);
+        let back = ShardInfoRecord::decode(&rec.encode(Encoding::ThriftRW).unwrap(), Encoding::ThriftRW).unwrap();
+        assert_eq!(back.queue_states, rec.queue_states);
+    }
+
     // Go sqlblobs.TaskInfo emits these exact field bytes for scheduleID=7.
     const TASK_INFO_SCHEDULE_ID_7: &[u8] = &[10, 0, 13, 0, 0, 0, 0, 0, 0, 0, 7, 0];
 
@@ -1369,7 +1388,47 @@ pub struct ShardProcessingQueueRecord { pub level: i32, pub ack_level: i64, pub 
 
 /// `types.QueueState`; keys are `(scheduled_time_nano, task_id)`.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct ShardQueueStateRecord { pub exclusive_max_read_level: (i64, i64), pub virtual_slice_inclusive_mins: Vec<(i64, i64)> }
+pub struct ShardQueueStateRecord { pub exclusive_max_read_level: (i64, i64), pub virtual_queue_states: std::collections::BTreeMap<i64, Vec<ShardVirtualSliceRecord>> }
+
+/// `types.Predicate` (thrift `shared.Predicate`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ShardPredicateRecord { Universal, Empty, DomainId { domain_ids: Vec<String>, is_exclusive: Option<bool> } }
+
+/// `types.VirtualSliceState`; keys are `(scheduled_time_nano, task_id)`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShardVirtualSliceRecord { pub inclusive_min: (i64, i64), pub exclusive_max: (i64, i64), pub predicate: Option<ShardPredicateRecord> }
+
+fn predicate_struct(p: &ShardPredicateRecord) -> Value {
+    // mapper/thrift/predicate.go FromPredicate: type + the matching attributes struct.
+    let fields = match p {
+        ShardPredicateRecord::Universal => vec![(10, Value::I32(0)), (20, Value::Struct(Struct::default()))],
+        ShardPredicateRecord::Empty => vec![(10, Value::I32(1)), (30, Value::Struct(Struct::default()))],
+        ShardPredicateRecord::DomainId { domain_ids, is_exclusive } => {
+            let mut a = vec![(10, Value::List(domain_ids.iter().map(|d| string_field(d)).collect()))];
+            if let Some(x) = is_exclusive { a.push((20, Value::Bool(*x))); }
+            vec![(10, Value::I32(2)), (40, Value::Struct(Struct { fields: a }))]
+        }
+    };
+    Value::Struct(Struct { fields })
+}
+fn read_predicate(value: Option<&Value>) -> Result<Option<ShardPredicateRecord>> {
+    let Some(Value::Struct(s)) = value else { return Ok(None) };
+    Ok(Some(match s.get(10) {
+        Some(Value::I32(1)) => ShardPredicateRecord::Empty,
+        Some(Value::I32(2)) => {
+            let mut domain_ids = Vec::new();
+            let mut is_exclusive = None;
+            if let Some(Value::Struct(a)) = s.get(40) {
+                if let Some(Value::List(l)) = a.get(10) {
+                    for d in l { if let Value::Bytes(b) = d { domain_ids.push(String::from_utf8(b.clone()).map_err(Error::from)?); } }
+                }
+                if let Some(Value::Bool(b)) = a.get(20) { is_exclusive = Some(*b); }
+            }
+            ShardPredicateRecord::DomainId { domain_ids, is_exclusive }
+        }
+        _ => ShardPredicateRecord::Universal,
+    }))
+}
 
 /// Plain-data view of `sqlblobs.ShardInfo` (the `shards.data` blob).
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -1475,9 +1534,17 @@ impl ShardInfoRecord {
         if !self.queue_states.is_empty() {
             let entries = self.queue_states.iter().map(|(category, state)| {
                 let mut qf = Vec::new();
-                if !state.virtual_slice_inclusive_mins.is_empty() {
-                    let slices = state.virtual_slice_inclusive_mins.iter().map(|k| Value::Struct(Struct { fields: vec![(10, Value::Struct(Struct { fields: vec![(10, task_key_struct(*k))] }))] })).collect();
-                    qf.push((10, Value::Map(vec![(Value::I64(0), Value::Struct(Struct { fields: vec![(10, Value::List(slices))] }))])));
+                if !state.virtual_queue_states.is_empty() {
+                    let queues = state.virtual_queue_states.iter().map(|(id, slices)| {
+                        let slices: Vec<Value> = slices.iter().map(|sl| {
+                            let mut sf = vec![(10, Value::Struct(Struct { fields: vec![(10, task_key_struct(sl.inclusive_min)), (20, task_key_struct(sl.exclusive_max))] }))];
+                            if let Some(p) = &sl.predicate { sf.push((20, predicate_struct(p))); }
+                            Value::Struct(Struct { fields: sf })
+                        }).collect();
+                        let vf = if slices.is_empty() { vec![] } else { vec![(10, Value::List(slices))] };
+                        (Value::I64(*id), Value::Struct(Struct { fields: vf }))
+                    }).collect();
+                    qf.push((10, Value::Map(queues)));
                 }
                 qf.push((20, task_key_struct(state.exclusive_max_read_level)));
                 (Value::I32(*category), Value::Struct(Struct { fields: qf }))
@@ -1508,13 +1575,14 @@ impl ShardInfoRecord {
                 let (Value::I32(k), Value::Struct(s)) = (k, s) else { return Err(Error::Invalid("bad queueStates entry".into())) };
                 let mut q = ShardQueueStateRecord { exclusive_max_read_level: read_task_key(s.get(20))?, ..Default::default() };
                 if let Some(Value::Map(vqs)) = s.get(10) {
-                    for (_, vq) in vqs {
-                        let Value::Struct(vq) = vq else { continue };
+                    for (id, vq) in vqs {
+                        let (Value::I64(id), Value::Struct(vq)) = (id, vq) else { continue };
+                        let list = q.virtual_queue_states.entry(*id).or_default();
                         if let Some(Value::List(slices)) = vq.get(10) {
                             for slice in slices {
                                 let Value::Struct(slice) = slice else { continue };
-                                let min = match slice.get(10) { Some(Value::Struct(range)) => read_task_key(range.get(10))?, _ => (0, 0) };
-                                q.virtual_slice_inclusive_mins.push(min);
+                                let (min, max) = match slice.get(10) { Some(Value::Struct(range)) => (read_task_key(range.get(10))?, read_task_key(range.get(20))?), _ => ((0, 0), (0, 0)) };
+                                list.push(ShardVirtualSliceRecord { inclusive_min: min, exclusive_max: max, predicate: read_predicate(slice.get(20))? });
                             }
                         }
                     }

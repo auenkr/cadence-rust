@@ -198,7 +198,7 @@ pub fn history_error_to_replication(e: HistoryError) -> ReplicationError {
             other => ReplicationError::Other(other.to_string()),
         },
         HistoryError::MissingVersionHistories => ReplicationError::MissingVersionHistories,
-        HistoryError::PersistenceShardOwnershipLost(m) => ReplicationError::ShardOwnershipLost(m),
+        HistoryError::PersistenceShardOwnershipLost { message: m, .. } => ReplicationError::ShardOwnershipLost(m),
         HistoryError::DeadlineExceeded => ReplicationError::DeadlineExceeded("context deadline exceeded".into()),
         other => ReplicationError::Other(other.to_string()),
     }

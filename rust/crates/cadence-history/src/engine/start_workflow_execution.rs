@@ -566,7 +566,7 @@ impl HistoryEngine {
             | HistoryError::ConditionFailed(_)
             | HistoryError::ShardAlreadyExist(_)
             | HistoryError::PersistenceAlreadyStarted(_)
-            | HistoryError::PersistenceShardOwnershipLost(_)
+            | HistoryError::PersistenceShardOwnershipLost { .. }
             | HistoryError::DuplicateRequest { .. } => true,
             _ => false,
         };

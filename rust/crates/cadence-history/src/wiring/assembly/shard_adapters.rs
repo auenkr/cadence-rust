@@ -8,9 +8,8 @@
 //!   shard's copy still matches, otherwise domain ids are empty;
 //! * failover levels carry no domain ids in the shard; the adapter keeps them
 //!   in-process (a restart drops failover levels in Go too: they are not persisted);
-//! * queuev2 queue states are reduced to `virtual_slice_inclusive_mins`; reading
-//!   rebuilds a single virtual queue (id 0) with universal slices.
-use std::collections::{BTreeMap, HashMap, HashSet};
+//! * queuev2 queue states keep every virtual queue id, slice range and predicate (Go `types.QueueState`).
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -356,48 +355,55 @@ impl v2::ShardContext for RealQueueV2ShardContext {
     }
     fn get_queue_state(&self, c: v2::HistoryTaskCategory) -> Result<v2::TypesQueueState, v2::DepError> {
         let s = self.shard.get_queue_state(v2_cat(c)).map_err(|e| e.to_string())?;
-        let max = s.exclusive_max_read_level;
-        let mut vqs = BTreeMap::new();
-        if !s.virtual_slice_inclusive_mins.is_empty() {
-            let slices = s
-                .virtual_slice_inclusive_mins
-                .iter()
-                .map(|m| v2::TypesVirtualSliceState {
-                    task_range: v2::TypesTaskRange {
-                        inclusive_min: v2::TypesTaskKey { task_id: m.task_id, scheduled_time_nano: m.scheduled_time_nano },
-                        exclusive_max: v2::TypesTaskKey { task_id: max.task_id, scheduled_time_nano: max.scheduled_time_nano },
-                    },
-                    predicate: Some(v2::TypesPredicate::Universal),
-                })
-                .collect();
-            vqs.insert(0, v2::TypesVirtualQueueState { virtual_slice_states: slices });
-        }
-        Ok(v2::TypesQueueState {
-            virtual_queue_states: vqs,
-            exclusive_max_read_level: v2::TypesTaskKey { task_id: max.task_id, scheduled_time_nano: max.scheduled_time_nano },
-        })
+        let key = |k: sc::TaskKey| v2::TypesTaskKey { task_id: k.task_id, scheduled_time_nano: k.scheduled_time_nano };
+        let vqs = s
+            .virtual_queue_states
+            .iter()
+            .map(|(id, slices)| {
+                let slices = slices
+                    .iter()
+                    .map(|sl| v2::TypesVirtualSliceState {
+                        task_range: v2::TypesTaskRange { inclusive_min: key(sl.inclusive_min), exclusive_max: key(sl.exclusive_max) },
+                        predicate: sl.predicate.as_ref().map(|p| match p {
+                            sc::QueuePredicate::Universal => v2::TypesPredicate::Universal,
+                            sc::QueuePredicate::Empty => v2::TypesPredicate::Empty,
+                            sc::QueuePredicate::DomainId { domain_ids, is_exclusive } => {
+                                v2::TypesPredicate::DomainId { domain_ids: domain_ids.clone(), is_exclusive: *is_exclusive }
+                            }
+                        }),
+                    })
+                    .collect();
+                (*id, v2::TypesVirtualQueueState { virtual_slice_states: slices })
+            })
+            .collect();
+        Ok(v2::TypesQueueState { virtual_queue_states: vqs, exclusive_max_read_level: key(s.exclusive_max_read_level) })
     }
     fn update_queue_state(&self, c: v2::HistoryTaskCategory, s: v2::TypesQueueState) -> Result<(), v2::DepError> {
-        let mins = s
+        let key = |k: &v2::TypesTaskKey| sc::TaskKey { task_id: k.task_id, scheduled_time_nano: k.scheduled_time_nano };
+        let virtual_queue_states = s
             .virtual_queue_states
-            .values()
-            .flat_map(|vq| vq.virtual_slice_states.iter())
-            .map(|sl| sc::TaskKey {
-                task_id: sl.task_range.inclusive_min.task_id,
-                scheduled_time_nano: sl.task_range.inclusive_min.scheduled_time_nano,
+            .iter()
+            .map(|(id, vq)| {
+                let slices = vq
+                    .virtual_slice_states
+                    .iter()
+                    .map(|sl| sc::VirtualSliceState {
+                        inclusive_min: key(&sl.task_range.inclusive_min),
+                        exclusive_max: key(&sl.task_range.exclusive_max),
+                        predicate: sl.predicate.as_ref().map(|p| match p {
+                            v2::TypesPredicate::Universal => sc::QueuePredicate::Universal,
+                            v2::TypesPredicate::Empty => sc::QueuePredicate::Empty,
+                            v2::TypesPredicate::DomainId { domain_ids, is_exclusive } => {
+                                sc::QueuePredicate::DomainId { domain_ids: domain_ids.clone(), is_exclusive: *is_exclusive }
+                            }
+                        }),
+                    })
+                    .collect();
+                (*id, slices)
             })
             .collect();
         self.shard
-            .update_queue_state(
-                v2_cat(c),
-                sc::QueueState {
-                    exclusive_max_read_level: sc::TaskKey {
-                        task_id: s.exclusive_max_read_level.task_id,
-                        scheduled_time_nano: s.exclusive_max_read_level.scheduled_time_nano,
-                    },
-                    virtual_slice_inclusive_mins: mins,
-                },
-            )
+            .update_queue_state(v2_cat(c), sc::QueueState { exclusive_max_read_level: key(&s.exclusive_max_read_level), virtual_queue_states })
             .map_err(|e| e.to_string())
     }
     fn update_if_needed_and_get_queue_max_read_level(&self, c: v2::HistoryTaskCategory, cluster: &str) -> v2::HistoryTaskKey {

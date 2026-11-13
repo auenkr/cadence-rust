@@ -161,7 +161,7 @@ impl EngineCore {
 
 pub(super) fn shard_err(e: ShardContextError) -> HistoryError {
     match e {
-        ShardContextError::ShardOwnershipLost(m) => HistoryError::PersistenceShardOwnershipLost(m),
+        ShardContextError::ShardOwnershipLost(m) => HistoryError::PersistenceShardOwnershipLost { message: m, shard_id: None },
         other => HistoryError::internal(other.to_string()),
     }
 }
@@ -500,6 +500,41 @@ struct Entry {
 
 type Key = (String, String, String);
 
+/// Drops entries whose workflow lock nobody holds or has pinned (a pinned/held lock owns an extra
+/// clone of the mutex `Arc`); returns the number evicted.
+fn evict_unheld<V>(entries: &mut HashMap<Key, V>, lock: impl Fn(&V) -> &Arc<tokio::sync::Mutex<()>>) -> usize {
+    let before = entries.len();
+    entries.retain(|_, e| Arc::strong_count(lock(e)) > 1);
+    before - entries.len()
+}
+
+#[cfg(test)]
+mod evict_tests {
+    use super::*;
+
+    fn key(n: &str) -> Key {
+        ("d".into(), n.into(), "r".into())
+    }
+
+    /// Go cache pins on Get/PutIfNotExist before taking the workflow lock: an entry whose lock Arc was
+    /// cloned (pinned or locked) is never evicted, an idle one is, and the pin is released on drop.
+    #[tokio::test]
+    async fn eviction_keeps_pinned_and_locked_entries() {
+        let mut map: HashMap<Key, Arc<tokio::sync::Mutex<()>>> = HashMap::new();
+        for n in ["idle", "pinned", "locked"] {
+            map.insert(key(n), Arc::new(tokio::sync::Mutex::new(())));
+        }
+        let pin = map[&key("pinned")].clone();
+        let guard = map[&key("locked")].clone().lock_owned().await;
+        assert_eq!(evict_unheld(&mut map, |l| l), 1);
+        assert!(map.contains_key(&key("pinned")) && map.contains_key(&key("locked")) && !map.contains_key(&key("idle")));
+        drop(pin);
+        drop(guard);
+        assert_eq!(evict_unheld(&mut map, |l| l), 2);
+        assert!(map.is_empty());
+    }
+}
+
 /// Go `execution.cacheImpl`: contexts keyed by domain/workflow/run, each guarded
 /// by a lock held until the returned `ReleaseFunc` is called.
 pub struct EngineExecutionCache {
@@ -583,9 +618,8 @@ impl EngineExecutionCache {
         if entries.len() >= self.max_size {
             lru.inc_counter("BaseCacheFullCounter");
             // Evict entries nobody holds (a held lock owns a clone of the mutex Arc).
-            let before = entries.len();
-            entries.retain(|_, e| Arc::strong_count(&e.lock) > 1);
-            lru.add_counter("BaseCacheEvictCounter", (before - entries.len()) as i64);
+            let evicted = evict_unheld(&mut entries, |e| &e.lock);
+            lru.add_counter("BaseCacheEvictCounter", evicted as i64);
         }
         let entry = Arc::new(Entry {
             lock: Arc::new(tokio::sync::Mutex::new(())),

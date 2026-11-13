@@ -138,9 +138,9 @@ impl Service {
             WORKFLOW_ID_CACHE_TTL,
             WORKFLOW_ID_CACHE_MAX_COUNT,
         ));
-        let raw = Arc::new(HandlerImpl::new(registry, (env.config.rps)() as f64));
+        let raw = Arc::new(HandlerImpl::new(registry.clone(), (env.config.rps)() as f64));
         let handler: Arc<dyn Handler> =
-            Arc::new(HistoryHandler { wrapped: Arc::new(crate::handler::metrics_handler::MetricsHandler { wrapped: raw, registry: env.metrics_registry.clone() }), workflow_id_cache: Arc::new(CacheAdapter(wf_cache)) });
+            Arc::new(HistoryHandler { wrapped: Arc::new(crate::handler::metrics_handler::MetricsHandler { wrapped: raw, registry: env.metrics_registry.clone(), convert_error: Some({ let reg = registry.clone(); Arc::new(move |e: crate::engine::deps::HistoryError| reg.convert_error(e)) }) }), workflow_id_cache: Arc::new(CacheAdapter(wf_cache)) });
         Self {
             status: AtomicI32::new(STATUS_INITIALIZED),
             env,
