@@ -32,6 +32,7 @@ ap.add_argument('--database', choices=['mysql', 'postgres', 'cassandra'], defaul
 ap.add_argument('--rust-history-binary', type=Path, help='run cluster A History as Rust History (replication from Go cluster B)')
 ap.add_argument('--rust-history-side', choices=['standby', 'active'], default='standby', help='with --rust-history-binary: Rust History on standby cluster A (default) or on active cluster B (A all Go)')
 ap.add_argument('--two-history-graceful', action='store_true', help='with --rust-history-side active: run TWO Rust History hosts on active cluster B, do a graceful failover to A and assert cross-host failover markers')
+ap.add_argument('--rust-frontend-active', action='store_true', help='Rust Frontend serves ACTIVE/source cluster B (Go history/matching/worker); cluster A all Go. Asserts domain register+update replicate B->A')
 args = ap.parse_args()
 if args.two_history_graceful and not (args.rust_history_binary and args.rust_history_side == 'active'):
     ap.error('--two-history-graceful needs --rust-history-binary and --rust-history-side active')
@@ -116,7 +117,7 @@ def go_config(dirname, prefix, db, vis, seeds, current):
         (d / f'development_{plugin}.yaml').write_text(persistence(db, vis))
     return d, text
 
-a_seeds = ', '.join(f'"127.0.0.1:{P[k]}"' for k in ['A_FE', 'A_HIST', 'A_WORKER', 'A_MATCH' if (args.rust_history_binary and args.rust_history_side == 'active') else 'A_RMATCH'])
+a_seeds = ', '.join(f'"127.0.0.1:{P[k]}"' for k in ['A_FE', 'A_HIST', 'A_WORKER', 'A_MATCH' if ((args.rust_history_binary and args.rust_history_side == 'active') or args.rust_frontend_active) else 'A_RMATCH'])
 b_seeds = ', '.join(f'"127.0.0.1:{P[k]}"' for k in ['B_FE', 'B_HIST', 'B_MATCH', 'B_WORKER'] + (['B_HIST2'] if args.two_history_graceful else []))
 a_dir, _ = go_config('config-a', 'A_', 'cadence_a', 'cadence_a_visibility', a_seeds, 'cluster0')
 b_dir, _ = go_config('config-b', 'B_', 'cadence_b', 'cadence_b_visibility', b_seeds, 'cluster1')
@@ -199,6 +200,36 @@ def prom():
 status = 0
 try:
     (work / 'rust-binary.sha256').write_text(subprocess.run(['sha256sum', str(args.rust_binary)], capture_output=True, text=True).stdout)
+    if args.rust_frontend_active:
+        # Rust Frontend is the domain-replication SOURCE (cluster B frontend); everything else is Go.
+        start('go-a', [args.go_server, '--config', a_dir, '--zone', plugin, 'start', '--auto-setup'])
+        start('go-b-hmw', [args.go_server, '--config', b_dir, '--zone', plugin, 'start', '--auto-setup', '--services', 'history,matching,worker'])
+        ok = wait_port(P['A_FE_GRPC'], 300, 'go-a') and wait_port(P['B_HIST_GRPC'], 300, 'go-b-hmw') and wait_port(P['B_MATCH_GRPC'], 300, 'go-b-hmw')
+        (work / 'rust-frontend-b.yaml').write_text(rust_yaml('noop', '', 'grpc', 'B_', ('cadence_b', 'cadence_b_visibility'), b_seeds, 'cluster1'))
+        env_b = {**os.environ, 'CADENCE_HISTORY_TCHANNEL_ADDR': f'127.0.0.1:{P["B_HIST"]}', 'CADENCE_MATCHING_TCHANNEL_ADDR': f'127.0.0.1:{P["B_MATCH"]}'}
+        start('rust-frontend-b', [args.rust_binary, 'start', '--config', work / 'rust-frontend-b.yaml', '--root', work, '--services', 'frontend',
+                                  '--history-grpc-port', P['B_HIST_GRPC'], '--data-dir', work / 'rust-frontend-b-data'], env=env_b)
+        ok = ok and wait_port(P['B_FE'], 120, 'rust-frontend-b') and wait_port(P['B_FE_GRPC'], 10, 'rust-frontend-b')
+        record('go-clusters-and-rust-frontend-b-listening', ok)
+        if not ok:
+            raise SystemExit(1)
+        time.sleep(20)
+        dom = 'fr-src-' + secrets.token_hex(3)
+        rc, out = cli(B_T, 'tchannel', '--domain', dom, 'domain', 'register', '--retention', '1', '--global_domain', 'true', '--description', 'd0',
+                      '--active_cluster', 'cluster1', '--cl', 'cluster0', '--cl', 'cluster1')
+        record('register-global-domain-on-rust-frontend-B', rc == 0, out)
+        def a_dom(token):
+            def f():
+                rc, out = cli(A_T, 'tchannel', '--domain', dom, 'domain', 'describe')
+                return rc == 0 and token in out, out
+            return f
+        poll('domain-registered-replicated-to-A', a_dom('d0'), 240)
+        rc, out = cli(B_T, 'tchannel', '--domain', dom, 'domain', 'update', '--description', 'd1-updated', '--retention', '2')
+        record('update-global-domain-on-rust-frontend-B', rc == 0, out)
+        poll('domain-update-replicated-to-A', a_dom('d1-updated'), 240)
+        for n in ['go-a', 'go-b-hmw', 'rust-frontend-b']:
+            record(f'{n}-alive-at-end', procs[n].poll() is None, f'exit={procs[n].poll()}')
+        raise SystemExit(0)
     if args.rust_history_binary and args.rust_history_side == 'active':
         # Rust History is the ACTIVE source (cluster B); cluster A is all Go (standby).
         start('go-a', [args.go_server, '--config', a_dir, '--zone', plugin, 'start', '--auto-setup'])

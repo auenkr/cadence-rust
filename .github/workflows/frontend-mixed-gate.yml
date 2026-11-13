@@ -47,12 +47,16 @@ on:
         description: With two_cluster+rust_history (side standby), run two Rust History hosts on cluster A and a graceful failover to A asserting cross-host failover markers
         type: boolean
         default: false
+      rust_frontend_active:
+        description: With two_cluster, Rust Frontend on the ACTIVE/source cluster B (Go elsewhere); asserts domain register+update replicate to A
+        type: boolean
+        default: false
       rust_ref:
         description: branch/ref of the Rust sources to build cadence-server from
         default: ""
 
 concurrency:
-  group: frontend-mixed-gate-${{ github.ref }}-${{ inputs.database }}-${{ inputs.es_flavor }}-${{ inputs.es }}-${{ inputs.gcs }}-${{ inputs.two_history_graceful }}-${{ inputs.rust_history }}-${{ inputs.two_cluster }}-${{ inputs.rust_history_side }}
+  group: frontend-mixed-gate-${{ github.ref }}-${{ inputs.database }}-${{ inputs.es_flavor }}-${{ inputs.es }}-${{ inputs.gcs }}-${{ inputs.two_history_graceful }}-${{ inputs.rust_history }}-${{ inputs.two_cluster }}-${{ inputs.rust_history_side }}-${{ inputs.rust_frontend_active }}
   cancel-in-progress: true
 
 jobs:
@@ -110,7 +114,7 @@ jobs:
               --rust-binary "$CARGO_TARGET_DIR/debug/cadence-server" \
               --go-server "$GITHUB_WORKSPACE/out/cadence-go-server" \
               --go-cli "$GITHUB_WORKSPACE/out/cadence-cli" \
-              ${{ inputs.rust_history && '--rust-history-binary "$CARGO_TARGET_DIR/debug/cadence-history"' || '' }} --rust-history-side ${{ inputs.rust_history_side || 'standby' }} ${{ inputs.two_history_graceful && '--two-history-graceful' || '' }} \
+              ${{ inputs.rust_history && '--rust-history-binary "$CARGO_TARGET_DIR/debug/cadence-history"' || '' }} --rust-history-side ${{ inputs.rust_history_side || 'standby' }} ${{ inputs.two_history_graceful && '--two-history-graceful' || '' }} ${{ inputs.rust_frontend_active && '--rust-frontend-active' || '' }} \
               --rust-root "$GITHUB_WORKSPACE/rustsrc" > out/gate.log 2>&1
           elif [ "${{ inputs.database || 'mysql' }}" = cassandra ]; then
             RUST_BACKTRACE=1 tests/gates/run-frontend-cassandra-lane.sh out/gate \

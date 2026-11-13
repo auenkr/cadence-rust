@@ -236,18 +236,69 @@ fn ts_out(v: Option<i64>) -> Option<prost_types::Timestamp> {
     v.map(timestamp_from_nanos)
 }
 
+/// Go `FromDomainTaskAttributes` / `FromDescribeDomainResponseDomain`. Go builds a
+/// DescribeDomainResponse with only info/config/replication config, so
+/// failover_version and is_global_domain stay zero.
+fn domain_out(a: &t::DomainTaskAttributes) -> cadence_proto::api::Domain {
+    let info = a.info.clone().unwrap_or_default();
+    let config = a.config.clone().unwrap_or_default();
+    let repl = a.replication_config.clone().unwrap_or_default();
+    let archival = |v: Option<e::ArchivalStatus>| v.map_or(0, |v| v as i32 + 1);
+    cadence_proto::api::Domain {
+        id: info.uuid,
+        name: info.name,
+        status: info.status.map_or(0, |v| v as i32 + 1),
+        description: info.description,
+        owner_email: info.owner_email,
+        data: info.data.unwrap_or_default(),
+        workflow_execution_retention_period: Some(cadence_proto::convert::duration(
+            i64::from(config.workflow_execution_retention_period_in_days) * 86400,
+        )),
+        bad_binaries: config.bad_binaries.map(|b| cadence_proto::api::BadBinaries {
+            binaries: b
+                .binaries
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(k, v)| {
+                    let v = v.unwrap_or_default();
+                    (
+                        k,
+                        cadence_proto::api::BadBinaryInfo {
+                            reason: v.reason,
+                            operator: v.operator,
+                            created_time: v.created_time_nano.map(timestamp_from_nanos),
+                        },
+                    )
+                })
+                .collect(),
+        }),
+        history_archival_status: archival(config.history_archival_status),
+        history_archival_uri: config.history_archival_uri,
+        visibility_archival_status: archival(config.visibility_archival_status),
+        visibility_archival_uri: config.visibility_archival_uri,
+        active_cluster_name: repl.active_cluster_name,
+        clusters: repl
+            .clusters
+            .into_iter()
+            .map(|c| cadence_proto::api::ClusterReplicationConfiguration {
+                cluster_name: c.cluster_name,
+            })
+            .collect(),
+        ..Default::default()
+    }
+}
+
 /// Go `FromReplicationTask` (proto enums are the Go enums shifted by one).
 pub fn replication_task_out(task: t::ReplicationTask) -> pa::ReplicationTask {
     use pa::replication_task::Attributes;
     let attributes = if let Some(a) = task.domain_task_attributes {
-        // History never emits domain tasks; only the scalar attributes are mapped.
         Some(Attributes::DomainTaskAttributes(pa::DomainTaskAttributes {
             domain_operation: a.domain_operation.map_or(0, |v| v as i32 + 1),
-            id: a.id,
+            id: a.id.clone(),
+            domain: Some(domain_out(&a)),
             config_version: a.config_version,
             failover_version: a.failover_version,
             previous_failover_version: a.previous_failover_version,
-            ..Default::default()
         }))
     } else if let Some(a) = task.sync_shard_status_task_attributes {
         Some(Attributes::SyncShardStatusTaskAttributes(
