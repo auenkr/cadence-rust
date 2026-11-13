@@ -56,7 +56,7 @@ fn he(e: HistoryError) -> TaskError {
     match e {
         HistoryError::DeadlineExceeded => TaskError::ContextDeadlineExceeded,
         HistoryError::Canceled => TaskError::ContextCanceled,
-        HistoryError::PersistenceShardOwnershipLost(m) => TaskError::ShardOwnershipLost(m),
+        HistoryError::PersistenceShardOwnershipLost { message: m, .. } => TaskError::ShardOwnershipLost(m),
         other => {
             let text = other.to_string();
             if text.contains("not exist") || text.starts_with("Workflow execution not found") {

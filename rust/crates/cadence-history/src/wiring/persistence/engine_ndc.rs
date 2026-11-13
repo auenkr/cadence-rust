@@ -56,7 +56,7 @@ fn now_unix_nanos() -> i64 {
 /// `persistence` error -> History error (Go keeps the typed persistence errors).
 pub fn to_history_error(err: PersistenceError) -> HistoryError {
     match err {
-        PersistenceError::ShardOwnershipLost { .. } => HistoryError::PersistenceShardOwnershipLost(err.to_string()),
+        PersistenceError::ShardOwnershipLost { shard_id, .. } => HistoryError::PersistenceShardOwnershipLost { shard_id: Some(shard_id), message: err.to_string() },
         PersistenceError::ConditionFailed(m) => HistoryError::ConditionFailed(m),
         PersistenceError::WorkflowAlreadyStarted { message, start_request_id, run_id, state, close_status, last_write_version } => {
             HistoryError::PersistenceAlreadyStarted(Box::new(PersistenceAlreadyStarted {

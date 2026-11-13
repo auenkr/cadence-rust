@@ -39,7 +39,7 @@ fn classify(e: &HistoryError) -> (&'static str, String, Struct) {
             st.fields.push((20, Value::Bytes(current_branch_token.clone())));
             ("CurrentBranchChangedError", message.clone())
         }
-        HistoryError::PersistenceShardOwnershipLost(m) => ("ShardOwnershipLostError", m.clone()),
+        HistoryError::PersistenceShardOwnershipLost { message: m, .. } => ("ShardOwnershipLostError", m.clone()),
         HistoryError::Cadence(c) => match &**c {
             CadenceError::WorkflowAlreadyCompleted(x) => ("WorkflowExecutionAlreadyCompletedError", x.to_string()),
             CadenceError::EntityNotExists(x) => {

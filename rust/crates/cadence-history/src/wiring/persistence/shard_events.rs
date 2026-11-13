@@ -17,7 +17,7 @@ use cadence_persistence::history_reader::{
 };
 use cadence_persistence::history_sql::{HistoryPersistenceError, ShardRow, ShardStore as RowShardStore};
 use cadence_persistence::sqlblobs::{
-    Encoding, ShardInfoRecord, ShardProcessingQueueRecord, ShardQueueStateRecord,
+    Encoding, ShardInfoRecord, ShardPredicateRecord, ShardProcessingQueueRecord, ShardQueueStateRecord, ShardVirtualSliceRecord,
 };
 
 use crate::engine::deps::{HResult, HistoryError};
@@ -26,8 +26,8 @@ use crate::events::{EventCacheError, HistoryBranchStore, HistoryEventReader, Sto
 use crate::execution::integrity::HistoryPageSource;
 use crate::shard::{ShardError, ShardInfo, ShardStore};
 use crate::shard_context::{
-    FailoverMarker, ProcessingQueueState, QueueState, ShardContextError, ShardInfoData,
-    ShardPersistence, TaskKey,
+    FailoverMarker, ProcessingQueueState, QueuePredicate, QueueState, ShardContextError, ShardInfoData,
+    ShardPersistence, TaskKey, VirtualSliceState,
 };
 use crate::task::deps::{Result as TaskResult, TaskError};
 use crate::taskdlq::processor::{
@@ -162,15 +162,48 @@ fn shard_data_to_record(info: &ShardInfoData) -> ShardInfoRecord {
                             q.exclusive_max_read_level.scheduled_time_nano,
                             q.exclusive_max_read_level.task_id,
                         ),
-                        virtual_slice_inclusive_mins: q
-                            .virtual_slice_inclusive_mins
+                        virtual_queue_states: q
+                            .virtual_queue_states
                             .iter()
-                            .map(|k| (k.scheduled_time_nano, k.task_id))
+                            .map(|(id, slices)| (*id, slices.iter().map(slice_to_record).collect()))
                             .collect(),
                     },
                 )
             })
             .collect(),
+    }
+}
+
+fn key_to_pair(k: &TaskKey) -> (i64, i64) {
+    (k.scheduled_time_nano, k.task_id)
+}
+fn key_from_pair(k: (i64, i64)) -> TaskKey {
+    TaskKey { scheduled_time_nano: k.0, task_id: k.1 }
+}
+fn slice_to_record(s: &VirtualSliceState) -> ShardVirtualSliceRecord {
+    ShardVirtualSliceRecord {
+        inclusive_min: key_to_pair(&s.inclusive_min),
+        exclusive_max: key_to_pair(&s.exclusive_max),
+        predicate: s.predicate.as_ref().map(|p| match p {
+            QueuePredicate::Universal => ShardPredicateRecord::Universal,
+            QueuePredicate::Empty => ShardPredicateRecord::Empty,
+            QueuePredicate::DomainId { domain_ids, is_exclusive } => {
+                ShardPredicateRecord::DomainId { domain_ids: domain_ids.clone(), is_exclusive: *is_exclusive }
+            }
+        }),
+    }
+}
+fn slice_from_record(s: &ShardVirtualSliceRecord) -> VirtualSliceState {
+    VirtualSliceState {
+        inclusive_min: key_from_pair(s.inclusive_min),
+        exclusive_max: key_from_pair(s.exclusive_max),
+        predicate: s.predicate.as_ref().map(|p| match p {
+            ShardPredicateRecord::Universal => QueuePredicate::Universal,
+            ShardPredicateRecord::Empty => QueuePredicate::Empty,
+            ShardPredicateRecord::DomainId { domain_ids, is_exclusive } => {
+                QueuePredicate::DomainId { domain_ids: domain_ids.clone(), is_exclusive: *is_exclusive }
+            }
+        }),
     }
 }
 
@@ -200,10 +233,10 @@ fn shard_row_to_data(row: &ShardRow) -> Result<ShardInfoData, String> {
                             scheduled_time_nano: q.exclusive_max_read_level.0,
                             task_id: q.exclusive_max_read_level.1,
                         },
-                        virtual_slice_inclusive_mins: q
-                            .virtual_slice_inclusive_mins
+                        virtual_queue_states: q
+                            .virtual_queue_states
                             .into_iter()
-                            .map(|(s, t)| TaskKey { scheduled_time_nano: s, task_id: t })
+                            .map(|(id, slices)| (id, slices.iter().map(slice_from_record).collect()))
                             .collect(),
                     },
                 )
@@ -354,9 +387,10 @@ fn map_persistence_error(e: PersistenceError) -> HistoryError {
     match e {
         PersistenceError::EntityNotExists(m) => HistoryError::entity_not_exists(m),
         PersistenceError::ShardOwnershipLost { shard_id, expected_range_id, actual_range_id } => {
-            HistoryError::PersistenceShardOwnershipLost(format!(
-                "Failed to update shard {shard_id}. Previous range ID: {expected_range_id}; new range ID: {actual_range_id}"
-            ))
+            HistoryError::PersistenceShardOwnershipLost {
+                shard_id: Some(shard_id),
+                message: format!("Failed to update shard {shard_id}. Previous range ID: {expected_range_id}; new range ID: {actual_range_id}"),
+            }
         }
         PersistenceError::InvalidArgument(m) | PersistenceError::InvalidPersistenceRequest(m) => HistoryError::bad_request(m),
         other => HistoryError::internal(format!("{other:?}")),

@@ -66,9 +66,9 @@ pub enum HistoryError {
     /// `persistence.ShardAlreadyExistError`
     #[error("{0}")]
     ShardAlreadyExist(String),
-    /// `persistence.ShardOwnershipLostError`
-    #[error("{0}")]
-    PersistenceShardOwnershipLost(String),
+    /// `persistence.ShardOwnershipLostError` (`ShardID` when the persistence layer knows it).
+    #[error("{message}")]
+    PersistenceShardOwnershipLost { message: String, shard_id: Option<i32> },
     /// `persistence.TimeoutError`
     #[error("{0}")]
     PersistenceTimeout(String),
@@ -345,8 +345,32 @@ impl DomainCacheEntry {
     pub fn get_info(&self) -> &DomainInfo {
         &self.info
     }
+    /// `getActiveClusters` (Go `domainCache.go`): sorted attribute-scope cluster names, empty unless active-active.
+    pub fn active_cluster_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.active_clusters.iter().filter(|(a, _)| a.is_some()).map(|(_, c)| c.clone()).collect();
+        names.sort();
+        names
+    }
+    /// `DomainReplicationConfiguration.IsActiveActive`: some attribute scope has a cluster attribute.
+    pub fn is_active_active(&self) -> bool {
+        self.active_clusters.iter().any(|(a, _)| a.is_some())
+    }
     /// `NewDomainNotActiveError`
     pub fn new_domain_not_active_error(&self, current: &str, active: &str) -> HistoryError {
+        if self.is_active_active() {
+            let active_clusters = self.active_cluster_names();
+            return DomainNotActiveError {
+                message: format!(
+                    "Domain: {} is active in cluster(s): [{}], while current cluster {} is a standby cluster. Operation active cluster: {}",
+                    self.info.name, active_clusters.join(" "), current, active
+                ),
+                domain_name: self.info.name.clone(),
+                current_cluster: current.to_string(),
+                active_cluster: active.to_string(),
+                active_clusters,
+            }
+            .into();
+        }
         DomainNotActiveError {
             message: format!(
                 "Domain: {} is active in cluster: {}, while current cluster {} is a standby cluster.",
@@ -424,6 +448,28 @@ impl From<CadenceError> for HistoryError { fn from(error: CadenceError) -> Self 
 mod active_cluster_lookup_tests {
     use super::*;
     use cadence_api::types::ClusterAttribute;
+
+    /// domainCache_test NewDomainNotActiveError: active-active form fills ActiveClusters (sorted) and uses the `%v` message.
+    #[test]
+    fn domain_not_active_error_active_active_form() {
+        let mut entry = DomainCacheEntry { active_clusters: vec![(None, "c0".into()), (Some(attr("region", "us")), "c2".into()), (Some(attr("region", "eu")), "c1".into())], ..Default::default() };
+        entry.info.name = "d".into();
+        let HistoryError::Cadence(e) = entry.new_domain_not_active_error("c9", "c2") else { panic!() };
+        let CadenceError::DomainNotActive(e) = *e else { panic!() };
+        assert_eq!(e.active_clusters, vec!["c1".to_string(), "c2".to_string()]);
+        assert_eq!(e.message, "Domain: d is active in cluster(s): [c1 c2], while current cluster c9 is a standby cluster. Operation active cluster: c2");
+        assert_eq!((e.current_cluster.as_str(), e.active_cluster.as_str(), e.domain_name.as_str()), ("c9", "c2", "d"));
+    }
+
+    #[test]
+    fn domain_not_active_error_plain_form() {
+        let mut entry = DomainCacheEntry { active_clusters: vec![(None, "c0".into())], ..Default::default() };
+        entry.info.name = "d".into();
+        let HistoryError::Cadence(e) = entry.new_domain_not_active_error("c9", "c0") else { panic!() };
+        let CadenceError::DomainNotActive(e) = *e else { panic!() };
+        assert!(e.active_clusters.is_empty());
+        assert_eq!(e.message, "Domain: d is active in cluster: c0, while current cluster c9 is a standby cluster.");
+    }
 
     fn attr(scope: &str, name: &str) -> ClusterAttribute {
         ClusterAttribute { scope: scope.into(), name: name.into() }

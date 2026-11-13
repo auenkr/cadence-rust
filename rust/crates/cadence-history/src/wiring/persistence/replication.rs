@@ -71,7 +71,7 @@ pub fn replication_error_to_history_error(e: ReplicationError) -> HistoryError {
         ReplicationError::InternalDataInconsistency(m) | ReplicationError::Transient(m) => {
             HistoryError::internal(m)
         }
-        ReplicationError::ShardOwnershipLost(m) => HistoryError::PersistenceShardOwnershipLost(m),
+        ReplicationError::ShardOwnershipLost(m) => HistoryError::PersistenceShardOwnershipLost { message: m, shard_id: None },
         ReplicationError::DeadlineExceeded(_) => HistoryError::DeadlineExceeded,
         ReplicationError::RetryTaskV2(e) => retry_task_v2(e),
         other => HistoryError::Other(other.to_string()),

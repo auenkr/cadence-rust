@@ -55,7 +55,7 @@ fn he(e: HistoryError) -> TaskError {
         },
         HistoryError::DeadlineExceeded => TaskError::ContextDeadlineExceeded,
         HistoryError::Canceled => TaskError::ContextCanceled,
-        HistoryError::PersistenceShardOwnershipLost(m) => TaskError::ShardOwnershipLost(m),
+        HistoryError::PersistenceShardOwnershipLost { message: m, .. } => TaskError::ShardOwnershipLost(m),
         other => {
             let text = other.to_string();
             // Persistence "Workflow execution not found" for a deleted execution is an expected EntityNotExists (Go task handling).

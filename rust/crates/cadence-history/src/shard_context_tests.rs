@@ -98,10 +98,7 @@ fn transfer_queue_state() {
     let f = fixture();
     let st = f.ctx.get_queue_state(HistoryTaskCategory::Transfer).unwrap();
     assert_eq!(st.exclusive_max_read_level.task_id, 1);
-    let update = QueueState {
-        exclusive_max_read_level: TaskKey { task_id: 100, scheduled_time_nano: 0 },
-        virtual_slice_inclusive_mins: vec![TaskKey { task_id: 50, scheduled_time_nano: 0 }],
-    };
+    let update = QueueState::with_slice_mins(TaskKey { task_id: 100, scheduled_time_nano: 0 }, vec![TaskKey { task_id: 50, scheduled_time_nano: 0 }]);
     f.ctx.update_queue_state(HistoryTaskCategory::Transfer, update.clone()).unwrap();
     assert_eq!(f.ctx.get_queue_state(HistoryTaskCategory::Transfer).unwrap(), update);
     // ack level is min(slice mins, max read) - 1 (exclusive -> inclusive)
@@ -115,10 +112,7 @@ fn transfer_queue_state() {
 #[test]
 fn timer_queue_state() {
     let f = fixture();
-    let update = QueueState {
-        exclusive_max_read_level: TaskKey { task_id: 0, scheduled_time_nano: 9_000 },
-        virtual_slice_inclusive_mins: vec![TaskKey { task_id: 0, scheduled_time_nano: 4_000 }],
-    };
+    let update = QueueState::with_slice_mins(TaskKey { task_id: 0, scheduled_time_nano: 9_000 }, vec![TaskKey { task_id: 0, scheduled_time_nano: 4_000 }]);
     f.ctx.update_queue_state(HistoryTaskCategory::Timer, update.clone()).unwrap();
     assert_eq!(f.ctx.get_queue_state(HistoryTaskCategory::Timer).unwrap(), update);
     assert_eq!(f.ctx.get_queue_ack_level(HistoryTaskCategory::Timer).scheduled_time_nanos, 4_000);

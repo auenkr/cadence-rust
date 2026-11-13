@@ -47,6 +47,29 @@ pub fn check_ownership(shard_id: u32, who_am_i: &str, owner: Option<&Host>) -> H
     }
 }
 
+/// Go `handlerImpl.convertError` for `*persistence.ShardOwnershipLostError`: `CreateShardOwnershipLostError(self, owner)`.
+/// A failed ring lookup yields an empty owner (Go passes an empty `HostInfo`).
+pub fn shard_ownership_lost_error(who_am_i: &str, owner: Option<&Host>) -> cadence_api::errors::ShardOwnershipLostError {
+    cadence_api::errors::ShardOwnershipLostError::with_owner(
+        format!("Shard is not owned by host: {who_am_i}"),
+        owner.map(|h| h.address.clone()).unwrap_or_default(),
+    )
+}
+
+/// Pure part of `convertError`: rewrites a persistence ShardOwnershipLost using `lookup(shard_id)`.
+pub fn convert_shard_ownership_lost(
+    e: HistoryError,
+    who_am_i: &str,
+    lookup: impl Fn(i32) -> Option<Host>,
+) -> HistoryError {
+    match e {
+        HistoryError::PersistenceShardOwnershipLost { shard_id: Some(shard_id), .. } => {
+            shard_ownership_lost_error(who_am_i, lookup(shard_id).as_ref()).into()
+        }
+        other => other,
+    }
+}
+
 type Cell = Arc<OnceCell<Arc<ShardEntry>>>;
 
 pub struct ShardRegistry {
@@ -104,6 +127,13 @@ impl ShardRegistry {
             self.metrics_scope.inc_counter("GetEngineForShardErrorCounter");
         }
         Ok(res?.engine.clone())
+    }
+
+    /// Go `handlerImpl.convertError` (ShardOwnershipLost branch).
+    pub fn convert_error(&self, e: HistoryError) -> HistoryError {
+        convert_shard_ownership_lost(e, self.env.membership.who_am_i(), |id| {
+            self.env.membership.lookup(&crate::lookup::shard_key(id))
+        })
     }
 
     pub async fn entry_for_shard(&self, shard_id: u32) -> Result<Arc<ShardEntry>, HistoryError> {
@@ -269,6 +299,25 @@ fn scopeguard_timer(s: Scope, start: std::time::Instant) -> AcquireTimer {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn convert_shard_ownership_lost_fills_owner() {
+        use crate::engine::deps::HistoryError;
+        let lost = |id| HistoryError::PersistenceShardOwnershipLost { message: "x".into(), shard_id: id };
+        let host = Host { address: "10.0.0.2:7934".into(), identity: String::new(), grpc_address: String::new() };
+        let HistoryError::Cadence(c) = convert_shard_ownership_lost(lost(Some(7)), "me:7934", |id| { assert_eq!(id, 7); Some(host.clone()) }) else { panic!() };
+        let cadence_api::CadenceError::ShardOwnershipLost(e) = *c else { panic!() };
+        assert_eq!((e.message.as_str(), e.owner.as_str()), ("Shard is not owned by host: me:7934", "10.0.0.2:7934"));
+        // lookup failure: Go passes an empty HostInfo -> empty owner
+        let HistoryError::Cadence(c) = convert_shard_ownership_lost(lost(Some(7)), "me:7934", |_| None) else { panic!() };
+        let cadence_api::CadenceError::ShardOwnershipLost(e) = *c else { panic!() };
+        assert_eq!(e.owner, "");
+        // other errors and unknown shard ids pass through
+        assert!(matches!(convert_shard_ownership_lost(lost(None), "me", |_| None), HistoryError::PersistenceShardOwnershipLost { .. }));
+        assert!(matches!(convert_shard_ownership_lost(HistoryError::internal("i"), "me", |_| None), HistoryError::Cadence(_)));
+    }
+
     use super::*;
 
     fn host(identity: &str, address: &str) -> Host {
