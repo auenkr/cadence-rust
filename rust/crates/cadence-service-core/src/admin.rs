@@ -1564,7 +1564,11 @@ pub(crate) fn decode_domain_dlq_page_token(token: &[u8]) -> Result<Option<i64>, 
     if token.len() != 8 {
         return Err(format!(
             "invalid next page token [{}]",
-            token.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(" ")
+            token
+                .iter()
+                .map(|b| b.to_string())
+                .collect::<Vec<_>>()
+                .join(" ")
         ));
     }
     Ok(Some(i64::from_le_bytes(
@@ -2488,21 +2492,20 @@ pub async fn update_domain_isolation_groups(
     if req.domain.is_empty() {
         return bad_request(BadRequestError::new("Domain is not set on request."));
     }
-    match state
-        .domain_manager
-        .update_isolation_groups(
-            &req.domain,
-            req.isolation_groups,
-            &state.cluster_metadata,
-            &state.domain_policy(&req.domain),
-        )
-    {
+    match state.domain_manager.update_isolation_groups(
+        &req.domain,
+        req.isolation_groups,
+        &state.cluster_metadata,
+        &state.domain_policy(&req.domain),
+    ) {
         Ok(()) => ok_json(cadence_api::admin::UpdateDomainIsolationGroupsResponse {}),
         Err(cadence_persistence::FrontendDomainError::NotFound(e)) => entity_not_exists(e),
         Err(cadence_persistence::FrontendDomainError::Busy(m)) => {
             error_response("ServiceBusyError", StatusCode::SERVICE_UNAVAILABLE, m)
         }
-        Err(cadence_persistence::FrontendDomainError::Invalid(m)) => bad_request(BadRequestError::new(m)),
+        Err(cadence_persistence::FrontendDomainError::Invalid(m)) => {
+            bad_request(BadRequestError::new(m))
+        }
         Err(e) => error_response(
             "InternalServiceError",
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -2540,21 +2543,20 @@ pub async fn update_domain_async_workflow_configuration(
     if req.domain.is_empty() {
         return bad_request(BadRequestError::new("Domain is not set on request."));
     }
-    match state
-        .domain_manager
-        .update_async_workflow_config(
-            &req.domain,
-            req.configuration,
-            &state.cluster_metadata,
-            &state.domain_policy(&req.domain),
-        )
-    {
+    match state.domain_manager.update_async_workflow_config(
+        &req.domain,
+        req.configuration,
+        &state.cluster_metadata,
+        &state.domain_policy(&req.domain),
+    ) {
         Ok(()) => ok_json(cadence_api::admin::UpdateDomainAsyncWorkflowConfiguratonResponse {}),
         Err(cadence_persistence::FrontendDomainError::NotFound(e)) => entity_not_exists(e),
         Err(cadence_persistence::FrontendDomainError::Busy(m)) => {
             error_response("ServiceBusyError", StatusCode::SERVICE_UNAVAILABLE, m)
         }
-        Err(cadence_persistence::FrontendDomainError::Invalid(m)) => bad_request(BadRequestError::new(m)),
+        Err(cadence_persistence::FrontendDomainError::Invalid(m)) => {
+            bad_request(BadRequestError::new(m))
+        }
         Err(e) => error_response(
             "InternalServiceError",
             StatusCode::INTERNAL_SERVER_ERROR,
