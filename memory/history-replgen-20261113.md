@@ -19,4 +19,4 @@ history-mixed-gate runs (all success, 12 combos): 43408777601 43408781711 434087
 
 ## Post-merge master validation
 
-Master f9e9319d3 (2026-11-13): rust-ci + 11 gates success; cassandra/tchannel/two_history=false (43411166710) FAILED dbrestart recovery round (workflow-started-during-failure, signal-two, complete-signal, raw-poll-new-decision). Under investigation. Runs: 43411112948 43411117187 43411122253 43411126791 43411131399 43411135347 43411139854 43411145257 43411149511 43411154046 43411157884 43411162837 43411166710 
+Master f9e9319d3 (2026-11-13): rust-ci + 11 gates success; cassandra/tchannel/two_history=false (43411166710) FAILED dbrestart recovery round (workflow-started-during-failure, signal-two, complete-signal, raw-poll-new-decision). Rerun (attempt 2, same run id) passed with GATE SUMMARY failed: [] -> intermittent; cassandra dbrestart recovery flake to investigate. Runs: 43411112948 43411117187 43411122253 43411126791 43411131399 43411135347 43411139854 43411145257 43411149511 43411154046 43411157884 43411162837 43411166710 
