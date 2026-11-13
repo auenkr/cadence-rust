@@ -997,7 +997,7 @@ impl super::engine_state::Inner {
         });
         let points = cadence_api::types::ResetPoints { points: curr };
         let data = Encoding::ThriftRW
-            .encode(&points.to_thrift())
+            .encode_versioned(&points.to_thrift())
             .map_err(|e| HistoryError::internal(format!("encode auto reset points: {e}")))?;
         self.pc_exec.auto_reset_points =
             Some(cadence_persistence::history_contract::DataBlob { encoding: "thriftrw".to_string(), data });

@@ -209,7 +209,11 @@ def kill(name, sig=signal.SIGKILL):
     p = procs.get(name)
     if p and p.poll() is None:
         os.killpg(p.pid, sig)
-        p.wait(timeout=60)
+        try:
+            p.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            os.killpg(p.pid, signal.SIGKILL)
+            p.wait(timeout=30)
 def wait_port(port, secs, name=None):
     end = time.monotonic() + secs
     while time.monotonic() < end:
