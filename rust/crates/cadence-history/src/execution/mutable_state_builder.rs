@@ -357,10 +357,8 @@ impl TypedMutableState {
     }
 
     pub fn is_current_workflow_guaranteed(&self) -> bool {
-        matches!(
-            self.execution_info.state,
-            WORKFLOW_STATE_CREATED | WORKFLOW_STATE_RUNNING
-        )
+        // Go: stateInDB (not the in-transaction state) is the bloom filter.
+        matches!(self.state_in_db, WORKFLOW_STATE_CREATED | WORKFLOW_STATE_RUNNING)
     }
 
     pub fn has_in_flight_decision(&self) -> bool {
@@ -1008,7 +1006,10 @@ mod tests {
             (WORKFLOW_STATE_VOID, false),
             (WORKFLOW_STATE_CORRUPTED, false),
         ] {
-            state.execution_info.state = s;
+            state.state_in_db = s;
+            assert_eq!(state.is_current_workflow_guaranteed(), want);
+            // the in-transaction state (e.g. replayed terminate) must not matter
+            state.execution_info.state = WORKFLOW_STATE_COMPLETED;
             assert_eq!(state.is_current_workflow_guaranteed(), want);
         }
     }
