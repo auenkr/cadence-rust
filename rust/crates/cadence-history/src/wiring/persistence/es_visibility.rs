@@ -197,18 +197,42 @@ struct Connected {
 pub struct KafkaProducer {
     brokers: Vec<String>,
     topic: String,
+    tls: Option<Arc<rustls::ClientConfig>>,
+    sasl: Option<rskafka::client::SaslConfig>,
     connected: OnceCell<Connected>,
     partition_clients: Mutex<HashMap<i32, Arc<PartitionClient>>>,
 }
 
 impl KafkaProducer {
     pub fn new(brokers: Vec<String>, topic: String) -> Self {
-        Self { brokers, topic, connected: OnceCell::new(), partition_clients: Mutex::new(HashMap::new()) }
+        Self::with_auth(brokers, topic, None, None)
+    }
+
+    /// Go `clientImpl.initAuth`: optional TLS and SASL on the producer connection.
+    pub fn with_auth(
+        brokers: Vec<String>,
+        topic: String,
+        tls: Option<Arc<rustls::ClientConfig>>,
+        sasl: Option<rskafka::client::SaslConfig>,
+    ) -> Self {
+        Self { brokers, topic, tls, sasl, connected: OnceCell::new(), partition_clients: Mutex::new(HashMap::new()) }
+    }
+
+    /// Go `NewSyncProducer` connects at construction: establish the connection eagerly.
+    pub async fn connect_eager(&self) -> anyhow::Result<()> {
+        self.connected.get_or_try_init(|| self.connect()).await.map(|_| ())
     }
 
     async fn connect(&self) -> anyhow::Result<Connected> {
         let (client, topics) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-            let client = ClientBuilder::new(self.brokers.clone()).build().await?;
+            let mut builder = ClientBuilder::new(self.brokers.clone());
+            if let Some(tls) = &self.tls {
+                builder = builder.tls_config(tls.clone());
+            }
+            if let Some(sasl) = &self.sasl {
+                builder = builder.sasl_config(sasl.clone());
+            }
+            let client = builder.build().await?;
             let topics = client.list_topics().await?;
             anyhow::Ok((client, topics))
         })
@@ -230,7 +254,7 @@ impl KafkaProducer {
         Ok(created)
     }
 
-    async fn send(&self, key: &str, value: Vec<u8>) -> anyhow::Result<()> {
+    async fn send_once(&self, key: &str, value: Vec<u8>) -> anyhow::Result<()> {
         let connected = self.connected.get_or_try_init(|| self.connect()).await?;
         let partition = sarama_partition(key.as_bytes(), connected.partitions);
         let client = self.partition_client(connected, partition).await?;
@@ -243,7 +267,24 @@ impl KafkaProducer {
         }
         Ok(())
     }
+
+    /// sarama `Producer.Retry.Max` (3 retries, 100ms backoff).
+    async fn send(&self, key: &str, value: Vec<u8>) -> anyhow::Result<()> {
+        let mut attempt = 0;
+        loop {
+            match self.send_once(key, value.clone()).await {
+                Ok(()) => return Ok(()),
+                Err(e) if attempt >= KAFKA_PRODUCER_RETRY_MAX => return Err(e),
+                Err(_) => {
+                    attempt += 1;
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+            }
+        }
+    }
 }
+
+const KAFKA_PRODUCER_RETRY_MAX: u32 = 3;
 
 #[async_trait::async_trait]
 impl MessageProducer for KafkaProducer {
