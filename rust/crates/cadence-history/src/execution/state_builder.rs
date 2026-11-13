@@ -497,6 +497,23 @@ mod typed_replay_tests {
     }
 
     #[test]
+    fn passive_close_persists_replicated_batch_without_readvancing_version_history() {
+        let mut state = state();
+        let workflow = WorkflowExecution::new("wf", "run");
+        let start = HistoryEvent {
+            event_id: 1, timestamp: Some(100), event_type: Some(EventType::WorkflowExecutionStarted), version: 7, task_id: 90,
+            workflow_execution_started_event_attributes: Some(WorkflowExecutionStartedEventAttributes { request_id: "r".into(), ..Default::default() }),
+            ..Default::default()
+        };
+        StateBuilder::apply_events_typed(&mut state, "domain-id", "request", &workflow, &[start]).unwrap();
+        let (snapshot, events) = state.prepare_close_snapshot(1, crate::execution::workflow::TransactionPolicy::Passive).unwrap();
+        assert_eq!(events.iter().map(|e| e.event_id).collect::<Vec<_>>(), vec![1]);
+        let items = &snapshot.version_histories.unwrap().histories[0].items;
+        assert_eq!(items.len(), 1);
+        assert_eq!((items[0].event_id, items[0].version), (1, 7));
+    }
+
+    #[test]
     fn typed_replay_start_decision_timeout_retry_spans_batches_without_active_tasks() {
         let mut state = state();
         let workflow = WorkflowExecution::new("wf", "run");
