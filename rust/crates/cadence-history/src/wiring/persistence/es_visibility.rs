@@ -104,31 +104,22 @@ fn kv(k: &str, v: Value) -> (Value, Value) {
     (Value::Bytes(k.as_bytes().to_vec()), v)
 }
 
-/// Go sends UnixNano; the Rust record may carry milliseconds, so scale small values up.
-fn nanos(ts: i64) -> i64 {
-    if ts != 0 && ts.abs() < 100_000_000_000_000 {
-        ts.saturating_mul(1_000_000)
-    } else {
-        ts
-    }
-}
-
 /// Go `createVisibilityMessage`.
 fn create_visibility_message(row: &VisibilityWriteRow, op: VisibilityOperation) -> (String, Vec<u8>) {
     let mut fields: BTreeMap<String, Value> = BTreeMap::new();
     fields.insert(WORKFLOW_TYPE.into(), field_string(&row.workflow_type_name));
-    fields.insert(START_TIME.into(), field_int(nanos(row.start_time)));
-    fields.insert(EXECUTION_TIME.into(), field_int(nanos(row.execution_time)));
+    fields.insert(START_TIME.into(), field_int(row.start_time));
+    fields.insert(EXECUTION_TIME.into(), field_int(row.execution_time));
     fields.insert(TASK_LIST.into(), field_string(&row.task_list));
     fields.insert(IS_CRON.into(), field_bool(row.is_cron));
     fields.insert(NUM_CLUSTERS.into(), field_int(i64::from(row.num_clusters)));
     fields.insert(CLUSTER_ATTRIBUTE_SCOPE.into(), field_string(&row.cluster_attribute_scope));
     fields.insert(CLUSTER_ATTRIBUTE_NAME.into(), field_string(&row.cluster_attribute_name));
-    fields.insert(UPDATE_TIME.into(), field_int(nanos(row.update_time)));
+    fields.insert(UPDATE_TIME.into(), field_int(row.update_time));
     fields.insert(SHARD_ID.into(), field_int(row.shard_id));
     fields.insert(CRON_SCHEDULE.into(), field_string(&row.cron_schedule));
     fields.insert(EXECUTION_STATUS.into(), field_int(i64::from(row.request_execution_status)));
-    fields.insert(SCHEDULED_EXECUTION_TIME.into(), field_int(nanos(row.scheduled_execution_time)));
+    fields.insert(SCHEDULED_EXECUTION_TIME.into(), field_int(row.scheduled_execution_time));
     if !row.memo.is_empty() {
         fields.insert(MEMO.into(), field_binary(&row.memo));
         fields.insert(ENCODING.into(), field_string(&row.encoding));
@@ -138,7 +129,7 @@ fn create_visibility_message(row: &VisibilityWriteRow, op: VisibilityOperation) 
     }
     if op == VisibilityOperation::RecordClosed {
         let (close_time, close_status, history_length) = row.closed.unwrap_or((0, 0, 0));
-        fields.insert(CLOSE_TIME.into(), field_int(nanos(close_time)));
+        fields.insert(CLOSE_TIME.into(), field_int(close_time));
         fields.insert(CLOSE_STATUS.into(), field_int(i64::from(close_status)));
         fields.insert(HISTORY_LENGTH.into(), field_int(history_length));
     }
@@ -155,7 +146,7 @@ fn create_visibility_message(row: &VisibilityWriteRow, op: VisibilityOperation) 
 fn uninitialized_message(row: &VisibilityWriteRow) -> (String, Vec<u8>) {
     let fields = vec![
         kv(WORKFLOW_TYPE, field_string(&row.workflow_type_name)),
-        kv(UPDATE_TIME, field_int(nanos(row.update_time))),
+        kv(UPDATE_TIME, field_int(row.update_time)),
         kv(SHARD_ID, field_int(row.shard_id)),
     ];
     encode_message(MESSAGE_TYPE_CREATE, row, None, Some(fields), None)
@@ -206,18 +197,42 @@ struct Connected {
 pub struct KafkaProducer {
     brokers: Vec<String>,
     topic: String,
+    tls: Option<Arc<rustls::ClientConfig>>,
+    sasl: Option<rskafka::client::SaslConfig>,
     connected: OnceCell<Connected>,
     partition_clients: Mutex<HashMap<i32, Arc<PartitionClient>>>,
 }
 
 impl KafkaProducer {
     pub fn new(brokers: Vec<String>, topic: String) -> Self {
-        Self { brokers, topic, connected: OnceCell::new(), partition_clients: Mutex::new(HashMap::new()) }
+        Self::with_auth(brokers, topic, None, None)
+    }
+
+    /// Go `clientImpl.initAuth`: optional TLS and SASL on the producer connection.
+    pub fn with_auth(
+        brokers: Vec<String>,
+        topic: String,
+        tls: Option<Arc<rustls::ClientConfig>>,
+        sasl: Option<rskafka::client::SaslConfig>,
+    ) -> Self {
+        Self { brokers, topic, tls, sasl, connected: OnceCell::new(), partition_clients: Mutex::new(HashMap::new()) }
+    }
+
+    /// Go `NewSyncProducer` connects at construction: establish the connection eagerly.
+    pub async fn connect_eager(&self) -> anyhow::Result<()> {
+        self.connected.get_or_try_init(|| self.connect()).await.map(|_| ())
     }
 
     async fn connect(&self) -> anyhow::Result<Connected> {
         let (client, topics) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-            let client = ClientBuilder::new(self.brokers.clone()).build().await?;
+            let mut builder = ClientBuilder::new(self.brokers.clone());
+            if let Some(tls) = &self.tls {
+                builder = builder.tls_config(tls.clone());
+            }
+            if let Some(sasl) = &self.sasl {
+                builder = builder.sasl_config(sasl.clone());
+            }
+            let client = builder.build().await?;
             let topics = client.list_topics().await?;
             anyhow::Ok((client, topics))
         })
@@ -239,7 +254,7 @@ impl KafkaProducer {
         Ok(created)
     }
 
-    async fn send(&self, key: &str, value: Vec<u8>) -> anyhow::Result<()> {
+    async fn send_once(&self, key: &str, value: Vec<u8>) -> anyhow::Result<()> {
         let connected = self.connected.get_or_try_init(|| self.connect()).await?;
         let partition = sarama_partition(key.as_bytes(), connected.partitions);
         let client = self.partition_client(connected, partition).await?;
@@ -252,7 +267,24 @@ impl KafkaProducer {
         }
         Ok(())
     }
+
+    /// sarama `Producer.Retry.Max` (3 retries, 100ms backoff).
+    async fn send(&self, key: &str, value: Vec<u8>) -> anyhow::Result<()> {
+        let mut attempt = 0;
+        loop {
+            match self.send_once(key, value.clone()).await {
+                Ok(()) => return Ok(()),
+                Err(e) if attempt >= KAFKA_PRODUCER_RETRY_MAX => return Err(e),
+                Err(_) => {
+                    attempt += 1;
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+            }
+        }
+    }
 }
+
+const KAFKA_PRODUCER_RETRY_MAX: u32 = 3;
 
 #[async_trait::async_trait]
 impl MessageProducer for KafkaProducer {

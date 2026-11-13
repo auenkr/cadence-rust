@@ -32,20 +32,6 @@ pub enum StateBuilderError {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct StateBuilder { pub mutable_state: MutableStateBuilder }
 
-/// Wire/blob-decoded history events carry millisecond timestamps (`history_blob::decode`), while
-/// typed replay (like Go's `event.Timestamp`) works in nanoseconds.
-#[must_use]
-pub fn events_millis_to_nanos(events: &[HistoryEvent]) -> Vec<HistoryEvent> {
-    events
-        .iter()
-        .map(|e| {
-            let mut e = e.clone();
-            e.timestamp = e.timestamp.map(|ms| ms.saturating_mul(1_000_000));
-            e
-        })
-        .collect()
-}
-
 impl StateBuilder {
     /// Go `ReplicateSemaphoreAcquireInitiatedEvent`: the hold derives only from the event and run.
     fn replicate_semaphore_acquire_initiated(&mut self, event: &HistoryEvent) -> Result<(), StateBuilderError> {
@@ -602,9 +588,4 @@ mod typed_replay_tests {
         assert!(state.semaphore_state.get_semaphore_info(5).is_none());
     }
 
-    #[test]
-    fn millis_to_nanos_scales_event_timestamps() {
-        let e = HistoryEvent { timestamp: Some(1_800_000_000_000), ..Default::default() };
-        assert_eq!(events_millis_to_nanos(&[e])[0].timestamp, Some(1_800_000_000_000_000_000));
-    }
 }

@@ -12,7 +12,7 @@ use crate::wiring::persistence::visibility::VisibilityWriter;
 /// Go `constants.VisibilityAppName`.
 const VISIBILITY_APP_NAME: &str = "visibility";
 
-pub fn build_visibility_writer(
+pub async fn build_visibility_writer(
     db: Arc<dyn VisibilityWriter>,
     advanced_visibility_store: &str,
     kafka: &KafkaConfig,
@@ -27,11 +27,12 @@ pub fn build_visibility_writer(
         other => anyhow::bail!("unsupported advanced visibility store {other:?} for Rust History"),
     };
     if let Some(mode) = mode {
-        if kafka.tls.enabled {
-            anyhow::bail!("kafka.tls.enabled is not supported by the Rust History visibility producer");
-        }
         let (topic, brokers) = kafka.producer_target(VISIBILITY_APP_NAME).map_err(|e| anyhow::anyhow!(e))?;
-        let producer = Arc::new(KafkaProducer::new(brokers, topic));
+        let tls = crate::wiring::persistence::kafka_auth::client_config(&kafka.tls)?;
+        let sasl = crate::wiring::persistence::kafka_auth::sasl_config(&kafka.sasl)?;
+        let producer = Arc::new(KafkaProducer::with_auth(brokers, topic, tls, sasl));
+        // Go `NewSyncProducer` fails service start when the brokers/topic are unreachable.
+        producer.connect_eager().await?;
         mgrs.insert(mode.to_string(), Arc::new(EsVisibilityWriter::new(producer)));
     }
     Ok(Arc::new(HybridVisibilityWriter::new(mgrs, write_mode)))

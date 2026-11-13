@@ -46,12 +46,16 @@ on:
       repl_rust_cluster:
         description: History replication gate (Go<->Rust History, two clusters, any database). A = Go active -> Rust standby, B = Rust active -> Go standby; empty = off
         default: ""
+      two_history_graceful:
+        description: With two_cluster+rust_history (side standby), run two Rust History hosts on cluster A and a graceful failover to A asserting cross-host failover markers
+        type: boolean
+        default: false
       rust_ref:
         description: branch/ref of the Rust sources to build cadence-server from
         default: ""
 
 concurrency:
-  group: frontend-mixed-gate-${{ github.ref }}-${{ inputs.database }}-${{ inputs.es_flavor }}-${{ inputs.es }}-${{ inputs.gcs }}-${{ inputs.repl_rust_cluster }}-${{ inputs.two_cluster }}
+  group: frontend-mixed-gate-${{ github.ref }}-${{ inputs.database }}-${{ inputs.es_flavor }}-${{ inputs.es }}-${{ inputs.gcs }}-${{ inputs.two_history_graceful }}-${{ inputs.rust_history }}-${{ inputs.two_cluster }}-${{ inputs.rust_history_side }}-${{ inputs.repl_rust_cluster }}
   cancel-in-progress: true
 
 jobs:
@@ -112,11 +116,12 @@ jobs:
               --driver "$GITHUB_WORKSPACE/out/history-repl-driver" \
               --rust-root "$GITHUB_WORKSPACE/rustsrc" > out/gate.log 2>&1
           elif [ "${{ inputs.two_cluster }}" = true ]; then
-            tests/gates/run-frontend-two-cluster-lane.sh out/gate \
+            if [ "${{ inputs.database || 'mysql' }}" = mysql ]; then LANE=(tests/gates/run-frontend-two-cluster-lane.sh out/gate); else LANE=(tests/gates/run-frontend-two-cluster-lane-db.sh "${{ inputs.database }}" out/gate); fi
+            "${LANE[@]}" \
               --rust-binary "$CARGO_TARGET_DIR/debug/cadence-server" \
               --go-server "$GITHUB_WORKSPACE/out/cadence-go-server" \
               --go-cli "$GITHUB_WORKSPACE/out/cadence-cli" \
-              ${{ inputs.rust_history && '--rust-history-binary "$CARGO_TARGET_DIR/debug/cadence-history"' || '' }} --rust-history-side ${{ inputs.rust_history_side || 'standby' }} \
+              ${{ inputs.rust_history && '--rust-history-binary "$CARGO_TARGET_DIR/debug/cadence-history"' || '' }} --rust-history-side ${{ inputs.rust_history_side || 'standby' }} ${{ inputs.two_history_graceful && '--two-history-graceful' || '' }} \
               --rust-root "$GITHUB_WORKSPACE/rustsrc" > out/gate.log 2>&1
           elif [ "${{ inputs.database || 'mysql' }}" = cassandra ]; then
             RUST_BACKTRACE=1 tests/gates/run-frontend-cassandra-lane.sh out/gate \

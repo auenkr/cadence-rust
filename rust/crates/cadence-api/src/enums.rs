@@ -5,6 +5,23 @@
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+thread_local! {
+    static GO_JSON_ENUMS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Serialise `v` the way Go's `encoding/json` encodes `types.*`: every enum has `MarshalText`, so it
+/// is its string name (numbers only on the Thrift/REST wire). Used by the S3/filestore archivers.
+pub fn to_go_json_value<T: Serialize>(v: &T) -> serde_json::Result<serde_json::Value> {
+    struct Reset(bool);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            GO_JSON_ENUMS.with(|c| c.set(self.0));
+        }
+    }
+    let _reset = Reset(GO_JSON_ENUMS.with(|c| c.replace(true)));
+    serde_json::to_value(v)
+}
+
 macro_rules! cadence_enum {
     ($name:ident { $($variant:ident = $value:expr => $s:expr,)* }) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -15,7 +32,11 @@ macro_rules! cadence_enum {
         }
         impl Serialize for $name {
             fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-                s.serialize_i32(*self as i32)
+                if GO_JSON_ENUMS.with(std::cell::Cell::get) {
+                    s.serialize_str(self.as_str())
+                } else {
+                    s.serialize_i32(*self as i32)
+                }
             }
         }
         impl<'de> Deserialize<'de> for $name {
