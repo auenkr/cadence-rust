@@ -38,7 +38,7 @@ on:
         type: number
         default: 1024
 concurrency:
-  group: frontend-matching-benchmark-${{ github.ref }}
+  group: frontend-matching-benchmark-${{ github.ref }}-${{ inputs.sdk_openloop && inputs.service || 'legacy' }}
   cancel-in-progress: true
 jobs:
   sdk-service-smoke:

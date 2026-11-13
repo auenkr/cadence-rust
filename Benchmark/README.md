@@ -140,3 +140,9 @@ gh workflow run frontend-matching-benchmark.yml --ref t3/matching-benchmark-harn
   -f sdk_openloop=true -f service=history -f sdk_repetitions=3 \
   -f source_ref=c1bbd3ae71c84a71d5a226a70b0d8b71d021cb5b
 ```
+
+The service suite dispatches History, Frontend and Matching on independent standard
+Actions runners in parallel. Workflow concurrency groups include the service, so
+dispatching Frontend does not cancel History. Each job retains its 90-minute limit
+and runs its Go/Rust arms sequentially on the same runner. Evidence collection is
+serialized locally to avoid Git commit races.

@@ -26,7 +26,7 @@ on:
         description: Starting pair index (odd runs Rust first)
         default: '0'
 concurrency:
-  group: sdk-matching-benchmark-${{ github.ref }}
+  group: sdk-matching-benchmark-${{ github.ref }}-${{ inputs.service || 'matching' }}
   cancel-in-progress: true
 jobs:
   service-pair:

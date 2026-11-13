@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Finish History, then benchmark Frontend and Matching with identical protocol."""
+"""Run History, Frontend and Matching CI comparisons in parallel with identical protocol."""
 import json
 from pathlib import Path
 import statistics
@@ -43,9 +43,12 @@ def dispatch(service):
     state['runs'][service]=new[0]['databaseId'];checkpoint(f'Record isolated {service} benchmark dispatch')
     return new[0]['databaseId']
 
+state['execution']='parallel CI runners; serialized evidence collection'
 save()
 for service in ('history','frontend','matching'):
-    run_id=dispatch(service)
+    dispatch(service)
+for service in ('history','frontend','matching'):
+    run_id=state['runs'][service]
     result=subprocess.run([sys.executable,str(ROOT/'watch-benchmark.py'),str(run_id),'--service',service])
     state.setdefault('watch_exit_codes',{})[service]=result.returncode;save()
 
