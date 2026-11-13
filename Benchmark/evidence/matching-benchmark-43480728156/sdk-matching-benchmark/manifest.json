@@ -1,0 +1,37 @@
+{
+  "service": "matching",
+  "rate": 5.0,
+  "duration": 30,
+  "warmup": 10,
+  "repetitions": 3,
+  "repetition_offset": 0,
+  "payload_bytes": 1024,
+  "activity_ms": 10,
+  "worker_capacity": 128,
+  "source_head": "c1bbd3ae71c84a71d5a226a70b0d8b71d021cb5b",
+  "rust_tree": "d51a418cffee644ee7f9aa68778b8fe23724c190",
+  "head": "73b9adf054daec5b2809bbe1ca5769888c62986e",
+  "go_tree": "60cff4fed2b6295126835a467e2e1de9d98897d1",
+  "sdk_lock_sha256": "63839f10df3718a77bdf8de5cc48e8f654a81fbc0147b218afa4c042db1d1e14",
+  "driver_sha256": "457f97a3149aa91d4fe2eb4631073310816e34e1c4dd9d129c035ff66d519e8e",
+  "cpu_affinity": {
+    "generator": 0,
+    "sdk_worker": 1,
+    "services_and_db": [
+      2,
+      3
+    ]
+  },
+  "hardware": "Architecture:                            x86_64\nCPU op-mode(s):                          32-bit, 64-bit\nAddress sizes:                           48 bits physical, 48 bits virtual\nByte Order:                              Little Endian\nCPU(s):                                  4\nOn-line CPU(s) list:                     0-3\nVendor ID:                               AuthenticAMD\nModel name:                              AMD EPYC 7763 64-Core Processor\nCPU family:                              25\nModel:                                   1\nThread(s) per core:                      2\nCore(s) per socket:                      2\nSocket(s):                               1\nStepping:                                1\nBogoMIPS:                                4890.86\nFlags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl tsc_reliable nonstop_tsc cpuid extd_apicid aperfmperf tsc_known_freq pni pclmulqdq ssse3 fma cx16 pcid sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand hypervisor lahf_lm cmp_legacy svm cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw topoext vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid rdseed adx smap clflushopt clwb sha_ni xsaveopt xsavec xgetbv1 xsaves user_shstk clzero xsaveerptr rdpru arat npt nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold v_vmsave_vmload umip vaes vpclmulqdq rdpid fsrm\nVirtualization:                          AMD-V\nHypervisor vendor:                       Microsoft\nVirtualization type:                     full\nL1d cache:                               64 KiB (2 instances)\nL1i cache:                               64 KiB (2 instances)\nL2 cache:                                1 MiB (2 instances)\nL3 cache:                                32 MiB (1 instance)\nNUMA node(s):                            1\nNUMA node0 CPU(s):                       0-3\nVulnerability Gather data sampling:      Not affected\nVulnerability Ghostwrite:                Not affected\nVulnerability Indirect target selection: Not affected\nVulnerability Itlb multihit:             Not affected\nVulnerability L1tf:                      Not affected\nVulnerability Mds:                       Not affected\nVulnerability Meltdown:                  Not affected\nVulnerability Mmio stale data:           Not affected\nVulnerability Old microcode:             Not affected\nVulnerability Reg file data sampling:    Not affected\nVulnerability Retbleed:                  Not affected\nVulnerability Spec rstack overflow:      Vulnerable: Safe RET, no microcode\nVulnerability Spec store bypass:         Vulnerable\nVulnerability Spectre v1:                Mitigation; usercopy/swapgs barriers and __user pointer sanitization\nVulnerability Spectre v2:                Mitigation; Retpolines; STIBP disabled; RSB filling; PBRSB-eIBRS Not affected; BHI Not affected\nVulnerability Srbds:                     Not affected\nVulnerability Tsa:                       Vulnerable: No microcode\nVulnerability Tsx async abort:           Not affected\nVulnerability Vmscape:                   Not affected",
+  "protocol": "open-loop-one-activity-v1",
+  "metrics_unavailable": [
+    "database query latency percentiles",
+    "server retry counters",
+    "server queue backlog age"
+  ],
+  "scope": "Matching only; other core services and system Worker stay Go in both arms",
+  "go_image_id": "sha256:abf2873f23420a3897d65b2d22b2178947b2746ab08b5d9daf0d6285211f8256",
+  "go_binary_sha256": "d4bb490ad1879fa751a75466f3913b7a20453ee0a837421269470996b3f4a2a9  /usr/local/bin/cadence-server",
+  "rust_image_id": "sha256:5d8b2391aa9a9bc2c3ed7cd8aad76662f6c82be30a32b5071ddbc963208b3048",
+  "rust_binary_sha256": "52ad73e797008edd841d4d7ab6299e68b284485674779ce081407460cb10230b  /usr/local/bin/cadence-server"
+}

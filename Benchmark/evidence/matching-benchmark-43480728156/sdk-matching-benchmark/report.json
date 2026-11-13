@@ -1,0 +1,934 @@
+{
+  "manifest": {
+    "service": "matching",
+    "rate": 5.0,
+    "duration": 30,
+    "warmup": 10,
+    "repetitions": 3,
+    "repetition_offset": 0,
+    "payload_bytes": 1024,
+    "activity_ms": 10,
+    "worker_capacity": 128,
+    "source_head": "c1bbd3ae71c84a71d5a226a70b0d8b71d021cb5b",
+    "rust_tree": "d51a418cffee644ee7f9aa68778b8fe23724c190",
+    "head": "73b9adf054daec5b2809bbe1ca5769888c62986e",
+    "go_tree": "60cff4fed2b6295126835a467e2e1de9d98897d1",
+    "sdk_lock_sha256": "63839f10df3718a77bdf8de5cc48e8f654a81fbc0147b218afa4c042db1d1e14",
+    "driver_sha256": "457f97a3149aa91d4fe2eb4631073310816e34e1c4dd9d129c035ff66d519e8e",
+    "cpu_affinity": {
+      "generator": 0,
+      "sdk_worker": 1,
+      "services_and_db": [
+        2,
+        3
+      ]
+    },
+    "hardware": "Architecture:                            x86_64\nCPU op-mode(s):                          32-bit, 64-bit\nAddress sizes:                           48 bits physical, 48 bits virtual\nByte Order:                              Little Endian\nCPU(s):                                  4\nOn-line CPU(s) list:                     0-3\nVendor ID:                               AuthenticAMD\nModel name:                              AMD EPYC 7763 64-Core Processor\nCPU family:                              25\nModel:                                   1\nThread(s) per core:                      2\nCore(s) per socket:                      2\nSocket(s):                               1\nStepping:                                1\nBogoMIPS:                                4890.86\nFlags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl tsc_reliable nonstop_tsc cpuid extd_apicid aperfmperf tsc_known_freq pni pclmulqdq ssse3 fma cx16 pcid sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand hypervisor lahf_lm cmp_legacy svm cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw topoext vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid rdseed adx smap clflushopt clwb sha_ni xsaveopt xsavec xgetbv1 xsaves user_shstk clzero xsaveerptr rdpru arat npt nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold v_vmsave_vmload umip vaes vpclmulqdq rdpid fsrm\nVirtualization:                          AMD-V\nHypervisor vendor:                       Microsoft\nVirtualization type:                     full\nL1d cache:                               64 KiB (2 instances)\nL1i cache:                               64 KiB (2 instances)\nL2 cache:                                1 MiB (2 instances)\nL3 cache:                                32 MiB (1 instance)\nNUMA node(s):                            1\nNUMA node0 CPU(s):                       0-3\nVulnerability Gather data sampling:      Not affected\nVulnerability Ghostwrite:                Not affected\nVulnerability Indirect target selection: Not affected\nVulnerability Itlb multihit:             Not affected\nVulnerability L1tf:                      Not affected\nVulnerability Mds:                       Not affected\nVulnerability Meltdown:                  Not affected\nVulnerability Mmio stale data:           Not affected\nVulnerability Old microcode:             Not affected\nVulnerability Reg file data sampling:    Not affected\nVulnerability Retbleed:                  Not affected\nVulnerability Spec rstack overflow:      Vulnerable: Safe RET, no microcode\nVulnerability Spec store bypass:         Vulnerable\nVulnerability Spectre v1:                Mitigation; usercopy/swapgs barriers and __user pointer sanitization\nVulnerability Spectre v2:                Mitigation; Retpolines; STIBP disabled; RSB filling; PBRSB-eIBRS Not affected; BHI Not affected\nVulnerability Srbds:                     Not affected\nVulnerability Tsa:                       Vulnerable: No microcode\nVulnerability Tsx async abort:           Not affected\nVulnerability Vmscape:                   Not affected",
+    "protocol": "open-loop-one-activity-v1",
+    "metrics_unavailable": [
+      "database query latency percentiles",
+      "server retry counters",
+      "server queue backlog age"
+    ],
+    "scope": "Matching only; other core services and system Worker stay Go in both arms",
+    "go_image_id": "sha256:abf2873f23420a3897d65b2d22b2178947b2746ab08b5d9daf0d6285211f8256",
+    "go_binary_sha256": "d4bb490ad1879fa751a75466f3913b7a20453ee0a837421269470996b3f4a2a9  /usr/local/bin/cadence-server",
+    "rust_image_id": "sha256:5d8b2391aa9a9bc2c3ed7cd8aad76662f6c82be30a32b5071ddbc963208b3048",
+    "rust_binary_sha256": "52ad73e797008edd841d4d7ab6299e68b284485674779ce081407460cb10230b  /usr/local/bin/cadence-server"
+  },
+  "runs": {
+    "00-go": {
+      "scheduled": 150,
+      "correct": 150,
+      "errors": 0,
+      "arrival_rate": 5.0,
+      "successful_starts_per_second": 5.0,
+      "completions_per_second": 5.0,
+      "activity_tasks_per_second": 5.0,
+      "outstanding_at_arrival_end": 0,
+      "latency_ms": {
+        "start_rpc_ms": {
+          "p50": 8.765567,
+          "p95": 10.519904,
+          "p99": 11.576677,
+          "p999": 17.49135
+        },
+        "completion_ms": {
+          "p50": 61.229464,
+          "p95": 69.817419,
+          "p99": 74.021402,
+          "p999": 74.178922
+        },
+        "generator_lag_ms": {
+          "p50": 0.525758,
+          "p95": 1.020729,
+          "p99": 1.073862,
+          "p999": 1.083649
+        },
+        "activity_ms": {
+          "p50": 16.288117,
+          "p95": 17.250149,
+          "p99": 19.793693,
+          "p999": 20.675047
+        },
+        "activity_schedule_to_start_ms": {
+          "p50": 0.020398,
+          "p95": 0.035386,
+          "p99": 0.056485,
+          "p999": 0.135943
+        },
+        "decision_schedule_to_start_ms": {
+          "p50": 10.148675,
+          "p95": 15.19177,
+          "p99": 19.463922,
+          "p999": 22.691332
+        }
+      },
+      "resources": {
+        "containers": {
+          "cadence-sdk-benchmark-frontend-1": {
+            "average_cpu_cores": 0.055589096877270476,
+            "cgroup_version": "v2",
+            "cpu_seconds": 1.673204,
+            "disk_read_bytes": 0,
+            "disk_write_bytes": 4096,
+            "final_cpu_ns": 2594539000,
+            "initial_cpu_ns": 921335000,
+            "network_receive_bytes": 5304273,
+            "network_transmit_bytes": 4803957,
+            "peak_cgroup_memory_bytes": 34877440,
+            "peak_summed_process_rss_bytes": 105787392
+          },
+          "cadence-sdk-benchmark-history-1": {
+            "average_cpu_cores": 0.1389851676489079,
+            "cgroup_version": "v2",
+            "cpu_seconds": 4.183384,
+            "disk_read_bytes": 0,
+            "disk_write_bytes": 4096,
+            "final_cpu_ns": 5920962000,
+            "initial_cpu_ns": 1737578000,
+            "network_receive_bytes": 9172243,
+            "network_transmit_bytes": 8185386,
+            "peak_cgroup_memory_bytes": 43474944,
+            "peak_summed_process_rss_bytes": 118272000
+          },
+          "cadence-sdk-benchmark-matching-1": {
+            "average_cpu_cores": 0.02739763154123794,
+            "cgroup_version": "v2",
+            "cpu_seconds": 0.824655,
+            "disk_read_bytes": 0,
+            "disk_write_bytes": 4096,
+            "final_cpu_ns": 1498219000,
+            "initial_cpu_ns": 673564000,
+            "network_receive_bytes": 912486,
+            "network_transmit_bytes": 1017875,
+            "peak_cgroup_memory_bytes": 33005568,
+            "peak_summed_process_rss_bytes": 100651008
+          },
+          "cadence-sdk-benchmark-mysql-1": {
+            "average_cpu_cores": 0.17018542054491292,
+            "cgroup_version": "v2",
+            "cpu_seconds": 5.122496,
+            "disk_read_bytes": 0,
+            "disk_write_bytes": 79409152,
+            "final_cpu_ns": 13535248000,
+            "initial_cpu_ns": 8412752000,
+            "network_receive_bytes": 7107789,
+            "network_transmit_bytes": 9598900,
+            "peak_cgroup_memory_bytes": 602812416,
+            "peak_summed_process_rss_bytes": 496250880
+          },
+          "cadence-sdk-benchmark-worker-1": {
+            "average_cpu_cores": 0.004019402367198463,
+            "cgroup_version": "v2",
+            "cpu_seconds": 0.120982,
+            "disk_read_bytes": 0,
+            "disk_write_bytes": 4096,
+            "final_cpu_ns": 688209000,
+            "initial_cpu_ns": 567227000,
+            "network_receive_bytes": 151854,
+            "network_transmit_bytes": 121825,
+            "peak_cgroup_memory_bytes": 30208000,
+            "peak_summed_process_rss_bytes": 96018432
+          }
+        },
+        "cpu_method": "exact delta of cumulative cgroup cpu usage counters",
+        "duration_seconds": 30.099499613999797,
+        "ended_at_utc": "2026-11-13T18:48:05.971732+00:00",
+        "interval_method": "start/end marker files",
+        "memory_method": "peak sampled cgroup memory usage; includes charged cache and is not RSS",
+        "mysql_note": "Global SQL counters and total Performance Schema wait; includes observer queries. Query tail latency unavailable.",
+        "samples": 120,
+        "sampling_interval_seconds": 0.25,
+        "schema_version": 2,
+        "started_at_utc": "2026-11-13T18:47:35.807787+00:00"
+      },
+      "persistence": {
+        "queries_per_second": 425.32268523313155,
+        "new_connections_per_second": 25.349258618409575,
+        "peak_connections": 18,
+        "mean_statement_wait_ms": 0.34431455940422584,
+        "includes_observer_queries": true
+      }
+    },
+    "00-rust": {
+      "scheduled": 150,
+      "correct": 150,
+      "errors": 0,
+      "arrival_rate": 5.0,
+      "successful_starts_per_second": 5.0,
+      "completions_per_second": 5.0,
+      "activity_tasks_per_second": 5.0,
+      "outstanding_at_arrival_end": 0,
+      "latency_ms": {
+        "start_rpc_ms": {
+          "p50": 9.234764,
+          "p95": 10.915324,
+          "p99": 15.018659,
+          "p999": 18.007643
+        },
+        "completion_ms": {
+          "p50": 75.68722,
+          "p95": 82.660687,
+          "p99": 86.113948,
+          "p999": 86.186995
+        },
+        "generator_lag_ms": {
+          "p50": 0.557232,
+          "p95": 0.999136,
+          "p99": 1.141216,
+          "p999": 1.871637
+        },
+        "activity_ms": {
+          "p50": 16.792926,
+          "p95": 18.663462,
+          "p99": 20.461281,
+          "p999": 20.567614
+        },
+        "activity_schedule_to_start_ms": {
+          "p50": 0.022863,
+          "p95": 0.04288,
+          "p99": 0.05876,
+          "p999": 0.061004
+        },
+        "decision_schedule_to_start_ms": {
+          "p50": 12.900264,
+          "p95": 16.250777,
+          "p99": 20.486298,
+          "p999": 23.075621
+        }
+      },
+      "resources": {
+        "containers": {
+          "cadence-sdk-benchmark-frontend-1": {
+            "average_cpu_cores": 0.06039106122199373,
+            "cgroup_version": "v2",
+            "cpu_seconds": 1.83305,
+            "disk_read_bytes": 0,
+            "disk_write_bytes": 4096,
+            "final_cpu_ns": 2835384000,
+            "initial_cpu_ns": 1002334000,
+            "network_receive_bytes": 5327965,
+            "network_transmit_bytes": 4838400,
+            "peak_cgroup_memory_bytes": 35147776,
+            "peak_summed_process_rss_bytes": 106172416
+          },
+          "cadence-sdk-benchmark-history-1": {
+            "average_cpu_cores": 0.14675055880764362,
+            "cgroup_version": "v2",
+            "cpu_seconds": 4.45432,
+            "disk_read_bytes": 0,
+            "disk_write_bytes": 4096,
+            "final_cpu_ns": 6360738000,
+            "initial_cpu_ns": 1906418000,
+            "network_receive_bytes": 9170598,
+            "network_transmit_bytes": 8214544,
+            "peak_cgroup_memory_bytes": 43442176,
+            "peak_summed_process_rss_bytes": 120860672
+          },
+          "cadence-sdk-benchmark-matching-1": {
+            "average_cpu_cores": 0.033824232645918356,
+            "cgroup_version": "v2",
+            "cpu_seconds": 1.026667,
+            "disk_read_bytes": 0,
+            "disk_write_bytes": 4096,
+            "final_cpu_ns": 1668699000,
+            "initial_cpu_ns": 642032000,
+            "network_receive_bytes": 942638,
+            "network_transmit_bytes": 1042584,
+            "peak_cgroup_memory_bytes": 20234240,
+            "peak_summed_process_rss_bytes": 57589760
+          },
+          "cadence-sdk-benchmark-mysql-1": {
+            "average_cpu_cores": 0.1765737703968627,
+            "cgroup_version": "v2",
+            "cpu_seconds": 5.359544,
+            "disk_read_bytes": 73728,
+            "disk_write_bytes": 68366336,
+            "final_cpu_ns": 13996466000,
+            "initial_cpu_ns": 8636922000,
+            "network_receive_bytes": 7122411,
+            "network_transmit_bytes": 9583941,
+            "peak_cgroup_memory_bytes": 601931776,
+            "peak_summed_process_rss_bytes": 502329344
+          },
+          "cadence-sdk-benchmark-worker-1": {
+            "average_cpu_cores": 0.004845945721110628,
+            "cgroup_version": "v2",
+            "cpu_seconds": 0.147089,
+            "disk_read_bytes": 0,
+            "disk_write_bytes": 4096,
+            "final_cpu_ns": 756435000,
+            "initial_cpu_ns": 609346000,
+            "network_receive_bytes": 180922,
+            "network_transmit_bytes": 150613,
+            "peak_cgroup_memory_bytes": 27877376,
+            "peak_summed_process_rss_bytes": 94765056
+          }
+        },
+        "cpu_method": "exact delta of cumulative cgroup cpu usage counters",
+        "duration_seconds": 30.353001965999965,
+        "ended_at_utc": "2026-11-13T18:49:24.519453+00:00",
+        "interval_method": "start/end marker files",
+        "memory_method": "peak sampled cgroup memory usage; includes charged cache and is not RSS",
+        "mysql_note": "Global SQL counters and total Performance Schema wait; includes observer queries. Query tail latency unavailable.",
+        "samples": 121,
+        "sampling_interval_seconds": 0.25,
+        "schema_version": 2,
+        "started_at_utc": "2026-11-13T18:48:54.102473+00:00"
+      },
+      "persistence": {
+        "queries_per_second": 421.0127227057952,
+        "new_connections_per_second": 25.3022749071172,
+        "peak_connections": 16,
+        "mean_statement_wait_ms": 0.35340836033229495,
+        "includes_observer_queries": true
+      }
+    },
+    "01-go": {
+      "scheduled": 150,
+      "correct": 150,
+      "errors": 0,
+      "arrival_rate": 5.0,
+      "successful_starts_per_second": 5.0,
+      "completions_per_second": 5.0,
+      "activity_tasks_per_second": 5.0,
+      "outstanding_at_arrival_end": 0,
+      "latency_ms": {
+        "start_rpc_ms": {
+          "p50": 8.859035,
+          "p95": 11.574566,
+          "p99": 13.864461,
+          "p999": 14.719779
+        },
+        "completion_ms": {
+          "p50": 61.644508,
+          "p95": 70.474533,
+          "p99": 76.769038,
+          "p999": 79.088051
+        },
+        "generator_lag_ms": {
+          "p50": 0.529669,
+          "p95": 1.032784,
+          "p99": 1.079561,
+          "p999": 1.0874
+        },
+        "activity_ms": {
+          "p50": 16.301267,
+          "p95": 17.672439,
+          "p99": 20.658747,
+          "p999": 23.220145
+        },
+        "activity_schedule_to_start_ms": {
+          "p50": 0.021781,
+          "p95": 0.03756,
+          "p99": 0.045215,
+          "p999": 0.051646
+        },
+        "decision_schedule_to_start_ms": {
+          "p50": 12.834835,
+          "p95": 15.711539,
+          "p99": 20.000866,
+          "p999": 22.191569
+        }
+      },
+      "resources": {
+        "containers": {
+          "cadence-sdk-benchmark-frontend-1": {
+            "average_cpu_cores": 0.05592415164749797,
+            "cgroup_version": "v2",
+            "cpu_seconds": 1.683485,
+            "disk_read_bytes": 0,
+            "disk_write_bytes": 4096,
+            "final_cpu_ns": 2607670000,
+            "initial_cpu_ns": 924185000,
+            "network_receive_bytes": 5300878,
+            "network_transmit_bytes": 4802373,
+            "peak_cgroup_memory_bytes": 34983936,
+            "peak_summed_process_rss_bytes": 105897984
+          },
+          "cadence-sdk-benchmark-history-1": {
+            "average_cpu_cores": 0.13953975829266313,
+            "cgroup_version": "v2",
+            "cpu_seconds": 4.200566,
+            "disk_read_bytes": 0,
+            "disk_write_bytes": 4096,
+            "final_cpu_ns": 6001680000,
+            "initial_cpu_ns": 1801114000,
+            "network_receive_bytes": 9169867,
+            "network_transmit_bytes": 8182695,
+            "peak_cgroup_memory_bytes": 45625344,
+            "peak_summed_process_rss_bytes": 124633088
+          },
+          "cadence-sdk-benchmark-matching-1": {
+            "average_cpu_cores": 0.02733275326317611,
+            "cgroup_version": "v2",
+            "cpu_seconds": 0.822798,
+            "disk_read_bytes": 0,
+            "disk_write_bytes": 4096,
+            "final_cpu_ns": 1442598000,
+            "initial_cpu_ns": 619800000,
+            "network_receive_bytes": 912231,
+            "network_transmit_bytes": 1016875,
+            "peak_cgroup_memory_bytes": 34029568,
+            "peak_summed_process_rss_bytes": 100519936
+          },
+          "cadence-sdk-benchmark-mysql-1": {
+            "average_cpu_cores": 0.17138382201618596,
+            "cgroup_version": "v2",
+            "cpu_seconds": 5.159168,
+            "disk_read_bytes": 0,
+            "disk_write_bytes": 67616768,
+            "final_cpu_ns": 13591222000,
+            "initial_cpu_ns": 8432054000,
+            "network_receive_bytes": 7106350,
+            "network_transmit_bytes": 9598679,
+            "peak_cgroup_memory_bytes": 598749184,
+            "peak_summed_process_rss_bytes": 491937792
+          },
+          "cadence-sdk-benchmark-worker-1": {
+            "average_cpu_cores": 0.0037532465984198913,
+            "cgroup_version": "v2",
+            "cpu_seconds": 0.112984,
+            "disk_read_bytes": 0,
+            "disk_write_bytes": 4096,
+            "final_cpu_ns": 682098000,
+            "initial_cpu_ns": 569114000,
+            "network_receive_bytes": 152014,
+            "network_transmit_bytes": 122070,
+            "peak_cgroup_memory_bytes": 28229632,
+            "peak_summed_process_rss_bytes": 92909568
+          }
+        },
+        "cpu_method": "exact delta of cumulative cgroup cpu usage counters",
+        "duration_seconds": 30.103004702000135,
+        "ended_at_utc": "2026-11-13T18:52:02.219030+00:00",
+        "interval_method": "start/end marker files",
+        "memory_method": "peak sampled cgroup memory usage; includes charged cache and is not RSS",
+        "mysql_note": "Global SQL counters and total Performance Schema wait; includes observer queries. Query tail latency unavailable.",
+        "samples": 120,
+        "sampling_interval_seconds": 0.25,
+        "schema_version": 2,
+        "started_at_utc": "2026-11-13T18:51:32.052254+00:00"
+      },
+      "persistence": {
+        "queries_per_second": 425.2067236048875,
+        "new_connections_per_second": 25.31308776460346,
+        "peak_connections": 18,
+        "mean_statement_wait_ms": 0.3568258381843382,
+        "includes_observer_queries": true
+      }
+    },
+    "01-rust": {
+      "scheduled": 150,
+      "correct": 150,
+      "errors": 0,
+      "arrival_rate": 5.0,
+      "successful_starts_per_second": 5.0,
+      "completions_per_second": 5.0,
+      "activity_tasks_per_second": 5.0,
+      "outstanding_at_arrival_end": 0,
+      "latency_ms": {
+        "start_rpc_ms": {
+          "p50": 9.433483,
+          "p95": 11.728381,
+          "p99": 14.507932,
+          "p999": 14.930546
+        },
+        "completion_ms": {
+          "p50": 76.584283,
+          "p95": 84.019109,
+          "p99": 90.12612,
+          "p999": 92.204227
+        },
+        "generator_lag_ms": {
+          "p50": 0.608093,
+          "p95": 1.013253,
+          "p99": 1.162045,
+          "p999": 1.549474
+        },
+        "activity_ms": {
+          "p50": 17.393842,
+          "p95": 19.917115,
+          "p99": 22.451262,
+          "p999": 23.296238
+        },
+        "activity_schedule_to_start_ms": {
+          "p50": 0.025788,
+          "p95": 0.049963,
+          "p99": 0.129462,
+          "p999": 0.234916
+        },
+        "decision_schedule_to_start_ms": {
+          "p50": 14.13124,
+          "p95": 16.71246,
+          "p99": 22.507164,
+          "p999": 23.866524
+        }
+      },
+      "resources": {
+        "containers": {
+          "cadence-sdk-benchmark-frontend-1": {
+            "average_cpu_cores": 0.06547692189811148,
+            "cgroup_version": "v2",
+            "cpu_seconds": 1.971996,
+            "disk_read_bytes": 0,
+            "disk_write_bytes": 4096,
+            "final_cpu_ns": 2902478000,
+            "initial_cpu_ns": 930482000,
+            "network_receive_bytes": 5318938,
+            "network_transmit_bytes": 4831754,
+            "peak_cgroup_memory_bytes": 35012608,
+            "peak_summed_process_rss_bytes": 105857024
+          },
+          "cadence-sdk-benchmark-history-1": {
+            "average_cpu_cores": 0.15527063401505659,
+            "cgroup_version": "v2",
+            "cpu_seconds": 4.676351,
+            "disk_read_bytes": 0,
+            "disk_write_bytes": 4096,
+            "final_cpu_ns": 6518965000,
+            "initial_cpu_ns": 1842614000,
+            "network_receive_bytes": 9159883,
+            "network_transmit_bytes": 8202726,
+            "peak_cgroup_memory_bytes": 43151360,
+            "peak_summed_process_rss_bytes": 114925568
+          },
+          "cadence-sdk-benchmark-matching-1": {
+            "average_cpu_cores": 0.03512113511036665,
+            "cgroup_version": "v2",
+            "cpu_seconds": 1.057758,
+            "disk_read_bytes": 0,
+            "disk_write_bytes": 4096,
+            "final_cpu_ns": 1658575000,
+            "initial_cpu_ns": 600817000,
+            "network_receive_bytes": 927846,
+            "network_transmit_bytes": 1025940,
+            "peak_cgroup_memory_bytes": 20357120,
+            "peak_summed_process_rss_bytes": 57823232
+          },
+          "cadence-sdk-benchmark-mysql-1": {
+            "average_cpu_cores": 0.1895696203669475,
+            "cgroup_version": "v2",
+            "cpu_seconds": 5.709348,
+            "disk_read_bytes": 0,
+            "disk_write_bytes": 67325952,
+            "final_cpu_ns": 14135357000,
+            "initial_cpu_ns": 8426009000,
+            "network_receive_bytes": 7123515,
+            "network_transmit_bytes": 9583586,
+            "peak_cgroup_memory_bytes": 600166400,
+            "peak_summed_process_rss_bytes": 504123392
+          },
+          "cadence-sdk-benchmark-worker-1": {
+            "average_cpu_cores": 0.005098743406982517,
+            "cgroup_version": "v2",
+            "cpu_seconds": 0.153561,
+            "disk_read_bytes": 0,
+            "disk_write_bytes": 4096,
+            "final_cpu_ns": 737513000,
+            "initial_cpu_ns": 583952000,
+            "network_receive_bytes": 171581,
+            "network_transmit_bytes": 142249,
+            "peak_cgroup_memory_bytes": 28504064,
+            "peak_summed_process_rss_bytes": 94392320
+          }
+        },
+        "cpu_method": "exact delta of cumulative cgroup cpu usage counters",
+        "duration_seconds": 30.117420654999933,
+        "ended_at_utc": "2026-11-13T18:50:42.724090+00:00",
+        "interval_method": "start/end marker files",
+        "memory_method": "peak sampled cgroup memory usage; includes charged cache and is not RSS",
+        "mysql_note": "Global SQL counters and total Performance Schema wait; includes observer queries. Query tail latency unavailable.",
+        "samples": 120,
+        "sampling_interval_seconds": 0.25,
+        "schema_version": 2,
+        "started_at_utc": "2026-11-13T18:50:12.538835+00:00"
+      },
+      "persistence": {
+        "queries_per_second": 424.3059240160561,
+        "new_connections_per_second": 25.50019169295963,
+        "peak_connections": 16,
+        "mean_statement_wait_ms": 0.3730293821391485,
+        "includes_observer_queries": true
+      }
+    },
+    "02-go": {
+      "scheduled": 150,
+      "correct": 150,
+      "errors": 0,
+      "arrival_rate": 5.0,
+      "successful_starts_per_second": 5.0,
+      "completions_per_second": 5.0,
+      "activity_tasks_per_second": 5.0,
+      "outstanding_at_arrival_end": 0,
+      "latency_ms": {
+        "start_rpc_ms": {
+          "p50": 8.845172,
+          "p95": 10.242743,
+          "p99": 14.439396,
+          "p999": 16.314251
+        },
+        "completion_ms": {
+          "p50": 64.316682,
+          "p95": 70.995028,
+          "p99": 80.284501,
+          "p999": 89.033534
+        },
+        "generator_lag_ms": {
+          "p50": 0.578069,
+          "p95": 1.00798,
+          "p99": 1.056597,
+          "p999": 1.079364
+        },
+        "activity_ms": {
+          "p50": 16.679948,
+          "p95": 18.258326,
+          "p99": 20.405797,
+          "p999": 20.485782
+        },
+        "activity_schedule_to_start_ms": {
+          "p50": 0.02158,
+          "p95": 0.041457,
+          "p99": 0.06443,
+          "p999": 0.078246
+        },
+        "decision_schedule_to_start_ms": {
+          "p50": 12.645424,
+          "p95": 15.011662,
+          "p99": 20.223817,
+          "p999": 28.083258
+        }
+      },
+      "resources": {
+        "containers": {
+          "cadence-sdk-benchmark-frontend-1": {
+            "average_cpu_cores": 0.058438600758309645,
+            "cgroup_version": "v2",
+            "cpu_seconds": 1.773089,
+            "disk_read_bytes": 0,
+            "disk_write_bytes": 4096,
+            "final_cpu_ns": 2757653000,
+            "initial_cpu_ns": 984564000,
+            "network_receive_bytes": 5302402,
+            "network_transmit_bytes": 4799403,
+            "peak_cgroup_memory_bytes": 34689024,
+            "peak_summed_process_rss_bytes": 105779200
+          },
+          "cadence-sdk-benchmark-history-1": {
+            "average_cpu_cores": 0.14283631569501934,
+            "cgroup_version": "v2",
+            "cpu_seconds": 4.333805,
+            "disk_read_bytes": 0,
+            "disk_write_bytes": 4096,
+            "final_cpu_ns": 6180806000,
+            "initial_cpu_ns": 1847001000,
+            "network_receive_bytes": 9167560,
+            "network_transmit_bytes": 8185645,
+            "peak_cgroup_memory_bytes": 43720704,
+            "peak_summed_process_rss_bytes": 115429376
+          },
+          "cadence-sdk-benchmark-matching-1": {
+            "average_cpu_cores": 0.028615778256020685,
+            "cgroup_version": "v2",
+            "cpu_seconds": 0.868233,
+            "disk_read_bytes": 0,
+            "disk_write_bytes": 4096,
+            "final_cpu_ns": 1520187000,
+            "initial_cpu_ns": 651954000,
+            "network_receive_bytes": 916019,
+            "network_transmit_bytes": 1020596,
+            "peak_cgroup_memory_bytes": 31989760,
+            "peak_summed_process_rss_bytes": 99819520
+          },
+          "cadence-sdk-benchmark-mysql-1": {
+            "average_cpu_cores": 0.1715233175705192,
+            "cgroup_version": "v2",
+            "cpu_seconds": 5.204199,
+            "disk_read_bytes": 0,
+            "disk_write_bytes": 67432448,
+            "final_cpu_ns": 13850978000,
+            "initial_cpu_ns": 8646779000,
+            "network_receive_bytes": 7107426,
+            "network_transmit_bytes": 9598825,
+            "peak_cgroup_memory_bytes": 597680128,
+            "peak_summed_process_rss_bytes": 488968192
+          },
+          "cadence-sdk-benchmark-worker-1": {
+            "average_cpu_cores": 0.004333039347203784,
+            "cgroup_version": "v2",
+            "cpu_seconds": 0.131469,
+            "disk_read_bytes": 0,
+            "disk_write_bytes": 4096,
+            "final_cpu_ns": 731645000,
+            "initial_cpu_ns": 600176000,
+            "network_receive_bytes": 152622,
+            "network_transmit_bytes": 121922,
+            "peak_cgroup_memory_bytes": 28438528,
+            "peak_summed_process_rss_bytes": 94826496
+          }
+        },
+        "cpu_method": "exact delta of cumulative cgroup cpu usage counters",
+        "duration_seconds": 30.341058427000007,
+        "ended_at_utc": "2026-11-13T18:53:19.848101+00:00",
+        "interval_method": "start/end marker files",
+        "memory_method": "peak sampled cgroup memory usage; includes charged cache and is not RSS",
+        "mysql_note": "Global SQL counters and total Performance Schema wait; includes observer queries. Query tail latency unavailable.",
+        "samples": 121,
+        "sampling_interval_seconds": 0.25,
+        "schema_version": 2,
+        "started_at_utc": "2026-11-13T18:52:49.442883+00:00"
+      },
+      "persistence": {
+        "queries_per_second": 421.83762411565647,
+        "new_connections_per_second": 25.114483129629676,
+        "peak_connections": 18,
+        "mean_statement_wait_ms": 0.35523143882149044,
+        "includes_observer_queries": true
+      }
+    },
+    "02-rust": {
+      "scheduled": 150,
+      "correct": 150,
+      "errors": 0,
+      "arrival_rate": 5.0,
+      "successful_starts_per_second": 5.0,
+      "completions_per_second": 5.0,
+      "activity_tasks_per_second": 5.0,
+      "outstanding_at_arrival_end": 0,
+      "latency_ms": {
+        "start_rpc_ms": {
+          "p50": 8.941973,
+          "p95": 10.651289,
+          "p99": 17.064621,
+          "p999": 18.688325
+        },
+        "completion_ms": {
+          "p50": 75.205661,
+          "p95": 81.20905,
+          "p99": 84.770874,
+          "p999": 88.575896
+        },
+        "generator_lag_ms": {
+          "p50": 0.594402,
+          "p95": 1.059633,
+          "p99": 1.078222,
+          "p999": 1.105997
+        },
+        "activity_ms": {
+          "p50": 16.683947,
+          "p95": 18.474326,
+          "p99": 24.112169,
+          "p999": 25.802057
+        },
+        "activity_schedule_to_start_ms": {
+          "p50": 0.022131,
+          "p95": 0.05896,
+          "p99": 0.086691,
+          "p999": 0.094576
+        },
+        "decision_schedule_to_start_ms": {
+          "p50": 13.221481,
+          "p95": 15.965141,
+          "p99": 22.008333,
+          "p999": 25.177196
+        }
+      },
+      "resources": {
+        "containers": {
+          "cadence-sdk-benchmark-frontend-1": {
+            "average_cpu_cores": 0.06017353363710015,
+            "cgroup_version": "v2",
+            "cpu_seconds": 1.811781,
+            "disk_read_bytes": 0,
+            "disk_write_bytes": 4096,
+            "final_cpu_ns": 2667773000,
+            "initial_cpu_ns": 855992000,
+            "network_receive_bytes": 5329657,
+            "network_transmit_bytes": 4840386,
+            "peak_cgroup_memory_bytes": 34840576,
+            "peak_summed_process_rss_bytes": 106426368
+          },
+          "cadence-sdk-benchmark-history-1": {
+            "average_cpu_cores": 0.1466904849299814,
+            "cgroup_version": "v2",
+            "cpu_seconds": 4.416743,
+            "disk_read_bytes": 0,
+            "disk_write_bytes": 4096,
+            "final_cpu_ns": 6147910000,
+            "initial_cpu_ns": 1731167000,
+            "network_receive_bytes": 9176152,
+            "network_transmit_bytes": 8219381,
+            "peak_cgroup_memory_bytes": 43515904,
+            "peak_summed_process_rss_bytes": 115638272
+          },
+          "cadence-sdk-benchmark-matching-1": {
+            "average_cpu_cores": 0.03303574261194816,
+            "cgroup_version": "v2",
+            "cpu_seconds": 0.994682,
+            "disk_read_bytes": 0,
+            "disk_write_bytes": 4096,
+            "final_cpu_ns": 1557956000,
+            "initial_cpu_ns": 563274000,
+            "network_receive_bytes": 940168,
+            "network_transmit_bytes": 1039139,
+            "peak_cgroup_memory_bytes": 20111360,
+            "peak_summed_process_rss_bytes": 57737216
+          },
+          "cadence-sdk-benchmark-mysql-1": {
+            "average_cpu_cores": 0.18036197865140768,
+            "cgroup_version": "v2",
+            "cpu_seconds": 5.430567,
+            "disk_read_bytes": 0,
+            "disk_write_bytes": 75767808,
+            "final_cpu_ns": 13781521000,
+            "initial_cpu_ns": 8350954000,
+            "network_receive_bytes": 7123053,
+            "network_transmit_bytes": 9584787,
+            "peak_cgroup_memory_bytes": 598917120,
+            "peak_summed_process_rss_bytes": 490995712
+          },
+          "cadence-sdk-benchmark-worker-1": {
+            "average_cpu_cores": 0.004822435539453687,
+            "cgroup_version": "v2",
+            "cpu_seconds": 0.1452,
+            "disk_read_bytes": 0,
+            "disk_write_bytes": 4096,
+            "final_cpu_ns": 726833000,
+            "initial_cpu_ns": 581633000,
+            "network_receive_bytes": 180543,
+            "network_transmit_bytes": 149580,
+            "peak_cgroup_memory_bytes": 28008448,
+            "peak_summed_process_rss_bytes": 93900800
+          }
+        },
+        "cpu_method": "exact delta of cumulative cgroup cpu usage counters",
+        "duration_seconds": 30.109267155999987,
+        "ended_at_utc": "2026-11-13T18:54:31.002884+00:00",
+        "interval_method": "start/end marker files",
+        "memory_method": "peak sampled cgroup memory usage; includes charged cache and is not RSS",
+        "mysql_note": "Global SQL counters and total Performance Schema wait; includes observer queries. Query tail latency unavailable.",
+        "samples": 120,
+        "sampling_interval_seconds": 0.25,
+        "schema_version": 2,
+        "started_at_utc": "2026-11-13T18:54:00.829809+00:00"
+      },
+      "persistence": {
+        "queries_per_second": 424.4208247842884,
+        "new_connections_per_second": 25.507097068184795,
+        "peak_connections": 16,
+        "mean_statement_wait_ms": 0.3523954245152355,
+        "includes_observer_queries": true
+      }
+    }
+  },
+  "pairs": {
+    "0": {
+      "equal_completion_throughput_within_one_percent": true,
+      "resource_comparison_allowed": true,
+      "resource_deltas": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "average_cpu_cores_rust_minus_go_percent": 8.638320488143611,
+          "peak_cgroup_memory_bytes_rust_minus_go_percent": 0.7751027598355843
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "average_cpu_cores_rust_minus_go_percent": 5.587208541815036,
+          "peak_cgroup_memory_bytes_rust_minus_go_percent": -0.07537214999057848
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "average_cpu_cores_rust_minus_go_percent": 23.456776163323923,
+          "peak_cgroup_memory_bytes_rust_minus_go_percent": -38.69446512782328
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "average_cpu_cores_rust_minus_go_percent": 3.7537585954749004,
+          "peak_cgroup_memory_bytes_rust_minus_go_percent": -0.1460885636436526
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "average_cpu_cores_rust_minus_go_percent": 20.56383706835175,
+          "peak_cgroup_memory_bytes_rust_minus_go_percent": -7.715254237288136
+        }
+      }
+    },
+    "1": {
+      "equal_completion_throughput_within_one_percent": true,
+      "resource_comparison_allowed": true,
+      "resource_deltas": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "average_cpu_cores_rust_minus_go_percent": 17.08165429281197,
+          "peak_cgroup_memory_bytes_rust_minus_go_percent": 0.08195761620419155
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "average_cpu_cores_rust_minus_go_percent": 11.273400437888368,
+          "peak_cgroup_memory_bytes_rust_minus_go_percent": -5.422389801597989
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "average_cpu_cores_rust_minus_go_percent": 28.4946846451923,
+          "peak_cgroup_memory_bytes_rust_minus_go_percent": -40.17814155031295
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "average_cpu_cores_rust_minus_go_percent": 10.611152287783625,
+          "peak_cgroup_memory_bytes_rust_minus_go_percent": 0.23669610545974457
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "average_cpu_cores_rust_minus_go_percent": 35.84887838515799,
+          "peak_cgroup_memory_bytes_rust_minus_go_percent": 0.9721416134648868
+        }
+      }
+    },
+    "2": {
+      "equal_completion_throughput_within_one_percent": true,
+      "resource_comparison_allowed": true,
+      "resource_deltas": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "average_cpu_cores_rust_minus_go_percent": 2.9688131753288247,
+          "peak_cgroup_memory_bytes_rust_minus_go_percent": 0.4368874719565474
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "average_cpu_cores_rust_minus_go_percent": 2.698311851722217,
+          "peak_cgroup_memory_bytes_rust_minus_go_percent": -0.468427955780401
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "average_cpu_cores_rust_minus_go_percent": 15.445899518729759,
+          "peak_cgroup_memory_bytes_rust_minus_go_percent": -37.13188220230474
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "average_cpu_cores_rust_minus_go_percent": 5.1530376196546035,
+          "peak_cgroup_memory_bytes_rust_minus_go_percent": 0.2069655559972039
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "average_cpu_cores_rust_minus_go_percent": 11.294524536587058,
+          "peak_cgroup_memory_bytes_rust_minus_go_percent": -1.5123145614287772
+        }
+      }
+    }
+  },
+  "performance_claims_allowed": false,
+  "limitations": [
+    "Initial pipeline validation only. No capacity or recovery conclusion.",
+    "A hosted runner pair controls CPU affinity and limits, not external host contention.",
+    "Backlog count is client-observed outstanding workflows, not server queue length.",
+    "Resources include bounded workflow drain and history audit after arrivals stop.",
+    "Full protocol requires >=3 pairs, 600s warmup, 1800s measure and missing metric collectors."
+  ],
+  "retention_note": "Raw samples, time series and logs remain in temporary CI artifacts; this summary cannot regenerate percentiles."
+}
