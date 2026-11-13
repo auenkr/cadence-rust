@@ -158,8 +158,8 @@ fn exception_to_error(name: &str, exception: &Struct, details: &str) -> CadenceE
             Err(_) => internal(message),
         },
         // History reports these with the message in field 10.
-        "ShardOwnershipLostError" => CadenceError::ShardOwnershipLost(
-            ShardOwnershipLostError::with_owner(
+        "ShardOwnershipLostError" => {
+            CadenceError::ShardOwnershipLost(ShardOwnershipLostError::with_owner(
                 match exception.get(10) {
                     Some(Value::Bytes(b)) => String::from_utf8_lossy(b).into_owned(),
                     _ => message,
@@ -168,8 +168,8 @@ fn exception_to_error(name: &str, exception: &Struct, details: &str) -> CadenceE
                     Some(Value::Bytes(b)) => String::from_utf8_lossy(b).into_owned(),
                     _ => String::new(),
                 },
-            ),
-        ),
+            ))
+        }
         _ => internal(message),
     }
 }
