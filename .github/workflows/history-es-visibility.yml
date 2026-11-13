@@ -1,0 +1,91 @@
+name: History ES visibility gate (Rust History+Frontend+Matching; Go Worker indexer, Kafka, ES/OpenSearch)
+
+on:
+  workflow_dispatch:
+    inputs:
+      es_flavor:
+        description: Search backend
+        type: choice
+        options: [elasticsearch, opensearch]
+        default: elasticsearch
+      two_history:
+        description: Kill and restart a Rust History host during SDK traffic
+        type: boolean
+        default: false
+
+concurrency:
+  group: history-es-${{ github.ref }}-${{ inputs.es_flavor }}-${{ github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 85
+    env:
+      CARGO_TARGET_DIR: /tmp/cadence-history-es-${{ github.run_id }}-${{ github.run_attempt }}
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: |
+            go/go.sum
+            tests/frontend-gate/go.sum
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install probe dependencies
+        run: python3 -m pip install --user grpcio grpcio-tools
+      - name: Validate harness and record source identity
+        run: |
+          mkdir -p out
+          git rev-parse HEAD > out/head-sha.txt
+          python3 -m py_compile tests/gates/run-frontend-gate.py
+          bash -n tests/gates/run-frontend-mysql-lane.sh
+      - name: Build Rust services
+        run: |
+          set +e
+          cargo build --manifest-path rust/Cargo.toml -p cadence-server -p cadence-history > out/cargo-build.log 2>&1
+          result=$?
+          echo "$result" > out/cargo-build.exit
+          tail -60 out/cargo-build.log
+          if [ "$result" -ne 0 ]; then exit "$result"; fi
+          sha256sum "$CARGO_TARGET_DIR/debug/cadence-server" "$CARGO_TARGET_DIR/debug/cadence-history" > out/rust-binaries.sha256
+      - name: Build Go Worker, CLI and SDK driver
+        run: |
+          (cd go && go build -p 2 -ldflags='-s -w' -o "$GITHUB_WORKSPACE/out/cadence-go-server" ./cmd/server)
+          (cd go && go build -p 2 -ldflags='-s -w' -o "$GITHUB_WORKSPACE/out/cadence-cli" ./cmd/tools/cli)
+          (cd tests/frontend-gate && go build -p 2 -o "$GITHUB_WORKSPACE/out/frontend-gate-driver" .)
+      - name: ES advanced visibility with Rust History
+        env:
+          CADENCE_GATE_KAFKA: "true"
+          CADENCE_GATE_ES: "true"
+          CADENCE_GATE_ES_FLAVOR: ${{ inputs.es_flavor }}
+          CADENCE_GATE_TWO_HISTORY: ${{ inputs.two_history }}
+          RUST_BACKTRACE: 1
+          RUST_LOG: warn,cadence_history::task=debug
+        run: |
+          set +e
+          tests/gates/run-frontend-mysql-lane.sh out/gate \
+            --rust-binary "$CARGO_TARGET_DIR/debug/cadence-server" \
+            --rust-history-binary "$CARGO_TARGET_DIR/debug/cadence-history" \
+            --go-server "$GITHUB_WORKSPACE/out/cadence-go-server" \
+            --go-cli "$GITHUB_WORKSPACE/out/cadence-cli" \
+            --driver "$GITHUB_WORKSPACE/out/frontend-gate-driver" \
+            --rust-root "$GITHUB_WORKSPACE" > out/gate.log 2>&1
+          result=$?
+          echo "$result" > out/gate.exit
+          tail -120 out/gate.log
+          exit "$result"
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: history-es-visibility-${{ inputs.es_flavor }}
+          retention-days: 3
+          path: |
+            out/
+            !out/cadence-go-server
+            !out/cadence-cli
+            !out/frontend-gate-driver
