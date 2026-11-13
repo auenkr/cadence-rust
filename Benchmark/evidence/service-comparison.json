@@ -1,0 +1,89 @@
+{
+  "source_head": "c1bbd3ae71c84a71d5a226a70b0d8b71d021cb5b",
+  "protocol": {
+    "rate": 5,
+    "warmup_seconds": 10,
+    "measurement_seconds": 30,
+    "repetitions": 3,
+    "payload_bytes": 1024,
+    "activity_ms": 10
+  },
+  "services": {
+    "history": {
+      "run": {
+        "conclusion": "success",
+        "headSha": "30cff3593e4f58c57599df5f85f0b6e9ac4a5585",
+        "status": "completed",
+        "url": "https://github.com/auenkr/cadence-rust/actions/runs/43479770520",
+        "service": "history",
+        "watch_exit_code": 0
+      },
+      "run_id": 43479770520,
+      "rust_binary_sha256": "598107baf7b38793bce52ffb8262657b7361caba63756e7a145c6cc457718356  /usr/local/bin/cadence-server",
+      "go": {
+        "completion_p99_ms": 80.789489,
+        "average_cpu_cores": 0.15554777668324463,
+        "peak_memory_mib": 40.97265625,
+        "completions_per_second": 5.0,
+        "correct_workflows": 450,
+        "errors": 0
+      },
+      "rust": {
+        "completion_p99_ms": 20072.995872,
+        "average_cpu_cores": 0.06588469145007873,
+        "peak_memory_mib": 26.703125,
+        "completions_per_second": 1.6666666666666667,
+        "correct_workflows": 450,
+        "errors": 0
+      },
+      "equal_completion_throughput_within_one_percent": false
+    },
+    "frontend": {
+      "run": {
+        "conclusion": "failure",
+        "headSha": "bf06f66af38b43834ddf716c1bebf86ca58282b5",
+        "status": "completed",
+        "url": "https://github.com/auenkr/cadence-rust/actions/runs/43480575061",
+        "service": "frontend",
+        "watch_exit_code": 0
+      },
+      "run_id": 43480575061,
+      "comparison": "unavailable"
+    },
+    "matching": {
+      "run": {
+        "conclusion": "success",
+        "headSha": "73b9adf054daec5b2809bbe1ca5769888c62986e",
+        "status": "completed",
+        "url": "https://github.com/auenkr/cadence-rust/actions/runs/43480728156",
+        "service": "matching",
+        "watch_exit_code": 0
+      },
+      "run_id": 43480728156,
+      "rust_binary_sha256": "52ad73e797008edd841d4d7ab6299e68b284485674779ce081407460cb10230b  /usr/local/bin/cadence-server",
+      "go": {
+        "completion_p99_ms": 76.769038,
+        "average_cpu_cores": 0.02739763154123794,
+        "peak_memory_mib": 31.4765625,
+        "completions_per_second": 5.0,
+        "correct_workflows": 450,
+        "errors": 0
+      },
+      "rust": {
+        "completion_p99_ms": 86.113948,
+        "average_cpu_cores": 0.033824232645918356,
+        "peak_memory_mib": 19.296875,
+        "completions_per_second": 5.0,
+        "correct_workflows": 450,
+        "errors": 0
+      },
+      "equal_completion_throughput_within_one_percent": true
+    }
+  },
+  "limitations": [
+    "Short low-load comparisons; no capacity, recovery or production performance claim.",
+    "Each service has its own paired all-Go baseline on its CI runner.",
+    "Reported values are medians of per-run values over three repetitions.",
+    "CPU/memory collection includes completion drain and History audits."
+  ]
+}

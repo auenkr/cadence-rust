@@ -22,5 +22,11 @@
   "dispatched": {
     "frontend": "2026-11-13T18:13:50.097260+00:00",
     "matching": "2026-11-13T18:14:46.187517+00:00"
-  }
+  },
+  "watch_exit_codes": {
+    "history": 0,
+    "frontend": 1,
+    "matching": 0
+  },
+  "finished_utc": "2026-11-13T18:55:32.235309+00:00"
 }
