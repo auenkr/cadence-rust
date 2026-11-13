@@ -994,6 +994,7 @@ impl GoExecutionStore for SqlWorkflowStore {
         workflow_id: String,
         run_id: String,
     ) -> Result<(), PersistenceError> {
+        eprintln!("DIAG delete_workflow_execution shard={shard_id} domain={domain_id} wf={workflow_id} run={run_id}\n{}", std::backtrace::Backtrace::force_capture());
         let k = key(
             shard_id,
             &WorkflowExecutionInfo {
