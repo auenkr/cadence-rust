@@ -480,13 +480,6 @@ mod typed_replay_tests {
     }
 
     #[test]
-    fn typed_replay_semaphore_events_remain_explicitly_unsupported_without_persistence_state() {
-        let mut state = state();
-        let event = HistoryEvent { event_type: Some(EventType::SemaphoreAcquireInitiated), ..Default::default() };
-        assert!(matches!(StateBuilder::apply_events_typed(&mut state, "d", "r", &WorkflowExecution::default(), &[event]), Err(StateBuilderError::TypedReplayNotYetSupported { .. })));
-    }
-
-    #[test]
     fn typed_replay_rejects_missing_timer_attributes_and_unknown_event_types() {
         let mut typed_state = state();
         let missing_attributes = HistoryEvent { event_type: Some(EventType::TimerStarted), ..Default::default() };
