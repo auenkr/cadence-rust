@@ -572,8 +572,7 @@ mod tests {
         s.add_decision_task_scheduled(false).unwrap();
         {
             let mut g = s.inner.lock().unwrap();
-            let mut a = pc::ActivityInfo::default();
-            a.version = 7;
+            let a = pc::ActivityInfo { version: 7, ..Default::default() };
             g.pc_acts.insert(9, a);
             g.sync_activity_tasks.insert(9);
             g.sync_activity_tasks.insert(10); // not pending: skipped like Go
