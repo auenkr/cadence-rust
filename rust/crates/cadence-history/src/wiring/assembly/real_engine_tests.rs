@@ -313,6 +313,31 @@ async fn respond_decision_completed_bad_decision_attributes_fails_decision_task(
     assert_ne!(info.state, WORKFLOW_STATE_COMPLETED, "workflow stays open after a bad decision");
 }
 
+#[tokio::test]
+async fn respond_decision_failed_over_max_attempts_does_not_terminate() {
+    let h = Harness::new();
+    let run = start(&h).await;
+    decision_started(&h, &run, 2, "dec-req").await.unwrap();
+    {
+        let mut inner = h.execs.inner.lock().unwrap();
+        let snap = inner.runs.get_mut(&(DOMAIN_ID.into(), WF.into(), run.clone())).unwrap();
+        snap.execution_info.decision_attempt = 100_000;
+    }
+    h.engine
+        .respond_decision_task_failed(&HistoryRespondDecisionTaskFailedRequest {
+            domain_uuid: DOMAIN_ID.into(),
+            failed_request: Some(RespondDecisionTaskFailedRequest {
+                task_token: token(&run, 2),
+                identity: IDENTITY.into(),
+                ..Default::default()
+            }),
+        })
+        .await
+        .expect("failed");
+    let info = h.execs.snapshot(WF, &run).unwrap().execution_info;
+    assert_ne!(info.state, WORKFLOW_STATE_COMPLETED, "Go only records DecisionTaskFailed; no termination");
+}
+
 // ---- RespondActivityTask* / RecordActivityTaskStarted
 
 #[tokio::test]

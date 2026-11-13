@@ -105,6 +105,7 @@ fn shard_lost_body(x: &ShardOwnershipLostError) -> Struct {
     // history.thrift ShardOwnershipLostError: 10 message, 20 owner.
     let mut s = Struct::default();
     s.fields.push((10, Value::Bytes(x.message.as_bytes().to_vec())));
+    s.fields.push((20, Value::Bytes(x.owner.as_bytes().to_vec())));
     s
 }
 

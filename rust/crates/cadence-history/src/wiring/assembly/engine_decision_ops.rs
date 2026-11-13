@@ -191,7 +191,7 @@ impl Operations for EngineOps<'_> {
         let d = &self.domain_name;
         if size > (self.config.history_size_limit_error)(d) || count > (self.config.history_count_limit_error)(d) {
             let completed = self.state.inner.lock().unwrap().next_event_id - 1;
-            self.fail_workflow(completed, "FAILURE_REASON_HISTORY_SIZE_EXCEEDS_LIMIT", b"Workflow history size / count exceeds limit.")?;
+            self.fail_workflow(completed, crate::decision::FAILURE_REASON_HISTORY_SIZE_EXCEEDS_LIMIT, b"Workflow history size / count exceeds limit.")?;
             return Ok(true);
         }
         Ok(false)
@@ -447,21 +447,32 @@ impl Operations for EngineOps<'_> {
         let ms = self.state.now_millis();
         let identity = identity.to_string();
         let mut g = self.state.inner.lock().unwrap();
-        let Some(info) = g.timers.get(&a.timer_id).cloned() else {
-            return Err(bad(format!("unable to find timer: {}", a.timer_id)));
+        let running = g.timers.get(&a.timer_id).cloned();
+        let started_id = match &running {
+            Some(info) => info.started_id,
+            None => {
+                // Go checkAndClearTimerFiredEvent: the timer may already have fired into the
+                // persisted buffered events, the update-buffered events or the new history.
+                match g.check_and_clear_timer_fired_event(&a.timer_id) {
+                    Some(fired) => fired.timer_fired_event_attributes.map(|t| t.started_event_id).unwrap_or_default(),
+                    None => return Err(bad(format!("unable to find timer: {}", a.timer_id))),
+                }
+            }
         };
         let timer_id = a.timer_id.clone();
         g.push_event(EventType::TimerCanceled, ms, |e| {
             e.timer_canceled_event_attributes = Some(TimerCanceledEventAttributes {
                 timer_id,
-                started_event_id: info.started_id,
+                started_event_id: started_id,
                 decision_task_completed_event_id: completed_id,
                 identity,
             });
         });
-        g.timers.remove(&a.timer_id);
-        g.upsert_timers.remove(&a.timer_id);
-        g.delete_timers.insert(a.timer_id);
+        if running.is_some() {
+            g.timers.remove(&a.timer_id);
+            g.upsert_timers.remove(&a.timer_id);
+            g.delete_timers.insert(a.timer_id);
+        }
         g.dirty = true;
         Ok(())
     }
@@ -1014,6 +1025,54 @@ mod tests {
 
     fn event_types(state: &EngineMutableState) -> Vec<EventType> {
         state.inner.lock().unwrap().hist.iter().filter_map(|e| e.event_type).collect()
+    }
+
+    #[test]
+    fn history_limit_failure_uses_go_reason() {
+        let s = state();
+        let mut config = Config::new_for_test();
+        config.history_count_limit_error = Arc::new(|_| 1);
+        let ops = EngineOps {
+            state: &s,
+            config: Arc::new(config),
+            domains: Arc::new(Domains),
+            domain_name: "test-domain".into(),
+            identity: "id".into(),
+            semaphore_lookups: Default::default(),
+        };
+        let mut h = TaskHandler::new(ops, "id".into(), 4);
+        let mut d = vec![];
+        h.handle_decisions(b"", &mut d).unwrap();
+        let g = s.inner.lock().unwrap();
+        let reason = g
+            .hist
+            .iter()
+            .filter_map(|e| e.workflow_execution_failed_event_attributes.as_ref())
+            .filter_map(|a| a.reason.clone())
+            .next();
+        assert_eq!(reason.as_deref(), Some("HISTORY_EXCEEDS_LIMIT"));
+    }
+
+    #[test]
+    fn cancel_timer_retracts_buffered_timer_fired() {
+        let s = state();
+        s.inner.lock().unwrap().buffered.push(HistoryEvent {
+            event_type: Some(EventType::TimerFired),
+            timer_fired_event_attributes: Some(TimerFiredEventAttributes { timer_id: "t1".into(), started_event_id: 7 }),
+            ..Default::default()
+        });
+        let mut h = handler(&s);
+        let mut d = vec![Decision {
+            decision_type: Some(DecisionType::CancelTimer),
+            cancel_timer_decision_attributes: Some(CancelTimerDecisionAttributes { timer_id: "t1".into() }),
+            ..Default::default()
+        }];
+        h.handle_decisions(b"", &mut d).unwrap();
+        assert!(!h.fail_decision, "{:?}", h.fail_message);
+        assert_eq!(event_types(&s), vec![EventType::TimerCanceled]);
+        let g = s.inner.lock().unwrap();
+        assert!(g.buffered.is_empty(), "TimerFired removed from buffered events");
+        assert_eq!(g.hist[0].timer_canceled_event_attributes.as_ref().unwrap().started_event_id, 7);
     }
 
     #[test]

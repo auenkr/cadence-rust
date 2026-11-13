@@ -32,6 +32,20 @@ pub enum StateBuilderError {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct StateBuilder { pub mutable_state: MutableStateBuilder }
 
+/// Wire/blob-decoded history events carry millisecond timestamps (`history_blob::decode`), while
+/// typed replay (like Go's `event.Timestamp`) works in nanoseconds.
+#[must_use]
+pub fn events_millis_to_nanos(events: &[HistoryEvent]) -> Vec<HistoryEvent> {
+    events
+        .iter()
+        .map(|e| {
+            let mut e = e.clone();
+            e.timestamp = e.timestamp.map(|ms| ms.saturating_mul(1_000_000));
+            e
+        })
+        .collect()
+}
+
 impl StateBuilder {
     /// Go `ReplicateSemaphoreAcquireInitiatedEvent`: the hold derives only from the event and run.
     fn replicate_semaphore_acquire_initiated(&mut self, event: &HistoryEvent) -> Result<(), StateBuilderError> {
@@ -194,8 +208,37 @@ impl StateBuilder {
                     Some(EventType::WorkflowExecutionCanceled) => state.replicate_workflow_execution_canceled_event(first.event_id, event)?,
                     Some(EventType::WorkflowExecutionTerminated) => state.replicate_workflow_execution_terminated_event(first.event_id, event)?,
                     Some(EventType::WorkflowExecutionContinuedAsNew) => state.replicate_workflow_execution_continued_as_new_event(first.event_id, event)?,
-                    Some(EventType::SemaphoreAcquireInitiated | EventType::SemaphoreAcquired | EventType::SemaphoreReleased) => {
-                        return Err(StateBuilderError::TypedReplayNotYetSupported { event_type: event.event_type });
+                    Some(EventType::SemaphoreAcquireInitiated) => {
+                        // Go `ReplicateSemaphoreAcquireInitiatedEvent`: the hold derives only from the event and run.
+                        let attributes = event.semaphore_acquire_initiated_event_attributes.clone().unwrap_or_default();
+                        let workflow_id = state.execution_info.workflow_id.clone();
+                        let owner_id = format!("{}:{}:{}:{}", workflow_id.len(), workflow_id, state.execution_info.run_id, event.event_id);
+                        let wait_nanos = i64::from(attributes.wait_timeout_seconds.unwrap_or_default()) * 1_000_000_000;
+                        state.semaphore_state.upsert_semaphore_info(super::semaphore::SemaphoreInfo {
+                            version: event.version,
+                            initiated_id: event.event_id,
+                            semaphore_name: attributes.semaphore_name,
+                            owner_id,
+                            acquire_deadline_unix_nanos: event.timestamp.unwrap_or_default().saturating_add(wait_nanos),
+                            token_id: 0,
+                        });
+                    }
+                    Some(EventType::SemaphoreAcquired) => {
+                        let attributes = event.semaphore_acquired_event_attributes.clone().unwrap_or_default();
+                        let mut info = state
+                            .semaphore_state
+                            .get_semaphore_info(attributes.initiated_event_id)
+                            .cloned()
+                            .ok_or(StateBuilderError::MissingSemaphoreInfo)?;
+                        info.version = event.version;
+                        info.token_id = attributes.token_id;
+                        state.semaphore_state.upsert_semaphore_info(info);
+                    }
+                    Some(EventType::SemaphoreReleased) => {
+                        let id = event.semaphore_released_event_attributes.clone().unwrap_or_default().initiated_event_id;
+                        state.semaphore_state.pending.remove(&id);
+                        state.semaphore_state.updates.remove(&id);
+                        state.semaphore_state.deletes.insert(id);
                     }
                     None => return Err(StateBuilderError::UnknownEventType),
                     other => return Err(StateBuilderError::TypedReplayNotYetSupported { event_type: other }),
@@ -437,13 +480,6 @@ mod typed_replay_tests {
     }
 
     #[test]
-    fn typed_replay_semaphore_events_remain_explicitly_unsupported_without_persistence_state() {
-        let mut state = state();
-        let event = HistoryEvent { event_type: Some(EventType::SemaphoreAcquireInitiated), ..Default::default() };
-        assert!(matches!(StateBuilder::apply_events_typed(&mut state, "d", "r", &WorkflowExecution::default(), &[event]), Err(StateBuilderError::TypedReplayNotYetSupported { .. })));
-    }
-
-    #[test]
     fn typed_replay_rejects_missing_timer_attributes_and_unknown_event_types() {
         let mut typed_state = state();
         let missing_attributes = HistoryEvent { event_type: Some(EventType::TimerStarted), ..Default::default() };
@@ -496,5 +532,40 @@ mod typed_replay_tests {
         assert!(state.history_events.is_empty());
         assert!(state.transfer_tasks.is_empty());
         assert!(state.timer_tasks.is_empty());
+    }
+
+    #[test]
+    fn typed_replay_supports_semaphore_events() {
+        use cadence_api::tasks::{SemaphoreAcquireInitiatedEventAttributes, SemaphoreAcquiredEventAttributes, SemaphoreReleasedEventAttributes};
+        let mut state = state();
+        let workflow = WorkflowExecution::new("wf", "run");
+        let initiated = HistoryEvent {
+            event_id: 5, timestamp: Some(1_000), event_type: Some(EventType::SemaphoreAcquireInitiated), version: 1,
+            semaphore_acquire_initiated_event_attributes: Some(SemaphoreAcquireInitiatedEventAttributes {
+                semaphore_name: "s".into(), wait_timeout_seconds: Some(2), decision_task_completed_event_id: 4,
+            }),
+            ..Default::default()
+        };
+        let acquired = HistoryEvent {
+            event_id: 6, event_type: Some(EventType::SemaphoreAcquired), version: 1,
+            semaphore_acquired_event_attributes: Some(SemaphoreAcquiredEventAttributes { token_id: 3, initiated_event_id: 5 }),
+            ..Default::default()
+        };
+        StateBuilder::apply_events_typed(&mut state, "d", "r", &workflow, &[initiated, acquired]).unwrap();
+        let info = state.semaphore_state.get_semaphore_info(5).unwrap();
+        assert_eq!((info.token_id, info.acquire_deadline_unix_nanos), (3, 1_000 + 2_000_000_000));
+        let released = HistoryEvent {
+            event_id: 7, event_type: Some(EventType::SemaphoreReleased), version: 1,
+            semaphore_released_event_attributes: Some(SemaphoreReleasedEventAttributes { token_id: 3, initiated_event_id: 5, decision_task_completed_event_id: 4 }),
+            ..Default::default()
+        };
+        StateBuilder::apply_events_typed(&mut state, "d", "r", &workflow, &[released]).unwrap();
+        assert!(state.semaphore_state.get_semaphore_info(5).is_none());
+    }
+
+    #[test]
+    fn millis_to_nanos_scales_event_timestamps() {
+        let e = HistoryEvent { timestamp: Some(1_800_000_000_000), ..Default::default() };
+        assert_eq!(events_millis_to_nanos(&[e])[0].timestamp, Some(1_800_000_000_000_000_000));
     }
 }

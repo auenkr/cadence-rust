@@ -427,6 +427,12 @@ pub trait NdcWriter: Send + Sync {
         Err(internal("reapply_events is not supported by this writer"))
     }
 
+    /// Go `GetActiveClusterInfoByWorkflow(...).FailoverVersion` used by `StartTransaction`
+    /// (`None`: no active cluster manager).
+    fn active_failover_version(&self, _key: &WorkflowExecutionKey) -> HResult<Option<i64>> {
+        Ok(None)
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn write_create(
         &self,
@@ -529,6 +535,10 @@ impl EngineNdcWriter {
 impl NdcWriter for EngineNdcWriter {
     fn reapply_events(&self, _key: &WorkflowExecutionKey, batches: &[WorkflowEvents]) -> HResult<()> {
         block_on(reapply_via_engine(&self.core, batches))
+    }
+
+    fn active_failover_version(&self, key: &WorkflowExecutionKey) -> HResult<Option<i64>> {
+        block_on(self.core.active_cluster_manager.failover_version_by_workflow(&key.domain_id, &key.workflow_id, &key.run_id))
     }
 
     fn write_create(

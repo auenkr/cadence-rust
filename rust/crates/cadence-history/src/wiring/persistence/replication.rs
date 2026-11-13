@@ -202,14 +202,14 @@ impl ExecutionManager for SqlExecutionManager {
             ..Default::default()
         };
         self.store
-            .put_replication_task_to_dlq(req.source_cluster_name, task)
+            .put_replication_task_to_dlq(req.shard_id, req.source_cluster_name, task)
             .await
             .map_err(map_persistence_error)
     }
 
-    async fn get_replication_dlq_size(&self, _shard_id: i32, source_cluster: &str) -> Result<i64> {
+    async fn get_replication_dlq_size(&self, shard_id: i32, source_cluster: &str) -> Result<i64> {
         self.store
-            .get_replication_dlq_size(source_cluster.to_string())
+            .get_replication_dlq_size(shard_id, source_cluster.to_string())
             .await
             .map_err(map_persistence_error)
     }
@@ -516,5 +516,29 @@ impl ReplicationDLQHandler for SqlReplicationDlqHandler {
             .merge_messages(cluster, end, page_size.max(0) as usize, token.to_vec())
             .await
             .map_err(replication_error_to_history_error)
+    }
+}
+
+#[cfg(test)]
+mod dlq_shard_tests {
+    use super::*;
+    use crate::wiring::assembly::real_engine_harness::MemExecutions;
+
+    #[tokio::test]
+    async fn dlq_put_and_size_use_request_shard() {
+        let mem = Arc::new(MemExecutions::default());
+        let m = SqlExecutionManager::new(mem.clone());
+        m.put_replication_task_to_dlq(PutReplicationTaskToDlqRequest {
+            source_cluster_name: "c".into(),
+            task_info: DlqTaskInfo::default(),
+            task: Default::default(),
+            domain_name: "d".into(),
+            shard_id: 7,
+        })
+        .await
+        .unwrap();
+        m.get_replication_dlq_size(7, "c").await.unwrap();
+        let calls = mem.inner.lock().unwrap().dlq_calls.clone();
+        assert_eq!(calls, vec![("put", 7), ("size", 7)]);
     }
 }

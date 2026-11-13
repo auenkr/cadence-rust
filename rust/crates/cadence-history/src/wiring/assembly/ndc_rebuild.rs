@@ -214,7 +214,8 @@ impl RebuildContext for NdcRebuildContext {
     ) -> NdcResult<()> {
         let execution = WorkflowExecution { workflow_id: target.workflow_id.clone(), run_id: target.run_id.clone() };
         // Go passes `nil` new-run history when rebuilding.
-        StateBuilder::apply_events_typed(state.typed_mut(), &target.domain_id, request_id, &execution, events)
+        let events_ns = crate::execution::state_builder::events_millis_to_nanos(events);
+        StateBuilder::apply_events_typed(state.typed_mut(), &target.domain_id, request_id, &execution, &events_ns)
             .map_err(state_builder_err)?;
         for event in events.iter().filter(|e| is_refresh_event(e.event_type)) {
             self.events.insert(event.event_id, event.clone());

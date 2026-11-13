@@ -25,6 +25,8 @@ pub fn thrift_exception(e: &HistoryError) -> (&'static str, String) {
             other => ("InternalServiceError", other.to_string()),
         },
         HistoryError::EventAlreadyStarted(x) => ("EventAlreadyStartedError", x.to_string()),
+        HistoryError::PersistenceShardOwnershipLost(m) => ("ShardOwnershipLostError", m.clone()),
+        HistoryError::CurrentBranchChanged { message, .. } => ("CurrentBranchChangedError", message.clone()),
         other => ("InternalServiceError", other.to_string()),
     }
 }
@@ -40,7 +42,7 @@ fn grpc_code(name: &str) -> Code {
         | "CancellationAlreadyRequestedError"
         | "EventAlreadyStartedError" => Code::AlreadyExists,
         "ServiceBusyError" | "LimitExceededError" => Code::ResourceExhausted,
-        "ShardOwnershipLostError" | "RetryTaskV2Error" => Code::Aborted,
+        "ShardOwnershipLostError" | "RetryTaskV2Error" | "CurrentBranchChangedError" => Code::Aborted,
         "AccessDeniedError" => Code::PermissionDenied,
         "InternalDataInconsistencyError" => Code::DataLoss,
         "RemoteSyncMatchedError" | "StickyWorkerUnavailableError" => Code::Unavailable,
@@ -115,12 +117,96 @@ struct ReasonDetail {
 #[derive(Clone, PartialEq, Message)]
 struct EmptyDetail {}
 
+#[derive(Clone, PartialEq, Message)]
+struct ShardOwnershipLostDetail {
+    #[prost(string, tag = "1")]
+    owner: String,
+}
+
+#[derive(Clone, PartialEq, Message)]
+struct CurrentBranchChangedDetail {
+    #[prost(bytes = "vec", tag = "1")]
+    current_branch_token: Vec<u8>,
+}
+
+#[derive(Clone, PartialEq, Message)]
+struct WorkflowExecutionDetail {
+    #[prost(string, tag = "1")]
+    workflow_id: String,
+    #[prost(string, tag = "2")]
+    run_id: String,
+}
+
+#[derive(Clone, PartialEq, Message)]
+struct VersionHistoryItemDetail {
+    #[prost(int64, tag = "1")]
+    event_id: i64,
+    #[prost(int64, tag = "2")]
+    version: i64,
+}
+
+#[derive(Clone, PartialEq, Message)]
+struct RetryTaskV2Detail {
+    #[prost(string, tag = "1")]
+    domain_id: String,
+    #[prost(message, optional, tag = "2")]
+    workflow_execution: Option<WorkflowExecutionDetail>,
+    #[prost(message, optional, tag = "3")]
+    start_event: Option<VersionHistoryItemDetail>,
+    #[prost(message, optional, tag = "4")]
+    end_event: Option<VersionHistoryItemDetail>,
+}
+
+/// Go `FromEventIDVersionPair`: nil unless both values are present.
+fn version_pair(id: Option<i64>, version: Option<i64>) -> Option<VersionHistoryItemDetail> {
+    match (id, version) {
+        (Some(event_id), Some(version)) => Some(VersionHistoryItemDetail { event_id, version }),
+        _ => None,
+    }
+}
+
+/// Protobuf package of a detail type: shared.v1 for the internal-service errors, api.v1 otherwise.
+fn detail_package(name: &str) -> &'static str {
+    match name {
+        "ShardOwnershipLostError" | "RetryTaskV2Error" | "CurrentBranchChangedError" | "EventAlreadyStartedError" => {
+            "uber.cadence.shared.v1"
+        }
+        _ => "uber.cadence.api.v1",
+    }
+}
+
 /// Typed `uber.cadence.api.v1.*` detail (name, encoded bytes) like Go `FromError`.
 fn grpc_detail(e: &HistoryError) -> Option<(&'static str, Vec<u8>)> {
+    match e {
+        HistoryError::EventAlreadyStarted(_) => return Some(("EventAlreadyStartedError", EmptyDetail {}.encode_to_vec())),
+        HistoryError::PersistenceShardOwnershipLost(_) => {
+            return Some(("ShardOwnershipLostError", ShardOwnershipLostDetail::default().encode_to_vec()))
+        }
+        HistoryError::CurrentBranchChanged { current_branch_token, .. } => {
+            return Some((
+                "CurrentBranchChangedError",
+                CurrentBranchChangedDetail { current_branch_token: current_branch_token.clone() }.encode_to_vec(),
+            ))
+        }
+        _ => {}
+    }
     let HistoryError::Cadence(c) = e else {
         return None;
     };
     Some(match &**c {
+        CadenceError::ShardOwnershipLost(x) => {
+            ("ShardOwnershipLostError", ShardOwnershipLostDetail { owner: x.owner.clone() }.encode_to_vec())
+        }
+        CadenceError::RetryTaskV2(x) => (
+            "RetryTaskV2Error",
+            RetryTaskV2Detail {
+                domain_id: x.domain_id.clone(),
+                workflow_execution: Some(WorkflowExecutionDetail { workflow_id: x.workflow_id.clone(), run_id: x.run_id.clone() }),
+                start_event: version_pair(x.start_event_id, x.start_event_version),
+                end_event: version_pair(x.end_event_id, x.end_event_version),
+            }
+            .encode_to_vec(),
+        ),
         CadenceError::EntityNotExists(x) => (
             "EntityNotExistsError",
             EntityNotExistsDetail {
@@ -174,7 +260,7 @@ pub fn grpc_status(e: &HistoryError) -> tonic::Status {
             let status = RpcStatus {
                 code: code as i32,
                 message: msg.clone(),
-                details: vec![AnyMsg { type_url: format!("type.googleapis.com/uber.cadence.api.v1.{dname}"), value }],
+                details: vec![AnyMsg { type_url: format!("type.googleapis.com/{}.{dname}", detail_package(dname)), value }],
             };
             tonic::Status::with_details(code, msg, status.encode_to_vec().into())
         }
@@ -214,5 +300,57 @@ mod tests {
         let st = grpc_status(&HistoryError::StaleState);
         assert_eq!(st.code(), Code::Internal);
         assert!(st.details().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod typed_detail_tests {
+    use super::*;
+
+    fn first_detail(st: &tonic::Status) -> AnyMsg {
+        RpcStatus::decode(st.details()).unwrap().details.remove(0)
+    }
+
+    #[test]
+    fn shard_ownership_lost_carries_owner_detail() {
+        let e = HistoryError::Cadence(Box::new(cadence_api::errors::ShardOwnershipLostError::with_owner("m", "host:7934").into()));
+        let st = grpc_status(&e);
+        assert_eq!(st.code(), Code::Aborted);
+        let d = first_detail(&st);
+        assert_eq!(d.type_url, "type.googleapis.com/uber.cadence.shared.v1.ShardOwnershipLostError");
+        assert_eq!(ShardOwnershipLostDetail::decode(d.value.as_slice()).unwrap().owner, "host:7934");
+    }
+
+    #[test]
+    fn persistence_shard_lost_is_aborted_not_internal() {
+        let st = grpc_status(&HistoryError::PersistenceShardOwnershipLost("lost".into()));
+        assert_eq!(st.code(), Code::Aborted);
+        assert!(first_detail(&st).type_url.ends_with("shared.v1.ShardOwnershipLostError"));
+    }
+
+    #[test]
+    fn retry_task_v2_current_branch_and_event_already_started_have_details() {
+        let retry = cadence_api::errors::RetryTaskV2Error {
+            message: "r".into(),
+            domain_id: "d".into(),
+            workflow_id: "w".into(),
+            run_id: "r1".into(),
+            start_event_id: Some(3),
+            start_event_version: Some(4),
+            ..Default::default()
+        };
+        let d = first_detail(&grpc_status(&HistoryError::Cadence(Box::new(retry.into()))));
+        let msg = RetryTaskV2Detail::decode(d.value.as_slice()).unwrap();
+        assert_eq!(msg.domain_id, "d");
+        assert_eq!(msg.start_event, Some(VersionHistoryItemDetail { event_id: 3, version: 4 }));
+        assert_eq!(msg.end_event, None);
+
+        let st = grpc_status(&HistoryError::CurrentBranchChanged { message: "c".into(), current_branch_token: vec![1, 2] });
+        assert_eq!(st.code(), Code::Aborted);
+        let d = first_detail(&st);
+        assert_eq!(CurrentBranchChangedDetail::decode(d.value.as_slice()).unwrap().current_branch_token, vec![1, 2]);
+
+        let st = grpc_status(&HistoryError::EventAlreadyStarted(cadence_api::errors::EventAlreadyStartedError::new("e")));
+        assert!(first_detail(&st).type_url.ends_with("shared.v1.EventAlreadyStartedError"));
     }
 }

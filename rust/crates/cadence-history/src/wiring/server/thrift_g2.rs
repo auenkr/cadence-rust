@@ -65,6 +65,16 @@ fn classify(e: &HistoryError) -> (&'static str, String, Struct) {
     (name, msg, st)
 }
 
+fn shard_owner(e: &HistoryError) -> String {
+    match e {
+        HistoryError::Cadence(c) => match &**c {
+            CadenceError::ShardOwnershipLost(x) => x.owner.clone(),
+            _ => String::new(),
+        },
+        _ => String::new(),
+    }
+}
+
 fn fail(table: &[(&'static str, i16)], e: &HistoryError) -> Outcome {
     let (mut name, mut msg, mut st) = classify(e);
     if !table.iter().any(|(n, _)| *n == name) {
@@ -82,9 +92,10 @@ fn fail(table: &[(&'static str, i16)], e: &HistoryError) -> Outcome {
             Outcome::Rich(name, msg, r)
         }
         "ShardOwnershipLostError" => {
+            let owner = shard_owner(e);
             let mut inner = Struct::default();
             inner.fields.push((10, s_bytes(&msg)));
-            inner.fields.push((20, s_bytes("")));
+            inner.fields.push((20, s_bytes(&owner)));
             let mut r = Struct::default();
             r.fields.push((fid, Value::Struct(inner)));
             Outcome::Rich(name, msg, r)
