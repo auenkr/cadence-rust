@@ -1,6 +1,9 @@
 name: History ES visibility gate (Rust History+Frontend+Matching; Go Worker indexer, Kafka, ES/OpenSearch)
 
 on:
+  push:
+    branches: [history-esgate]
+    paths: ['.github/workflows/history-es-visibility.yml']
   workflow_dispatch:
     inputs:
       es_flavor:
