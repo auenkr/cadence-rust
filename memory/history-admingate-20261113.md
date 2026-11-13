@@ -30,3 +30,9 @@ logged `GATE SUMMARY failed: []`:
 | Shard ack-level admin calls | N-A | no Go CLI command exposes them |
 
 Also: ringpop `history_host` resolves by TChannel address too.
+
+## Re-validation after merging origin/master
+Head a17df1fecd06c1037c51c526a4921978da5185a9 (master merged, no conflicts): rust-ci 43487824739 success,
+rust-check 43487824532 success; all 12 gates `GATE SUMMARY failed: []`:
+43487829934, 43487842389, 43487854915, 43487869582, 43487882676, 43487895029,
+43487909807, 43487920788, 43487935112, 43487949286, 43487963701, 43487980482.
