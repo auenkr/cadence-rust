@@ -36,7 +36,7 @@ def dispatch(service):
     gh('workflow','run','frontend-matching-benchmark.yml','--ref',BRANCH,
        '-f','sdk_openloop=true','-f',f'service={service}','-f','sdk_repetitions=3','-f',f'source_ref={SOURCE}')
     state.setdefault('dispatched',{})[service]=datetime.now(timezone.utc).isoformat();save()
-    time.sleep(5)  # one propagation delay; no discovery polling loop
+    time.sleep(60)  # one propagation delay; no discovery polling loop
     runs=json.loads(gh('run','list','--workflow','frontend-matching-benchmark.yml','--branch',BRANCH,'--limit','20','--json','databaseId,url,headSha'))
     new=[r for r in runs if r['databaseId'] not in known]
     if len(new)!=1:raise RuntimeError('Ambiguous dispatch; saved state prevents duplicate runs')
