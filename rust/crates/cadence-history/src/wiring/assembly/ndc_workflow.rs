@@ -584,12 +584,12 @@ impl NdcWorkflow for EngineNdcWorkflow {
             let snapshot = block_on(context.clean_snapshot()).map_err(history_to_ndc)?;
             self.history_size = snapshot.execution_info.history_size;
             self.ms = state_from_snapshot(&self.domain_id, &self.execution, self.clock.now(), snapshot)?;
+            self.writer.configure_state(self.ms.as_mut(), &self.domain_id, &self.execution.workflow_id);
             self.loaded = true;
         }
         // Go `LoadWorkflowExecutionWithTaskVersion`: `StartTransaction(domain, incomingVersion)`.
-        let Some(incoming) = task_version else {
-            return Ok(());
-        };
+        // Go `LoadWorkflowExecution` passes `common.EmptyVersion`; StartTransaction still runs.
+        let incoming = task_version.unwrap_or(crate::execution::mutable_state_builder::EMPTY_VERSION);
         let key = self.write_key();
         if let Some(version) = self.writer.active_failover_version(&key).map_err(history_to_ndc)? {
             self.ms.update_current_version(version, false)?;

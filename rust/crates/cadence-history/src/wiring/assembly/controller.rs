@@ -72,14 +72,11 @@ pub fn convert_shard_ownership_lost(
 
 type Cell = Arc<OnceCell<Arc<ShardEntry>>>;
 
-/// True when the registered cell belongs to the closing shard context (`closing`); an unset
-/// `closing` (callback fired before the context was published) keeps the previous remove-any behavior.
-fn remove_matches(current: Option<&Cell>, closing: Option<&std::sync::Weak<ShardContext>>) -> bool {
-    let (Some(cell), Some(closing)) = (current, closing) else { return current.is_some() };
-    match cell.get() {
-        Some(entry) => std::sync::Weak::ptr_eq(closing, &Arc::downgrade(&entry.shard)),
-        None => false,
-    }
+/// Go `removeHistoryShardItem` identity compare: only the item registered for this acquisition
+/// (`mine`) is removed; a replaced shard's late callback never removes its successor. A shard that
+/// closes while still initializing is removed too (its cell is not yet published).
+fn remove_matches(current: Option<&Cell>, mine: &Cell) -> bool {
+    current.is_some_and(|c| Arc::ptr_eq(c, mine))
 }
 
 pub struct ShardRegistry {
@@ -163,12 +160,12 @@ impl ShardRegistry {
             let mut guard = self.entries.lock().unwrap();
             guard.entry(shard_id).or_default().clone()
         };
-        let entry = cell.get_or_try_init(|| self.create_entry(shard_id)).await?;
+        let entry = cell.get_or_try_init(|| self.create_entry(shard_id, cell.clone())).await?;
         self.metrics_scope.update_gauge("NumShardsGauge", self.owned_shard_ids().len() as f64);
         Ok(entry.clone())
     }
 
-    async fn create_entry(&self, shard_id: u32) -> HResult<Arc<ShardEntry>> {
+    async fn create_entry(&self, shard_id: u32, my_cell: Cell) -> HResult<Arc<ShardEntry>> {
         let env = self.env.clone();
         let factory = self.factory.clone();
         let queues = self.queues.clone();
@@ -179,11 +176,11 @@ impl ShardRegistry {
         let started = std::time::Instant::now();
         let scope = self.metrics_scope.clone();
         tracing::info!(shard_id, "Creating new history shard item");
+        let closed_early = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let closed_early_cb = closed_early.clone();
         let entry = tokio::task::spawn_blocking(move || -> HResult<Arc<ShardEntry>> {
             let id = shard_id as i32;
             let on_close = entries.clone();
-            let my_shard: Arc<OnceLock<std::sync::Weak<ShardContext>>> = Arc::new(OnceLock::new());
-            let my_shard_cb = my_shard.clone();
             // Go `removeEngineForShard`: the engine is stopped when the shard goes away.
             let closed_scope = scope.clone();
             let close_callback: Arc<dyn Fn(i32) + Send + Sync> = Arc::new(move |closed: i32| {
@@ -195,19 +192,23 @@ impl ShardRegistry {
                 // context: a late callback of a replaced shard must not tear down its healthy successor.
                 let cell = {
                     let mut map = on_close.lock().unwrap();
-                    if remove_matches(map.get(&(closed as u32)), my_shard_cb.get()) {
+                    if remove_matches(map.get(&(closed as u32)), &my_cell) {
                         map.remove(&(closed as u32))
                     } else {
                         None
                     }
                 };
-                if let Some(entry) = cell.and_then(|c| c.get().cloned()) {
-                    let engine = entry.engine.clone();
-                    handle.spawn(async move { engine.stop().await });
+                match cell.map(|c| c.get().cloned()) {
+                    Some(Some(entry)) => {
+                        let engine = entry.engine.clone();
+                        handle.spawn(async move { engine.stop().await });
+                    }
+                    // Closed while initializing: the engine is stopped once creation finishes.
+                    Some(None) => closed_early_cb.store(true, std::sync::atomic::Ordering::SeqCst),
+                    None => {}
                 }
             });
             let shard = factory.new_shard_context(id, close_callback)?;
-            let _ = my_shard.set(Arc::downgrade(&shard));
             let (core, cache) = super::engine_factory::build_core(&env, &shard);
             let ctx = ShardBuildCtx {
                 env: env.clone(),
@@ -231,6 +232,10 @@ impl ShardRegistry {
         .map_err(|e| HistoryError::internal(format!("shard creation task failed: {e}")))??;
         // Go `newShardItem` -> `engine.Start()` after the engine is created.
         entry.engine.start().await;
+        if closed_early.load(std::sync::atomic::Ordering::SeqCst) {
+            // Go: the removed item's engine is stopped after its start (item lock serializes).
+            self.stop_engine(&entry);
+        }
         let acquisition = started.elapsed();
         self.metrics_scope.inc_counter("ShardItemCreatedCounter");
         {
@@ -345,12 +350,13 @@ mod tests {
     }
 
     #[test]
-    fn late_close_callback_keeps_uninitialized_or_unknown_successor() {
-        let empty: Cell = Arc::new(OnceCell::new());
-        let closing = std::sync::Weak::<ShardContext>::new();
-        assert!(!remove_matches(None, Some(&closing)));
-        assert!(!remove_matches(Some(&empty), Some(&closing)));
-        assert!(remove_matches(Some(&empty), None));
+    fn close_callback_removes_only_own_cell() {
+        let mine: Cell = Arc::new(OnceCell::new());
+        let other: Cell = Arc::new(OnceCell::new());
+        assert!(!remove_matches(None, &mine));
+        assert!(!remove_matches(Some(&other), &mine));
+        // uninitialized own cell (closed during init) is removed
+        assert!(remove_matches(Some(&mine), &mine));
     }
 
     #[test]

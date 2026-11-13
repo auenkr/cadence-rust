@@ -17,7 +17,22 @@ import (
 	"go.uber.org/cadence/.gen/go/shared"
 	"go.uber.org/cadence/client"
 	"go.uber.org/cadence/worker"
+	"go.uber.org/cadence/workflow"
 )
+
+// UpsertSAWorkflow upserts search attributes (twice, second call overwrites the int) and then completes.
+func UpsertSAWorkflow(ctx workflow.Context, marker string) (string, error) {
+	if err := workflow.UpsertSearchAttributes(ctx, map[string]interface{}{"CustomKeywordField": marker, "CustomIntField": 70}); err != nil {
+		return "", err
+	}
+	if err := workflow.Sleep(ctx, time.Second); err != nil {
+		return "", err
+	}
+	if err := workflow.UpsertSearchAttributes(ctx, map[string]interface{}{"CustomIntField": 71}); err != nil {
+		return "", err
+	}
+	return "upserted", nil
+}
 
 func esMain(rpc workflowserviceclient.Interface, domain string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
@@ -27,6 +42,7 @@ func esMain(rpc workflowserviceclient.Interface, domain string) {
 	w := worker.New(rpc, domain, tl, worker.Options{DisableStickyExecution: true})
 	w.RegisterWorkflow(EchoWorkflow)
 	w.RegisterActivity(EchoActivity)
+	w.RegisterWorkflow(UpsertSAWorkflow)
 	if !step("es-worker-start", w.Start()) {
 		os.Exit(2)
 	}
@@ -154,6 +170,51 @@ func esMain(rpc workflowserviceclient.Interface, domain string) {
 			return err
 		}
 		return errIf(len(resp.Executions) != 1, "closed by id returned %d", len(resp.Executions))
+	})
+	// Upsert search attributes: run, close, then query by the upserted (final) values.
+	umarker := "ups-" + marker
+	uid := tl + "-upsert"
+	urun, err := c.ExecuteWorkflow(ctx, opts(uid, nil), UpsertSAWorkflow, umarker)
+	if step("es-upsert-start", err) {
+		var uout string
+		step("es-upsert-complete", firstErr(urun.Get(ctx, &uout), errIf(uout != "upserted", "result %q", uout)))
+	}
+	uq := fmt.Sprintf("CustomKeywordField = '%s' and CustomIntField = 71 and CloseStatus = 0", umarker)
+	poll("es-upsert-list", func() error {
+		got, err := list(uq)
+		if err != nil {
+			return err
+		}
+		if len(got) != 1 || got[0].Execution.GetWorkflowId() != uid {
+			return fmt.Errorf("want 1 upsert execution, got %d", len(got))
+		}
+		var n int
+		if json.Unmarshal(got[0].SearchAttributes.GetIndexedFields()["CustomIntField"], &n) != nil || n != 71 {
+			return fmt.Errorf("CustomIntField=%s", got[0].SearchAttributes.GetIndexedFields()["CustomIntField"])
+		}
+		return nil
+	})
+	poll("es-upsert-count", func() error {
+		resp, err := rpc.CountWorkflowExecutions(ctx, &shared.CountWorkflowExecutionsRequest{Domain: &domain, Query: ptr(uq)})
+		if err != nil {
+			return err
+		}
+		return errIf(resp.GetCount() != 1, "count %d", resp.GetCount())
+	})
+	poll("es-upsert-scan", func() error {
+		resp, err := rpc.ScanWorkflowExecutions(ctx, &shared.ListWorkflowExecutionsRequest{Domain: &domain, PageSize: ptr(int32(10)), Query: ptr(uq)})
+		if err != nil {
+			return err
+		}
+		return errIf(len(resp.Executions) != 1, "scan returned %d", len(resp.Executions))
+	})
+	poll("es-upsert-old-value-gone", func() error {
+		resp, err := rpc.CountWorkflowExecutions(ctx, &shared.CountWorkflowExecutionsRequest{Domain: &domain,
+			Query: ptr(fmt.Sprintf("CustomKeywordField = '%s' and CustomIntField = 70", umarker))})
+		if err != nil {
+			return err
+		}
+		return errIf(resp.GetCount() != 0, "stale count %d", resp.GetCount())
 	})
 	// Query errors keep Go's message.
 	_, err = rpc.ListWorkflowExecutions(ctx, &shared.ListWorkflowExecutionsRequest{Domain: &domain, Query: ptr("NoSuchAttr = 'x'")})

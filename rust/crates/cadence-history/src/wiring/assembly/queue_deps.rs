@@ -160,6 +160,9 @@ fn matching_metadata<T>(request: &mut tonic::Request<T>) {
     metadata.insert("rpc-service", tonic::metadata::MetadataValue::from_static("cadence-matching"));
     metadata.insert("rpc-caller", tonic::metadata::MetadataValue::from_static("cadence-history"));
     metadata.insert("rpc-encoding", tonic::metadata::MetadataValue::from_static("proto"));
+    // Go passes a context with a deadline (taskRPCCallTimeout); yarpc rejects a request
+    // without one ("missing TTL"). set_timeout emits the grpc-timeout header.
+    request.set_timeout(crate::task::transfer_task_executor_base::TASK_RPC_CALL_TIMEOUT);
 }
 
 /// `TransferDependencies` over the real matching client, visibility writer and domain cache.
@@ -545,5 +548,17 @@ impl CleanupDependencies for CleanupDepsImpl {
                 .map_err(pe)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod matching_metadata_tests {
+    use super::*;
+
+    #[test]
+    fn matching_metadata_sets_grpc_timeout_deadline() {
+        let mut r = tonic::Request::new(());
+        matching_metadata(&mut r);
+        assert!(r.metadata().get("grpc-timeout").is_some(), "yarpc requires a TTL");
     }
 }
