@@ -84,8 +84,6 @@ pub trait NativePollObserver: Send + Sync {
 /// Shared Go-compatible poller history with byte-exact identities and groups.
 pub type NativePollerManager = Mutex<cadence_common::poller_bytes::Manager>;
 
-/// Observation of one getTask wait. EndPoll precedes History's start RPC.
-#[derive(Clone)]
 /// Marks that a poll's delivery worker has taken a task (Go getTask returns a
 /// task or a query, never both): a claimed poll must not also accept a query.
 #[derive(Default)]
@@ -102,6 +100,8 @@ impl PollClaim {
         self.notify.notify_waiters();
     }
 }
+/// Observation of one getTask wait. EndPoll precedes History's start RPC.
+#[derive(Clone)]
 pub struct NativePollLifecycle {
     pub claim: Option<Arc<PollClaim>>,
     pub manager: Arc<NativePollerManager>,
