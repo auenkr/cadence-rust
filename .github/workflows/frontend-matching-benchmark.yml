@@ -9,7 +9,7 @@ on:
       service:
         description: Isolated service to replace in SDK benchmark
         type: choice
-        options: [matching, history]
+        options: [matching, frontend, history]
         default: matching
       source_ref:
         description: Exact migrated source commit (empty uses workflow head)

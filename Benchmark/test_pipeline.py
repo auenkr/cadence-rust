@@ -19,6 +19,10 @@ class PipelineTests(unittest.TestCase):
         go,rust=deployments('go'),deployments('rust')
         self.assertEqual([k for k in go if go[k]!=rust[k]],['matching'])
 
+    def test_frontend_only(self):
+        go,rust=deployments('go','frontend'),deployments('rust','frontend')
+        self.assertEqual([k for k in go if go[k]!=rust[k]],['frontend'])
+
     def test_history_only(self):
         go,rust=deployments('go','history'),deployments('rust','history')
         self.assertEqual([k for k in go if go[k]!=rust[k]],['history'])

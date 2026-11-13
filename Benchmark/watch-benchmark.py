@@ -9,7 +9,7 @@ from compact_evidence import export_compact
 
 p=argparse.ArgumentParser()
 p.add_argument('run_id',type=int)
-p.add_argument('--service',choices=('history','matching'),required=True)
+p.add_argument('--service',choices=('history','frontend','matching'),required=True)
 a=p.parse_args()
 root=Path(__file__).resolve().parent
 repository=root.parent

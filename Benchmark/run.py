@@ -45,7 +45,7 @@ def deployments(arm, service='matching'):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('--service', choices=('matching', 'history'), default='matching')
+    p.add_argument('--service', choices=('matching', 'frontend', 'history'), default='matching')
     p.add_argument('--rate', type=float, default=5)
     p.add_argument('--duration', type=int, default=30)
     p.add_argument('--warmup', type=int, default=10)

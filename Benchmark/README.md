@@ -1,7 +1,7 @@
 # Repeatable SDK benchmark
 
 The gate compares **All Go** against one Rust service at a time: Matching
-(with Go Frontend/History) or History (with Go Frontend/Matching).
+(with Go Frontend/History) Frontend (with Go Matching/History), or History (with Go Frontend/Matching).
 Everything new lives here except GitHub's required workflow entry points.
 The `--service history` lane builds the standalone `cadence-history` executable
 using `Benchmark/Dockerfile` and installs it at the drop-in server path. Both
@@ -113,7 +113,7 @@ No speedup claim is enabled by this initial report. Before performance conclusio
    signals/queries, large histories/payloads, failures/retries/timeouts. These are
    specified, **not implemented**, and must pass correctness before timing.
 4. Add Frontend-only, History-only and all-Rust arms, preserving the Go system
-   Worker until its own replacement is explicitly benchmarked. The runner currently supports Matching-only and History-only comparisons.
+   Worker until its own replacement is explicitly benchmarked. The runner supports isolated Matching, Frontend and History comparisons.
 5. Implement stepped open-loop capacity against explicit p99/error/backlog targets
    and recovery fault injection with traffic continuing. A failed fixed-load run
    is not a capacity estimate or recovery measurement.

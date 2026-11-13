@@ -10,7 +10,7 @@ BENCHMARK_SOURCE_DIR="${BENCHMARK_SOURCE_DIR:-$PWD}"
 export BENCHMARK_SOURCE_DIR
 service="${SERVICE:-matching}"
 case "$service" in
-  matching) rust_package=cadence-server ;;
+  matching|frontend) rust_package=cadence-server ;;
   history) rust_package=cadence-history ;;
   *) echo "Unsupported service: $service" >&2; exit 2 ;;
 esac
