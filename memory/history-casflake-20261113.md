@@ -1,0 +1,3 @@
+# history-casflake (2026-11-13)
+Status: IN PROGRESS. Attempt-1 artifact of run 43411166710 was overwritten by attempt 2 (same artifact name); only the 100-line log tail survives: rust-history ends with "History engine state changed: stopped" then only domain-failover callbacks, no shard re-create.
+Candidate root cause: ShardRegistry close callback removed whatever cell was registered for the shard id (Go removeEngineForShard compares the shard item). A late callback of a replaced shard context (after DB-restart LWT timeouts -> ownership-lost -> re-acquire) could stop the healthy new engine. Fix: controller.rs remove_matches ptr_eq on ShardContext.
