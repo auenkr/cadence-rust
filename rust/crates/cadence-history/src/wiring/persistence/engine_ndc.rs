@@ -82,7 +82,7 @@ pub fn to_history_error(err: PersistenceError) -> HistoryError {
         PersistenceError::AlreadyExists(m) => HistoryError::Other(m),
         PersistenceError::InvalidPersistenceRequest(m) | PersistenceError::InvalidArgument(m) => HistoryError::bad_request(m),
         PersistenceError::InternalDataInconsistency(m) | PersistenceError::Internal(m) => HistoryError::internal(m),
-        PersistenceError::Timeout(m) => HistoryError::internal(m),
+        PersistenceError::Timeout(m) => HistoryError::PersistenceTimeout(m),
         PersistenceError::ServiceBusy(m) => HistoryError::internal(m),
     }
 }
@@ -106,7 +106,8 @@ fn history_to_ndc(err: HistoryError) -> NdcError {
 }
 
 fn is_transient(err: &PersistenceError) -> bool {
-    matches!(err, PersistenceError::Internal(_))
+    // Go `IsTransientError`: InternalService, ServiceBusy and DBUnavailable (never timeouts).
+    matches!(err, PersistenceError::Internal(_) | PersistenceError::ServiceBusy(_))
 }
 
 /// Go `persistenceOperationRetryPolicy`: exponential backoff, transient errors only.
@@ -560,24 +561,30 @@ where
         previous_version: i64,
         requests: WorkflowRequestMode,
     ) -> Result<(), M::Error> {
-        // Go does not retry create (a timeout may have succeeded).
         let mut snapshot = snapshot.clone();
         self.hooks.begin_task_write().await;
         if let Err(e) = self.hooks.allocate_task_ids(&mut snapshot.tasks_by_category) {
             self.hooks.write_failed(&e);
             return Err(e);
         }
-        let request = CreateWorkflowExecutionRequest {
-            shard_id: self.shard_id,
-            range_id: (self.range_id)(),
-            mode,
-            previous_run_id: previous_run.to_string(),
-            previous_last_write_version: previous_version,
-            new_workflow_snapshot: snapshot,
-            workflow_request_mode: requests,
-            current_timestamp_unix_nanos: now_unix_nanos(),
-        };
-        match self.executions.create_workflow_execution(request).await {
+        let executions = self.executions.clone();
+        let (shard_id, range_id) = (self.shard_id, self.range_id.clone());
+        let result = retry_transient(|| {
+            let request = CreateWorkflowExecutionRequest {
+                shard_id,
+                range_id: (range_id)(),
+                mode,
+                previous_run_id: previous_run.to_string(),
+                previous_last_write_version: previous_version,
+                new_workflow_snapshot: snapshot.clone(),
+                workflow_request_mode: requests,
+                current_timestamp_unix_nanos: now_unix_nanos(),
+            };
+            let executions = executions.clone();
+            async move { executions.create_workflow_execution(request).await }
+        })
+        .await;
+        match result {
             Ok(_) => {
                 self.hooks.tasks_committed();
                 Ok(())
@@ -608,16 +615,23 @@ where
             self.hooks.write_failed(&e);
             return Err(e);
         }
-        let request = UpdateWorkflowExecutionRequest {
-            shard_id: self.shard_id,
-            range_id: (self.range_id)(),
-            mode,
-            update_workflow_mutation: mutation,
-            new_workflow_snapshot: new_snapshot,
-            workflow_request_mode: requests,
-            current_timestamp_unix_nanos: now_unix_nanos(),
-        };
-        match self.executions.update_workflow_execution(request).await {
+        let executions = self.executions.clone();
+        let (shard_id, range_id) = (self.shard_id, self.range_id.clone());
+        let result = retry_transient(|| {
+            let request = UpdateWorkflowExecutionRequest {
+                shard_id,
+                range_id: (range_id)(),
+                mode,
+                update_workflow_mutation: mutation.clone(),
+                new_workflow_snapshot: new_snapshot.clone(),
+                workflow_request_mode: requests,
+                current_timestamp_unix_nanos: now_unix_nanos(),
+            };
+            let executions = executions.clone();
+            async move { executions.update_workflow_execution(request).await }
+        })
+        .await;
+        match result {
             Ok(()) => {
                 self.hooks.tasks_committed();
                 Ok(())
@@ -883,5 +897,45 @@ impl ExecutionCacheBackend for SqlExecutionCacheBackend {
         if let Some(metrics) = &self.metrics {
             metrics(scope, name);
         }
+    }
+}
+
+#[cfg(test)]
+mod xrfix_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn persistence_timeout_is_possibly_successful() {
+        let e = to_history_error(PersistenceError::Timeout("t".into()));
+        assert!(e.is_timeout());
+        assert!(!to_history_error(PersistenceError::Internal("x".into())).is_timeout());
+    }
+
+    #[tokio::test]
+    async fn transient_errors_retry_but_timeouts_do_not() {
+        let calls = AtomicUsize::new(0);
+        let r: Result<i32, PersistenceError> = retry_transient(|| {
+            let n = calls.fetch_add(1, Ordering::SeqCst);
+            async move {
+                if n < 2 {
+                    Err(PersistenceError::ServiceBusy("busy".into()))
+                } else {
+                    Ok(7)
+                }
+            }
+        })
+        .await;
+        assert_eq!(r.unwrap(), 7);
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+
+        let calls = AtomicUsize::new(0);
+        let r: Result<i32, PersistenceError> = retry_transient(|| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            async { Err(PersistenceError::Timeout("t".into())) }
+        })
+        .await;
+        assert!(r.is_err());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 }
