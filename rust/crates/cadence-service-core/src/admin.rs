@@ -3300,7 +3300,7 @@ async fn shard_redirect<Req: Clone, Resp, F, Fut>(
     first: Result<tonic::Response<Resp>, tonic::Status>,
 ) -> Result<tonic::Response<Resp>, tonic::Status>
 where
-    F: FnOnce(
+    F: Fn(
         cadence_proto::history::history_api_client::HistoryApiClient<tonic::transport::Channel>,
         Req,
     ) -> Fut,
@@ -3315,14 +3315,30 @@ where
         return Err(status);
     };
     let owner = owner.trim().trim_end_matches('.').to_owned();
-    match history_channel_for(state, shard, Some(&owner)) {
-        Ok(Some(channel)) => {
-            retry(
-                cadence_proto::history::history_api_client::HistoryApiClient::new(channel),
-                request.clone(),
-            )
-            .await
-        }
-        _ => Err(status),
+    let mut candidates = Vec::new();
+    if let Ok(Some(channel)) = history_channel_for(state, shard, Some(&owner)) {
+        candidates.push(channel);
     }
+    if let Some(channel) = state.history_admin_channel.clone() {
+        candidates.push(channel);
+    }
+    let mut last = status;
+    for channel in candidates {
+        match retry(
+            cadence_proto::history::history_api_client::HistoryApiClient::new(channel),
+            request.clone(),
+        )
+        .await
+        {
+            Ok(response) => return Ok(response),
+            Err(error) => {
+                let lost = error.message().contains("is not owned by this host");
+                last = error;
+                if !lost {
+                    break;
+                }
+            }
+        }
+    }
+    Err(last)
 }
