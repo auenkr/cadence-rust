@@ -144,10 +144,7 @@ impl HistoryError {
     }
     /// `execution.IsConflictError`
     pub fn is_conflict_error(&self) -> bool {
-        matches!(
-            self,
-            HistoryError::ConditionFailed(_) | HistoryError::CurrentWorkflowConditionFailed(_)
-        )
+        matches!(self, HistoryError::ConditionFailed(_))
     }
 }
 

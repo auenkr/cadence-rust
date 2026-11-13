@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use cadence_api::enums::{DecisionTaskFailedCause, EventType, TimeoutType};
-use cadence_api::errors::EventAlreadyStartedError;
+use cadence_api::errors::{EventAlreadyStartedError, WorkflowExecutionAlreadyCompletedError};
 use cadence_api::service_types::HistoryEvent;
 use cadence_api::tasks::{
     DecisionTaskCompletedEventAttributes, DecisionTaskFailedEventAttributes, DecisionTaskScheduledEventAttributes,
@@ -567,6 +567,14 @@ impl EngineDecisionHandler {
         Self { cache, core, config }
     }
 
+    /// Go `handlerImpl.getActiveDomainByWorkflow`.
+    async fn ensure_active_domain(&self, domain_id: &str, workflow_id: &str, run_id: &str) -> HResult<()> {
+        let active = self.core.active_cluster_manager.active_cluster_by_workflow(domain_id, workflow_id, run_id).await?;
+        let domain = self.core.domains.get_domain_by_id(domain_id)?;
+        let current = self.core.cluster_metadata.get_current_cluster_name();
+        if active == current { Ok(()) } else { Err(domain.new_domain_not_active_error(&current, &active)) }
+    }
+
     /// Go `HandleDecisionTaskCompleted` (retry loop of `workflow.UpdateWithAction`
     /// specialised for the failure path that must clear and reload the state).
     async fn completed_run(
@@ -664,6 +672,7 @@ impl EngineDecisionHandler {
                         domains: self.core.domains.clone(),
                         domain_name: domain_name.clone(),
                         identity: req.identity.clone(),
+                        completed_id,
                     };
                     let mut handler = TaskHandler::new(ops, req.identity.clone(), completed_id);
                     local_dispatch =
@@ -849,6 +858,7 @@ impl DecisionHandler for EngineDecisionHandler {
         request: &RecordDecisionTaskStartedRequest,
     ) -> HResult<RecordDecisionTaskStartedResponse> {
         let execution = request.workflow_execution.clone().unwrap_or_default();
+        self.ensure_active_domain(&request.domain_uuid, &execution.workflow_id, &execution.run_id).await?;
         let poll = request.poll_request.clone().unwrap_or_default();
         let identity = poll.identity.clone();
         let task_list = poll.task_list.as_ref().map(|t| t.name.clone()).unwrap_or_default();
@@ -887,6 +897,7 @@ impl DecisionHandler for EngineDecisionHandler {
         let token = JsonTaskTokenSerializer::deserialize(&req.task_token)
             .map_err(|_| HistoryError::bad_request("Error deserializing task token."))?;
         let execution = WorkflowExecution { workflow_id: token.workflow_id.clone(), run_id: token.run_id.clone() };
+        self.ensure_active_domain(&request.domain_uuid, &execution.workflow_id, &execution.run_id).await?;
         let (context, release) = self.cache.get_or_create(&request.domain_uuid, &execution).await?;
         let result = self.completed_run(&context, &req, token.schedule_id, token.schedule_attempt).await;
         release(result.as_ref().err());
@@ -901,9 +912,10 @@ impl DecisionHandler for EngineDecisionHandler {
         let token = JsonTaskTokenSerializer::deserialize(&failed.task_token)
             .map_err(|_| HistoryError::bad_request("Error deserializing task token."))?;
         let execution = WorkflowExecution { workflow_id: token.workflow_id.clone(), run_id: token.run_id.clone() };
+        self.ensure_active_domain(&request.domain_uuid, &execution.workflow_id, &execution.run_id).await?;
         self.update(&request.domain_uuid, &execution, |state| {
             if !state.is_workflow_execution_running() {
-                return Err(HistoryError::entity_not_exists("workflow execution already completed"));
+                return Err(WorkflowExecutionAlreadyCompletedError { message: "Workflow execution already completed.".into() }.into());
             }
             let d = state
                 .decision_info(token.schedule_id)
@@ -926,6 +938,7 @@ impl DecisionHandler for EngineDecisionHandler {
 
     async fn handle_decision_task_scheduled(&self, request: &ScheduleDecisionTaskRequest) -> HResult<()> {
         let execution = request.workflow_execution.clone().unwrap_or_default();
+        self.ensure_active_domain(&request.domain_uuid, &execution.workflow_id, &execution.run_id).await?;
         self.update(&request.domain_uuid, &execution, |state| {
             if !state.is_workflow_execution_running() {
                 return Err(HistoryError::entity_not_exists("workflow execution already completed"));

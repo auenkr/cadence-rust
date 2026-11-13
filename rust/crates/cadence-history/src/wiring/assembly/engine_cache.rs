@@ -570,12 +570,14 @@ impl EngineExecutionCache {
     }
 
     /// Returns the entry and whether it was newly created (a cache miss).
-    fn entry(&self, key: &Key, domain_id: &str, execution: &WorkflowExecution) -> (Arc<Entry>, bool) {
+    /// The returned lock Arc is cloned while the map mutex is held, which pins the entry against
+    /// eviction (Go pins on Get/PutIfNotExist before taking the workflow lock).
+    fn entry(&self, key: &Key, domain_id: &str, execution: &WorkflowExecution) -> (Arc<Entry>, Arc<tokio::sync::Mutex<()>>, bool) {
         let lru = self.lru_scope();
         let mut entries = self.entries.lock().unwrap();
         if let Some(e) = entries.get(key) {
             lru.inc_counter("BaseCacheHit");
-            return (e.clone(), false);
+            return (e.clone(), e.lock.clone(), false);
         }
         lru.inc_counter("BaseCacheMiss");
         if entries.len() >= self.max_size {
@@ -589,10 +591,11 @@ impl EngineExecutionCache {
             lock: Arc::new(tokio::sync::Mutex::new(())),
             context: EngineExecutionContext::new(self.core.clone(), domain_id, execution),
         });
+        let pin = entry.lock.clone();
         entries.insert(key.clone(), entry.clone());
         lru.update_gauge("BaseCacheCount", entries.len() as f64);
         lru.update_gauge("BaseCacheCountLimitGauge", self.max_size as f64);
-        (entry, true)
+        (entry, pin, true)
     }
 
     /// Go `getOrCreateWorkflowExecutionInternal` (execution already validated).
@@ -614,11 +617,11 @@ impl EngineExecutionCache {
         force_clear: bool,
     ) -> HResult<(Arc<EngineExecutionContext>, ReleaseFunc)> {
         let key = (domain_id.to_string(), execution.workflow_id.clone(), execution.run_id.clone());
-        let (entry, created) = self.entry(&key, domain_id, execution);
+        let (entry, pin, created) = self.entry(&key, domain_id, execution);
         if created {
             self.cache_scope(scope).inc_counter("CacheMissCounter");
         }
-        let guard: OwnedMutexGuard<()> = entry.lock.clone().lock_owned().await;
+        let guard: OwnedMutexGuard<()> = pin.lock_owned().await;
         let slot = Mutex::new(Some(guard));
         let context = entry.context.clone();
         let release_context = context.clone();
