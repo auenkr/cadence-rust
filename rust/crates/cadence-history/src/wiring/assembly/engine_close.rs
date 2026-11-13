@@ -376,7 +376,7 @@ impl EngineMutableState {
                     run_id: g.pc_exec.run_id.clone(),
                     task_type: REPLICATION_TASK_TYPE_SYNC_ACTIVITY,
                     version: a.version,
-                    scheduled_id: a.schedule_id,
+                    scheduled_id: *sid,
                     ..Default::default()
                 });
             }
@@ -573,7 +573,6 @@ mod tests {
         {
             let mut g = s.inner.lock().unwrap();
             let mut a = pc::ActivityInfo::default();
-            a.schedule_id = 9;
             a.version = 7;
             g.pc_acts.insert(9, a);
             g.sync_activity_tasks.insert(9);
