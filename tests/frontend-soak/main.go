@@ -183,15 +183,22 @@ func main() {
 			return
 		}
 		atomic.AddInt64(&started, 1)
-		time.Sleep(time.Duration(1+rand.Intn(4)) * time.Second)
+		tStarted := time.Since(t0).Milliseconds()
+		sleepFor := time.Duration(1+rand.Intn(4)) * time.Second
+		time.Sleep(sleepFor)
+		tSig0 := time.Now()
 		if err = retry(func() error { return c.SignalWorkflow(ctx, id, run.GetRunID(), "wake", "w-"+id) }); err != nil {
 			fail("signal", err)
 			return
 		}
 		atomic.AddInt64(&signals, 1)
+		tSigMs := time.Since(tSig0).Milliseconds()
+		tQ0 := time.Now()
+		qAttempts := 0
 		sawInit := false
 		if err = retry(func() error {
 			qs := time.Now()
+			qAttempts++
 			resp, e := c.QueryWorkflow(ctx, id, run.GetRunID(), "state")
 			if e != nil {
 				return e
@@ -221,6 +228,8 @@ func main() {
 			fail("signal-done", err)
 			return
 		}
+		tQMs := time.Since(tQ0).Milliseconds()
+		tR0 := time.Now()
 		var out string
 		if err = retry(func() error {
 			gctx, cancel := context.WithTimeout(ctx, 60*time.Second)
@@ -235,6 +244,7 @@ func main() {
 			return
 		}
 		ms := time.Since(t0).Milliseconds()
+		fmt.Printf("STAGE %s e2e=%d start=%d presleep=%d signal=%d query=%d qattempts=%d result_after_done=%d\n", id, ms, tStarted, sleepFor.Milliseconds(), tSigMs, tQMs, qAttempts, time.Since(tR0).Milliseconds())
 		atomic.AddInt64(&completed, 1)
 		atomic.AddInt64(&latNs, ms*1e6)
 		atomic.AddInt64(&latCount, 1)
