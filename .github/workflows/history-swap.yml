@@ -4,7 +4,7 @@ on:
   # push trigger on the work branch: a new dispatch-only workflow cannot be dispatched before it exists on master.
   push:
     branches: [history-swap]
-    paths: ['.github/workflows/history-swap.yml', 'tests/history-swap/**', 'tests/gates/run-history-swap.py']
+    paths: ['.github/workflows/history-swap.yml', 'tests/history-swap/**', 'tests/gates/run-history-swap.py', 'rust/**']
   workflow_dispatch:
     inputs:
       database:
