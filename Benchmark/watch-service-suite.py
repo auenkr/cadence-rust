@@ -83,6 +83,8 @@ for service,run_id in state['runs'].items():
                    'correct_workflows':sum(r['correct'] for r in runs),'errors':sum(r['errors'] for r in runs)}
     g,r=item['go'],item['rust']
     item['equal_completion_throughput_within_one_percent']=abs(g['completions_per_second']-r['completions_per_second'])<=.01*max(g['completions_per_second'],r['completions_per_second'])
+    if not item['equal_completion_throughput_within_one_percent']:
+        summary['limitations'].append(f"{service.title()}: observed completions/s Go {g['completions_per_second']:.2f}, Rust {r['completions_per_second']:.2f}; resource figures do not establish equal-throughput gains.")
     lines.append(f"| {service.title()} | {g['completion_p99_ms']:.2f} | {r['completion_p99_ms']:.2f} | {g['average_cpu_cores']:.4f} | {r['average_cpu_cores']:.4f} | {g['peak_memory_mib']:.2f} | {r['peak_memory_mib']:.2f} | {g['correct_workflows']} / {r['correct_workflows']} |")
 (ROOT/'evidence/service-comparison.json').write_text(json.dumps(summary,indent=2)+'\n')
 (ROOT/'evidence/service-comparison.md').write_text('\n'.join(lines)+'\n\n'+'\n'.join('- '+note for note in summary['limitations'])+'\n')

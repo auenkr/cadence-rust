@@ -131,6 +131,7 @@
   </div>
 </header>
 <main>
+<p>2026-11-13 benchmark smoke: Matching 450/450 correct in each arm; History 450/450 eventually correct but ~20s observed completion latency; Frontend baseline startup failed. Compact results: Benchmark/evidence/service-comparison.md. No capacity conclusion.</p>
 <p class="note">History checkpoint 2026-11-09: Rust History/Frontend/Matching boot in the new mixed gate. StartWorkflowExecution and SignalWithStartWorkflowExecution now route through the real History engine after Go-equivalent handler checks, with race retry regression coverage; crate CI pending. Live queue processors are absent. Queue configuration adapter passed CI 42568401701. Timer-status corrections await CI 42581586431. Owned NDC state and lossless persistence bridge remain incomplete. No History completion claimed. <a href="history-runtime-20261109.md">Evidence and next tasks</a>.</p>
   <section class="est">
     <h2>Frontend + Matching benchmark — verified results</h2>

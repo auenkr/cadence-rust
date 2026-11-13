@@ -93,7 +93,9 @@ def main():
                 (OUT/(key+'-compose.yml')).write_text(capture(compose+['config'],arm_env))
                 sdk_worker = None
                 try:
-                    run(compose+['up','-d'],key+'-up',env=arm_env)
+                    # Register the benchmark domain before the system Worker creates its domains.
+                    # Concurrent Go domain registrations can race on metadata versions.
+                    run(compose+['up','-d','mysql','history','matching','frontend'],key+'-up',env=arm_env)
                     cli=[str(ROOT/'bin/cli'),'--address','127.0.0.1:7833','--transport','grpc','--domain','benchmark','domain']
                     for attempt in range(60):
                         if run(cli+['register','--rd','1'],key+f'-domain-{attempt}',timeout=15,check=False)==0:
@@ -103,10 +105,14 @@ def main():
                         time.sleep(3)
                     else:
                         raise RuntimeError('domain not ready')
+                    run(compose+['up','-d','worker'],key+'-worker-up',env=arm_env)
                     containers=[]; identities={}
                     for service,image in expected.items():
-                        cid=capture(compose+['ps','-q',service],arm_env)
+                        cid=capture(compose+['ps','-a','-q',service],arm_env)
+                        if not cid: raise RuntimeError(f'{service} container missing; see {key}-services.log')
                         identity=json.loads(capture(['docker','inspect',cid]))[0]
+                        if not identity['State']['Running']:
+                            raise RuntimeError(f'{service} exited ({identity["State"]["ExitCode"]}); see {key}-services.log')
                         if identity['Config']['Image']!=image: raise RuntimeError('unexpected service image')
                         run(['docker','exec',cid,'cat','/etc/cadence/config/docker.yaml'],key+'-config-'+service)
                         run(['docker','exec',cid,'cat','/etc/cadence/dynamicconfig/development.yaml'],key+'-dynamic-'+service)
