@@ -588,6 +588,17 @@ mod tests {
     }
 
     #[test]
+    fn double_schedule_errors_so_callers_must_guard_with_has_pending_decision() {
+        use crate::engine::deps_ms::MutableState as _;
+        let s = global_state(false, false);
+        assert!(!s.has_pending_decision());
+        s.add_decision_task_scheduled(false).unwrap();
+        assert!(s.has_pending_decision());
+        // The timer executor's schedule_decision guards on this (Go ScheduleDecision).
+        assert!(s.add_decision_task_scheduled(false).is_err());
+    }
+
+    #[test]
     fn no_replication_tasks_for_local_domain_disabled_config_or_passive_close() {
         for (enabled, global) in [(true, false), (false, true)] {
             let s = global_state(enabled, global);

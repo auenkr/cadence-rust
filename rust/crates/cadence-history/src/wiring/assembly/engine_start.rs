@@ -304,12 +304,12 @@ pub(super) async fn append_new_branch(
     info: &str,
 ) -> HResult<(i64, Option<i64>, PersistedBlobRef)> {
     let shard = &core.shard;
-    let ids = shard.generate_task_ids(txn.events.len()).map_err(shard_err)?;
+    let ids = shard.generate_task_ids(txn.events.len()).map_err(shard_err(shard.shard_id()))?;
     for (ev, id) in txn.events.iter_mut().zip(ids.iter()) {
         ev.task_id = *id;
     }
     let last = ids.last().copied();
-    let transaction_id = shard.generate_task_id().map_err(shard_err)?;
+    let transaction_id = shard.generate_task_id().map_err(shard_err(shard.shard_id()))?;
     let manager = SqlHistoryManager::new(core.history_v2.clone(), shard.shard_id());
     let blob = manager
         .append_history_nodes(&txn.branch_token, &txn.events, transaction_id, true, info)
@@ -336,7 +336,7 @@ pub(super) fn replication_rows(
     max_read_level: &mut i64,
 ) -> HResult<Vec<pc::Task>> {
     let mut slots: Vec<(i64, i64)> = vec![(0, 0); tasks.len()];
-    core.shard.allocate_transfer_ids(&mut slots, max_read_level).map_err(shard_err)?;
+    core.shard.allocate_transfer_ids(&mut slots, max_read_level).map_err(shard_err(core.shard.shard_id()))?;
     let mut rows = Vec::with_capacity(tasks.len());
     for (t, slot) in tasks.iter_mut().zip(slots.iter()) {
         t.task_id = slot.0;
@@ -358,10 +358,10 @@ pub(super) fn snapshot_of(core: &EngineCore, mut txn: ClosedTxn) -> HResult<(pc:
     let shard = &core.shard;
     let mut max_read_level = 0i64;
     let mut transfer_slots: Vec<(i64, i64)> = txn.transfer.iter().map(|_| (0, 0)).collect();
-    shard.allocate_transfer_ids(&mut transfer_slots, &mut max_read_level).map_err(shard_err)?;
+    shard.allocate_transfer_ids(&mut transfer_slots, &mut max_read_level).map_err(shard_err(shard.shard_id()))?;
     let mut timer_slots: Vec<(i64, i64)> =
         txn.timer.iter().map(|t| (0, t.visibility_timestamp_unix_nanos)).collect();
-    shard.allocate_timer_ids(&core.current_cluster, &mut timer_slots).map_err(shard_err)?;
+    shard.allocate_timer_ids(&core.current_cluster, &mut timer_slots).map_err(shard_err(shard.shard_id()))?;
     let mut transfer_tasks = Vec::new();
     for (t, slot) in txn.transfer.iter_mut().zip(transfer_slots.iter()) {
         t.task_id = slot.0;
@@ -743,18 +743,18 @@ impl DomainFailoverHost for EngineFailoverHost {
     }
 
     fn update_domain_notification_version(&self, version: i64) -> HResult<()> {
-        self.shard.update_domain_notification_version(version).map_err(shard_err)
+        self.shard.update_domain_notification_version(version).map_err(shard_err(self.shard.shard_id()))
     }
 
     /// Go `shard.ReplicateFailoverMarkers`.
     async fn replicate_failover_markers(&self, markers: Vec<FailoverMarkerTask>) -> HResult<()> {
         let _gate = self.shard.lock_task_writes().await;
         if let Some(e) = self.shard.closed_error() {
-            return Err(shard_err(e));
+            return Err(shard_err(self.shard.shard_id())(e));
         }
         let mut slots: Vec<(i64, i64)> = vec![(0, 0); markers.len()];
         let mut max_read_level = 0i64;
-        self.shard.allocate_transfer_ids(&mut slots, &mut max_read_level).map_err(shard_err)?;
+        self.shard.allocate_transfer_ids(&mut slots, &mut max_read_level).map_err(shard_err(self.shard.shard_id()))?;
         let tasks = markers
             .iter()
             .zip(slots.iter())
