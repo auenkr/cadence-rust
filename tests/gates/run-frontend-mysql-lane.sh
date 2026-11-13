@@ -87,7 +87,7 @@ s3_start
 gcs_start
 export CADENCE_MYSQL_ADDR="127.0.0.1:${PORT}" CADENCE_MYSQL_PASSWORD="$PASSWORD" CADENCE_MYSQL_DOCKER_CONTAINER="$CONTAINER"
 if [[ "${CADENCE_GATE_TWO_HISTORY:-}" == "true" ]]; then KAFKA_ARGS+=(--two-history); fi
-python3 "$ROOT/tests/gates/run-frontend-gate.py" --out "$ARTIFACTS/run" "${KAFKA_ARGS[@]}" "${ES_ARGS[@]}" "${S3_ARGS[@]}" "${GCS_ARGS[@]}" "$@"
+python3 "$ROOT/tests/gates/${CADENCE_GATE_SCRIPT:-run-frontend-gate.py}" --out "$ARTIFACTS/run" "${KAFKA_ARGS[@]}" "${ES_ARGS[@]}" "${S3_ARGS[@]}" "${GCS_ARGS[@]}" "$@"
 status=$?
 echo "$status" > "$ARTIFACTS/lane.exit"
 exit "$status"

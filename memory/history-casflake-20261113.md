@@ -15,3 +15,7 @@
 ## 3. Final validation at head f40651e31f54429a3576ee665039a880435a0871
 - rust-ci 43429232528: success.
 - All 12 history-mixed-gate combos (mysql/postgres/cassandra x grpc/tchannel x two_history true/false): 43429119172 43429128806 43429138171 43429147493 43429157255 43429165782 43429174877 43429184140 43429193707 43429204197 43429213610 43429223202: all success, each log shows `GATE SUMMARY failed: []`.
+
+## Post-merge master validation
+
+Master 4da929f43 (2026-11-13): 43431973159: success  43431978347: success GATESUMMARYfailed: 43431982938: success GATESUMMARYfailed: 43431988382: success GATESUMMARYfailed: 43431994002: success GATESUMMARYfailed: 43431998920: success GATESUMMARYfailed: 43432004220: success GATESUMMARYfailed: 43432009917: success GATESUMMARYfailed: 43432015926: success GATESUMMARYfailed: 43432021522: success GATESUMMARYfailed: 43432026354: success GATESUMMARYfailed: 43432031848: success GATESUMMARYfailed: 43432037779: success GATESUMMARYfailed: 

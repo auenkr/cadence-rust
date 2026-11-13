@@ -46,7 +46,7 @@ export CADENCE_CASSANDRA_KEYSPACE="$KEYSPACE" CADENCE_CASSANDRA_VISIBILITY_KEYSP
 kafka_start
 es_start
 if [[ "${CADENCE_GATE_TWO_HISTORY:-}" == "true" ]]; then KAFKA_ARGS+=(--two-history); fi
-python3 "$ROOT/tests/gates/run-frontend-gate.py" --database cassandra --out "$ARTIFACTS/run" "${KAFKA_ARGS[@]}" "${ES_ARGS[@]}" "$@"
+python3 "$ROOT/tests/gates/${CADENCE_GATE_SCRIPT:-run-frontend-gate.py}" --database cassandra --out "$ARTIFACTS/run" "${KAFKA_ARGS[@]}" "${ES_ARGS[@]}" "$@"
 status=$?
 echo "$status" > "$ARTIFACTS/lane.exit"
 exit "$status"
