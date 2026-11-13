@@ -22,24 +22,62 @@ use crate::wiring::assembly::engine_state::{
     EngineMutableState, Inner, BUFFERED_EVENT_ID, EMPTY_EVENT_TASK_ID, TRANSIENT_EVENT_ID,
 };
 
-/// Go `shouldBufferEvent` (only consulted while a decision is in flight).
+/// Go `shouldBufferEvent` (only consulted while a decision is in flight): every event
+/// type is buffered except workflow state changes, decision events and the events
+/// generated directly from decisions.
 fn is_bufferable(ty: EventType) -> bool {
-    matches!(
+    !matches!(
         ty,
-        EventType::ActivityTaskStarted
-            | EventType::ActivityTaskCompleted
-            | EventType::ActivityTaskFailed
-            | EventType::ActivityTaskTimedOut
-            | EventType::ActivityTaskCanceled
-            | EventType::WorkflowExecutionCancelRequested
-            | EventType::WorkflowExecutionSignaled
-            | EventType::ChildWorkflowExecutionStarted
-            | EventType::ChildWorkflowExecutionCompleted
-            | EventType::ChildWorkflowExecutionFailed
-            | EventType::ChildWorkflowExecutionCanceled
-            | EventType::ChildWorkflowExecutionTimedOut
-            | EventType::ChildWorkflowExecutionTerminated
+        EventType::WorkflowExecutionStarted
+            | EventType::WorkflowExecutionCompleted
+            | EventType::WorkflowExecutionFailed
+            | EventType::WorkflowExecutionTimedOut
+            | EventType::WorkflowExecutionTerminated
+            | EventType::WorkflowExecutionContinuedAsNew
+            | EventType::WorkflowExecutionCanceled
+            | EventType::DecisionTaskScheduled
+            | EventType::DecisionTaskStarted
+            | EventType::DecisionTaskCompleted
+            | EventType::DecisionTaskFailed
+            | EventType::DecisionTaskTimedOut
+            | EventType::ActivityTaskScheduled
+            | EventType::ActivityTaskCancelRequested
+            | EventType::TimerStarted
+            | EventType::TimerCanceled
+            | EventType::CancelTimerFailed
+            | EventType::RequestCancelExternalWorkflowExecutionInitiated
+            | EventType::MarkerRecorded
+            | EventType::StartChildWorkflowExecutionInitiated
+            | EventType::SignalExternalWorkflowExecutionInitiated
+            | EventType::UpsertWorkflowSearchAttributes
+            | EventType::SemaphoreAcquireInitiated
+            | EventType::SemaphoreReleased
     )
+}
+
+#[cfg(test)]
+mod buffer_tests {
+    use super::*;
+
+    #[test]
+    fn async_results_are_buffered_like_go() {
+        for ty in [
+            EventType::TimerFired,
+            EventType::StartChildWorkflowExecutionFailed,
+            EventType::ExternalWorkflowExecutionSignaled,
+            EventType::SignalExternalWorkflowExecutionFailed,
+            EventType::ExternalWorkflowExecutionCancelRequested,
+            EventType::RequestCancelExternalWorkflowExecutionFailed,
+            EventType::SemaphoreAcquired,
+            EventType::ActivityTaskCompleted,
+            EventType::WorkflowExecutionSignaled,
+        ] {
+            assert!(is_bufferable(ty), "{ty:?}");
+        }
+        for ty in [EventType::TimerStarted, EventType::DecisionTaskCompleted, EventType::WorkflowExecutionCompleted] {
+            assert!(!is_bufferable(ty), "{ty:?}");
+        }
+    }
 }
 
 fn is_close_event(ty: Option<EventType>) -> bool {
@@ -57,6 +95,25 @@ fn is_close_event(ty: Option<EventType>) -> bool {
 }
 
 impl Inner {
+    /// Go `checkAndClearTimerFiredEvent`: removes and returns a TimerFired event for `timer_id`
+    /// from the persisted buffered events, the update-buffered events, then the new history.
+    pub(super) fn check_and_clear_timer_fired_event(&mut self, timer_id: &str) -> Option<HistoryEvent> {
+        fn take(events: &mut Vec<HistoryEvent>, timer_id: &str) -> Option<HistoryEvent> {
+            let idx = events.iter().position(|e| {
+                e.event_type == Some(EventType::TimerFired)
+                    && e.timer_fired_event_attributes.as_ref().is_some_and(|a| a.timer_id == timer_id)
+            })?;
+            Some(events.remove(idx))
+        }
+        let found = take(&mut self.buffered, timer_id)
+            .or_else(|| take(&mut self.update_buffered, timer_id))
+            .or_else(|| take(&mut self.hist, timer_id));
+        if found.is_some() {
+            self.dirty = true;
+        }
+        found
+    }
+
     /// Go `historyBuilder.addEventToHistory` + `CreateNewHistoryEvent`.
     pub(super) fn push_event(
         &mut self,
