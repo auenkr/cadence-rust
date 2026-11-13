@@ -83,3 +83,7 @@ Two clippy errors from master were also fixed (`matching/src/grpc.rs` unreachabl
 | cassandra | tchannel | true | https://github.com/auenkr/cadence-rust/actions/runs/43387108919 |
 | cassandra | tchannel | false | https://github.com/auenkr/cadence-rust/actions/runs/43389357186 (re-dispatched after an HTTP 500 on dispatch) |
 Round coverage: `killall`, `dbrestart` (all DBs), `killprimary` (two_history=true only).
+
+## Post-merge master validation
+
+Master bf1cba71c (2026-11-13), rust-ci + 12 gates incl. recovery phase: 43391579158: success 43391583572: success 43391588064: success 43391592039: success 43391597949: success 43391602675: success 43391606815: success 43391611373: success 43391616081: success 43391620658: success 43391625494: success 43391629854: success 43391634727: success 
