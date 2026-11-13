@@ -58,6 +58,21 @@ fn check_cooldown(current: &DomainRecord, now: i64, policy: &DomainPolicy) -> Re
     }
     Ok(())
 }
+/// Go `UpdateIsolationGroups` / `UpdateAsyncWorkflowConfiguraton`: cool-down
+/// first (ServiceBusy "Domain update too frequent."), then the primary-cluster
+/// check for global domains (BadRequest).
+pub fn check_admin_config_update(
+    current: &DomainRecord,
+    now: i64,
+    metadata: &cadence_common::cluster::Metadata,
+    policy: &DomainPolicy,
+) -> Result<()> {
+    check_cooldown(current, now, policy)?;
+    if !metadata.is_primary_cluster() && current.is_global_domain {
+        return Err(invalid(PRIMARY));
+    }
+    Ok(())
+}
 const MIXED: &str = "Cannot set active cluster to current cluster when other parameters are set.";
 const LOCAL: &str = "Local domains cannot perform failovers or change replication configuration";
 const PRIMARY: &str =

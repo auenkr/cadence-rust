@@ -1356,7 +1356,7 @@ pub fn domain_replication_messages_response(
                 cursor = row.id;
                 tasks.push(task);
             }
-            Err(error) => return Err(format!("failed to decode domain replication task: {error}")),
+            Err(error) => return Err(format!("failed to decode task: {error}")),
         }
     }
     // Go calls UpdateAckLevel on every request. An omitted field uses the
@@ -1473,7 +1473,7 @@ pub async fn read_dlq_messages(
                         return crate::handlers::error_response(
                             "InternalServiceError",
                             StatusCode::INTERNAL_SERVER_ERROR,
-                            format!("failed to decode domain DLQ task: {error}"),
+                            format!("failed to decode dlq task: {error}"),
                         )
                     }
                 }
@@ -1562,7 +1562,10 @@ pub(crate) fn decode_domain_dlq_page_token(token: &[u8]) -> Result<Option<i64>, 
         return Ok(None);
     }
     if token.len() != 8 {
-        return Err(format!("invalid next page token {token:?}"));
+        return Err(format!(
+            "invalid next page token [{}]",
+            token.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(" ")
+        ));
     }
     Ok(Some(i64::from_le_bytes(
         token.try_into().expect("8-byte token"),
@@ -1637,21 +1640,18 @@ pub fn merge_domain_dlq_messages(
     let page_size = req.maximum_page_size.max(0) as usize;
     let rows =
         persistence.read_domain_replication_dlq(first_message_id, end_message_id, page_size)?;
-    let mut last_processed = ack_level;
+    // Go starts ackedMessageID at 0 and always range-deletes and updates the
+    // ack level, even when no message was merged (persistence ignores stale levels).
+    let mut last_processed = 0_i64;
     for row in &rows {
         let thrift =
             read_struct(&mut Reader::new(&row.payload)).map_err(|error| error.to_string())?;
         let task = cadence_api::types::ReplicationTask::from_thrift(&thrift)
             .map_err(|error| error.to_string())?;
-        if task.task_type != Some(cadence_api::enums::ReplicationTaskType::Domain) {
-            return Err(
-                "Encounter non domain replication task in domain replication queue.".into(),
-            );
-        }
-        let attributes = task
-            .domain_task_attributes
-            .as_ref()
-            .ok_or_else(|| "empty domain replication task".to_string())?;
+        // Go only checks GetDomainTaskAttributes() == nil.
+        let attributes = task.domain_task_attributes.as_ref().ok_or_else(|| {
+            "Encounter non domain replication task in domain replication queue.".to_string()
+        })?;
         let info = attributes
             .info
             .as_ref()
@@ -1675,12 +1675,10 @@ pub fn merge_domain_dlq_messages(
         last_processed = row.id;
     }
 
-    if last_processed > ack_level {
-        persistence.delete_domain_replication_dlq_range(ack_level, last_processed)?;
-        // Go treats acknowledgement metadata as best-effort after delete.
-        let _ = persistence
-            .update_domain_replication_dlq_ack_level("domainReplication".into(), last_processed);
-    }
+    persistence.delete_domain_replication_dlq_range(ack_level, last_processed)?;
+    // Go treats acknowledgement metadata as best-effort after delete.
+    let _ = persistence
+        .update_domain_replication_dlq_ack_level("domainReplication".into(), last_processed);
     let next_page_token = if rows.len() >= page_size {
         encode_domain_dlq_page_token(rows.last().map_or(first_message_id, |row| row.id))
     } else {
@@ -2492,10 +2490,19 @@ pub async fn update_domain_isolation_groups(
     }
     match state
         .domain_manager
-        .update_isolation_groups(&req.domain, req.isolation_groups)
+        .update_isolation_groups(
+            &req.domain,
+            req.isolation_groups,
+            &state.cluster_metadata,
+            &state.domain_policy(&req.domain),
+        )
     {
         Ok(()) => ok_json(cadence_api::admin::UpdateDomainIsolationGroupsResponse {}),
         Err(cadence_persistence::FrontendDomainError::NotFound(e)) => entity_not_exists(e),
+        Err(cadence_persistence::FrontendDomainError::Busy(m)) => {
+            error_response("ServiceBusyError", StatusCode::SERVICE_UNAVAILABLE, m)
+        }
+        Err(cadence_persistence::FrontendDomainError::Invalid(m)) => bad_request(BadRequestError::new(m)),
         Err(e) => error_response(
             "InternalServiceError",
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -2535,10 +2542,19 @@ pub async fn update_domain_async_workflow_configuration(
     }
     match state
         .domain_manager
-        .update_async_workflow_config(&req.domain, req.configuration)
+        .update_async_workflow_config(
+            &req.domain,
+            req.configuration,
+            &state.cluster_metadata,
+            &state.domain_policy(&req.domain),
+        )
     {
         Ok(()) => ok_json(cadence_api::admin::UpdateDomainAsyncWorkflowConfiguratonResponse {}),
         Err(cadence_persistence::FrontendDomainError::NotFound(e)) => entity_not_exists(e),
+        Err(cadence_persistence::FrontendDomainError::Busy(m)) => {
+            error_response("ServiceBusyError", StatusCode::SERVICE_UNAVAILABLE, m)
+        }
+        Err(cadence_persistence::FrontendDomainError::Invalid(m)) => bad_request(BadRequestError::new(m)),
         Err(e) => error_response(
             "InternalServiceError",
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -2549,6 +2565,17 @@ pub async fn update_domain_async_workflow_configuration(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn domain_dlq_page_token_error_matches_go_format() {
+        assert_eq!(
+            super::decode_domain_dlq_page_token(&[1, 2, 3]).unwrap_err(),
+            "invalid next page token [1 2 3]"
+        );
+        assert_eq!(super::decode_domain_dlq_page_token(&[]).unwrap(), None);
+        let t = super::encode_domain_dlq_page_token(42);
+        assert_eq!(super::decode_domain_dlq_page_token(&t).unwrap(), Some(42));
+    }
+
     #[test]
     fn reapply_blob_decoding_follows_encoding_and_propagates_errors() {
         use cadence_api::enums::EncodingType;

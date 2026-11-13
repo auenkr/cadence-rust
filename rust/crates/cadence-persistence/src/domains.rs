@@ -371,6 +371,8 @@ pub trait FrontendDomainManager: std::fmt::Debug + Send + Sync {
         &self,
         name: &str,
         config: Option<cadence_api::types::AsyncWorkflowConfiguration>,
+        metadata: &cadence_common::cluster::Metadata,
+        policy: &crate::domain_update::DomainPolicy,
     ) -> Result<(), FrontendDomainError>;
 
     /// Replace and persist a domain's isolation groups (Go `UpdateIsolationGroups`:
@@ -379,6 +381,8 @@ pub trait FrontendDomainManager: std::fmt::Debug + Send + Sync {
         &self,
         name: &str,
         groups: Option<cadence_api::types::IsolationGroupConfiguration>,
+        metadata: &cadence_common::cluster::Metadata,
+        policy: &crate::domain_update::DomainPolicy,
     ) -> Result<(), FrontendDomainError>;
 }
 
@@ -1533,7 +1537,12 @@ impl FrontendDomainManager for InMemoryDomainStore {
         &self,
         name: &str,
         config: Option<cadence_api::types::AsyncWorkflowConfiguration>,
+        metadata: &cadence_common::cluster::Metadata,
+        policy: &crate::domain_update::DomainPolicy,
     ) -> Result<(), FrontendDomainError> {
+        let old = self.record_by_name(name)?;
+        crate::domain_update::check_admin_config_update(&old, now_nanos(), metadata, policy)
+            .map_err(FailoverError::from)?;
         Ok(self.update_domain_async_workflow_config(name, config)?)
     }
 
@@ -1541,7 +1550,17 @@ impl FrontendDomainManager for InMemoryDomainStore {
         &self,
         name: &str,
         groups: Option<cadence_api::types::IsolationGroupConfiguration>,
+        metadata: &cadence_common::cluster::Metadata,
+        policy: &crate::domain_update::DomainPolicy,
     ) -> Result<(), FrontendDomainError> {
+        if groups.is_none() {
+            return Err(FrontendDomainError::Invalid(
+                "invalid request, isolationGroup configuration must be set".to_string(),
+            ));
+        }
+        let old = self.record_by_name(name)?;
+        crate::domain_update::check_admin_config_update(&old, now_nanos(), metadata, policy)
+            .map_err(FailoverError::from)?;
         Ok(self.update_domain_isolation_groups(name, groups)?)
     }
 
@@ -1814,6 +1833,8 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
         &self,
         name: &str,
         config: Option<cadence_api::types::AsyncWorkflowConfiguration>,
+        metadata: &cadence_common::cluster::Metadata,
+        policy: &crate::domain_update::DomainPolicy,
     ) -> Result<(), FrontendDomainError> {
         let _guard = self.mutation_lock.lock().expect("domain manager lock");
         self.describe(&DescribeDomainRequest {
@@ -1821,6 +1842,8 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
             uuid: None,
         })?;
         let old = self.cache.record_by_name(name)?;
+        crate::domain_update::check_admin_config_update(&old, now_nanos(), metadata, policy)
+            .map_err(FailoverError::from)?;
         let version = self.current_metadata_version()?;
         self.cache
             .update_domain_async_workflow_config(name, config)?;
@@ -1841,13 +1864,22 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
         &self,
         name: &str,
         groups: Option<cadence_api::types::IsolationGroupConfiguration>,
+        metadata: &cadence_common::cluster::Metadata,
+        policy: &crate::domain_update::DomainPolicy,
     ) -> Result<(), FrontendDomainError> {
+        if groups.is_none() {
+            return Err(FrontendDomainError::Invalid(
+                "invalid request, isolationGroup configuration must be set".to_string(),
+            ));
+        }
         let _guard = self.mutation_lock.lock().expect("domain manager lock");
         self.describe(&DescribeDomainRequest {
             name: Some(name.to_owned()),
             uuid: None,
         })?;
         let old = self.cache.record_by_name(name)?;
+        crate::domain_update::check_admin_config_update(&old, now_nanos(), metadata, policy)
+            .map_err(FailoverError::from)?;
         let version = self.current_metadata_version()?;
         self.cache.update_domain_isolation_groups(name, groups)?;
         let mut updated = self.cache.record_by_name(name)?;
@@ -3226,6 +3258,52 @@ mod failover_notification_version_tests {
             cooldown_nanos: 0,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn admin_config_updates_enforce_cooldown_and_primary_cluster() {
+        let (manager, _p) = manager_with_global_domain();
+        let groups = Some(cadence_api::types::IsolationGroupConfiguration::default());
+        // Freshly created: default 60s cool-down applies (Go ServiceBusy).
+        let busy = manager
+            .update_isolation_groups(
+                "global",
+                groups.clone(),
+                &cluster_metadata(),
+                &crate::domain_update::DomainPolicy::default(),
+            )
+            .unwrap_err();
+        assert!(matches!(&busy, FrontendDomainError::Busy(m) if m == "Domain update too frequent."));
+        let busy = manager
+            .update_async_workflow_config(
+                "global",
+                None,
+                &cluster_metadata(),
+                &crate::domain_update::DomainPolicy::default(),
+            )
+            .unwrap_err();
+        assert!(matches!(busy, FrontendDomainError::Busy(_)));
+        // Non-primary cluster on a global domain: BadRequest-style Invalid.
+        let mut secondary = cluster_metadata();
+        secondary.current_cluster_name = "b".into();
+        let err = manager
+            .update_isolation_groups("global", groups.clone(), &secondary, &no_cooldown())
+            .unwrap_err();
+        assert!(matches!(&err, FrontendDomainError::Invalid(m)
+            if m == "Cluster is not primary cluster, cannot do domain registration or domain update."));
+        let err = manager
+            .update_async_workflow_config("global", None, &secondary, &no_cooldown())
+            .unwrap_err();
+        assert!(matches!(err, FrontendDomainError::Invalid(_)));
+        // Missing isolation groups is rejected before any check.
+        let err = manager
+            .update_isolation_groups("global", None, &cluster_metadata(), &no_cooldown())
+            .unwrap_err();
+        assert!(matches!(err, FrontendDomainError::Invalid(_)));
+        // Allowed once cool-down is disabled on the primary cluster.
+        manager
+            .update_isolation_groups("global", groups, &cluster_metadata(), &no_cooldown())
+            .unwrap();
     }
 
     #[test]
