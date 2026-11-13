@@ -224,20 +224,27 @@ try:
                 return rc == 0 and token in out, out
             return f
         poll('domain-registered-replicated-to-A', a_dom('d0'), 240)
-        rc, out = cli(B_T, 'tchannel', '--domain', dom, 'domain', 'update', '--description', 'd1-updated', '--retention', '2')
+        def retry_cooldown(*a):
+            # Go domain handler rejects updates inside FailoverCoolDown ("Domain update too frequent")
+            for _ in range(20):
+                rc, out = cli(B_T, 'tchannel', '--domain', dom, *a)
+                if rc == 0 or 'too frequent' not in out:
+                    break
+                time.sleep(5)
+            return rc, out
+        rc, out = retry_cooldown('domain', 'update', '--description', 'd1-updated', '--retention', '2')
         record('update-global-domain-on-rust-frontend-B', rc == 0, out)
         poll('domain-update-replicated-to-A', a_dom('d1-updated'), 240)
         # Isolation-group + async-workflow config set on Rust Frontend B must replicate to A
         # (Go UpdateIsolationGroups / UpdateAsyncWorkflowConfiguraton publish Update tasks;
         # Go FromDescribeDomainResponseDomain maps both into the Domain proto).
-        time.sleep(5)
-        rc, out = cli(B_T, 'tchannel', '--domain', dom, 'admin', 'isolation-groups', 'update-domain', '--set-drains', 'zone-gate-1')
+        rc, out = retry_cooldown('admin', 'isolation-groups', 'update-domain', '--set-drains', 'zone-gate-1')
         record('set-isolation-groups-on-rust-frontend-B', rc == 0, out)
         def a_ig():
             rc, out = cli(A_T, 'tchannel', '--domain', dom, 'admin', 'isolation-groups', 'get-domain')
             return rc == 0 and 'zone-gate-1' in out, out
         poll('isolation-groups-replicated-to-A', a_ig, 240)
-        rc, out = cli(B_T, 'tchannel', '--domain', dom, 'admin', 'async-wf-queue', 'update', '--json',
+        rc, out = retry_cooldown('admin', 'async-wf-queue', 'update', '--json',
                       '{"Enabled":false,"PredefinedQueueName":"gate-queue","QueueType":"kafka"}')
         record('set-async-workflow-config-on-rust-frontend-B', rc == 0, out)
         def a_async():
