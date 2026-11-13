@@ -326,7 +326,7 @@ impl TransferDependencies for TransferDepsImpl {
                 start_timestamp: archive_nanos(record.start_timestamp),
                 execution_timestamp: record.execution_timestamp,
                 close_timestamp: archive_nanos(record.close_timestamp),
-                close_status: record.close_status,
+                close_status: thrift_close_status(record.close_status),
                 history_length: record.history_length,
                 memo: record.memo.clone(),
                 search_attributes: record.search_attributes.clone(),

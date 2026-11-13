@@ -387,7 +387,8 @@ try:
                     hist_keys[wid] = re.findall(r'<Key>([^<]+)</Key>', listing) if st == 200 else []
                 st, listing = s3c('GET', f'/{bkt}', 'list-type=2&prefix=rust-visibility%2F')
                 vis_keys = re.findall(r'<Key>([^<]+)</Key>', listing) if st == 200 else []
-                if runs and all(hist_keys.values()) and len(vis_keys) >= len(runs):
+                if runs and all(hist_keys.values()) and all(any(f'/workflowID/{w}/closeTimeout/' in k for k in vis_keys) for w in runs) \
+                        and len([k for k in vis_keys if '/workflowTypeName/' in k and '/closeTimeout/' in k]) >= len(runs):
                     break
                 time.sleep(5)
             (work / 'rs3-objects.log').write_text(json.dumps({'history': hist_keys, 'visibility': vis_keys}, indent=1))
@@ -396,7 +397,7 @@ try:
                     st, blob = s3c('GET', f'/{bkt}/{kx}')
                     (work / f'rs3-blob-{wid}-{kx.rsplit("/", 1)[-1]}.json').write_text(blob)
             record('rs3-rust-wrote-history-blobs', bool(runs) and all(hist_keys.values()), json.dumps(hist_keys)[:500])
-            record('rs3-rust-wrote-visibility-records', len(vis_keys) >= len(runs) > 0, '\n'.join(vis_keys[:10]))
+            record('rs3-rust-wrote-visibility-records', len(vis_keys) >= 4 * len(runs) > 0, '\n'.join(vis_keys[:10]))
             # 2) wait for retention deletion (describe fails once the run left persistence)
             gone = {}
             for wid, rid in runs.items():
