@@ -1,0 +1,8 @@
+{
+  "conclusion": "failure",
+  "headSha": "a0dec2d7a1f0cbf94dd954e59012daed89424001",
+  "status": "completed",
+  "url": "https://github.com/auenkr/cadence-rust/actions/runs/43487649192",
+  "service": "frontend",
+  "watch_exit_code": 0
+}
