@@ -248,6 +248,9 @@ impl StateBuilder {
             }
             state.execution_info.last_first_event_id = first.event_id;
             state.execution_info.next_event_id = last.event_id.saturating_add(1);
+            // Go: mutableState.SetHistoryBuilder(NewHistoryBuilderFromEvents(history, ..)) so the
+            // replicated batch is persisted when the transaction closes.
+            state.history_events = events.to_vec();
             // Go only persists these rows when strong idempotency is enabled.
             // This API has no domain policy input, so never retain fabricated payloads.
             state.insert_workflow_requests.truncate(requests_before_replay);
