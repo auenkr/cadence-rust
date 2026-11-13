@@ -577,21 +577,32 @@ impl NdcWorkflow for EngineNdcWorkflow {
     /// Go `LoadWorkflowExecution`. Requires the lock-owning context; a loaded
     /// state is kept (Go: `if c.mutableState == nil`).
     fn load_workflow_execution(&mut self, task_version: Option<i64>) -> NdcResult<()> {
-        if task_version.is_some() {
-            return Err(NdcError::internal(
-                "TODO(ndc-persistence): load with incoming task version needs StartTransaction decision failover",
-            ));
+        if !self.loaded {
+            let Some(context) = self.context.clone() else {
+                return Err(NdcError::internal("ndc workflow has no context to load from"));
+            };
+            let snapshot = block_on(context.clean_snapshot()).map_err(history_to_ndc)?;
+            self.history_size = snapshot.execution_info.history_size;
+            self.ms = state_from_snapshot(&self.domain_id, &self.execution, self.clock.now(), snapshot)?;
+            self.loaded = true;
         }
-        if self.loaded {
+        // Go `LoadWorkflowExecutionWithTaskVersion`: `StartTransaction(domain, incomingVersion)`.
+        let Some(incoming) = task_version else {
             return Ok(());
-        }
-        let Some(context) = self.context.clone() else {
-            return Err(NdcError::internal("ndc workflow has no context to load from"));
         };
-        let snapshot = block_on(context.clean_snapshot()).map_err(history_to_ndc)?;
-        self.history_size = snapshot.execution_info.history_size;
-        self.ms = state_from_snapshot(&self.domain_id, &self.execution, self.clock.now(), snapshot)?;
-        self.loaded = true;
+        let key = self.write_key();
+        if let Some(version) = self.writer.active_failover_version(&key).map_err(history_to_ndc)? {
+            self.ms.update_current_version(version, false)?;
+        }
+        if self.ms.start_transaction_handle_decision_failover(incoming)? {
+            let now = self.clock.now();
+            self.update_workflow_execution_as_active(now)?;
+            if self.ms.start_transaction_handle_decision_failover(incoming)? {
+                return Err(NdcError::internal(
+                    "workflowExecutionContext counter flushBeforeReady status after loading mutable state from DB",
+                ));
+            }
+        }
         Ok(())
     }
 }
@@ -1028,6 +1039,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn persistence_methods_and_task_version_load_are_explicit_errors() {
         let source = Arc::new(FakeSource::default());
+        source.context("r5");
         let cache = cache(source);
         tokio::task::spawn_blocking(move || {
             let mut w = cache.get_or_create_workflow_execution("d", &exec("r5")).unwrap();
@@ -1042,7 +1054,10 @@ mod tests {
                 )
                 .is_err());
             assert!(w.reapply_events(&[]).is_err());
-            assert!(w.load_workflow_execution(Some(3)).is_err());
+            // Go `LoadWorkflowExecutionWithTaskVersion`: a non-start batch loads and runs
+            // StartTransaction with the incoming version instead of failing.
+            w.load_workflow_execution(Some(3)).unwrap();
+            assert!(w.mutable_state().get_next_event_id() > 0);
             w.release(None);
         })
         .await
