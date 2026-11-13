@@ -424,13 +424,7 @@ impl Handler for HandlerImpl {
 
     async fn record_decision_task_started(&self, request: Option<&RecordDecisionTaskStartedRequest>) -> HResult<RecordDecisionTaskStartedResponse> {
         let r = nil(request)?;
-        let __t0 = std::time::Instant::now();
-        eprintln!("SOAKDBG t={} rdts begin wf={} sched={}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis(), wf_id(&r.workflow_execution), r.schedule_id);
-        let __e = self.prep(false, &r.domain_uuid, wf_id(&r.workflow_execution)).await;
-        eprintln!("SOAKDBG t={} rdts prep wf={} {}ms ok={}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis(), wf_id(&r.workflow_execution), __t0.elapsed().as_millis(), __e.is_ok());
-        let __res = __e?.record_decision_task_started(r).await;
-        eprintln!("SOAKDBG t={} rdts end wf={} {}ms err={:?}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis(), wf_id(&r.workflow_execution), __t0.elapsed().as_millis(), __res.as_ref().err().map(|e| e.to_string()));
-        __res
+        self.prep(false, &r.domain_uuid, wf_id(&r.workflow_execution)).await?.record_decision_task_started(r).await
     }
 
     async fn refresh_workflow_tasks(&self, request: Option<&HistoryRefreshWorkflowTasksRequest>) -> HResult<()> {

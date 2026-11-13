@@ -808,11 +808,8 @@ impl EngineDecisionHandler {
         execution: &WorkflowExecution,
         mut action: impl FnMut(&Arc<EngineMutableState>) -> HResult<Outcome<T>>,
     ) -> HResult<T> {
-        let __t0 = std::time::Instant::now();
         let (context, release) = self.cache.get_or_create(domain_id, execution).await?;
-        eprintln!("SOAKDBG t={} update locked wf={} {}ms", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis(), execution.workflow_id, __t0.elapsed().as_millis());
         let result = self.run(&context, &mut action).await;
-        eprintln!("SOAKDBG t={} update done wf={} {}ms err={:?}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis(), execution.workflow_id, __t0.elapsed().as_millis(), result.as_ref().err().map(|e| e.to_string()));
         release(result.as_ref().err());
         result
     }
@@ -901,12 +898,8 @@ impl DecisionHandler for EngineDecisionHandler {
             .map_err(|_| HistoryError::bad_request("Error deserializing task token."))?;
         let execution = WorkflowExecution { workflow_id: token.workflow_id.clone(), run_id: token.run_id.clone() };
         self.ensure_active_domain(&request.domain_uuid, &execution.workflow_id, &execution.run_id).await?;
-        let __t0 = std::time::Instant::now();
-        let __ms = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
-        eprintln!("SOAKDBG t={} rdtc begin wf={} sched={}", __ms(), execution.workflow_id, token.schedule_id);
         let (context, release) = self.cache.get_or_create(&request.domain_uuid, &execution).await?;
         let result = self.completed_run(&context, &req, token.schedule_id, token.schedule_attempt).await;
-        eprintln!("SOAKDBG t={} rdtc end wf={} {}ms err={:?}", __ms(), execution.workflow_id, __t0.elapsed().as_millis(), result.as_ref().err().map(|e| e.to_string()));
         release(result.as_ref().err());
         result
     }
