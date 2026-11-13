@@ -26,10 +26,10 @@
       "url": "https://github.com/auenkr/cadence-rust/actions/runs/43465041662"
     },
     "matching_mixed": {
-      "conclusion": "",
+      "conclusion": "success",
       "databaseId": 43465066608,
       "headSha": "e7dcc4bedf8a533ff80dc652172c47d1b2989289",
-      "status": "in_progress",
+      "status": "completed",
       "url": "https://github.com/auenkr/cadence-rust/actions/runs/43465066608"
     }
   },

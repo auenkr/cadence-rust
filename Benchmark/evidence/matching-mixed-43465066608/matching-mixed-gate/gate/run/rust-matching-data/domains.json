@@ -1,0 +1,175 @@
+[
+  {
+    "info": {
+      "name": "cadence-system",
+      "status": 0,
+      "description": "Cadence internal system domain",
+      "uuid": "32049b68-7872-4094-8e63-d0dd59896a83"
+    },
+    "configuration": {
+      "workflowExecutionRetentionPeriodInDays": 7,
+      "emitMetric": true,
+      "badBinaries": {
+        "binaries": {}
+      },
+      "isolationGroups": {},
+      "asyncWorkflowConfig": {
+        "enabled": false
+      },
+      "historyArchivalStatus": 0,
+      "visibilityArchivalStatus": 0
+    },
+    "replication": {
+      "activeClusterName": "cluster0",
+      "clusters": [
+        {
+          "clusterName": "cluster0"
+        }
+      ]
+    },
+    "failover_version": -24,
+    "notification_version": 2,
+    "failover_notification_version": 0,
+    "is_global_domain": false,
+    "archival_bucket": "",
+    "failover_audit": [],
+    "config_version": 0,
+    "last_updated_time_nanos": 0,
+    "failover_end_time": null,
+    "previous_failover_version": -1,
+    "isolation_groups": {},
+    "async_workflow_config": {
+      "enabled": false
+    }
+  },
+  {
+    "info": {
+      "name": "default",
+      "status": 0,
+      "description": "Example Domain",
+      "uuid": "9374de4d-f5d0-4c93-824b-8c1953d65c57"
+    },
+    "configuration": {
+      "workflowExecutionRetentionPeriodInDays": 7,
+      "emitMetric": false,
+      "badBinaries": {
+        "binaries": {}
+      },
+      "isolationGroups": {},
+      "asyncWorkflowConfig": {
+        "enabled": false
+      },
+      "historyArchivalStatus": 0,
+      "visibilityArchivalStatus": 0
+    },
+    "replication": {
+      "activeClusterName": "cluster0",
+      "clusters": [
+        {
+          "clusterName": "cluster0"
+        }
+      ]
+    },
+    "failover_version": -24,
+    "notification_version": 1,
+    "failover_notification_version": 0,
+    "is_global_domain": true,
+    "archival_bucket": "",
+    "failover_audit": [],
+    "config_version": 0,
+    "last_updated_time_nanos": 0,
+    "failover_end_time": null,
+    "previous_failover_version": -1,
+    "isolation_groups": {},
+    "async_workflow_config": {
+      "enabled": false
+    }
+  },
+  {
+    "info": {
+      "name": "service-compat-b08ef1e5-a1ba-499d-b654-9b7b97ce84df",
+      "status": 0,
+      "uuid": "01a1d5cd-4bcf-7acf-906b-0698249994e8"
+    },
+    "configuration": {
+      "workflowExecutionRetentionPeriodInDays": 3,
+      "emitMetric": true,
+      "badBinaries": {
+        "binaries": {}
+      },
+      "isolationGroups": {},
+      "asyncWorkflowConfig": {
+        "enabled": false
+      },
+      "historyArchivalStatus": 1,
+      "historyArchivalURI": "file:///home/runner/work/cadence-rust/cadence-rust/out/gate/run/history-archive",
+      "visibilityArchivalStatus": 1,
+      "visibilityArchivalURI": "file:///home/runner/work/cadence-rust/cadence-rust/out/gate/run/visibility-archive"
+    },
+    "replication": {
+      "activeClusterName": "cluster0",
+      "clusters": [
+        {
+          "clusterName": "cluster0"
+        }
+      ]
+    },
+    "failover_version": -24,
+    "notification_version": 4,
+    "failover_notification_version": 0,
+    "is_global_domain": false,
+    "archival_bucket": "",
+    "failover_audit": [],
+    "config_version": 0,
+    "last_updated_time_nanos": 1794588363727712086,
+    "failover_end_time": null,
+    "previous_failover_version": -1,
+    "isolation_groups": {},
+    "async_workflow_config": {
+      "enabled": false
+    }
+  },
+  {
+    "info": {
+      "name": "cadence-batcher",
+      "status": 0,
+      "description": "Cadence internal system domain",
+      "uuid": "3116607e-419b-4783-85fc-47726a4c3fe9"
+    },
+    "configuration": {
+      "workflowExecutionRetentionPeriodInDays": 7,
+      "emitMetric": true,
+      "badBinaries": {
+        "binaries": {}
+      },
+      "isolationGroups": {},
+      "asyncWorkflowConfig": {
+        "enabled": false
+      },
+      "historyArchivalStatus": 0,
+      "visibilityArchivalStatus": 0
+    },
+    "replication": {
+      "activeClusterName": "cluster0",
+      "clusters": [
+        {
+          "clusterName": "cluster0"
+        }
+      ]
+    },
+    "failover_version": -24,
+    "notification_version": 3,
+    "failover_notification_version": 0,
+    "is_global_domain": false,
+    "archival_bucket": "",
+    "failover_audit": [],
+    "config_version": 0,
+    "last_updated_time_nanos": 0,
+    "failover_end_time": null,
+    "previous_failover_version": -1,
+    "isolation_groups": {},
+    "async_workflow_config": {
+      "enabled": false
+    }
+  }
+]

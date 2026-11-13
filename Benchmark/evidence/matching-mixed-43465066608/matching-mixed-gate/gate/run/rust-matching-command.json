@@ -1,0 +1,20 @@
+[
+  "/tmp/cadence-cargo-target-mysql-43465066608/debug/cadence-matching",
+  "start",
+  "--config",
+  "/home/runner/work/cadence-rust/cadence-rust/out/gate/run/rust-matching.yaml",
+  "--root",
+  "/home/runner/work/cadence-rust/cadence-rust/out/gate/run",
+  "--services",
+  "matching",
+  "--port",
+  "0",
+  "--history-grpc-port",
+  "27425",
+  "--matching-grpc-port",
+  "13004",
+  "--matching-tchannel-port",
+  "20392",
+  "--data-dir",
+  "/home/runner/work/cadence-rust/cadence-rust/out/gate/run/rust-matching-data"
+]
