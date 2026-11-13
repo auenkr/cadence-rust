@@ -3292,7 +3292,7 @@ mod dynamic_config_admin_tests {
 /// Go client/history `executeWithRedirect`: on ShardOwnershipLost the call is
 /// retried once against the owner named in the error.
 #[allow(clippy::result_large_err)]
-async fn shard_redirect<Req: Clone, Resp, F, Fut>(
+pub(crate) async fn shard_redirect<Req: Clone, Resp, F, Fut>(
     state: &AppState,
     shard: i32,
     request: &Req,
