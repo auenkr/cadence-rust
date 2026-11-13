@@ -47,6 +47,13 @@ struct ShardUdt {
     domain_notification_version: Option<i64>,
 }
 
+/// Read-side view of the `shard` UDT: Go writes empty (zero-byte) timestamps for fields like `timer_ack_level`,
+/// which a typed timestamp rejects; History only needs `range_id` (the `data` blob is authoritative).
+#[derive(Debug, Clone, Default, scylla::DeserializeValue)]
+struct ShardUdtRead {
+    range_id: Option<i64>,
+}
+
 fn visibility_ts() -> DateTime<Utc> {
     DateTime::<Utc>::from_timestamp_millis(DEFAULT_VISIBILITY_MS).expect("valid default visibility timestamp")
 }
@@ -195,7 +202,7 @@ impl ShardStore for CassandraShardStore {
                 .map_err(internal)?;
             let rows = result.into_rows_result().map_err(internal)?;
             let (udt, data, encoding, range_id) = rows
-                .maybe_first_row::<(Option<ShardUdt>, Option<Vec<u8>>, Option<String>, Option<i64>)>()
+                .maybe_first_row::<(Option<ShardUdtRead>, Option<Vec<u8>>, Option<String>, Option<i64>)>()
                 .map_err(internal)?
                 .ok_or_else(|| E::EntityNotExists(format!("shard {shard_id} does not exist")))?;
             let column_range = range_id.unwrap_or_default();
