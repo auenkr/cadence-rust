@@ -544,7 +544,8 @@ impl EngineNdcWriter {
         let id_shard = shard.clone();
         let store = SqlWorkflowContextStore::new(
             self.core.executions.clone(),
-            SqlHistoryManager::new(self.core.history_v2.clone(), shard.shard_id()),
+            SqlHistoryManager::new(self.core.history_v2.clone(), shard.shard_id())
+                .with_transaction_size_limit(self.core.transaction_size_limit.clone()),
             self.core.domains.clone(),
             Arc::new(move || range_shard.range_id()),
             Arc::new(move || id_shard.generate_task_id().map_err(shard_err(id_shard.shard_id()))),

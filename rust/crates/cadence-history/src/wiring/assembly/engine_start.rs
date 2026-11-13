@@ -310,7 +310,8 @@ pub(super) async fn append_new_branch(
     }
     let last = ids.last().copied();
     let transaction_id = shard.generate_task_id().map_err(shard_err(shard.shard_id()))?;
-    let manager = SqlHistoryManager::new(core.history_v2.clone(), shard.shard_id());
+    let manager = SqlHistoryManager::new(core.history_v2.clone(), shard.shard_id())
+        .with_transaction_size_limit(core.transaction_size_limit.clone());
     let blob = manager
         .append_history_nodes(&txn.branch_token, &txn.events, transaction_id, true, info)
         .await
