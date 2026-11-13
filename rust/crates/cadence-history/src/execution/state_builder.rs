@@ -137,6 +137,8 @@ impl StateBuilder {
                             event,
                             false,
                         )?;
+                        // Go: mutableState.SetHistoryTree(runID) right after the started event.
+                        state.set_history_tree(&workflow_execution.run_id)?;
                     }
                     Some(EventType::DecisionTaskScheduled) => {
                         let a = event.decision_task_scheduled_event_attributes.as_ref().ok_or(StateBuilderError::InvalidEvent { event_type: event.event_type, event_id: event.event_id })?;
@@ -501,6 +503,10 @@ mod typed_replay_tests {
         };
         StateBuilder::apply_events_typed(&mut state, "domain-id", "request", &workflow, &[start]).unwrap();
         assert_eq!(state.execution_info.domain_id, "domain-id");
+        // Go SetHistoryTree(runID): started event installs a fresh branch token for the run.
+        let token = &state.version_histories.as_ref().unwrap().histories[0].branch_token;
+        assert_ne!(token, &vec![1u8]);
+        assert!(!token.is_empty());
         assert_eq!(state.execution_info.create_request_id, "from-history");
         assert_eq!(state.execution_info.run_id, "run");
 
