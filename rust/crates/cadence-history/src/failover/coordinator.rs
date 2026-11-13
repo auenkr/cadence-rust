@@ -310,6 +310,7 @@ impl Coordinator for CoordinatorImpl {
     }
 
     fn notify_failover_markers(&self, shard_id: i32, markers: Vec<FailoverMarkerAttributes>) {
+        tracing::info!(shard_id, markers = markers.len(), "failover-marker-coordinator-notify");
         // Go blocks on a full channel; here we await via a spawned send.
         let tx = self.notification_tx.clone();
         let req = NotificationRequest { shard_id, markers };
@@ -321,6 +322,7 @@ impl Coordinator for CoordinatorImpl {
     }
 
     fn receive_failover_markers(&self, shard_ids: Vec<i32>, marker: FailoverMarkerAttributes) {
+        tracing::info!(?shard_ids, domain_id = ?marker.domain_id, "failover-marker-coordinator-receive");
         let tx = self.receive_tx.clone();
         let req = ReceiveRequest { shard_ids, marker };
         if let Err(mpsc::error::TrySendError::Full(req)) = tx.try_send(req) {

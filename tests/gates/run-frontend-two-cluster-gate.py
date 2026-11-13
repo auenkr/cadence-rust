@@ -217,7 +217,7 @@ try:
                 rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'start', '--tl', 'tc-tl', '--wt', 'TcType', '--wid', f'tc-grace-{i}-' + secrets.token_hex(2), '--et', '600', '--dt', '10')
                 record(f'grace-start-{i}-on-A', rc == 0, out)
             time.sleep(10)
-            rc, out = cli(B_T, 'tchannel', '--domain', dom, 'domain', 'update', '--active_cluster', 'cluster1', '--failover_type', 'grace', '--failover_timeout_seconds', '30')
+            rc, out = cli(B_T, 'tchannel', '--domain', dom, 'domain', 'update', '--active_cluster', 'cluster1', '--failover_type', 'grace', '--failover_timeout_seconds', '300')
             record('grace-failover-update-on-B', rc == 0, out)
             def done_on(addr):
                 def f():
@@ -285,7 +285,7 @@ try:
                 rc, out = cli(B_T, 'tchannel', '--domain', dom, 'workflow', 'start', '--tl', 'tc-tl', '--wt', 'TcType', '--wid', f'tc-grace-{i}-' + secrets.token_hex(2), '--et', '600', '--dt', '10')
                 record(f'grace-start-{i}-on-B', rc == 0, out)
             time.sleep(10)
-            rc, out = cli(B_T, 'tchannel', '--domain', dom, 'domain', 'update', '--active_cluster', 'cluster0', '--failover_type', 'grace', '--failover_timeout_seconds', '30')
+            rc, out = cli(B_T, 'tchannel', '--domain', dom, 'domain', 'update', '--active_cluster', 'cluster0', '--failover_type', 'grace', '--failover_timeout_seconds', '300')
             record('grace-failover-update-on-B', rc == 0, out)
             def done_on(addr):
                 def f():

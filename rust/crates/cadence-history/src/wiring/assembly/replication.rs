@@ -113,8 +113,11 @@ impl ReplShard for ReplicationShardAdapter {
         let m = FailoverMarker { domain_id, failover_version: version, creation_time: marker.creation_time.unwrap_or_default() };
         // Go AddingPendingFailoverMarker: drop markers that are already stale.
         match marker_stale_by_cache(&self.deps.domains, &self.deps.current_cluster, &m) {
-            Ok(true) => return Ok(()),
-            Ok(false) => {}
+            Ok(true) => {
+                tracing::info!(domain_id = %m.domain_id, failover_version = m.failover_version, "failover-marker-dropped-stale-on-add");
+                return Ok(());
+            }
+            Ok(false) => tracing::info!(domain_id = %m.domain_id, failover_version = m.failover_version, "failover-marker-pending-added"),
             Err(e) => return Err(ReplicationError::Other(e.to_string())),
         }
         self.deps
