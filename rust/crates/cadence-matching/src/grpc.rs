@@ -616,7 +616,7 @@ impl Frontend {
             .layer(axum::extract::DefaultBodyLimit::disable())
             .oneshot(request)
             .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .unwrap_or_else(|e: std::convert::Infallible| match e {});
         let status = response.status();
         let bytes = to_bytes(response.into_body(), usize::MAX)
             .await
