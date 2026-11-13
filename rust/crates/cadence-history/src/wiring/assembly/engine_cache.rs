@@ -417,6 +417,19 @@ impl EngineExecutionContext {
                 data: task_blob(Encoding::ThriftRW.encode(&s))?,
             });
         }
+        let mut new_snapshot = new_snapshot;
+        crate::wiring::assembly::engine_close::merge_continue_as_new_replication(
+            &mut txn.replication,
+            txn.mutation.execution_info.close_status,
+            &mut new_snapshot,
+        )?;
+        let replication_tasks =
+            crate::wiring::assembly::engine_start::replication_rows(core, &mut txn.replication, &mut max_read_level)?;
+        if !replication_tasks.is_empty() {
+            txn.mutation
+                .tasks_by_category
+                .insert(pc::HistoryTaskCategory { category_type: 1, category_id: 3 }, replication_tasks);
+        }
         if !transfer_tasks.is_empty() {
             txn.mutation
                 .tasks_by_category

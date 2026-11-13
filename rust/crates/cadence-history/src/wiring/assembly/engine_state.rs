@@ -204,6 +204,8 @@ pub(super) struct Inner {
     pub(super) activities: BTreeMap<i64, ActivityInfo>,
     pub(super) pc_acts: BTreeMap<i64, pc::ActivityInfo>,
     pub(super) upsert_acts: BTreeSet<i64>,
+    /// Go `syncActivityTasks`: activities to sync to the remote cluster on the next active close.
+    pub(super) sync_activity_tasks: BTreeSet<i64>,
     pub(super) deleted_activities: HashSet<i64>,
     pub(super) heartbeats: BTreeMap<i64, pc::ActivityHeartbeat>,
     /// User timers keyed by timer id (`TimerInfo.task_id` carries Go's `TaskStatus`).
@@ -464,6 +466,7 @@ impl EngineMutableState {
             activities,
             pc_acts,
             upsert_acts: BTreeSet::new(),
+            sync_activity_tasks: BTreeSet::new(),
             deleted_activities: HashSet::new(),
             heartbeats: snapshot.activity_heartbeats.clone(),
             timers,
@@ -772,7 +775,12 @@ impl MutableState for EngineMutableState {
                 info.schedule_id,
                 pc::ActivityHeartbeat { details: request.details.clone(), updated_time_unix_nanos: now },
             );
+            let version = g.current_version;
+            if let Some(a) = g.pc_acts.get_mut(&info.schedule_id) {
+                a.version = version;
+            }
             g.refresh_activity(info.schedule_id);
+            g.sync_activity_tasks.insert(info.schedule_id);
         }
     }
     fn add_workflow_execution_cancel_requested_event(&self, cause: &str, request: &HistoryRequestCancelWorkflowExecutionRequest) -> HResult<()> {
