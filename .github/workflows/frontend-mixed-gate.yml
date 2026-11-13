@@ -44,7 +44,7 @@ on:
         description: With two_cluster+rust_history, run Rust History on the standby (A, default) or active (B, source of replication; A all Go) cluster
         default: standby
       two_history_graceful:
-        description: With two_cluster+rust_history+side=active, run two Rust History hosts on active B and a graceful failover asserting cross-host failover markers
+        description: With two_cluster+rust_history (side standby), run two Rust History hosts on cluster A and a graceful failover to A asserting cross-host failover markers
         type: boolean
         default: false
       rust_ref:
