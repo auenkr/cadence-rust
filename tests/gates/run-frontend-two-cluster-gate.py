@@ -28,6 +28,7 @@ ap.add_argument('--rust-binary', type=Path, required=True)
 ap.add_argument('--go-server', type=Path, required=True)
 ap.add_argument('--go-cli', type=Path, required=True)
 ap.add_argument('--rust-root', type=Path, required=True)
+ap.add_argument('--database', choices=['mysql', 'postgres', 'cassandra'], default='mysql')
 ap.add_argument('--rust-history-binary', type=Path, help='run cluster A History as Rust History (replication from Go cluster B)')
 ap.add_argument('--rust-history-side', choices=['standby', 'active'], default='standby', help='with --rust-history-binary: Rust History on standby cluster A (default) or on active cluster B (A all Go)')
 ap.add_argument('--two-history-graceful', action='store_true', help='with --rust-history-side active: run TWO Rust History hosts on active cluster B, do a graceful failover to A and assert cross-host failover markers')
@@ -36,9 +37,13 @@ if args.two_history_graceful and not (args.rust_history_binary and args.rust_his
     ap.error('--two-history-graceful needs --rust-history-binary and --rust-history-side active')
 root = Path(__file__).resolve().parents[2]
 work = args.out.resolve(); work.mkdir(parents=True, exist_ok=True)
-my_addr = os.environ.get('CADENCE_MYSQL_ADDR', '127.0.0.1:3306')
-my_user = os.environ.get('CADENCE_MYSQL_USER', 'root')
-my_pass = os.environ.get('CADENCE_MYSQL_PASSWORD', 'cadence')
+plugin = args.database
+_pfx = 'CADENCE_' + plugin.upper()
+my_addr = os.environ.get(_pfx + '_ADDR', '127.0.0.1:5432' if plugin == 'postgres' else '127.0.0.1:3306')
+my_user = os.environ.get(_pfx + '_USER', 'postgres' if plugin == 'postgres' else 'root')
+my_pass = os.environ.get(_pfx + '_PASSWORD', 'cadence')
+cass_host = os.environ.get('CADENCE_CASSANDRA_CONTACT_POINTS', '127.0.0.1')
+cass_port = int(os.environ.get('CADENCE_CASSANDRA_PORT', '9042'))
 
 keys = ['A_FE', 'A_FE_GRPC', 'A_HIST', 'A_HIST_GRPC', 'A_WORKER', 'A_RMATCH', 'A_RMATCH_GRPC', 'A_MATCH', 'A_MATCH_GRPC',
         'A_PPROF1', 'A_PPROF2', 'A_PPROF3', 'A_PPROF4',
@@ -60,12 +65,20 @@ if 'worker.enableScheduler' not in dyn:
 (work / 'rust-dynamic-config.yaml').write_text(dyn + '\nsystem.enableGRPCOutbound:\n  - value: true\n')
 
 def persistence(db, vis):
+    if plugin == 'cassandra':
+        def cstore(name, ks):
+            return (f'    {name}:\n      nosql:\n        pluginName: cassandra\n'
+                    f'        hosts: {json.dumps(cass_host)}\n        port: {cass_port}\n'
+                    f'        keyspace: {json.dumps(ks)}\n        connectTimeout: 2s\n        timeout: 5s\n'
+                    '        consistency: LOCAL_QUORUM\n        serialConsistency: LOCAL_SERIAL\n')
+        return ('persistence:\n  defaultStore: cass-default\n  visibilityStore: cass-visibility\n  numHistoryShards: 4\n  datastores:\n'
+                + cstore('cass-default', db) + cstore('cass-visibility', vis))
     def store(name, d, conns):
-        return (f'    {name}:\n      sql:\n        pluginName: mysql\n        databaseName: {json.dumps(d)}\n'
+        return (f'    {name}:\n      sql:\n        pluginName: {plugin}\n        databaseName: {json.dumps(d)}\n'
                 f'        connectAddr: {json.dumps(my_addr)}\n        connectProtocol: tcp\n        user: {json.dumps(my_user)}\n'
                 f'        password: {json.dumps(my_pass)}\n        nShards: 1\n        maxConns: {conns}\n        maxIdleConns: {conns}\n')
-    return ('persistence:\n  defaultStore: mysql-default\n  visibilityStore: mysql-visibility\n  numHistoryShards: 4\n  datastores:\n'
-            + store('mysql-default', db, 20) + store('mysql-visibility', vis, 2))
+    return (f'persistence:\n  defaultStore: {plugin}-default\n  visibilityStore: {plugin}-visibility\n  numHistoryShards: 4\n  datastores:\n'
+            + store(plugin + '-default', db, 20) + store(plugin + '-visibility', vis, 2))
 
 def group_block(current, a_transport, b_transport, policy, target=''):
     """clusterGroupMetadata for a process; Go always sees gRPC, Rust Frontend gets the variant."""
@@ -94,7 +107,13 @@ def go_config(dirname, prefix, db, vis, seeds, current):
     text = re.sub(r'(?ms)^clusterGroupMetadata:.*?(?=^archival:)', group_block(current, 'grpc', 'grpc', 'noop'), text, count=1)
     text = text.replace('/tmp/cadence_archival/development', str(work / 'arch-h')).replace('/tmp/cadence_vis_archival/development', str(work / 'arch-v')).replace('/tmp/blobstore', str(work / 'blob'))
     (d / 'development.yaml').write_text(text)
-    (d / 'development_mysql.yaml').write_text(persistence(db, vis))
+    if plugin == 'cassandra':
+        g = text.replace('hosts: "127.0.0.1"', f'hosts: {json.dumps(cass_host)}')
+        g = g.replace('keyspace: "cadence_visibility"', f'keyspace: {json.dumps(vis)}').replace('keyspace: "cadence"', f'keyspace: {json.dumps(db)}')
+        g = re.sub(r'(?m)^(\s+port:) 9042$', rf'\1 {cass_port}', g)
+        (d / 'development_cassandra.yaml').write_text(g)
+    else:
+        (d / f'development_{plugin}.yaml').write_text(persistence(db, vis))
     return d, text
 
 a_seeds = ', '.join(f'"127.0.0.1:{P[k]}"' for k in ['A_FE', 'A_HIST', 'A_WORKER', 'A_MATCH' if (args.rust_history_binary and args.rust_history_side == 'active') else 'A_RMATCH'])
@@ -182,8 +201,8 @@ try:
     (work / 'rust-binary.sha256').write_text(subprocess.run(['sha256sum', str(args.rust_binary)], capture_output=True, text=True).stdout)
     if args.rust_history_binary and args.rust_history_side == 'active':
         # Rust History is the ACTIVE source (cluster B); cluster A is all Go (standby).
-        start('go-a', [args.go_server, '--config', a_dir, '--zone', 'mysql', 'start', '--auto-setup'])
-        start('go-b-fmw', [args.go_server, '--config', b_dir, '--zone', 'mysql', 'start', '--auto-setup', '--services', 'frontend,matching,worker'])
+        start('go-a', [args.go_server, '--config', a_dir, '--zone', plugin, 'start', '--auto-setup'])
+        start('go-b-fmw', [args.go_server, '--config', b_dir, '--zone', plugin, 'start', '--auto-setup', '--services', 'frontend,matching,worker'])
         ok = wait_port(P['A_FE_GRPC'], 300, 'go-a') and wait_port(P['B_FE_GRPC'], 300, 'go-b-fmw') and wait_port(P['B_WORKER'], 300, 'go-b-fmw')
         (work / 'rust-history.yaml').write_text(rust_yaml('noop', '', 'grpc', 'B_', ('cadence_b', 'cadence_b_visibility'), b_seeds, 'cluster1'))
         (work / 'rust-history-binary.sha256').write_text(subprocess.run(['sha256sum', str(args.rust_history_binary)], capture_output=True, text=True).stdout)
@@ -322,8 +341,8 @@ try:
         for n in ['go-a', 'go-b-fmw', 'rust-history'] + (['rust-history-2'] if args.two_history_graceful else []):
             record(f'{n}-alive-at-end', procs[n].poll() is None, f'exit={procs[n].poll()}')
         raise SystemExit(0)
-    start('go-b', [args.go_server, '--config', b_dir, '--zone', 'mysql', 'start', '--auto-setup'])
-    start('go-a-history-worker', [args.go_server, '--config', a_dir, '--zone', 'mysql', 'start', '--auto-setup', '--services', 'worker' if args.rust_history_binary else 'history,worker'])
+    start('go-b', [args.go_server, '--config', b_dir, '--zone', plugin, 'start', '--auto-setup'])
+    start('go-a-history-worker', [args.go_server, '--config', a_dir, '--zone', plugin, 'start', '--auto-setup', '--services', 'worker' if args.rust_history_binary else 'history,worker'])
     if args.rust_history_binary:
         # schema is created by go-a's --auto-setup before its worker listens; then Rust History serves cluster A
         ok = wait_port(P['B_FE_GRPC'], 300, 'go-b') and wait_port(P['A_WORKER'], 300, 'go-a-history-worker')
