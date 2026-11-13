@@ -2,7 +2,8 @@
 //! marker notifier and the shard / history-client adapters they need.
 //!
 //! Gaps (documented, see memory/history-port-wiring-20261105.md, Unit D2/D3):
-//! * `LocalFailoverHistoryClient` delivers `NotifyFailoverMarkers` tokens to the
+//! * `LocalFailoverHistoryClient` is only the fallback when no client is given;
+//!   production wiring uses `failover_client::RoutingFailoverHistoryClient` (Go routing).
 //!   coordinator of this process only. Go routes tokens through the history
 //!   client to the host owning each shard; multi-host routing needs the history
 //!   RPC client (not available yet).

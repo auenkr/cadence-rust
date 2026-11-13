@@ -206,6 +206,7 @@ impl HistoryEnv {
             persistence.executions.clone(),
             config.number_of_shards.clamp(1, i64::from(i32::MAX)) as i32,
         ));
+        let membership = Arc::new(MembershipResolver::new(who_am_i.clone(), hosts));
         let failover_coordinator = super::failover::build_failover_coordinator(super::failover::FailoverDeps {
             domain_manager: Arc::new(crate::wiring::resources::failover_domain_manager::PersistenceDomainManager::new(
                 domain_persistence,
@@ -214,13 +215,17 @@ impl HistoryEnv {
             domain_cache: domain_cache.clone(),
             config: config_adapter.clone(),
             metrics: metrics.clone(),
-            history_client: None,
+            history_client: Some(super::failover_client::RoutingFailoverHistoryClient::new(Arc::new(
+                super::failover_client::MembershipPeerResolver {
+                    membership: membership.clone(),
+                    number_of_shards: config.number_of_shards.clamp(1, i64::from(i32::MAX)) as i32,
+                },
+            ))),
         })
         .coordinator;
         let dlq_host_limiter = crate::taskdlq::new_host_limiter(
             (config.history_task_dlq_processor_host_concurrency)().clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
         );
-        let membership = Arc::new(MembershipResolver::new(who_am_i.clone(), hosts));
         let cluster = Arc::new(ClusterMetadataImpl::new(cluster));
         let archiver_client = Arc::new(super::archiver_wiring::build_client(
             &config,
