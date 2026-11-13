@@ -341,8 +341,32 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
     }
 
     fn write_failed(&mut self, error: &HistoryError) {
-        self.pending = PendingTasks::default();
+        let pending = std::mem::take(&mut self.pending);
         self.task_write_gate = None;
+        // Go `taskNotifier.isNotifyTaskNeeded`: an ambiguous failure (the write may have
+        // landed) still wakes the queues with `PersistenceError`; definitive failures
+        // are only logged in shadow mode.
+        let definitive = matches!(
+            error,
+            HistoryError::DuplicateRequest { .. }
+                | HistoryError::PersistenceAlreadyStarted(_)
+                | HistoryError::CurrentWorkflowConditionFailed(_)
+                | HistoryError::ConditionFailed(_)
+                | HistoryError::PersistenceShardOwnershipLost { .. }
+        );
+        if !definitive {
+            self.core.notify_tasks_with(&pending.transfer, &pending.timer, true);
+        } else {
+            let (timer_shadow, transfer_shadow) = (self.core.cached_queue_reader_shadow)();
+            let timer_ids: Vec<i64> = if timer_shadow { pending.timer.iter().map(|t| t.task_id).collect() } else { vec![] };
+            let transfer_ids: Vec<i64> = if transfer_shadow { pending.transfer.iter().map(|t| t.task_id).collect() } else { vec![] };
+            if !timer_ids.is_empty() || !transfer_ids.is_empty() {
+                tracing::info!(
+                    error = %error, dropped_timer_task_ids = ?timer_ids, dropped_transfer_task_ids = ?transfer_ids,
+                    "notify tasks dropped due to persistence error"
+                );
+            }
+        }
         if matches!(error, HistoryError::PersistenceShardOwnershipLost { .. }) {
             self.core.shard.close_shard(None);
         }

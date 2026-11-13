@@ -210,29 +210,48 @@ impl EngineExecutionContext {
             return Ok(state);
         }
         let core = &self.core;
-        let snapshot = core
-            .executions
-            .get_workflow_execution(
-                core.shard.shard_id(),
-                self.domain_id.clone(),
-                self.execution.workflow_id.clone(),
-                self.execution.run_id.clone(),
-                core.shard.range_id(),
-            )
-            .await
-            .map_err(to_history_error)?;
-        let domain = core.domains.get_domain_by_id(&self.domain_id)?;
-        let ttl = (core.sticky_ttl_nanos)(&domain.info.name);
-        let clock = core.clock.clone();
-        let state = Arc::new(EngineMutableState::from_snapshot(
-            snapshot,
-            (*domain).clone(),
-            ttl,
-            Arc::new(move || clock.now()),
-        )?
-        .with_params((core.state_params)(&self.domain_id)));
-        // Go `Load` checksum invalidation + `VerifyAndRepairWorkflowIfNeeded` detection.
-        state.verify_loaded_checksum(core);
+        // Go `LoadWorkflowExecutionWithTaskVersion`: up to `checksumErrorRetryCount` (3) load +
+        // verify/repair attempts; a successful repair reloads fresh state from the DB.
+        const CHECKSUM_ERROR_RETRY_COUNT: usize = 3;
+        let mut attempt = 0;
+        let state = loop {
+            if attempt == CHECKSUM_ERROR_RETRY_COUNT {
+                return Err(HistoryError::internal("mutable state could not be loaded after multiple attempts"));
+            }
+            let snapshot = core
+                .executions
+                .get_workflow_execution(
+                    core.shard.shard_id(),
+                    self.domain_id.clone(),
+                    self.execution.workflow_id.clone(),
+                    self.execution.run_id.clone(),
+                    core.shard.range_id(),
+                )
+                .await
+                .map_err(to_history_error)?;
+            let domain = core.domains.get_domain_by_id(&self.domain_id)?;
+            let ttl = (core.sticky_ttl_nanos)(&domain.info.name);
+            let clock = core.clock.clone();
+            let state = Arc::new(EngineMutableState::from_snapshot(
+                snapshot,
+                (*domain).clone(),
+                ttl,
+                Arc::new(move || clock.now()),
+            )?
+            .with_params((core.state_params)(&self.domain_id)));
+            // Go `Load` checksum invalidation + `VerifyAndRepairWorkflowIfNeeded`.
+            let outcome = state.verify_loaded_checksum(core);
+            if outcome == super::engine_checksum::ChecksumLoadOutcome::Mismatch
+                && state.params.enable_corruption_auto_repair
+            {
+                if let Some(persisted) = state.persisted_checksum() {
+                    state.repair_workflow(core, &persisted).await?;
+                    attempt += 1;
+                    continue;
+                }
+            }
+            break state;
+        };
         *self.state.lock().unwrap() = Some(state.clone());
         Ok(state)
     }

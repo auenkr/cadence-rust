@@ -444,7 +444,7 @@ impl NdcStateRebuilder for SqlNdcStateRebuilder {
         now_nanos: i64,
         base_domain_id: &str,
         base_workflow_id: &str,
-        _base_run_id: &str,
+        base_run_id: &str,
         base_branch_token: &[u8],
         base_last_event_id: i64,
         base_last_event_version: i64,
@@ -452,6 +452,39 @@ impl NdcStateRebuilder for SqlNdcStateRebuilder {
         target_branch_token: &dyn Fn() -> NdcResult<Vec<u8>>,
         request_id: &str,
     ) -> NdcResult<(Box<dyn NdcMutableState>, i64)> {
+        let (state, size) = self.rebuild_owned(
+            now_nanos,
+            base_domain_id,
+            base_workflow_id,
+            base_run_id,
+            base_branch_token,
+            base_last_event_id,
+            base_last_event_version,
+            target_run_id,
+            target_branch_token,
+            request_id,
+        )?;
+        Ok((Box::new(state), size))
+    }
+}
+
+impl SqlNdcStateRebuilder {
+    /// Same as the trait `rebuild` but returns the concrete state (Go
+    /// `workflowRepairerImpl.repairViaRebuild` needs the typed builder).
+    #[allow(clippy::too_many_arguments)]
+    pub fn rebuild_owned(
+        &self,
+        now_nanos: i64,
+        base_domain_id: &str,
+        base_workflow_id: &str,
+        _base_run_id: &str,
+        base_branch_token: &[u8],
+        base_last_event_id: i64,
+        base_last_event_version: i64,
+        target_run_id: &str,
+        target_branch_token: &dyn Fn() -> NdcResult<Vec<u8>>,
+        request_id: &str,
+    ) -> NdcResult<(OwnedNdcMutableState, i64)> {
         let target = WorkflowExecutionKey {
             domain_id: base_domain_id.to_string(),
             workflow_id: base_workflow_id.to_string(),
@@ -470,7 +503,7 @@ impl NdcStateRebuilder for SqlNdcStateRebuilder {
             },
             target_branch_token,
         )?;
-        Ok((Box::new(state), size))
+        Ok((state, size))
     }
 }
 
