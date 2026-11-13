@@ -19,6 +19,12 @@ class PipelineTests(unittest.TestCase):
         go,rust=deployments('go'),deployments('rust')
         self.assertEqual([k for k in go if go[k]!=rust[k]],['matching'])
 
+    def test_history_only(self):
+        go,rust=deployments('go','history'),deployments('rust','history')
+        self.assertEqual([k for k in go if go[k]!=rust[k]],['history'])
+        self.assertEqual(rust['matching'],'cadence-go:ci')
+        self.assertEqual(rust['frontend'],'cadence-go:ci')
+
     def test_missing_duplicate_or_wrong_results_rejected(self):
         for rows in ([],[self.row,self.row],[dict(self.row,correct=False)],
                      [dict(self.row,generator_dropped=True)],[dict(self.row,error='timeout')]):

@@ -121,7 +121,7 @@ def main(path):
                              'Resources include bounded workflow drain and history audit after arrivals stop.',
                              'Full protocol requires >=3 pairs, 600s warmup, 1800s measure and missing metric collectors.'])
     (root/'report.json').write_text(json.dumps(report,indent=2)+'\n')
-    lines=['# Matching one-activity fixed-arrival benchmark','', 'Pipeline evidence only; no migration performance claim.','',
+    lines=[f"# {manifest.get('service', 'matching').title()} one-activity fixed-arrival benchmark",'', 'Pipeline evidence only; no migration performance claim.','',
            '| Run | starts/s | completions/s | outstanding at arrival end | completion p99 ms | activity STS p99 ms |',
            '|---|---:|---:|---:|---:|---:|']
     for key,r in runs.items():lines.append(f"| {key} | {r['successful_starts_per_second']:.3f} | {r['completions_per_second']:.3f} | {r['outstanding_at_arrival_end']} | {r['latency_ms']['completion_ms']['p99']:.3f} | {r['latency_ms']['activity_schedule_to_start_ms']['p99']:.3f} |")

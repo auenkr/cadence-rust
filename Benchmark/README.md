@@ -1,8 +1,13 @@
 # Repeatable SDK benchmark
 
-The initial gate compares **All Go** against **Rust Matching + Go Frontend/History**.
+The gate compares **All Go** against one Rust service at a time: Matching
+(with Go Frontend/History) or History (with Go Frontend/Matching).
 Everything new lives here except GitHub's required workflow entry points.
-This benchmark is independent of the older closed-loop Frontend+Matching harness.
+The `--service history` lane builds the standalone `cadence-history` executable
+using `Benchmark/Dockerfile` and installs it at the drop-in server path. Both
+lanes preserve the Go image layout, schema helper and configuration. `source_ref`
+can pin a migrated implementation independently of the harness; the manifest
+records both source and harness commits. This benchmark is independent of the older closed-loop Frontend+Matching harness.
 Do not combine its numbers with those historical results.
 
 ## Initial pipeline
@@ -108,8 +113,7 @@ No speedup claim is enabled by this initial report. Before performance conclusio
    signals/queries, large histories/payloads, failures/retries/timeouts. These are
    specified, **not implemented**, and must pass correctness before timing.
 4. Add Frontend-only, History-only and all-Rust arms, preserving the Go system
-   Worker until its own replacement is explicitly benchmarked. The initial runner
-   intentionally allows only the two Matching arms.
+   Worker until its own replacement is explicitly benchmarked. The runner currently supports Matching-only and History-only comparisons.
 5. Implement stepped open-loop capacity against explicit p99/error/backlog targets
    and recovery fault injection with traffic continuing. A failed fixed-load run
    is not a capacity estimate or recovery measurement.
@@ -121,3 +125,18 @@ No speedup claim is enabled by this initial report. Before performance conclusio
 
 There are no production-derived sizes, latency SLOs, error budgets or soak duration
 in the request. Choose and record those before enabling capacity comparisons.
+
+## History comparison
+
+The first History comparison uses migrated source commit
+`c1bbd3ae71c84a71d5a226a70b0d8b71d021cb5b` from `history-admingate`.
+It uses the same 5 starts/s, 1 KiB payload, 10 ms activity, 10-second warmup and
+30-second measured window as the initial Matching smoke, with **three** alternating
+fresh-database pairs. This is still a short pipeline benchmark, not the full
+10-minute/30-minute performance protocol.
+
+```sh
+gh workflow run frontend-matching-benchmark.yml --ref t3/matching-benchmark-harness \
+  -f sdk_openloop=true -f service=history -f sdk_repetitions=3 \
+  -f source_ref=c1bbd3ae71c84a71d5a226a70b0d8b71d021cb5b
+```

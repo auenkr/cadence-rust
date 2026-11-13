@@ -1,7 +1,15 @@
-name: SDK Matching fixed arrival benchmark
+name: SDK service fixed arrival benchmark
 on:
   workflow_dispatch:
     inputs:
+      service:
+        description: Isolated service to replace
+        type: choice
+        options: [matching, history]
+        default: matching
+      source_ref:
+        description: Exact migrated source commit (empty uses workflow head)
+        default: ''
       rate:
         description: Fixed workflow starts per second
         default: '5'
@@ -21,12 +29,17 @@ concurrency:
   group: sdk-matching-benchmark-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  matching-pair:
+  service-pair:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
+          submodules: true
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
+          path: benchmark-source
           submodules: true
       - uses: actions/setup-go@v5
         with:
@@ -36,6 +49,8 @@ jobs:
             go/go.sum
       - name: Build and benchmark (all implementation in Benchmark)
         env:
+          SERVICE: ${{ inputs.service }}
+          BENCHMARK_SOURCE_DIR: ${{ github.workspace }}/benchmark-source
           RATE: ${{ inputs.rate }}
           DURATION: ${{ inputs.duration }}
           WARMUP: ${{ inputs.warmup }}
@@ -45,6 +60,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: sdk-matching-benchmark
+          name: sdk-${{ inputs.service || 'matching' }}-benchmark
           path: Benchmark/evidence/run/
           retention-days: 3

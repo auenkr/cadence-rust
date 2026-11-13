@@ -3,9 +3,20 @@ on:
   workflow_dispatch:
     inputs:
       sdk_openloop:
-        description: Run the isolated Matching fixed-arrival harness in Benchmark/
+        description: Run the isolated service fixed-arrival harness in Benchmark/
         type: boolean
         default: false
+      service:
+        description: Isolated service to replace in SDK benchmark
+        type: choice
+        options: [matching, history]
+        default: matching
+      source_ref:
+        description: Exact migrated source commit (empty uses workflow head)
+        default: ''
+      sdk_repetitions:
+        description: Fresh database pairs for SDK mode
+        default: '1'
       requests:
         description: Measured workflows per concurrency and arm
         type: number
@@ -30,13 +41,18 @@ concurrency:
   group: frontend-matching-benchmark-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  sdk-matching-smoke:
+  sdk-service-smoke:
     if: ${{ inputs.sdk_openloop == true }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
+          submodules: true
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
+          path: benchmark-source
           submodules: true
       - uses: actions/setup-go@v5
         with:
@@ -45,10 +61,14 @@ jobs:
             Benchmark/go.sum
             go/go.sum
       - run: bash Benchmark/ci.sh
+        env:
+          SERVICE: ${{ inputs.service || 'matching' }}
+          REPETITIONS: ${{ inputs.sdk_repetitions || '1' }}
+          BENCHMARK_SOURCE_DIR: ${{ github.workspace }}/benchmark-source
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: sdk-matching-benchmark
+          name: sdk-${{ inputs.service || 'matching' }}-benchmark
           path: Benchmark/evidence/run/
           retention-days: 3
   paired-benchmark:

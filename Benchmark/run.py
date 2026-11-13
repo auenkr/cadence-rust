@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fresh-database alternating Matching comparison. Heavy work: Actions only."""
+"""Fresh-database alternating single-service comparison. Heavy work: Actions only."""
 import argparse
 import hashlib
 import json
@@ -38,13 +38,14 @@ def capture(command, env=None):
     return subprocess.check_output(command, cwd=ROOT, env=env, text=True).strip()
 
 
-def deployments(arm):
-    return {s: ('cadence-rust:ci' if s == 'matching' and arm == 'rust' else 'cadence-go:ci')
+def deployments(arm, service='matching'):
+    return {s: ('cadence-rust:ci' if s == service and arm == 'rust' else 'cadence-go:ci')
             for s in ('frontend', 'matching', 'history', 'worker')}
 
 
 def main():
     p = argparse.ArgumentParser()
+    p.add_argument('--service', choices=('matching', 'history'), default='matching')
     p.add_argument('--rate', type=float, default=5)
     p.add_argument('--duration', type=int, default=30)
     p.add_argument('--warmup', type=int, default=10)
@@ -67,15 +68,17 @@ def main():
         f'  mysql:\n    cpuset: "{cpus[2]},{cpus[3]}"\n')
     env = dict(os.environ, COMPOSE_FILE=os.pathsep.join((str(ROOT/'compose.yml'), str(override))))
     compose = ['docker', 'compose', '-p', PROJECT]
-    manifest = dict(vars(a), head=capture(['git','rev-parse','HEAD']),
-                    go_tree=capture(['git','rev-parse','HEAD:go']),
+    source = Path(os.environ.get('BENCHMARK_SOURCE_DIR', ROOT.parent))
+    manifest = dict(vars(a), source_head=capture(['git','-C',str(source),'rev-parse','HEAD']),
+                    rust_tree=capture(['git','-C',str(source),'rev-parse','HEAD:rust']), head=capture(['git','rev-parse','HEAD']),
+                    go_tree=capture(['git','-C',str(source),'rev-parse','HEAD:go']),
                     sdk_lock_sha256=hashlib.sha256((ROOT/'go.sum').read_bytes()).hexdigest(),
                     driver_sha256=hashlib.sha256((ROOT/'bin/driver').read_bytes()).hexdigest(),
                     cpu_affinity={'generator':cpus[0], 'sdk_worker':cpus[1], 'services_and_db':cpus[2:4]},
                     hardware=capture(['lscpu']), protocol='open-loop-one-activity-v1',
                     metrics_unavailable=['database query latency percentiles', 'server retry counters',
                                          'server queue backlog age'],
-                    scope='Matching only; Go Frontend, History and system Worker in both arms')
+                    scope=f'{a.service.title()} only; other core services and system Worker stay Go in both arms')
     for arm, image in [('go','cadence-go:ci'),('rust','cadence-rust:ci')]:
         manifest[arm+'_image_id'] = capture(['docker','image','inspect',image,'--format','{{.Id}}'])
         manifest[arm+'_binary_sha256'] = capture(['docker','run','--rm','--entrypoint','sha256sum',image,'/usr/local/bin/cadence-server'])
@@ -84,7 +87,7 @@ def main():
         for rep in range(a.repetition_offset, a.repetition_offset+a.repetitions):
             for arm in (['go','rust'] if rep%2==0 else ['rust','go']):
                 key=f'{rep:02}-{arm}'
-                expected=deployments(arm)
+                expected=deployments(arm,a.service)
                 arm_env=dict(env, **{'CADENCE_IMAGE_'+s.upper():im for s,im in expected.items()})
                 run(compose+['down','-v','--remove-orphans'], key+'-reset', env=arm_env)
                 (OUT/(key+'-compose.yml')).write_text(capture(compose+['config'],arm_env))
