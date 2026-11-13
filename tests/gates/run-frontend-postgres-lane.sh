@@ -43,7 +43,7 @@ export CADENCE_POSTGRES_VISIBILITY_DATABASE=cadence_visibility CADENCE_POSTGRES_
 kafka_start
 es_start
 if [[ "${CADENCE_GATE_TWO_HISTORY:-}" == "true" ]]; then KAFKA_ARGS+=(--two-history); fi
-python3 "$ROOT/tests/gates/run-frontend-gate.py" --database postgres --out "$ARTIFACTS/run" "${KAFKA_ARGS[@]}" "${ES_ARGS[@]}" "$@"
+python3 "$ROOT/tests/gates/${CADENCE_GATE_SCRIPT:-run-frontend-gate.py}" --database postgres --out "$ARTIFACTS/run" "${KAFKA_ARGS[@]}" "${ES_ARGS[@]}" "$@"
 status=$?
 echo "$status" > "$ARTIFACTS/lane.exit"
 exit "$status"

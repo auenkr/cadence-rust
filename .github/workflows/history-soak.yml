@@ -1,0 +1,117 @@
+name: History soak (Rust History, Frontend and Matching; Go Worker)
+
+on:
+  # push trigger on the work branch only: a new dispatch-only workflow cannot be dispatched before it exists on master.
+  push:
+    branches: [history-soak]
+    paths: ['.github/workflows/history-soak.yml', 'tests/history-soak/**', 'tests/gates/run-history-soak.py']
+  workflow_dispatch:
+    inputs:
+      database:
+        description: Persistence lane
+        type: choice
+        options: [mysql, postgres, cassandra]
+        default: mysql
+      duration_minutes:
+        description: Sustained SDK load duration in minutes (one History host is killed and restarted at the halfway point)
+        default: "45"
+      two_history:
+        description: Run two Rust History hosts (the second one is restarted mid-soak); otherwise the only host is restarted
+        type: boolean
+        default: true
+      rate:
+        description: Workflows started per second
+        default: "4"
+
+concurrency:
+  group: history-soak-${{ github.ref }}-${{ github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  soak:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        database: ${{ fromJSON(github.event_name == 'push' && '["mysql","postgres","cassandra"]' || format('["{0}"]', inputs.database)) }}
+    name: soak-${{ matrix.database }}
+    env:
+      TWO_HISTORY: ${{ github.event_name == 'push' && 'true' || inputs.two_history }}
+      DURATION: ${{ inputs.duration_minutes || '45' }}
+      RATE: ${{ inputs.rate || '4' }}
+      CARGO_TARGET_DIR: /tmp/cadence-history-soak-${{ github.run_id }}-${{ github.run_attempt }}
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: |
+            go/go.sum
+            tests/history-soak/go.sum
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install probe dependencies
+        run: python3 -m pip install --user grpcio grpcio-tools
+      - name: Validate harness syntax and record source identity
+        run: |
+          mkdir -p out
+          git rev-parse HEAD > out/head-sha.txt
+          python3 -m py_compile tests/gates/run-history-soak.py
+          bash -n tests/gates/run-frontend-${{ matrix.database }}-lane.sh
+      - name: Build Rust services in fresh target directory
+        run: |
+          set +e
+          cargo build --manifest-path rust/Cargo.toml -p cadence-server -p cadence-history > out/cargo-build.log 2>&1
+          result=$?
+          echo "$result" > out/cargo-build.exit
+          tail -40 out/cargo-build.log
+          if [ "$result" -ne 0 ]; then exit "$result"; fi
+          sha256sum "$CARGO_TARGET_DIR/debug/cadence-server" "$CARGO_TARGET_DIR/debug/cadence-history" > out/rust-binaries.sha256
+          cat out/rust-binaries.sha256
+      - name: Build Go Worker, CLI and soak driver
+        run: |
+          (cd go && go build -p 2 -ldflags='-s -w' -o "$GITHUB_WORKSPACE/out/cadence-go-server" ./cmd/server)
+          (cd go && go build -p 2 -ldflags='-s -w' -o "$GITHUB_WORKSPACE/out/cadence-cli" ./cmd/tools/cli)
+          (cd tests/history-soak && go build -o "$GITHUB_WORKSPACE/out/history-soak-driver" .)
+      - name: Sustained SDK load with History restart
+        env:
+          CADENCE_GATE_SCRIPT: run-history-soak.py
+          CADENCE_GATE_TWO_HISTORY: ${{ env.TWO_HISTORY }}
+          RUST_BACKTRACE: 1
+          RUST_LOG: warn
+        run: |
+          set +e
+          export SOAK_SECONDS=$(( ${{ env.DURATION }} * 60 ))
+          export SOAK_RESTART_AT=$(( SOAK_SECONDS / 2 ))
+          export SOAK_RATE='${{ env.RATE }}'
+          tests/gates/run-frontend-${{ matrix.database }}-lane.sh out/gate \
+            --rust-binary "$CARGO_TARGET_DIR/debug/cadence-server" \
+            --rust-history-binary "$CARGO_TARGET_DIR/debug/cadence-history" \
+            --go-server "$GITHUB_WORKSPACE/out/cadence-go-server" \
+            --go-cli "$GITHUB_WORKSPACE/out/cadence-cli" \
+            --driver "$GITHUB_WORKSPACE/out/history-soak-driver" \
+            --rust-root "$GITHUB_WORKSPACE" > out/gate.log 2>&1
+          result=$?
+          echo "$result" > out/gate.exit
+          tail -80 out/gate.log | cut -c1-300
+          # Keep the artifact small: tail every service log, drop raw copies.
+          mkdir -p out/up/logs
+          for f in out/gate/run/*.log; do [ -f "$f" ] && tail -n 400 "$f" > "out/up/logs/$(basename "$f")"; done
+          cp out/gate/run/{steps.json,summary.json,soak-result.json,samples.jsonl,soak-driver.log,rust-binary.sha256,rust-history-binary.sha256} out/up/ 2>/dev/null || true
+          cp out/head-sha.txt out/rust-binaries.sha256 out/gate.exit out/up/
+          {
+            echo "### History soak ${{ matrix.database }} (two_history=${{ env.TWO_HISTORY }}, ${{ env.DURATION }} min, exit $result)"
+            echo '```'; cat out/up/soak-result.json 2>/dev/null; echo '```'
+            python3 -c "import json;print('failed steps:', json.load(open('out/up/summary.json'))['failedSteps'])" 2>/dev/null
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$result"
+      - name: Upload reproducible evidence
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: history-soak-${{ matrix.database }}
+          retention-days: 3
+          path: out/up/
