@@ -99,6 +99,7 @@ var started, completed, failed, retries, signals, queries, inflight int64
 var latNs, latCount, latMax, queryInit, queryInitWfs int64
 
 // Latency samples (ms) for percentiles: end-to-end, start call, query call (successful attempt only).
+var dumped int64
 var latMu sync.Mutex
 var lat = map[string][]int64{"e2e": nil, "start": nil, "query": nil}
 
@@ -256,6 +257,19 @@ func main() {
 			return nil
 		}); err != nil {
 			fail("query", err)
+			if atomic.AddInt64(&dumped, 1) <= 4 {
+				dctx, dcancel := context.WithTimeout(ctx, 20*time.Second)
+				it := c.GetWorkflowHistory(dctx, id, "", false, 0)
+				for it.HasNext() {
+					ev, e := it.Next()
+					if e != nil {
+						fmt.Printf("HISTDUMP %s err %v\n", id, e)
+						break
+					}
+					fmt.Printf("HISTDUMP %s #%d %v ts=%d\n", id, ev.GetEventId(), ev.GetEventType(), ev.GetTimestamp())
+				}
+				dcancel()
+			}
 			return
 		}
 		atomic.AddInt64(&queries, 1)
