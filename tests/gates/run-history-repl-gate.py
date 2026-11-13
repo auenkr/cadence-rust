@@ -254,7 +254,8 @@ try:
     ok = all(wait_port(P[f'{c}_FE_GRPC'], 300, n) for c, n in [(go_c, 'go-all-' + go_c.lower()), (rust_c, 'go-fmw-' + rust_c.lower())])
     ok = ok and wait_port(P[go_c + '_WORKER'], 300) and wait_port(P[rust_c + '_WORKER'], 300)
     (work / 'rust-history.yaml').write_text(rust_yaml(rust_c))
-    start(rc_name, [args.rust_history_binary, '--config', work / 'rust-history.yaml', '--root', work, 'start', '--services', 'history'])
+    start(rc_name, [args.rust_history_binary, '--config', work / 'rust-history.yaml', '--root', work, 'start', '--services', 'history'],
+          env={**os.environ, 'RUST_LOG': 'info,cadence_history::engine=debug,cadence_matching::matching_domain_cache=info'})
     ok = ok and wait_port(P[rust_c + '_HIST_GRPC'], 240, rc_name)
     record('clusters-listening', ok)
     if not ok:
