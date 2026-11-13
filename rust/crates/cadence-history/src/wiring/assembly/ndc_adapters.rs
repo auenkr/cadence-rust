@@ -121,6 +121,50 @@ impl HistoryBatchDeserializer for ThriftBatchDeserializer {
 /// Go `execution.StateBuilder.ApplyEvents` over the typed replay entry.
 pub struct TypedNdcStateBuilder;
 
+/// Minimal Go `domainCache.GetDomain(name)` resolver for replay (parent domain
+/// name -> id fallback in `ReplicateWorkflowExecutionStartedEvent`).
+struct NameOnlyDomains(Arc<dyn crate::engine::deps::DomainCache>);
+
+impl crate::execution::mutable_state_task_generator::TaskGeneratorDomains for NameOnlyDomains {
+    fn domain_id_by_name(&self, name: &str) -> Result<String, crate::execution::mutable_state_builder::TypedMutableStateError> {
+        self.0
+            .get_domain(name)
+            .map(|e| e.info.id.clone())
+            .map_err(|e| crate::execution::mutable_state_builder::TypedMutableStateError::Internal(e.to_string()))
+    }
+    fn retention_days(&self, _d: &str, _w: &str) -> Result<Option<i32>, crate::execution::mutable_state_builder::TypedMutableStateError> {
+        Ok(None)
+    }
+    fn is_global_domain(&self, _d: &str) -> Result<bool, crate::execution::mutable_state_builder::TypedMutableStateError> {
+        Ok(false)
+    }
+}
+
+/// `TypedNdcStateBuilder` that first installs the domain cache on states that
+/// were created without one (Go's state builder always has `domainCache`).
+pub struct DomainAwareNdcStateBuilder {
+    domains: Arc<dyn crate::engine::deps::DomainCache>,
+}
+
+impl NdcStateBuilder for DomainAwareNdcStateBuilder {
+    fn apply_events(
+        &self,
+        mutable_state: &mut dyn NdcMutableState,
+        domain_id: &str,
+        request_id: &str,
+        execution: &WorkflowExecution,
+        events: &[HistoryEvent],
+        new_events: &[HistoryEvent],
+    ) -> NdcResult<Option<Box<dyn NdcMutableState>>> {
+        if let Some(owned) = mutable_state.as_any_mut().and_then(|a| a.downcast_mut::<OwnedNdcMutableState>()) {
+            if owned.typed_mut().task_gen_env.domains.is_none() {
+                owned.typed_mut().task_gen_env.domains = Some(Arc::new(NameOnlyDomains(self.domains.clone())));
+            }
+        }
+        TypedNdcStateBuilder.apply_events(mutable_state, domain_id, request_id, execution, events, new_events)
+    }
+}
+
 impl NdcStateBuilder for TypedNdcStateBuilder {
     fn apply_events(
         &self,
@@ -345,7 +389,7 @@ pub struct EngineNdcEnv {
     serializer: ThriftBatchDeserializer,
     cache: EngineNdcExecutionCache,
     transactions: EngineNdcTransactionManager,
-    state_builder: TypedNdcStateBuilder,
+    state_builder: DomainAwareNdcStateBuilder,
     state_rebuilder: SqlNdcStateRebuilder,
     branch_env: SqlBranchManagerEnv,
     resetter_env: SqlWorkflowResetterEnv,
@@ -377,7 +421,7 @@ impl EngineNdcEnv {
                 ),
                 engine_cache,
             ),
-            state_builder: TypedNdcStateBuilder,
+            state_builder: DomainAwareNdcStateBuilder { domains: core.domains.clone() },
             state_rebuilder: new_state_rebuilder(core),
             branch_env: SqlBranchManagerEnv { history: history.clone(), domains: core.domains.clone() },
             resetter_env: SqlWorkflowResetterEnv { history, domains: core.domains.clone() },
