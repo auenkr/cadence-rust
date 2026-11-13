@@ -98,7 +98,7 @@ impl TypedMutableState {
         run_id: &str,
         control: &[u8],
     ) -> Result<HistoryEvent> {
-        let op = "add-external-workflow-signaled-event";
+        let op = "add-externalworkflow-signal-requested-event";
         self.check_mutability()?;
         if self.get_signal_info(initiated_id).is_none() {
             return Err(self.create_internal_server_error(op));
@@ -144,7 +144,7 @@ impl TypedMutableState {
         _control: &[u8],
         cause: SignalExternalWorkflowExecutionFailedCause,
     ) -> Result<HistoryEvent> {
-        let op = "add-signal-external-workflow-failed-event";
+        let op = "add-externalworkflow-signal-failed-event";
         self.check_mutability()?;
         if self.get_signal_info(initiated_id).is_none() {
             return Err(self.create_internal_server_error(op));
