@@ -5,6 +5,7 @@
 //  3. history archival (file://, retention 0): closed run archived by the Go Worker archival workflow, then deleted;
 //     GetWorkflowExecutionHistory falls back to the archive
 //  4. auto-reset on a bad binary checksum
+//  5. parent close policy (terminate / request-cancel / abandon) applied to children
 // Env: FE_DOMAIN, FE_DOMAIN_ARCH, FE_ARCH_DIR.
 package main
 
@@ -22,6 +23,7 @@ import (
 	"go.uber.org/cadence/.gen/go/shared"
 	"go.uber.org/cadence/client"
 	"go.uber.org/cadence/worker"
+	"go.uber.org/cadence/workflow"
 )
 
 func scenHistory(ctx context.Context, rpc workflowserviceclient.Interface, domain, wid, runID string) ([]*shared.HistoryEvent, error) {
@@ -356,5 +358,74 @@ func scenMain(rpc workflowserviceclient.Interface, domain, archDomain, archDir s
 		}
 		worker.SetBinaryChecksum("")
 	}
+
+	// ---- 5. parent close policy applied to children when the parent closes (transfer CloseExecution task)
+	{
+		ptl := tl + "-pcp"
+		w := worker.New(rpc, domain, ptl, worker.Options{DisableStickyExecution: true})
+		w.RegisterWorkflow(ParentClosePolicyParent)
+		w.RegisterWorkflow(SignalQueryWorkflow)
+		if step("scen-pcp-worker-start", w.Start()) {
+			pwid := ptl + "-parent"
+			_, err := rpc.StartWorkflowExecution(ctx, scenStartReq(domain, ptl, pwid, "main.ParentClosePolicyParent", 120))
+			if step("scen-pcp-start-parent", err) {
+				err = scenPoll(ctx, 2*time.Minute, func() error {
+					d, e := scenDescribe(ctx, rpc, domain, pwid+"-terminate", "")
+					if e != nil {
+						return e
+					}
+					if d.WorkflowExecutionInfo.CloseStatus == nil || *d.WorkflowExecutionInfo.CloseStatus != shared.WorkflowExecutionCloseStatusTerminated {
+						return fmt.Errorf("child close status %v want Terminated", d.WorkflowExecutionInfo.CloseStatus)
+					}
+					return nil
+				})
+				step("scen-pcp-child-terminate", err)
+				// SignalQueryWorkflow ignores cancellation, so RequestCancel is observed as the CancelRequested event.
+				err = scenPoll(ctx, 2*time.Minute, func() error {
+					ev, e := scenHistory(ctx, rpc, domain, pwid+"-cancel", "")
+					if e != nil {
+						return e
+					}
+					for _, x := range ev {
+						if x.GetEventType() == shared.EventTypeWorkflowExecutionCancelRequested {
+							return nil
+						}
+					}
+					return errors.New("no WorkflowExecutionCancelRequested event yet")
+				})
+				step("scen-pcp-child-request-cancel", err)
+				// the abandon child must still be running after the parent closed
+				d, derr := scenDescribe(ctx, rpc, domain, pwid+"-abandon", "")
+				if derr == nil && d.WorkflowExecutionInfo.CloseStatus != nil {
+					derr = fmt.Errorf("abandon child closed with %v", *d.WorkflowExecutionInfo.CloseStatus)
+				}
+				step("scen-pcp-child-abandon-still-running", derr)
+				for _, suffix := range []string{"-abandon", "-cancel"} {
+					_ = rpc.TerminateWorkflowExecution(ctx, &shared.TerminateWorkflowExecutionRequest{Domain: &domain, WorkflowExecution: &shared.WorkflowExecution{WorkflowId: ptr(pwid + suffix)}, Reason: ptr("gate cleanup")})
+				}
+			}
+			w.Stop()
+		}
+	}
 	fmt.Printf("SCEN done failures=%d\n", failures)
+}
+
+// ParentClosePolicyParent starts three SignalQueryWorkflow children with Terminate / RequestCancel /
+// Abandon parent close policies, waits until all started, then completes.
+func ParentClosePolicyParent(ctx workflow.Context) error {
+	id := workflow.GetInfo(ctx).WorkflowExecution.ID
+	var futs []workflow.ChildWorkflowFuture
+	for _, c := range []struct {
+		suffix string
+		policy client.ParentClosePolicy
+	}{{"-terminate", client.ParentClosePolicyTerminate}, {"-cancel", client.ParentClosePolicyRequestCancel}, {"-abandon", client.ParentClosePolicyAbandon}} {
+		cctx := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{WorkflowID: id + c.suffix, ExecutionStartToCloseTimeout: 10 * time.Minute, TaskStartToCloseTimeout: 10 * time.Second, ParentClosePolicy: c.policy})
+		futs = append(futs, workflow.ExecuteChildWorkflow(cctx, SignalQueryWorkflow))
+	}
+	for _, f := range futs {
+		if err := f.GetChildWorkflowExecution().Get(ctx, nil); err != nil {
+			return err
+		}
+	}
+	return nil
 }
