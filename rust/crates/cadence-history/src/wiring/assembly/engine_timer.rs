@@ -160,7 +160,7 @@ impl EngineMutableState {
             return Err(HistoryError::internal(format!("invalid history action TimerFired (timer {timer_id} not found)")));
         };
         let id = timer_id.to_string();
-        g.push_event(EventType::TimerFired, ms, |e| {
+        g.push_event(EventType::TimerFired, ms * 1_000_000, |e| {
             e.timer_fired_event_attributes = Some(TimerFiredEventAttributes { timer_id: id, started_event_id: t.started_id });
         });
         g.timers.remove(timer_id);
@@ -215,7 +215,7 @@ impl EngineMutableState {
         let details = g.heartbeats.get(&schedule_id).map(|h| h.details.clone()).unwrap_or_default();
         let reason = (!a.retry_last_failure_reason.is_empty()).then(|| a.retry_last_failure_reason.clone());
         let last_details = a.retry_last_failure_details.clone();
-        g.push_event(EventType::ActivityTaskTimedOut, ms, |e| {
+        g.push_event(EventType::ActivityTaskTimedOut, ms * 1_000_000, |e| {
             e.activity_task_timed_out_event_attributes = Some(ActivityTaskTimedOutEventAttributes {
                 details,
                 scheduled_event_id: schedule_id,
@@ -240,7 +240,7 @@ impl EngineMutableState {
             )));
         }
         if g.pc_exec.decision_attempt == 0 {
-            g.push_event(EventType::DecisionTaskTimedOut, now / 1_000_000, |e| {
+            g.push_event(EventType::DecisionTaskTimedOut, now, |e| {
                 e.decision_task_timed_out_event_attributes = Some(DecisionTaskTimedOutEventAttributes {
                     scheduled_event_id: schedule_id,
                     started_event_id: started_id,
@@ -323,7 +323,7 @@ impl EngineMutableState {
                 g.next_event_id
             )));
         }
-        let ev = g.push_event(EventType::WorkflowExecutionTimedOut, ms, |e| {
+        let ev = g.push_event(EventType::WorkflowExecutionTimedOut, ms * 1_000_000, |e| {
             e.workflow_execution_timed_out_event_attributes =
                 Some(WorkflowExecutionTimedOutEventAttributes { timeout_type: Some(TimeoutType::StartToClose) });
         });

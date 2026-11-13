@@ -50,7 +50,7 @@ impl SemaphoreExecution for Exec<'_> {
         else {
             unreachable!("engine only adds SemaphoreAcquireInitiated events");
         };
-        let ev = self.g.push_event(EventType::SemaphoreAcquireInitiated, self.now_ms, |e| {
+        let ev = self.g.push_event(EventType::SemaphoreAcquireInitiated, self.now_ms * 1_000_000, |e| {
             e.semaphore_acquire_initiated_event_attributes = Some(SemaphoreAcquireInitiatedEventAttributes {
                 semaphore_name,
                 wait_timeout_seconds: Some(wait_timeout_seconds),

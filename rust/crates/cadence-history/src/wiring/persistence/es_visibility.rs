@@ -104,31 +104,22 @@ fn kv(k: &str, v: Value) -> (Value, Value) {
     (Value::Bytes(k.as_bytes().to_vec()), v)
 }
 
-/// Go sends UnixNano; the Rust record may carry milliseconds, so scale small values up.
-fn nanos(ts: i64) -> i64 {
-    if ts != 0 && ts.abs() < 100_000_000_000_000 {
-        ts.saturating_mul(1_000_000)
-    } else {
-        ts
-    }
-}
-
 /// Go `createVisibilityMessage`.
 fn create_visibility_message(row: &VisibilityWriteRow, op: VisibilityOperation) -> (String, Vec<u8>) {
     let mut fields: BTreeMap<String, Value> = BTreeMap::new();
     fields.insert(WORKFLOW_TYPE.into(), field_string(&row.workflow_type_name));
-    fields.insert(START_TIME.into(), field_int(nanos(row.start_time)));
-    fields.insert(EXECUTION_TIME.into(), field_int(nanos(row.execution_time)));
+    fields.insert(START_TIME.into(), field_int(row.start_time));
+    fields.insert(EXECUTION_TIME.into(), field_int(row.execution_time));
     fields.insert(TASK_LIST.into(), field_string(&row.task_list));
     fields.insert(IS_CRON.into(), field_bool(row.is_cron));
     fields.insert(NUM_CLUSTERS.into(), field_int(i64::from(row.num_clusters)));
     fields.insert(CLUSTER_ATTRIBUTE_SCOPE.into(), field_string(&row.cluster_attribute_scope));
     fields.insert(CLUSTER_ATTRIBUTE_NAME.into(), field_string(&row.cluster_attribute_name));
-    fields.insert(UPDATE_TIME.into(), field_int(nanos(row.update_time)));
+    fields.insert(UPDATE_TIME.into(), field_int(row.update_time));
     fields.insert(SHARD_ID.into(), field_int(row.shard_id));
     fields.insert(CRON_SCHEDULE.into(), field_string(&row.cron_schedule));
     fields.insert(EXECUTION_STATUS.into(), field_int(i64::from(row.request_execution_status)));
-    fields.insert(SCHEDULED_EXECUTION_TIME.into(), field_int(nanos(row.scheduled_execution_time)));
+    fields.insert(SCHEDULED_EXECUTION_TIME.into(), field_int(row.scheduled_execution_time));
     if !row.memo.is_empty() {
         fields.insert(MEMO.into(), field_binary(&row.memo));
         fields.insert(ENCODING.into(), field_string(&row.encoding));
@@ -138,7 +129,7 @@ fn create_visibility_message(row: &VisibilityWriteRow, op: VisibilityOperation) 
     }
     if op == VisibilityOperation::RecordClosed {
         let (close_time, close_status, history_length) = row.closed.unwrap_or((0, 0, 0));
-        fields.insert(CLOSE_TIME.into(), field_int(nanos(close_time)));
+        fields.insert(CLOSE_TIME.into(), field_int(close_time));
         fields.insert(CLOSE_STATUS.into(), field_int(i64::from(close_status)));
         fields.insert(HISTORY_LENGTH.into(), field_int(history_length));
     }
@@ -155,7 +146,7 @@ fn create_visibility_message(row: &VisibilityWriteRow, op: VisibilityOperation) 
 fn uninitialized_message(row: &VisibilityWriteRow) -> (String, Vec<u8>) {
     let fields = vec![
         kv(WORKFLOW_TYPE, field_string(&row.workflow_type_name)),
-        kv(UPDATE_TIME, field_int(nanos(row.update_time))),
+        kv(UPDATE_TIME, field_int(row.update_time)),
         kv(SHARD_ID, field_int(row.shard_id)),
     ];
     encode_message(MESSAGE_TYPE_CREATE, row, None, Some(fields), None)
