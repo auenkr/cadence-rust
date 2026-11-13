@@ -32,6 +32,72 @@ pub struct OwnedNdcMutableState {
     applied_events: std::collections::BTreeSet<String>,
 }
 
+/// Go `prepareEventsAndReplicationTasks` (`eventsToReplicationTask` + `syncActivityToReplicationTask`)
+/// for the active policy; empty unless `canReplicateEvents()`.
+fn active_replication_rows(
+    typed: &TypedMutableState,
+    domain_id: &str,
+    workflow_id: &str,
+    run_id: &str,
+    events: &[cadence_api::types::HistoryEvent],
+    branch_token: &[u8],
+) -> NdcResult<Vec<cadence_persistence::history_contract::Task>> {
+    use cadence_persistence::history_contract as pc;
+    use cadence_persistence::sqlblobs::replication_task_to_struct;
+    let Some(cluster) = typed.failover.as_ref().filter(|c| c.can_replicate_events) else {
+        return Ok(Vec::new());
+    };
+    let mut tasks = Vec::new();
+    let mut push = |t: pc::ReplicationTask| -> NdcResult<()> {
+        let s = replication_task_to_struct(&t).map_err(|e| NdcError::internal(e.to_string()))?;
+        let data = super::engine_cache::task_blob(cadence_persistence::sqlblobs::Encoding::ThriftRW.encode(&s))
+            .map_err(|e| NdcError::internal(e.to_string()))?;
+        tasks.push(pc::Task { visibility_timestamp_unix_nanos: 0, task_type: t.task_type, task_id: 0, data });
+        Ok(())
+    };
+    if let (Some(first), Some(last)) = (events.first(), events.last()) {
+        let source = (cluster.cluster_name_for_failover_version)(first.version).map_err(NdcError::internal)?;
+        if cluster.current_cluster != source {
+            return Err(NdcError::internal("mutableStateBuilder encounter contradicting version & transaction policy"));
+        }
+        push(pc::ReplicationTask {
+            domain_id: domain_id.to_string(),
+            workflow_id: workflow_id.to_string(),
+            run_id: run_id.to_string(),
+            task_type: super::engine_close::REPLICATION_TASK_TYPE_HISTORY,
+            version: first.version,
+            first_event_id: first.event_id,
+            next_event_id: last.event_id + 1,
+            branch_token: branch_token.to_vec(),
+            ..Default::default()
+        })?;
+    }
+    for sid in &typed.sync_activity_tasks {
+        if let Some(a) = typed.pending_activity_info_ids.get(sid) {
+            push(pc::ReplicationTask {
+                domain_id: domain_id.to_string(),
+                workflow_id: workflow_id.to_string(),
+                run_id: run_id.to_string(),
+                task_type: super::engine_close::REPLICATION_TASK_TYPE_SYNC_ACTIVITY,
+                version: a.version,
+                scheduled_id: *sid,
+                ..Default::default()
+            })?;
+        }
+    }
+    Ok(tasks)
+}
+
+fn add_replication_rows(
+    tasks_by_category: &mut std::collections::BTreeMap<cadence_persistence::history_contract::HistoryTaskCategory, Vec<cadence_persistence::history_contract::Task>>,
+    rows: Vec<cadence_persistence::history_contract::Task>,
+) {
+    if !rows.is_empty() {
+        let category = cadence_persistence::history_contract::HistoryTaskCategory { category_type: 1, category_id: 3 };
+        tasks_by_category.entry(category).or_default().extend(rows);
+    }
+}
+
 /// Go `definition.NewEventReappliedID(runID, eventID, version).GetID()`.
 fn event_reapplied_id(run_id: &str, event_id: i64, version: i64) -> String {
     format!("{run_id}::{event_id}::{version}")
@@ -316,8 +382,12 @@ impl NdcMutableState for OwnedNdcMutableState {
     fn close_transaction_as_snapshot(&mut self, now_nanos: i64, policy: TransactionPolicy) -> NdcResult<(WorkflowSnapshot, Vec<WorkflowEvents>)> {
         let (typed, events) = self.typed.prepare_close_snapshot(now_nanos, policy)
             .map_err(|e| NdcError::internal(e.to_string()))?;
-        let snapshot = crate::execution::mutable_state_bridge::typed_snapshot_to_persistence(&typed)
+        let mut snapshot = crate::execution::mutable_state_bridge::typed_snapshot_to_persistence(&typed)
             .map_err(|e| NdcError::internal(e.to_string()))?;
+        if policy == TransactionPolicy::Active {
+            let rows = active_replication_rows(&self.typed, &self.domain_id, &self.workflow_id, &self.run_id, &events, &self.get_current_branch_token()?)?;
+            add_replication_rows(&mut snapshot.tasks_by_category, rows);
+        }
         let batches = if events.is_empty() { Vec::new() } else { vec![WorkflowEvents {
             key: WorkflowExecutionKey { domain_id: self.domain_id.clone(), workflow_id: self.workflow_id.clone(), run_id: self.run_id.clone() },
             branch_token: self.get_current_branch_token()?, events,
@@ -344,7 +414,11 @@ impl TransactionState for OwnedNdcMutableState {
     fn close_mutation(&mut self, now: i64, policy: TransactionPolicy) -> NdcResult<(cadence_persistence::history_contract::WorkflowMutation, Vec<WorkflowEvents>)> {
         let (typed, events) = self.typed.prepare_close_mutation(now, policy).map_err(|e| NdcError::internal(e.to_string()))?;
         let envelope = crate::execution::mutable_state_bridge::snapshot_to_envelope(WorkflowSnapshot::default()).map_err(|e| NdcError::internal(e.to_string()))?;
-        let mutation = crate::execution::mutable_state_bridge::mutation_to_persistence(&typed, &envelope).map_err(|e| NdcError::internal(e.to_string()))?;
+        let mut mutation = crate::execution::mutable_state_bridge::mutation_to_persistence(&typed, &envelope).map_err(|e| NdcError::internal(e.to_string()))?;
+        if policy == TransactionPolicy::Active {
+            let rows = active_replication_rows(&self.typed, &self.domain_id, &self.workflow_id, &self.run_id, &events, &self.get_current_branch_token()?)?;
+            add_replication_rows(&mut mutation.tasks_by_category, rows);
+        }
         let batches = if events.is_empty() { Vec::new() } else { vec![WorkflowEvents { key: WorkflowExecutionKey { domain_id: self.domain_id.clone(), workflow_id: self.workflow_id.clone(), run_id: self.run_id.clone() }, branch_token: self.get_current_branch_token()?, events }] };
         Ok((mutation, batches))
     }
