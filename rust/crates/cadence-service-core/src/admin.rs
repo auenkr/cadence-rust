@@ -2019,7 +2019,7 @@ pub async fn remove_task(
         cluster_name: req.cluster_name,
     };
     let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
-    match client.remove_task(history_admin_request(request)).await {
+    match shard_redirect(&state, req.shard_id, &request, |mut c, r| async move { c.remove_task(history_admin_request(r)).await }, client.remove_task(history_admin_request(request.clone())).await).await {
         Ok(_) => ok_json(cadence_api::admin::RemoveTaskResponse {}),
         Err(error) => error_response(
             "InternalServiceError",
@@ -2067,7 +2067,7 @@ pub async fn reset_queue(
         task_type: req.task_type.unwrap_or_default(),
     };
     let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
-    let response = match client.reset_queue(history_admin_request(request)).await {
+    let response = match shard_redirect(&state, req.shard_id, &request, |mut c, r| async move { c.reset_queue(history_admin_request(r)).await }, client.reset_queue(history_admin_request(request.clone())).await).await {
         Ok(response) => response.into_inner(),
         Err(error) => {
             return error_response(
@@ -2118,7 +2118,7 @@ pub async fn describe_queue(
         task_type: req.task_type.unwrap_or_default(),
     };
     let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
-    match client.describe_queue(history_admin_request(request)).await {
+    match shard_redirect(&state, req.shard_id, &request, |mut c, r| async move { c.describe_queue(history_admin_request(r)).await }, client.describe_queue(history_admin_request(request.clone())).await).await {
         Ok(response) => ok_json(cadence_api::admin::DescribeQueueResponse {
             processing_queue_states: response.into_inner().processing_queue_states,
         }),
@@ -3256,5 +3256,42 @@ mod dynamic_config_admin_tests {
             stored["CustomKw"],
             cadence_api::enums::IndexedValueType::Keyword.value()
         );
+    }
+}
+
+/// Go client/history `executeWithRedirect`: on ShardOwnershipLost the call is
+/// retried once against the owner named in the error.
+async fn shard_redirect<Req: Clone, Resp, F, Fut>(
+    state: &AppState,
+    shard: i32,
+    request: &Req,
+    retry: F,
+    first: Result<tonic::Response<Resp>, tonic::Status>,
+) -> Result<tonic::Response<Resp>, tonic::Status>
+where
+    F: FnOnce(
+        cadence_proto::history::history_api_client::HistoryApiClient<tonic::transport::Channel>,
+        Req,
+    ) -> Fut,
+    Fut: std::future::Future<Output = Result<tonic::Response<Resp>, tonic::Status>>,
+{
+    let status = match first {
+        Ok(response) => return Ok(response),
+        Err(status) => status,
+    };
+    let message = status.message();
+    let Some((_, owner)) = message.split_once("is not owned by this host, owner: ") else {
+        return Err(status);
+    };
+    let owner = owner.trim().trim_end_matches('.').to_owned();
+    match history_channel_for(state, shard, Some(&owner)) {
+        Ok(Some(channel)) => {
+            retry(
+                cadence_proto::history::history_api_client::HistoryApiClient::new(channel),
+                request.clone(),
+            )
+            .await
+        }
+        _ => Err(status),
     }
 }
