@@ -448,23 +448,6 @@ fn new_state_with_empty_version_histories(
     state
 }
 
-#[cfg(test)]
-mod empty_version_histories_tests {
-    use super::*;
-    use crate::ndc::NdcMutableState;
-
-    #[test]
-    fn replicator_new_state_has_empty_current_version_history() {
-        let exec = WorkflowExecution { workflow_id: "w".into(), run_id: "r".into() };
-        let state = new_state_with_empty_version_histories("d", &exec, 1);
-        let h = state.get_version_histories().expect("version histories present");
-        assert_eq!(h.current_version_history_index, 0);
-        assert_eq!(h.histories.len(), 1);
-        assert!(h.histories[0].items.is_empty());
-        assert!(h.histories[0].branch_token.is_empty());
-    }
-}
-
 // ---------------------------------------------------------------- request conversion
 
 fn to_ndc_replicate(r: &et::ReplicateEventsV2Request) -> ReplicateEventsV2Request {
@@ -548,5 +531,22 @@ impl Replicator for NdcReplicator {
         .await
         .map_err(|e| HistoryError::internal(format!("ndc sync activity task failed: {e}")))?
         .map_err(ndc_to_history_error)
+    }
+}
+
+#[cfg(test)]
+mod empty_version_histories_tests {
+    use super::*;
+    use crate::ndc::NdcMutableState;
+
+    #[test]
+    fn replicator_new_state_has_empty_current_version_history() {
+        let exec = WorkflowExecution { workflow_id: "w".into(), run_id: "r".into() };
+        let state = new_state_with_empty_version_histories("d", &exec, 1);
+        let h = state.get_version_histories().expect("version histories present");
+        assert_eq!(h.current_version_history_index, 0);
+        assert_eq!(h.histories.len(), 1);
+        assert!(h.histories[0].items.is_empty());
+        assert!(h.histories[0].branch_token.is_empty());
     }
 }
