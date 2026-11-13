@@ -11,7 +11,7 @@ use cadence_api::enums::{EventType, FailureCategory};
 use cadence_api::service_types::HistoryEvent;
 use cadence_api::tasks::*;
 use cadence_api::types::{FailureOptions, WorkflowExecution, WorkflowType};
-use cadence_persistence::history_reader::{read_history_branch, ReadHistoryBranchRequest};
+use cadence_persistence::history_reader::{read_history_branch, HistoryReadError, ReadHistoryBranchRequest};
 
 use crate::engine::deps::{
     ActivityInfo, HResult, HistoryError, EMPTY_EVENT_ID, WORKFLOW_CLOSE_STATUS_TERMINATED, WORKFLOW_STATE_COMPLETED,
@@ -711,7 +711,8 @@ impl EngineMutableState {
             .clone()
             .ok_or_else(|| HistoryError::internal("history node store is not configured on the mutable state"))?;
         let shard_id = self.params.shard_id;
-        tokio::task::spawn_blocking(move || -> Result<Vec<HistoryEvent>, String> {
+        let ctx = format!("shard={shard_id} range=[{min},{max}) branch_len={}", branch.len());
+        tokio::task::spawn_blocking(move || -> Result<Vec<HistoryEvent>, HistoryReadError> {
             let mut out = Vec::new();
             let mut token = Vec::new();
             loop {
@@ -725,8 +726,7 @@ impl EngineMutableState {
                         next_page_token: token.clone(),
                         shard_id,
                     },
-                )
-                .map_err(|e| format!("{e:?}"))?;
+                )?;
                 for b in resp.batches {
                     out.extend(b);
                 }
@@ -739,7 +739,11 @@ impl EngineMutableState {
         })
         .await
         .map_err(|e| HistoryError::internal(format!("history read task: {e}")))?
-        .map_err(|e| HistoryError::internal(format!("read history branch: {e}")))
+        .map_err(|e| match e {
+            // Go keeps EntityNotExists typed so the task processor drops the task instead of retrying forever.
+            HistoryReadError::EntityNotExists(m) => HistoryError::entity_not_exists(format!("read history branch ({ctx}): {m}")),
+            e => HistoryError::internal(format!("read history branch ({ctx}): {e}")),
+        })
     }
 
     /// Go `GetStartEvent`.
