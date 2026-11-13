@@ -1754,7 +1754,7 @@ pub async fn respond_cross_cluster_tasks_completed(
     }
 }
 
-pub(crate) fn shard_count(state: &AppState) -> i32 {
+pub fn shard_count(state: &AppState) -> i32 {
     state.num_history_shards.max(1)
 }
 
@@ -1891,7 +1891,7 @@ pub async fn describe_shard_distribution(
 
 /// Resolve an Admin request without losing the configured TLS policy. Only an
 /// empty/uninstalled ring uses the static channel; resolver failures propagate.
-pub(crate) fn history_channel_for(
+pub fn history_channel_for(
     state: &AppState,
     shard: i32,
     explicit: Option<&str>,
