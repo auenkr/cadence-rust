@@ -253,7 +253,8 @@ impl Operations for EngineOps<'_> {
             return Err(bad(format!("activity id {} is already pending", a.activity_id)));
         }
         if limit_enabled && g.pc_acts.len() as i64 >= limit {
-            return Err(internal("Too many pending activities."));
+            // Go execution.ErrTooManyPendingActivities (no trailing dot; task_handler compares the text).
+            return Err(internal(crate::decision::ERR_TOO_MANY_PENDING_ACTIVITIES));
         }
         let ev_attrs = ActivityTaskScheduledEventAttributes {
             activity_id: a.activity_id.clone(),
@@ -1172,6 +1173,29 @@ mod tests {
             }),
             ..Default::default()
         }]
+    }
+
+    #[test]
+    fn too_many_pending_activities_fails_workflow_with_go_reason() {
+        let s = state();
+        let mut config = Config::new_for_test();
+        config.pending_activity_validation_enabled = Arc::new(|| true);
+        config.pending_activities_count_limit_error = Arc::new(|_| 0);
+        let ops = EngineOps {
+            state: &s,
+            config: Arc::new(config),
+            domains: Arc::new(Domains),
+            domain_name: "test-domain".into(),
+            identity: "id".into(),
+            completed_id: 4,
+            semaphore_lookups: Default::default(),
+        };
+        let mut h = TaskHandler::new(ops, "id".into(), 4);
+        let mut d = schedule_activity_decision(false);
+        h.handle_decisions(b"", &mut d).unwrap();
+        assert!(!h.fail_decision);
+        assert_eq!(event_types(&s), vec![EventType::WorkflowExecutionFailed]);
+        assert_eq!(crate::decision::ERR_TOO_MANY_PENDING_ACTIVITIES, "Too many pending activities");
     }
 
     #[test]
