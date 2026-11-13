@@ -303,7 +303,8 @@ try:
                     rc, out = cli(B_T, 'tchannel', 'admin', 'history_host', 'describe',
                                   '--had', address, '--pf')
                     try:
-                        shard_ids = json.loads(out).get('shardIds', []) if rc == 0 else []
+                        response = json.loads(out) if rc == 0 else {}
+                        shard_ids = response.get('shardIDs', response.get('shardIds', []))
                     except (json.JSONDecodeError, AttributeError):
                         shard_ids = []
                     owned[name] = bool(shard_ids)
