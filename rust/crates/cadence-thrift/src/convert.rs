@@ -7431,7 +7431,7 @@ mod tests {
         round_trip(&e);
 
         let timestamp = HistoryEvent {
-            timestamp: Some(1_700_000_000_123),
+            timestamp: Some(1_700_000_000_123_000_000),
             ..Default::default()
         }
         .to_thrift();
