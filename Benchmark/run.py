@@ -73,7 +73,7 @@ def main():
                     driver_sha256=hashlib.sha256((ROOT/'bin/driver').read_bytes()).hexdigest(),
                     cpu_affinity={'generator':cpus[0], 'sdk_worker':cpus[1], 'services_and_db':cpus[2:4]},
                     hardware=capture(['lscpu']), protocol='open-loop-one-activity-v1',
-                    metrics_unavailable=['database query latency/ops/connections', 'server retry counters',
+                    metrics_unavailable=['database query latency percentiles', 'server retry counters',
                                          'server queue backlog age'],
                     scope='Matching only; Go Frontend, History and system Worker in both arms')
     for arm, image in [('go','cadence-go:ci'),('rust','cadence-rust:ci')]:
@@ -125,7 +125,7 @@ def main():
                     for path in (start,end,ready):path.unlink(missing_ok=True)
                     collector_cmd=['taskset','-c',str(cpus[0]),'python3',str(ROOT/'collect_resources.py'),'--start-event',str(start),
                         '--end-event',str(end),'--ready-event',str(ready),'--event-timeout',str(a.warmup+a.duration+300),
-                        '--interval','0.25','--output',str(OUT/(key+'-resources.json')),'--containers',*containers]
+                        '--mysql-container',identities['mysql']['Name'].lstrip('/'),'--interval','0.25','--output',str(OUT/(key+'-resources.json')),'--containers',*containers]
                     with (OUT/(key+'-collector.log')).open('w') as log:
                         collector=subprocess.Popen(collector_cmd,stdout=log,stderr=subprocess.STDOUT)
                     try:

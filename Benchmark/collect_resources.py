@@ -88,7 +88,23 @@ def cpu_seconds(before_ns, after_ns):
     return (after_ns - before_ns) / 1_000_000_000
 
 
-def collect(interval, output, names, start_event=None, end_event=None, duration=None, ready_event=None, event_timeout=180):
+def mysql_snapshot(container):
+    query = """SHOW GLOBAL STATUS WHERE Variable_name IN
+      ('Threads_connected','Connections','Questions','Com_select','Com_insert',
+       'Com_update','Com_delete','Aborted_connects','Threads_running');
+      SELECT 'statement_count', COALESCE(SUM(COUNT_STAR),0)
+        FROM performance_schema.events_statements_summary_global_by_event_name
+        WHERE EVENT_NAME LIKE 'statement/sql/%';
+      SELECT 'statement_wait_ps', COALESCE(SUM(SUM_TIMER_WAIT),0)
+        FROM performance_schema.events_statements_summary_global_by_event_name
+        WHERE EVENT_NAME LIKE 'statement/sql/%';"""
+    raw = subprocess.check_output(['docker','exec',container,'mysql','-proot',
+                                  '-N','-B','-e',query], text=True,
+                                 stderr=subprocess.DEVNULL, timeout=10)
+    return {key: int(value) for key,value in (line.split('\t') for line in raw.splitlines())}
+
+
+def collect(interval, output, names, start_event=None, end_event=None, duration=None, ready_event=None, event_timeout=180, mysql_container=None):
     if bool(start_event) != bool(end_event):
         raise ValueError("--start-event and --end-event must be provided together")
     if not start_event and duration is None:
@@ -116,6 +132,9 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
     started_at = datetime.now(timezone.utc).isoformat()
     started = time.monotonic()
     first = snapshot(selected)
+    mysql_samples = [{"elapsed_seconds":0,"counters":mysql_snapshot(mysql_container)}] if mysql_container else []
+    timeline = [{"elapsed_seconds":0,"containers":first}]
+    last_timeline = last_mysql = 0
     if ready_event:
         Path(ready_event).write_text(started_at, encoding="utf-8")
     peak = dict((name, data["memory_bytes"]) for name, data in first.items())
@@ -131,6 +150,13 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
             break
         time.sleep(min(interval, max(0.01, duration - elapsed)) if duration is not None else interval)
         now = snapshot(selected)
+        elapsed = time.monotonic() - started
+        if elapsed-last_timeline >= 1:
+            timeline.append({"elapsed_seconds":elapsed,"containers":now})
+            last_timeline = elapsed
+        if mysql_container and elapsed-last_mysql >= 5:
+            mysql_samples.append({"elapsed_seconds":elapsed,"counters":mysql_snapshot(mysql_container)})
+            last_mysql = elapsed
         for name, data in now.items():
             peak[name] = max(peak[name], data["memory_bytes"])
             if data["rss_bytes"] is not None:
@@ -144,6 +170,9 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
         if data["rss_bytes"] is not None:
             rss_peak[name] = max(rss_peak[name], data["rss_bytes"])
     elapsed = time.monotonic() - started
+    timeline.append({"elapsed_seconds":elapsed,"containers":last})
+    if mysql_container:
+        mysql_samples.append({"elapsed_seconds":elapsed,"counters":mysql_snapshot(mysql_container)})
     containers_result = {}
     for name, (_, version) in selected.items():
         try:
@@ -165,12 +194,15 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
               "cpu_method": "exact delta of cumulative cgroup cpu usage counters",
               "memory_method": "peak sampled cgroup memory usage; includes charged cache and is not RSS",
               "interval_method": "start/end marker files" if start_event else "fixed duration",
-              "containers": containers_result}
+              "containers": containers_result, "timeline": timeline,
+              "mysql_samples": mysql_samples,
+              "mysql_note": "Global SQL counters and total Performance Schema wait; includes observer queries. Query tail latency unavailable."}
     Path(output).write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--mysql-container", help="MySQL container for SQL counter and aggregate query wait samples")
     ap.add_argument("--duration", type=float, help="duration in seconds (alternative to marker files)")
     ap.add_argument("--interval", type=float, default=1.0)
     ap.add_argument("--output", required=True)
@@ -183,7 +215,7 @@ def main():
     if a.duration is not None and a.duration <= 0 or a.interval <= 0 or a.event_timeout <= 0:
         ap.error("duration and interval must be positive")
     try:
-        collect(a.interval, a.output, a.containers, a.start_event, a.end_event, a.duration, a.ready_event, a.event_timeout)
+        collect(a.interval, a.output, a.containers, a.start_event, a.end_event, a.duration, a.ready_event, a.event_timeout, a.mysql_container)
     except ValueError as error:
         ap.error(str(error))
 

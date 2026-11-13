@@ -2,6 +2,7 @@
 """Fail closed on correctness and load mismatch. Never infer missing metrics."""
 import json
 import math
+import heapq
 from pathlib import Path
 import sys
 from datetime import datetime
@@ -11,6 +12,41 @@ def percentiles(values):
     values=sorted(values)
     return {p:values[max(0,math.ceil(len(values)*q)-1)] if values else None
             for p,q in [('p50',.5),('p95',.95),('p99',.99),('p999',.999)]}
+
+
+def backlog_series(rows,begin,duration):
+    # Client-observed outstanding executions; deliberately not called task backlog.
+    events=[]
+    for r in rows:
+        start=datetime.fromisoformat(r['scheduled'].replace('Z','+00:00')).timestamp()
+        end=datetime.fromisoformat(r['completed'].replace('Z','+00:00')).timestamp()
+        events.extend([(start,1,r['workflow_id']),(end,-1,r['workflow_id'])])
+    events.sort(key=lambda event:(event[0],-event[1]));pending={};oldest=[];cursor=0;series=[]
+    for tick in range(math.ceil(duration)+1):
+        now=begin+tick
+        while cursor<len(events) and events[cursor][0]<=now:
+            when,kind,wid=events[cursor]
+            if kind==1:pending[wid]=when;heapq.heappush(oldest,(when,wid))
+            else:pending.pop(wid,None)
+            cursor+=1
+        while oldest and oldest[0][1] not in pending:heapq.heappop(oldest)
+        series.append(dict(elapsed_seconds=tick,outstanding_workflows=len(pending),
+                           oldest_outstanding_seconds=now-oldest[0][0] if oldest else 0))
+    return series
+
+
+def persistence_summary(resource):
+    samples=resource['mysql_samples']
+    if len(samples)<2:raise ValueError('missing persistence counters')
+    first,last=samples[0]['counters'],samples[-1]['counters']
+    elapsed=samples[-1]['elapsed_seconds']-samples[0]['elapsed_seconds']
+    deltas={key:last[key]-first[key] for key in ('Questions','Connections','statement_count','statement_wait_ps')}
+    if elapsed<=0 or any(v<0 for v in deltas.values()):raise ValueError('persistence counter reset or invalid duration')
+    return dict(queries_per_second=deltas['Questions']/elapsed,
+                new_connections_per_second=deltas['Connections']/elapsed,
+                peak_connections=max(s['counters']['Threads_connected'] for s in samples),
+                mean_statement_wait_ms=deltas['statement_wait_ps']/deltas['statement_count']/1e9 if deltas['statement_count'] else None,
+                includes_observer_queries=True)
 
 
 def summarize(rows, manifest):
@@ -42,7 +78,8 @@ def summarize(rows, manifest):
                 successful_starts_per_second=started_in_window/manifest['duration'],
                 completions_per_second=completed_in_window/manifest['duration'],
                 activity_tasks_per_second=sum(begin.timestamp()<=t/1e9<end for r in measured for t in r['activity_completion_unix_nano'])/manifest['duration'],
-                outstanding_at_arrival_end=expected-completed_in_window,latency_ms=latency)
+                outstanding_at_arrival_end=expected-completed_in_window,latency_ms=latency,
+                client_outstanding_timeline=backlog_series(measured,begin.timestamp(),manifest['duration']))
 
 
 def main(path):
@@ -54,8 +91,29 @@ def main(path):
         for arm in ('go','rust'):
             key=f'{rep:02}-{arm}'; resource=json.loads((root/(key+'-resources.json')).read_text())
             if resource.get('schema_version')!=2:raise ValueError('unsupported resource evidence')
+            containers=resource['containers']
+            if len(containers)!=5 or resource['duration_seconds']<=0 or resource['samples']<2:
+                raise ValueError('incomplete service/database resource collection')
+            for data in containers.values():
+                if data['cpu_seconds']<0 or data['peak_cgroup_memory_bytes']<=0:
+                    raise ValueError('invalid resource counters')
             runs[key]['resources']=resource
-    report=dict(manifest=manifest,runs=runs,
+            runs[key]['persistence']=persistence_summary(resource)
+    pairs={}
+    for rep in range(manifest['repetition_offset'],manifest['repetition_offset']+manifest['repetitions']):
+        go,rust=runs[f'{rep:02}-go'],runs[f'{rep:02}-rust']
+        equal=abs(go['completions_per_second']-rust['completions_per_second'])<=.01*max(go['completions_per_second'],rust['completions_per_second'])
+        pairs[str(rep)]={'equal_completion_throughput_within_one_percent':equal,
+                         'resource_comparison_allowed':equal,'resource_deltas':{}}
+        if equal:
+            if go['resources']['containers'].keys()!=rust['resources']['containers'].keys():
+                raise ValueError('incomparable service sets')
+            for name,g in go['resources']['containers'].items():
+                r=rust['resources']['containers'][name]
+                pairs[str(rep)]['resource_deltas'][name]={
+                    metric+'_rust_minus_go_percent':100*(r[metric]-g[metric])/g[metric] if g[metric] else None
+                    for metric in ('average_cpu_cores','peak_cgroup_memory_bytes')}
+    report=dict(manifest=manifest,runs=runs,pairs=pairs,
                 performance_claims_allowed=False,
                 limitations=['Initial pipeline validation only. No capacity or recovery conclusion.',
                              'A hosted runner pair controls CPU affinity and limits, not external host contention.',

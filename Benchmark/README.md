@@ -54,7 +54,10 @@ sample-count p999 values are not statistically strong tail estimates.
 `collect_resources.py` uses a warmup-excluding baseline handshake and end marker.
 It measures cumulative container CPU, sampled cgroup memory, summed process RSS
 (shared pages may count twice), network bytes and cgroup v2 block I/O bytes for
-all services **and MySQL**. Collection includes the completion drain and history
+all services **and MySQL**. It also records one-second resource time series and
+five-second MySQL global operation/connection counters and aggregate Performance
+Schema statement wait. Observer SQL contributes a small, identical load; aggregate
+wait provides a mean, not query latency percentiles. Collection includes the completion drain and history
 audits; it must not be described as precisely the arrival window. CPU averages
 use the actual collection interval. Missing v1 disk/RSS values remain null.
 
@@ -91,8 +94,8 @@ this implementation does not publish images or allocate paid storage.
 No speedup claim is enabled by this initial report. Before performance conclusions:
 
 1. Complete the initial Go/Rust Matching gate and retain actual passing evidence.
-2. Add persistence query latency/ops/connection instrumentation, SDK/server retry
-   counters, task queue backlog size/age and resource time series for growth.
+2. Add persistence query latency percentiles, SDK/server retry
+   counters, and task queue backlog size/age.
    MySQL CPU/memory/I/O already share the resource collector. Outstanding workflow
    count is **not** server queue backlog. Missing metrics are named in the manifest.
 3. Add scenarios in `scenarios.json`: sequential activities, fan-out, timers,
