@@ -54,6 +54,27 @@ pub struct DecisionSnapshot {
     pub task_list: String,
 }
 
+/// Go workflow.ErrDeserializingToken (workflow/errors.go:43).
+fn err_deserializing_token() -> HistoryError {
+    HistoryError::bad_request("error deserializing task token")
+}
+
+/// Go workflow.ErrAlreadyCompleted (workflow/errors.go:39): WorkflowExecutionAlreadyCompletedError.
+fn already_completed_err() -> HistoryError {
+    WorkflowExecutionAlreadyCompletedError { message: "workflow execution already completed".into() }.into()
+}
+
+#[cfg(test)]
+mod respond_parity_tests {
+    use super::*;
+
+    #[test]
+    fn go_error_messages_and_types() {
+        assert_eq!(err_deserializing_token().to_string(), HistoryError::bad_request("error deserializing task token").to_string());
+        assert!(already_completed_err().is_workflow_already_completed());
+    }
+}
+
 fn invalid_action(what: &str, next_event_id: i64) -> HistoryError {
     HistoryError::internal(format!("invalid history action {what} (next event id {next_event_id})"))
 }
@@ -590,7 +611,7 @@ impl EngineDecisionHandler {
         for attempt in 0..CONDITIONAL_RETRY_COUNT {
             let mut state = context.load_state().await?;
             if !state.is_workflow_execution_running() {
-                return Err(HistoryError::entity_not_exists("workflow execution already completed"));
+                return Err(already_completed_err());
             }
             let decision = state.decision_info(token_schedule_id);
             if decision.is_none() && token_schedule_id >= state.get_next_event_id() {
@@ -864,7 +885,7 @@ impl DecisionHandler for EngineDecisionHandler {
         let task_list = poll.task_list.as_ref().map(|t| t.name.clone()).unwrap_or_default();
         self.update(&request.domain_uuid, &execution, |state| {
             if !state.is_workflow_execution_running() {
-                return Err(HistoryError::entity_not_exists("Workflow execution already completed."));
+                return Err(HistoryError::entity_not_exists("workflow execution already completed"));
             }
             let schedule_id = request.schedule_id;
             let decision = state.decision_info(schedule_id);
@@ -895,7 +916,7 @@ impl DecisionHandler for EngineDecisionHandler {
             .clone()
             .ok_or_else(|| HistoryError::bad_request("Missing complete request."))?;
         let token = JsonTaskTokenSerializer::deserialize(&req.task_token)
-            .map_err(|_| HistoryError::bad_request("Error deserializing task token."))?;
+            .map_err(|_| err_deserializing_token())?;
         let execution = WorkflowExecution { workflow_id: token.workflow_id.clone(), run_id: token.run_id.clone() };
         self.ensure_active_domain(&request.domain_uuid, &execution.workflow_id, &execution.run_id).await?;
         let (context, release) = self.cache.get_or_create(&request.domain_uuid, &execution).await?;
@@ -910,12 +931,12 @@ impl DecisionHandler for EngineDecisionHandler {
             .clone()
             .ok_or_else(|| HistoryError::bad_request("Missing failed request."))?;
         let token = JsonTaskTokenSerializer::deserialize(&failed.task_token)
-            .map_err(|_| HistoryError::bad_request("Error deserializing task token."))?;
+            .map_err(|_| err_deserializing_token())?;
         let execution = WorkflowExecution { workflow_id: token.workflow_id.clone(), run_id: token.run_id.clone() };
         self.ensure_active_domain(&request.domain_uuid, &execution.workflow_id, &execution.run_id).await?;
         self.update(&request.domain_uuid, &execution, |state| {
             if !state.is_workflow_execution_running() {
-                return Err(WorkflowExecutionAlreadyCompletedError { message: "Workflow execution already completed.".into() }.into());
+                return Err(already_completed_err());
             }
             let d = state
                 .decision_info(token.schedule_id)
