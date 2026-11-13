@@ -251,6 +251,10 @@ try:
             rc, out = cli(A_T, 'tchannel', '--domain', dom, 'admin', 'async-wf-queue', 'get')
             return rc == 0 and 'gate-queue' in out, out
         poll('async-workflow-config-replicated-to-A', a_async, 240)
+        # Domain-type DLQ admin calls against the Rust Frontend (Go common/domain/dlq_message_handler.go).
+        for op in ('read', 'purge', 'merge'):
+            rc, out = cli(B_T, 'tchannel', 'admin', 'dlq', op, '--dlq_type', 'domain', '--source_cluster', 'cluster1', inp='0\n')
+            record(f'domain-dlq-{op}-on-rust-frontend-B', rc == 0, out)
         for n in ['go-a', 'go-b-hmw', 'rust-frontend-b']:
             record(f'{n}-alive-at-end', procs[n].poll() is None, f'exit={procs[n].poll()}')
         raise SystemExit(0)

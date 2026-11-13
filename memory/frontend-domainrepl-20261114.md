@@ -29,3 +29,14 @@ Evidence (head dd53650f25b1a0f7362d240a9a5937b02756d94b for gates):
 - rust_frontend_active two_cluster: mysql 43514692582, postgres 43514697798, cassandra 43514702914: all success, `GATE SUMMARY failed: []`
 - default two-cluster regression 43513067704: success (previous head 7f code-identical; gate script change only touches rust-frontend-active branch)
 - Earlier failed: postgres 43513057218 (cool-down, fixed in harness)
+
+## Part 3 (branch frontend-domainrepl3)
+Changes (Go refs: common/domain/handler.go UpdateIsolationGroups L1175, UpdateAsyncWorkflowConfiguraton L1271, ensureUpdateOrFailoverCooldown L473; dlq_message_handler.go; service/frontend/admin/handler.go ReadDLQMessages/Purge/Merge/GetDomainReplicationMessages; replication_queue.go):
+- `domain_update.rs::check_admin_config_update`: cool-down (ServiceBusy "Domain update too frequent.") then primary-cluster check for global domains (BadRequest). `FrontendDomainManager::update_isolation_groups/update_async_workflow_config` now take `(metadata, policy)` and enforce it; isolation update rejects a nil config ("invalid request, isolationGroup configuration must be set"). admin.rs maps Busy->ServiceBusyError(503), Invalid->BadRequest. Main UpdateDomain/failover paths already had cool-down + primary checks (domain_update.rs check_cooldown/PRIMARY); verified, unchanged.
+- Domain DLQ audit fixes (admin.rs): invalid page-token message now Go `%v` format (`[1 2 3]`); merge only fails on nil DomainTaskAttributes (Go message), no task_type check; merge always range-deletes (ack, acked) and updates ack level with acked starting at 0 like Go; DLQ decode error text "failed to decode dlq task"; tchannel/gRPC GetDomainReplicationMessages decode error text "failed to decode task". Ack levels/paging (LE 8-byte token, page size 1000 read default, token when rows>=page size) already matched.
+- Gate (`run-frontend-two-cluster-gate.py --rust-frontend-active`): also runs `admin dlq read|purge|merge --dlq_type domain` through the Go CLI against the Rust Frontend.
+- Tests: persistence `admin_config_updates_enforce_cooldown_and_primary_cluster`, service-core `domain_dlq_page_token_error_matches_go_format`; e2e admin_isolation_and_async_config_flow now sets failoverCoolDown=0s.
+Evidence (head d2287041520d235f7fa40521e9a99442078da7b5; earlier fmt-only failures 43516261486/43516267688/43516275414, e2e cool-down failure 43516902343):
+- rust-ci persistence 43516897832 success, matching 43516906975 success (head 15504c6a), service-core 43519779396 success
+- rust_frontend_active two_cluster: mysql 43519802311, postgres 43519817199, cassandra 43519829350 all success, `GATE SUMMARY failed: []` (domain-dlq-read/purge/merge ok)
+- default two-cluster regression 43519845041 success, `GATE SUMMARY failed: []`
