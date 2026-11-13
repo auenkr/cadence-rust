@@ -165,18 +165,6 @@ fn matching_metadata<T>(request: &mut tonic::Request<T>) {
     request.set_timeout(crate::task::transfer_task_executor_base::TASK_RPC_CALL_TIMEOUT);
 }
 
-#[cfg(test)]
-mod matching_metadata_tests {
-    use super::*;
-
-    #[test]
-    fn matching_metadata_sets_grpc_timeout_deadline() {
-        let mut r = tonic::Request::new(());
-        matching_metadata(&mut r);
-        assert!(r.metadata().get("grpc-timeout").is_some(), "yarpc requires a TTL");
-    }
-}
-
 /// `TransferDependencies` over the real matching client, visibility writer and domain cache.
 pub struct TransferDepsImpl {
     env: Arc<HistoryEnv>,
@@ -560,5 +548,17 @@ impl CleanupDependencies for CleanupDepsImpl {
                 .map_err(pe)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod matching_metadata_tests {
+    use super::*;
+
+    #[test]
+    fn matching_metadata_sets_grpc_timeout_deadline() {
+        let mut r = tonic::Request::new(());
+        matching_metadata(&mut r);
+        assert!(r.metadata().get("grpc-timeout").is_some(), "yarpc requires a TTL");
     }
 }
