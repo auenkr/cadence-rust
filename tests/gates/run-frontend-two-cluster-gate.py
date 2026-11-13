@@ -30,7 +30,10 @@ ap.add_argument('--go-cli', type=Path, required=True)
 ap.add_argument('--rust-root', type=Path, required=True)
 ap.add_argument('--rust-history-binary', type=Path, help='run cluster A History as Rust History (replication from Go cluster B)')
 ap.add_argument('--rust-history-side', choices=['standby', 'active'], default='standby', help='with --rust-history-binary: Rust History on standby cluster A (default) or on active cluster B (A all Go)')
+ap.add_argument('--two-history-graceful', action='store_true', help='with --rust-history-side active: run TWO Rust History hosts on active cluster B, do a graceful failover to A and assert cross-host failover markers')
 args = ap.parse_args()
+if args.two_history_graceful and not (args.rust_history_binary and args.rust_history_side == 'active'):
+    ap.error('--two-history-graceful needs --rust-history-binary and --rust-history-side active')
 root = Path(__file__).resolve().parents[2]
 work = args.out.resolve(); work.mkdir(parents=True, exist_ok=True)
 my_addr = os.environ.get('CADENCE_MYSQL_ADDR', '127.0.0.1:3306')
@@ -40,7 +43,7 @@ my_pass = os.environ.get('CADENCE_MYSQL_PASSWORD', 'cadence')
 keys = ['A_FE', 'A_FE_GRPC', 'A_HIST', 'A_HIST_GRPC', 'A_WORKER', 'A_RMATCH', 'A_RMATCH_GRPC', 'A_MATCH', 'A_MATCH_GRPC',
         'A_PPROF1', 'A_PPROF2', 'A_PPROF3', 'A_PPROF4',
         'B_FE', 'B_FE_GRPC', 'B_MATCH', 'B_MATCH_GRPC', 'B_HIST', 'B_HIST_GRPC', 'B_WORKER',
-        'B_PPROF1', 'B_PPROF2', 'B_PPROF3', 'B_PPROF4']
+        'B_PPROF1', 'B_PPROF2', 'B_PPROF3', 'B_PPROF4', 'B_HIST2', 'B_HIST2_GRPC', 'B_PPROF5']
 socks = [socket.socket() for _ in keys]
 for s in socks:
     s.bind(('127.0.0.1', 0))
@@ -95,7 +98,7 @@ def go_config(dirname, prefix, db, vis, seeds, current):
     return d, text
 
 a_seeds = ', '.join(f'"127.0.0.1:{P[k]}"' for k in ['A_FE', 'A_HIST', 'A_WORKER', 'A_MATCH' if (args.rust_history_binary and args.rust_history_side == 'active') else 'A_RMATCH'])
-b_seeds = ', '.join(f'"127.0.0.1:{P[k]}"' for k in ['B_FE', 'B_HIST', 'B_MATCH', 'B_WORKER'])
+b_seeds = ', '.join(f'"127.0.0.1:{P[k]}"' for k in ['B_FE', 'B_HIST', 'B_MATCH', 'B_WORKER'] + (['B_HIST2'] if args.two_history_graceful else []))
 a_dir, _ = go_config('config-a', 'A_', 'cadence_a', 'cadence_a_visibility', a_seeds, 'cluster0')
 b_dir, _ = go_config('config-b', 'B_', 'cadence_b', 'cadence_b_visibility', b_seeds, 'cluster1')
 
@@ -189,6 +192,14 @@ try:
         record('go-clusters-listening', ok)
         if not ok:
             raise SystemExit(1)
+        if args.two_history_graceful:
+            y2 = (work / 'rust-history.yaml').read_text()
+            for a, b in [('B_HIST_GRPC', 'B_HIST2_GRPC'), ('B_PPROF3', 'B_PPROF5'), ('B_HIST', 'B_HIST2')]:
+                y2 = re.sub(r'(?m)^(      (?:port|grpcPort): )' + P[a] + r'$', lambda m: m.group(1) + P[b], y2)
+            (work / 'rust-history2.yaml').write_text(y2)
+            start('rust-history-2', [args.rust_history_binary, '--config', work / 'rust-history2.yaml', '--root', work, 'start', '--services', 'history'])
+            ok = ok and wait_port(P['B_HIST2_GRPC'], 240, 'rust-history-2')
+            record('rust-history-2-listening', ok)
         time.sleep(20)
         dom = 'tc-act-' + secrets.token_hex(3)
         rc, out = cli(B_T, 'tchannel', '--domain', dom, 'domain', 'register', '--retention', '1', '--global_domain', 'true',
@@ -225,7 +236,47 @@ try:
             return re.findall(r'WorkflowExecution\w+|DecisionTask\w+', out)
         ea, eb = ev(A_T), ev(B_T)
         record('act-standby-history-equals-active', ea == eb and len(ea) >= 3, f'A={ea} B={eb}')
-        for n in ['go-a', 'go-b-fmw', 'rust-history']:
+        if args.two_history_graceful:
+            gw = []
+            for i in range(4):
+                rc, out = cli(B_T, 'tchannel', '--domain', dom, 'workflow', 'start', '--tl', 'tc-tl', '--wt', 'TcType', '--wid', f'tc-grace-{i}-' + secrets.token_hex(2), '--et', '600', '--dt', '10')
+                record(f'grace-start-{i}-on-B', rc == 0, out)
+            time.sleep(10)
+            rc, out = cli(B_T, 'tchannel', '--domain', dom, 'domain', 'update', '--active_cluster', 'cluster0', '--failover_type', 'grace', '--failover_timeout_seconds', '30')
+            record('grace-failover-update-on-B', rc == 0, out)
+            def done_on(addr):
+                def f():
+                    rc, out = cli(addr, 'tchannel', '--domain', dom, 'domain', 'describe')
+                    return rc == 0 and re.search(r'ActiveClusterName:\s*cluster0', out) is not None and 'pending' not in out.lower(), out
+                return f
+            poll('grace-failover-complete-on-A', done_on(A_T), 300)
+            poll('grace-failover-complete-on-B', done_on(B_T), 300)
+            def rd(n):
+                p = work / f'{n}.log'
+                return p.read_text(errors='replace').splitlines() if p.exists() else []
+            sends, recvs = [], []
+            for n in ['rust-history', 'rust-history-2']:
+                for l in rd(n):
+                    if 'failover-marker-send' in l: sends.append((n, l))
+                    if 'failover-marker-recv' in l: recvs.append((n, l))
+            (work / 'failover-marker-lines.txt').write_text('\n'.join(f'{n}: {l}' for n, l in sends + recvs))
+            self_host = {'rust-history': P['B_HIST_GRPC'], 'rust-history-2': P['B_HIST2_GRPC']}
+            cross = [(n, l) for n, l in sends if (m := re.search(r'target_grpc[=:"\s]+([\w.:\[\]-]+)', l)) and m.group(1).strip('"') != f'127.0.0.1:{self_host[n]}']
+            recv_hosts = {n for n, _ in recvs}
+            other = {'rust-history': 'rust-history-2', 'rust-history-2': 'rust-history'}
+            record('grace-marker-send-cross-host', bool(cross), f'sends={len(sends)} cross={len(cross)} e.g. {(cross or sends or [("", "none")])[0][1][-300:]}')
+            record('grace-marker-recv-on-other-host', any(other[n] in recv_hosts for n, _ in cross), f'recv hosts={sorted(recv_hosts)} count={len(recvs)}')
+            # workflows continue on the new active side A
+            wid = 'tc-grace-after-' + secrets.token_hex(2)
+            rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'start', '--tl', 'tc-tl', '--wt', 'TcType', '--wid', wid, '--et', '600', '--dt', '10')
+            record('grace-after-start-on-new-active-A', rc == 0, out)
+            rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'signal', '--wid', wid, '--name', 'sig', '--input', '"y"')
+            record('grace-after-signal-on-A', rc == 0, out)
+            def b_sig():
+                rc, out = cli(B_T, 'tchannel', '--domain', dom, 'workflow', 'show', '--wid', wid)
+                return rc == 0 and 'WorkflowExecutionSignaled' in out, out
+            poll('grace-after-signal-replicated-to-B', b_sig, 240)
+        for n in ['go-a', 'go-b-fmw', 'rust-history'] + (['rust-history-2'] if args.two_history_graceful else []):
             record(f'{n}-alive-at-end', procs[n].poll() is None, f'exit={procs[n].poll()}')
         raise SystemExit(0)
     start('go-b', [args.go_server, '--config', b_dir, '--zone', 'mysql', 'start', '--auto-setup'])
