@@ -215,6 +215,7 @@ impl EngineMutableState {
     }
 
     /// Go `repairViaRebuild` + `persistRepairedState`.
+    #[allow(clippy::result_large_err)]
     async fn repair_via_rebuild(&self, core: &Arc<EngineCore>, persisted: &Checksum) -> crate::engine::deps::HResult<()> {
         use crate::engine::deps::HistoryError;
         use crate::execution::workflow::TransactionPolicy;
