@@ -2019,7 +2019,17 @@ pub async fn remove_task(
         cluster_name: req.cluster_name,
     };
     let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
-    match shard_redirect(&state, req.shard_id, &request, |mut c, r| async move { c.remove_task(history_admin_request(r)).await }, client.remove_task(history_admin_request(request.clone())).await).await {
+    match shard_redirect(
+        &state,
+        req.shard_id,
+        &request,
+        |mut c, r| async move { c.remove_task(history_admin_request(r)).await },
+        client
+            .remove_task(history_admin_request(request.clone()))
+            .await,
+    )
+    .await
+    {
         Ok(_) => ok_json(cadence_api::admin::RemoveTaskResponse {}),
         Err(error) => error_response(
             "InternalServiceError",
@@ -2067,7 +2077,17 @@ pub async fn reset_queue(
         task_type: req.task_type.unwrap_or_default(),
     };
     let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
-    let response = match shard_redirect(&state, req.shard_id, &request, |mut c, r| async move { c.reset_queue(history_admin_request(r)).await }, client.reset_queue(history_admin_request(request.clone())).await).await {
+    let response = match shard_redirect(
+        &state,
+        req.shard_id,
+        &request,
+        |mut c, r| async move { c.reset_queue(history_admin_request(r)).await },
+        client
+            .reset_queue(history_admin_request(request.clone()))
+            .await,
+    )
+    .await
+    {
         Ok(response) => response.into_inner(),
         Err(error) => {
             return error_response(
@@ -2118,7 +2138,17 @@ pub async fn describe_queue(
         task_type: req.task_type.unwrap_or_default(),
     };
     let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
-    match shard_redirect(&state, req.shard_id, &request, |mut c, r| async move { c.describe_queue(history_admin_request(r)).await }, client.describe_queue(history_admin_request(request.clone())).await).await {
+    match shard_redirect(
+        &state,
+        req.shard_id,
+        &request,
+        |mut c, r| async move { c.describe_queue(history_admin_request(r)).await },
+        client
+            .describe_queue(history_admin_request(request.clone()))
+            .await,
+    )
+    .await
+    {
         Ok(response) => ok_json(cadence_api::admin::DescribeQueueResponse {
             processing_queue_states: response.into_inner().processing_queue_states,
         }),
