@@ -95,7 +95,7 @@ def go_config(dirname, prefix, db, vis, seeds, current):
     (d / 'development_mysql.yaml').write_text(persistence(db, vis))
     return d, text
 
-a_seeds = ', '.join(f'"127.0.0.1:{P[k]}"' for k in ['A_FE', 'A_HIST', 'A_WORKER', 'A_MATCH' if (args.rust_history_binary and args.rust_history_side == 'active') else 'A_RMATCH'])
+a_seeds = ', '.join(f'"127.0.0.1:{P[k]}"' for k in ['A_FE', 'A_HIST', 'A_WORKER', 'A_MATCH' if ((args.rust_history_binary and args.rust_history_side == 'active') or args.rust_frontend_active) else 'A_RMATCH'])
 b_seeds = ', '.join(f'"127.0.0.1:{P[k]}"' for k in ['B_FE', 'B_HIST', 'B_MATCH', 'B_WORKER'])
 a_dir, _ = go_config('config-a', 'A_', 'cadence_a', 'cadence_a_visibility', a_seeds, 'cluster0')
 b_dir, _ = go_config('config-b', 'B_', 'cadence_b', 'cadence_b_visibility', b_seeds, 'cluster1')
