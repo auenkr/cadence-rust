@@ -357,10 +357,8 @@ impl TypedMutableState {
     }
 
     pub fn is_current_workflow_guaranteed(&self) -> bool {
-        matches!(
-            self.execution_info.state,
-            WORKFLOW_STATE_CREATED | WORKFLOW_STATE_RUNNING
-        )
+        // Go: stateInDB (not the in-transaction state) is the bloom filter.
+        matches!(self.state_in_db, WORKFLOW_STATE_CREATED | WORKFLOW_STATE_RUNNING)
     }
 
     pub fn has_in_flight_decision(&self) -> bool {
@@ -562,7 +560,7 @@ impl TypedMutableState {
     ) -> Result<(TypedWorkflowMutation, Vec<HistoryEvent>)> {
         let mut working = self.clone();
         working.prepare_close_policy(now_nanos, policy)?;
-        let (mutation, events) = working.close_mutation_prepared()?;
+        let (mutation, events) = working.close_mutation_prepared(policy == super::workflow::TransactionPolicy::Passive)?;
         Ok((mutation, events))
     }
 
@@ -574,7 +572,7 @@ impl TypedMutableState {
     ) -> Result<(TypedWorkflowSnapshot, Vec<HistoryEvent>)> {
         let mut working = self.clone();
         working.prepare_close_policy(now_nanos, policy)?;
-        let (snapshot, events) = working.close_snapshot_prepared()?;
+        let (snapshot, events) = working.close_snapshot_prepared(policy == super::workflow::TransactionPolicy::Passive)?;
         Ok((snapshot, events))
     }
 
@@ -664,13 +662,16 @@ impl TypedMutableState {
     /// Go `CloseTransactionAsMutation`.
     pub fn close_transaction_as_mutation(&mut self) -> Result<(TypedWorkflowMutation, Vec<HistoryEvent>)> {
         self.close_transaction_handle_activity_user_timer_tasks()?;
-        self.close_mutation_prepared()
+        self.close_mutation_prepared(false)
     }
 
-    fn close_mutation_prepared(&mut self) -> Result<(TypedWorkflowMutation, Vec<HistoryEvent>)> {
+    fn close_mutation_prepared(&mut self, passive: bool) -> Result<(TypedWorkflowMutation, Vec<HistoryEvent>)> {
         let tasks_by_category = self.drain_encoded_tasks()?;
         let events = std::mem::take(&mut self.history_events);
-        self.advance_version_history(&events)?;
+        // Go updateWithLastWriteEvent: Passive is "already handled in state builder".
+        if !passive {
+            self.advance_version_history(&events)?;
+        }
 
         let rewrite_activity = !self.delete_activity_infos.is_empty();
         let rewrite_timer = !self.delete_timer_infos.is_empty();
@@ -721,16 +722,19 @@ impl TypedMutableState {
             return internal("cannot close transaction as snapshot with buffered events");
         }
         self.close_transaction_handle_activity_user_timer_tasks()?;
-        self.close_snapshot_prepared()
+        self.close_snapshot_prepared(false)
     }
 
-    fn close_snapshot_prepared(&mut self) -> Result<(TypedWorkflowSnapshot, Vec<HistoryEvent>)> {
+    fn close_snapshot_prepared(&mut self, passive: bool) -> Result<(TypedWorkflowSnapshot, Vec<HistoryEvent>)> {
         if !self.update_buffered_events.is_empty() || !self.buffered_events.is_empty() {
             return internal("cannot close transaction as snapshot with buffered events");
         }
         let tasks_by_category = self.drain_encoded_tasks()?;
         let events = std::mem::take(&mut self.history_events);
-        self.advance_version_history(&events)?;
+        // Go updateWithLastWriteEvent: Passive is "already handled in state builder".
+        if !passive {
+            self.advance_version_history(&events)?;
+        }
         let workflow_requests = self.prepared_workflow_requests()?;
         let snapshot = TypedWorkflowSnapshot {
             execution_info: self.execution_info.clone(),
@@ -1002,7 +1006,10 @@ mod tests {
             (WORKFLOW_STATE_VOID, false),
             (WORKFLOW_STATE_CORRUPTED, false),
         ] {
-            state.execution_info.state = s;
+            state.state_in_db = s;
+            assert_eq!(state.is_current_workflow_guaranteed(), want);
+            // the in-transaction state (e.g. replayed terminate) must not matter
+            state.execution_info.state = WORKFLOW_STATE_COMPLETED;
             assert_eq!(state.is_current_workflow_guaranteed(), want);
         }
     }
