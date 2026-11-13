@@ -206,6 +206,8 @@ impl TimerWorkflow for EngineTimerWorkflow {
         self.state.workflow_retry_backoff(reason)
     }
     async fn cron_backoff_duration(&self) -> TaskResult<Option<Duration>> {
+        // Go `GetStartEvent` inside GetCronBackoffDuration.
+        self.state.preload_start_event().await;
         self.state.workflow_cron_backoff().map_err(he)
     }
     fn cancel_requested(&self) -> bool {

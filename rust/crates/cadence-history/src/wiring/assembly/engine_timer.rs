@@ -355,9 +355,11 @@ impl EngineMutableState {
             (e.initial_interval_nanos / NANOS) as i32,
             (e.maximum_interval_nanos / NANOS) as i32,
             e.backoff_coefficient,
-            0.0,
-            0.0,
+            e.jitter_coefficient,
+            rand::random::<f64>(),
         )?;
+        // Go: round up so a sub-second jittered interval doesn't become an immediate retry.
+        let backoff = Duration::from_secs(backoff.as_secs() + u64::from(backoff.subsec_nanos() > 0));
         let next = now.saturating_add(backoff.as_nanos() as i64);
         let expiration = (e.expiration_time_unix_nanos > 0)
             .then(|| UNIX_EPOCH + Duration::from_nanos(e.expiration_time_unix_nanos as u64));
@@ -373,13 +375,26 @@ impl EngineMutableState {
         .then_some(backoff)
     }
 
-    /// Go `GetCronBackoffDuration`. Jitter start seconds are not applied (start event not read).
+    /// Go `GetCronBackoffDuration`: execution time = start timestamp + first decision backoff;
+    /// jitter start seconds come from the start event (requires it to be loaded, as in Go).
     pub fn workflow_cron_backoff(&self) -> HResult<Option<Duration>> {
         let now = self.now();
         let g = self.inner.lock().unwrap();
         if g.pc_exec.cron_schedule.is_empty() {
             return Ok(None);
         }
+        let start_attrs = g
+            .prev_start_event
+            .clone()
+            .and_then(|e| e.workflow_execution_started_event_attributes)
+            .ok_or_else(|| HistoryError::internal("unable to find workflow start event"))?;
+        let first_backoff = start_attrs.first_decision_task_backoff_seconds.unwrap_or(0) as i64 * NANOS;
+        let jitter = start_attrs.jitter_start_seconds.unwrap_or(0);
+        let jitter = if jitter > 0 {
+            Duration::from_secs(rand::Rng::gen_range(&mut rand::thread_rng(), 0..=jitter as u64))
+        } else {
+            Duration::ZERO
+        };
         let to_dt = |nanos: i64| {
             chrono::DateTime::from_timestamp(nanos.div_euclid(NANOS), nanos.rem_euclid(NANOS) as u32)
                 .map(|d| d.naive_utc())
@@ -387,11 +402,11 @@ impl EngineMutableState {
         };
         let secs = cadence_common::cron::get_backoff_for_next_schedule_in_seconds(
             &g.pc_exec.cron_schedule,
-            to_dt(g.pc_exec.start_time_unix_nanos),
+            to_dt(g.pc_exec.start_time_unix_nanos.saturating_add(first_backoff)),
             to_dt(now),
             Some(g.pc_exec.cron_overlap_policy),
             to_dt(now),
-            Duration::ZERO,
+            jitter,
         )
         .map_err(HistoryError::internal)?;
         Ok(Some(Duration::from_secs(secs.max(0) as u64)))
@@ -544,5 +559,41 @@ mod retry_workflow_tests {
         s.inner.lock().unwrap().prev_start_event = None;
         assert!(s.retry_workflow_new_run(5, Duration::from_secs(1), false, "START_TO_CLOSE").is_err());
         assert!(s.is_workflow_execution_running());
+    }
+
+    #[test]
+    fn retry_backoff_rounds_up_to_whole_seconds_with_jitter() {
+        let s = state();
+        {
+            let mut g = s.inner.lock().unwrap();
+            g.pc_exec.has_retry_policy = true;
+            g.pc_exec.initial_interval_nanos = 10 * NANOS;
+            g.pc_exec.backoff_coefficient = 2.0;
+            g.pc_exec.jitter_coefficient = 0.5;
+            g.pc_exec.maximum_attempts = 5;
+        }
+        for _ in 0..50 {
+            let d = s.workflow_retry_backoff("x").unwrap();
+            assert_eq!(d.subsec_nanos(), 0);
+            assert!(d.as_secs() >= 5 && d.as_secs() <= 10, "{d:?}");
+        }
+    }
+
+    #[test]
+    fn cron_backoff_uses_first_decision_backoff_and_requires_start_event() {
+        let s = state();
+        {
+            let mut g = s.inner.lock().unwrap();
+            g.pc_exec.cron_schedule = "0 * * * *".into();
+            // now = 1_700_000_000s = 22:13:20 UTC; started at 21:00:00 with 2h first-decision backoff
+            g.pc_exec.start_time_unix_nanos = 1_699_995_600 * NANOS;
+            g.pc_exec.cron_overlap_policy = 0;
+            g.prev_start_event.as_mut().unwrap().workflow_execution_started_event_attributes.as_mut().unwrap().first_decision_task_backoff_seconds = Some(7200);
+        }
+        // execution time 23:00 -> next 00:00 (> close 22:13:20) => 6400s... computed from schedule
+        let d = s.workflow_cron_backoff().unwrap().unwrap();
+        assert_eq!(d, Duration::from_secs(6400));
+        s.inner.lock().unwrap().prev_start_event = None;
+        assert!(s.workflow_cron_backoff().is_err());
     }
 }
