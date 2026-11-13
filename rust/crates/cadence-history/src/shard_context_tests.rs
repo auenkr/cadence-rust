@@ -357,7 +357,7 @@ fn get_and_update_processing_queue_states() {
 }
 
 fn marker(d: &str, v: i64) -> FailoverMarker {
-    FailoverMarker { domain_id: d.into(), failover_version: v }
+    FailoverMarker { domain_id: d.into(), failover_version: v, creation_time: 0 }
 }
 
 // TestValidateAndUpdateFailoverMarkers (+ FailoverCompleted/DeprecatedDomain/DomainNoLongerExists)
@@ -383,6 +383,19 @@ fn validate_and_update_failover_markers() {
         .validate_and_update_failover_markers(|_| Err(ShardContextError::Other("lookup".into())))
         .unwrap_err();
     assert_eq!(err, ShardContextError::Other("lookup".into()));
+}
+
+// Go keeps `FailoverMarkerAttributes.CreationTime` on the pending marker so the
+// coordinator's graceful-failover latency uses the original creation time.
+#[test]
+fn failover_marker_creation_time_is_preserved() {
+    let f = fixture();
+    let m = FailoverMarker { domain_id: "d1".into(), failover_version: 1, creation_time: 12345 };
+    f.ctx.add_pending_failover_marker(m.clone()).unwrap();
+    let rem = f.ctx.validate_and_update_failover_markers(|_| Ok(false)).unwrap();
+    assert_eq!(rem, vec![m.clone()]);
+    assert_eq!(rem[0].creation_time, 12345);
+    assert_eq!(f.ctx.shard_info_snapshot().pending_failover_markers[0].creation_time, 12345);
 }
 
 // TestCloseShard

@@ -146,31 +146,7 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
         let history_size = info.history_size;
         let domain_id = info.domain_id.clone();
         let mut ms = state_from_snapshot(domain, &execution, self.core.clock.now(), snapshot).map_err(ndc_err)?;
-        // Go `newMutableStateBuilder` receives the shard cluster metadata and domain entry.
-        if let Some(owned) = ms.as_any_mut().and_then(|a| a.downcast_mut::<super::ndc_state::OwnedNdcMutableState>()) {
-            let policy_multi_cluster = self
-                .core
-                .domains
-                .get_domain_by_id(&domain_id)
-                .map(|d| d.is_global_domain && d.clusters.len() > 1)
-                .unwrap_or(false);
-            let can_replicate = policy_multi_cluster
-                && (self.core.enable_replication_task_generation)(&domain_id, &execution.workflow_id);
-            let metadata = self.core.cluster_metadata.clone();
-            let params = (self.core.state_params)(&domain_id);
-            owned.set_failover_context(
-                crate::execution::mutable_state_failover::FailoverCluster {
-                    current_cluster: self.core.current_cluster.clone(),
-                    cluster_name_for_failover_version: Arc::new(move |v| {
-                        metadata.cluster_name_for_failover_version(v).map_err(|e| e.to_string())
-                    }),
-                    can_replicate_events: can_replicate,
-                },
-                params.normal_decision_s2s_timeout_nanos,
-                params.normal_decision_s2s_max_attempts,
-                self.core.clock.now(),
-            );
-        }
+        install_failover_context(&self.core, ms.as_mut(), &domain_id, &execution.workflow_id);
         Ok(NdcStateBox { ms, history_size })
     }
     /// Go `GetActiveClusterInfoByWorkflow(...).FailoverVersion` for `StartTransaction`.
@@ -302,7 +278,7 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
             }
             let mut slots: Vec<(i64, i64)> = decoded.iter().map(|_| (0, 0)).collect();
             let mut max_read_level = 0i64;
-            shard.allocate_transfer_ids(&mut slots, &mut max_read_level).map_err(shard_err)?;
+            shard.allocate_transfer_ids(&mut slots, &mut max_read_level).map_err(shard_err(shard.shard_id()))?;
             for ((task, t), slot) in list.iter_mut().zip(decoded.iter_mut()).zip(slots.iter()) {
                 t.task_id = slot.0;
                 t.visibility_time_unix_nanos = slot.1;
@@ -321,7 +297,7 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
                 decoded.push(timer_task_from_struct(&s).map_err(|e| internal(e.to_string()))?);
             }
             let mut slots: Vec<(i64, i64)> = decoded.iter().map(|t| (0, t.visibility_timestamp_unix_nanos)).collect();
-            shard.allocate_timer_ids(&self.core.current_cluster, &mut slots).map_err(shard_err)?;
+            shard.allocate_timer_ids(&self.core.current_cluster, &mut slots).map_err(shard_err(shard.shard_id()))?;
             for ((task, t), slot) in list.iter_mut().zip(decoded.iter_mut()).zip(slots.iter()) {
                 t.task_id = slot.0;
                 t.visibility_timestamp_unix_nanos = slot.1;
@@ -341,7 +317,7 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
             }
             let mut slots: Vec<(i64, i64)> = list.iter().map(|t| (0, t.visibility_timestamp_unix_nanos)).collect();
             let mut max_read_level = 0i64;
-            shard.allocate_transfer_ids(&mut slots, &mut max_read_level).map_err(shard_err)?;
+            shard.allocate_transfer_ids(&mut slots, &mut max_read_level).map_err(shard_err(shard.shard_id()))?;
             for (task, slot) in list.iter_mut().zip(slots.iter()) {
                 task.task_id = slot.0;
                 task.visibility_timestamp_unix_nanos = slot.1;
@@ -419,6 +395,39 @@ pub(super) async fn reapply_via_engine(core: &EngineCore, batches: &[WorkflowEve
 
 // ------------------------------------------------------------------ writer seam
 
+/// Go `newMutableStateBuilder` receives the shard cluster metadata and domain entry: installs the
+/// failover context on a typed NDC state (`StartTransaction` decision failover needs it).
+pub(super) fn install_failover_context(
+    core: &EngineCore,
+    ms: &mut dyn NdcMutableState,
+    domain_id: &str,
+    workflow_id: &str,
+) {
+    let Some(owned) = ms.as_any_mut().and_then(|a| a.downcast_mut::<super::ndc_state::OwnedNdcMutableState>()) else {
+        return;
+    };
+    let policy_multi_cluster = core
+        .domains
+        .get_domain_by_id(domain_id)
+        .map(|d| d.is_global_domain && d.clusters.len() > 1)
+        .unwrap_or(false);
+    let can_replicate = policy_multi_cluster && (core.enable_replication_task_generation)(domain_id, workflow_id);
+    let metadata = core.cluster_metadata.clone();
+    let params = (core.state_params)(domain_id);
+    owned.set_failover_context(
+        crate::execution::mutable_state_failover::FailoverCluster {
+            current_cluster: core.current_cluster.clone(),
+            cluster_name_for_failover_version: Arc::new(move |v| {
+                metadata.cluster_name_for_failover_version(v).map_err(|e| e.to_string())
+            }),
+            can_replicate_events: can_replicate,
+        },
+        params.normal_decision_s2s_timeout_nanos,
+        params.normal_decision_s2s_max_attempts,
+        core.clock.now(),
+    );
+}
+
 /// Sync single-run create/update persistence (the NDC state is not `Send`, so
 /// the write is driven with `block_on`). Production: [`EngineNdcWriter`].
 pub trait NdcWriter: Send + Sync {
@@ -426,6 +435,9 @@ pub trait NdcWriter: Send + Sync {
     fn reapply_events(&self, _key: &WorkflowExecutionKey, _batches: &[WorkflowEvents]) -> HResult<()> {
         Err(internal("reapply_events is not supported by this writer"))
     }
+
+    /// Installs shard cluster metadata on a freshly loaded state (Go `newMutableStateBuilder`).
+    fn configure_state(&self, _ms: &mut dyn NdcMutableState, _domain_id: &str, _workflow_id: &str) {}
 
     /// Go `GetActiveClusterInfoByWorkflow(...).FailoverVersion` used by `StartTransaction`
     /// (`None`: no active cluster manager).
@@ -511,7 +523,7 @@ impl EngineNdcWriter {
             SqlHistoryManager::new(self.core.history_v2.clone(), shard.shard_id()),
             self.core.domains.clone(),
             Arc::new(move || range_shard.range_id()),
-            Arc::new(move || id_shard.generate_task_id().map_err(shard_err)),
+            Arc::new(move || id_shard.generate_task_id().map_err(shard_err(id_shard.shard_id()))),
             EngineNdcContextHooks::new(self.core.clone()),
         );
         let mut ctx = WorkflowContext::new(key.clone(), store);
@@ -533,6 +545,10 @@ impl EngineNdcWriter {
 }
 
 impl NdcWriter for EngineNdcWriter {
+    fn configure_state(&self, ms: &mut dyn NdcMutableState, domain_id: &str, workflow_id: &str) {
+        install_failover_context(&self.core, ms, domain_id, workflow_id);
+    }
+
     fn reapply_events(&self, _key: &WorkflowExecutionKey, batches: &[WorkflowEvents]) -> HResult<()> {
         block_on(reapply_via_engine(&self.core, batches))
     }

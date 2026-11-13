@@ -147,7 +147,7 @@ fn shard_data_to_record(info: &ShardInfoData) -> ShardInfoRecord {
         pending_failover_markers: info
             .pending_failover_markers
             .iter()
-            .map(|m| (m.domain_id.clone(), m.failover_version, 0))
+            .map(|m| (m.domain_id.clone(), m.failover_version, m.creation_time))
             .collect(),
         transfer_processing_queue_states: to_pq_records(&info.transfer_processing_queue_states),
         timer_processing_queue_states: to_pq_records(&info.timer_processing_queue_states),
@@ -247,7 +247,7 @@ fn shard_row_to_data(row: &ShardRow) -> Result<ShardInfoData, String> {
         pending_failover_markers: rec
             .pending_failover_markers
             .into_iter()
-            .map(|(domain_id, failover_version, _)| FailoverMarker { domain_id, failover_version })
+            .map(|(domain_id, failover_version, creation_time)| FailoverMarker { domain_id, failover_version, creation_time })
             .collect(),
     })
 }

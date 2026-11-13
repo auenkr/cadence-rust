@@ -110,7 +110,7 @@ impl ReplShard for ReplicationShardAdapter {
         let (Some(domain_id), Some(version)) = (marker.domain_id, marker.failover_version) else {
             return Err(ReplicationError::empty_failover_marker_attributes());
         };
-        let m = FailoverMarker { domain_id, failover_version: version };
+        let m = FailoverMarker { domain_id, failover_version: version, creation_time: marker.creation_time.unwrap_or_default() };
         // Go AddingPendingFailoverMarker: drop markers that are already stale.
         match marker_stale_by_cache(&self.deps.domains, &self.deps.current_cluster, &m) {
             Ok(true) => return Ok(()),
