@@ -89,6 +89,11 @@ impl HistoryClient for RoutingFailoverHistoryClient {
                 if host.grpc_address.is_empty() {
                     return Err(format!("history host {} has no gRPC address", host.address));
                 }
+                tracing::info!(
+                    target_host = %host.address, target_grpc = %host.grpc_address, tokens = toks.len(),
+                    domains = ?toks.iter().map(|t| t.failover_marker.domain_id.clone().unwrap_or_default()).collect::<Vec<_>>(),
+                    "failover-marker-send: NotifyFailoverMarkers to owning history host"
+                );
                 let channel = cadence_service_core::grpc_tls::endpoint_channel(
                     &host.grpc_address,
                     crate::client_tls::history_client_tls().as_ref(),

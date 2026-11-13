@@ -357,6 +357,12 @@ impl Handler for HandlerImpl {
         let r = nil(request)?;
         let coordinator = &self.registry.env().failover_coordinator;
         for token in &r.failover_marker_tokens {
+            tracing::info!(
+                shard_ids = ?token.shard_ids,
+                domain_id = ?token.failover_marker.as_ref().and_then(|m| m.domain_id.clone()),
+                failover_version = ?token.failover_marker.as_ref().and_then(|m| m.failover_version),
+                "failover-marker-recv: NotifyFailoverMarkers applied on this history host"
+            );
             if let Some(marker) = token.failover_marker.clone() {
                 crate::failover::Coordinator::receive_failover_markers(&**coordinator, token.shard_ids.clone(), marker);
             }
