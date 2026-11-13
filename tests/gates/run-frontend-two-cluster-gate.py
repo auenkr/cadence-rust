@@ -39,6 +39,7 @@ if args.two_history_graceful and not (args.rust_history_binary and args.rust_his
 root = Path(__file__).resolve().parents[2]
 work = args.out.resolve(); work.mkdir(parents=True, exist_ok=True)
 plugin = args.database
+history_shards = 16 if args.two_history_graceful else 4
 _pfx = 'CADENCE_' + plugin.upper()
 my_addr = os.environ.get(_pfx + '_ADDR', '127.0.0.1:5432' if plugin == 'postgres' else '127.0.0.1:3306')
 my_user = os.environ.get(_pfx + '_USER', 'postgres' if plugin == 'postgres' else 'root')
@@ -72,13 +73,13 @@ def persistence(db, vis):
                     f'        hosts: {json.dumps(cass_host)}\n        port: {cass_port}\n'
                     f'        keyspace: {json.dumps(ks)}\n        connectTimeout: 2s\n        timeout: 5s\n'
                     '        consistency: LOCAL_QUORUM\n        serialConsistency: LOCAL_SERIAL\n')
-        return ('persistence:\n  defaultStore: cass-default\n  visibilityStore: cass-visibility\n  numHistoryShards: 4\n  datastores:\n'
+        return (f'persistence:\n  defaultStore: cass-default\n  visibilityStore: cass-visibility\n  numHistoryShards: {history_shards}\n  datastores:\n'
                 + cstore('cass-default', db) + cstore('cass-visibility', vis))
     def store(name, d, conns):
         return (f'    {name}:\n      sql:\n        pluginName: {plugin}\n        databaseName: {json.dumps(d)}\n'
                 f'        connectAddr: {json.dumps(my_addr)}\n        connectProtocol: tcp\n        user: {json.dumps(my_user)}\n'
                 f'        password: {json.dumps(my_pass)}\n        nShards: 1\n        maxConns: {conns}\n        maxIdleConns: {conns}\n')
-    return (f'persistence:\n  defaultStore: {plugin}-default\n  visibilityStore: {plugin}-visibility\n  numHistoryShards: 4\n  datastores:\n'
+    return (f'persistence:\n  defaultStore: {plugin}-default\n  visibilityStore: {plugin}-visibility\n  numHistoryShards: {history_shards}\n  datastores:\n'
             + store(plugin + '-default', db, 20) + store(plugin + '-visibility', vis, 2))
 
 def group_block(current, a_transport, b_transport, policy, target=''):
@@ -95,6 +96,7 @@ def go_config(dirname, prefix, db, vis, seeds, current):
     d = work / dirname; d.mkdir(exist_ok=True)
     (d / 'base.yaml').write_text((root / 'go/config/base.yaml').read_text())
     text = (root / 'go/config/development.yaml').read_text()
+    text = text.replace('numHistoryShards: 4', f'numHistoryShards: {history_shards}', 1)
     ren = {'FRONTEND_PORT': prefix + 'FE', 'FRONTEND_PORT_GRPC': prefix + 'FE_GRPC', 'MATCHING_PORT': prefix + 'MATCH',
            'MATCHING_PORT_GRPC': prefix + 'MATCH_GRPC', 'HISTORY_PORT': prefix + 'HIST', 'HISTORY_PORT_GRPC': prefix + 'HIST_GRPC',
            'WORKER_PORT': prefix + 'WORKER', 'FRONTEND_PORT_PPROF': prefix + 'PPROF1', 'MATCHING_PORT_PPROF': prefix + 'PPROF2',
@@ -290,6 +292,27 @@ try:
             raise SystemExit(1)
         time.sleep(12)
         if args.two_history_graceful:
+            def both_rust_history_hosts_own_shards():
+                hosts = {
+                    'rust-history': f'127.0.0.1:{P["B_HIST"]}',
+                    'rust-history-2': f'127.0.0.1:{P["B_HIST2"]}',
+                }
+                owned = {}
+                details = []
+                for name, address in hosts.items():
+                    rc, out = cli(B_T, 'tchannel', 'admin', 'history_host', 'describe',
+                                  '--had', address, '--pf')
+                    try:
+                        response = json.loads(out) if rc == 0 else {}
+                        shard_ids = response.get('shardIDs', response.get('shardIds', []))
+                    except (json.JSONDecodeError, AttributeError):
+                        shard_ids = []
+                    owned[name] = bool(shard_ids)
+                    details.append(f'{name} address={address} shards={shard_ids} rc={rc} output={out[-300:]}')
+                return all(owned.values()), '; '.join(details)
+
+            if not poll('grace-both-hosts-own-shards', both_rust_history_hosts_own_shards, 240):
+                raise SystemExit(1)
             # domain is active on Go cluster A; graceful failover to Rust-History cluster B (to-be-active) is requested on B
             for i in range(4):
                 rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'start', '--tl', 'tc-tl', '--wt', 'TcType', '--wid', f'tc-grace-{i}-' + secrets.token_hex(2), '--et', '600', '--dt', '10')
