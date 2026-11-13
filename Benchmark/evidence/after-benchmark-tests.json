@@ -40,7 +40,6 @@
       "url": "https://github.com/auenkr/cadence-rust/actions/runs/43466508274"
     }
   },
-  "next_check_utc": "2026-11-13T16:19:39.673Z",
   "watch_mode": "gh run watch --interval 60",
   "schedule_enabled": false,
   "benchmark": {
@@ -82,5 +81,6 @@
     }
   },
   "finished_utc": "2026-11-13T17:01:05.103490+00:00",
-  "all_passed": true
+  "all_passed": true,
+  "watch_command_exit_code": 0
 }
