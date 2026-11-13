@@ -1,0 +1,19 @@
+{
+  "source_head": "c1bbd3ae71c84a71d5a226a70b0d8b71d021cb5b",
+  "runs": {
+    "history": 43479770520
+  },
+  "protocol": {
+    "rate": 5,
+    "warmup_seconds": 10,
+    "measurement_seconds": 30,
+    "repetitions": 3,
+    "payload_bytes": 1024,
+    "activity_ms": 10
+  },
+  "source_ci": {
+    "url": "https://github.com/auenkr/cadence-rust/actions/runs/43477045500",
+    "headSha": "c1bbd3ae71c84a71d5a226a70b0d8b71d021cb5b",
+    "conclusion": "success"
+  }
+}
