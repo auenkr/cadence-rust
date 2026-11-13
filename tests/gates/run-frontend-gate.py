@@ -666,6 +666,26 @@ try:
             record('admin-probe-run', False, pr.stdout + pr.stderr)
     except Exception as e:
         record('admin-probe-run', False, repr(e))
+    # ---- History admin APIs through the Go CLI (only meaningful with Rust History)
+    if args.rust_history_binary:
+        try:
+            adm_wid = 'admin-gate-' + secrets.token_hex(3)
+            run('admin-gate-start-wf', [*cli_g, '--domain', dom_t, 'workflow', 'start', '--tl', 'admin-gate-tl', '--wt', 'AdminGate', '--wid', adm_wid, '--et', '600', '--dt', '10'])
+            pr = subprocess.run([sys.executable, str(Path(__file__).resolve().parent / 'history_admin_cli.py'), str(args.go_cli),
+                                 f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["FRONTEND_PORT"]}', dom_t, 'cluster0', adm_wid, str(work)],
+                                capture_output=True, text=True, timeout=900)
+            (work / 'history-admin-cli.log').write_text(pr.stdout + pr.stderr)
+            for line in pr.stdout.splitlines():
+                try:
+                    item = json.loads(line)
+                except ValueError:
+                    continue
+                record('history-admin-' + item['name'], item['ok'], item['detail'])
+            if not any(l.startswith('{') for l in pr.stdout.splitlines()):
+                record('history-admin-run', False, pr.stdout + pr.stderr)
+            time.sleep(5)
+        except Exception as e:
+            record('history-admin-run', False, repr(e))
     # ---- history scenarios phase: retry/cron timeout, strong idempotency, retention-0 archival, bad-binary auto-reset
     dom_sc = 'fe-gate-scen-' + secrets.token_hex(3)
     scen_hist_uri, scen_vis_uri = f'file://{work / "scen-history-archive"}', f'file://{work / "scen-visibility-archive"}'
