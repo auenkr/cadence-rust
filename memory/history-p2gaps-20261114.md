@@ -7,4 +7,10 @@
 4. Shard reference cycle: fixed (Weak cells, controller.rs). Failover coordinator: see history-failcoord-20261113.md.
 
 ## CI
-(pending: run URLs / head SHA to be appended)
+Head SHA 3ab6c83a8f0f335c1839c771bf13a904e2a66e7e (branch history-p2gaps-20261114).
+- rust-ci cadence-history: https://github.com/auenkr/cadence-rust/actions/runs/43497333066 success (first run 43496595168 failed clippy result_large_err, fixed).
+- history-mixed-gate, two_history=true, all success and `GATE SUMMARY failed: []`:
+  mysql grpc 43498713851, mysql tchannel 43498726630, postgres grpc 43498739943,
+  postgres tchannel 43498753373, cassandra grpc 43498764568, cassandra tchannel 43498777843
+  (https://github.com/auenkr/cadence-rust/actions/runs/<id>).
+- Not done: dedicated new unit tests for the checksum repair helpers / schedule_decision guard.
