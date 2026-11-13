@@ -127,7 +127,7 @@ func main() {
 			for i := 0; i < 90 && !ok; i++ {
 				resp, qerr := c.QueryWorkflow(ctx, run.GetID(), run.GetRunID(), "stage")
 				var st string
-				if qerr == nil && resp.QueryResult.Get(&st) == nil && st == "waiting-finish" {
+				if qerr == nil && resp.Get(&st) == nil && st == "waiting-finish" {
 					ok = true
 				} else {
 					time.Sleep(2 * time.Second)
