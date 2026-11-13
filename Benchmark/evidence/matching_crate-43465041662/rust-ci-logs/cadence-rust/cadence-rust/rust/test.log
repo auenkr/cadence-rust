@@ -1,0 +1,200 @@
+test get_task_lists_by_domain_success_lists_normal_kinds ... ok
+
+test result: ok. 11 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/matching_engine_go_tests_b.rs (/home/runner/work/_temp/cargo-target-final/debug/build/cadence-matching/e760f04e7774ded1/out/matching_engine_go_tests_b-e760f04e7774ded1)
+
+running 19 tests
+test is_shutting_down_is_false_until_stop ... ok
+test query_workflow_invalid_tasklist_name_is_error ... ok
+test query_workflow_sticky_worker_unavailable_is_error ... ok
+test query_workflow_success_reports_partition_config ... ok
+test query_workflow_success_returns_worker_answer ... ok
+test update_task_list_partition_config_invalid_tasklist_name_is_error ... ok
+test update_task_list_partition_config_manual_update_rejected_when_scaler_enabled ... ok
+test update_task_list_partition_config_nil_partition_config_is_error ... ok
+test get_tasklists_not_owned_returns_only_non_owned_managers ... ok
+test update_task_list_partition_config_non_root_partition_is_error ... ok
+test update_task_list_partition_config_tasklist_manager_error ... ignored, parity gap: Go injects a TaskListManager.UpdateTaskListPartitionConfig error through a gomock; Rust has no seam to make the durable partition update fail
+test wait_for_query_result_internal_error_is_passed_through ... ok
+test update_task_list_partition_config_sticky_kind_is_error ... ok
+test wait_for_query_result_query_task_failed ... ok
+test wait_for_query_result_strong_consistency_version_unsupported ... ok
+test wait_for_query_result_success_query_task_completed ... ok
+test wait_for_query_result_unknown_query_result_is_internal_error ... ok
+test shut_down_tasklists_not_owned_unloads_only_moved_owner ... ok
+test update_task_list_partition_config_success ... ok
+
+test result: ok. 18 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/matching_engine_go_tests_c.rs (/home/runner/work/_temp/cargo-target-final/debug/build/cadence-matching/6a7d839e6383e72c/out/matching_engine_go_tests_c-6a7d839e6383e72c)
+
+running 19 tests
+test domain_change_callback_updates_failover_version_and_releases_eligible_pollers ... ignored, parity gap: Go domainChangeCallback is a matchingEngineImpl method that updates engine.failoverNotificationVersion and calls ReleaseBlockedPollers on each eligible mock manager; Rust folds the same logic into the private closure in matching_runtime.rs start_domain_cache, which exposes neither the version nor a released-poller count
+test refresh_task_list_partition_config_invalid_tasklist_name_is_internal ... ok
+test refresh_task_list_partition_config_sticky_kind_is_invalid_argument ... ok
+test refresh_task_list_partition_config_root_with_partition_config_is_invalid_argument ... ok
+test refresh_workflow_tasks_already_completed_is_propagated ... ok
+test refresh_workflow_tasks_empty_domain_id_is_forwarded ... ok
+test refresh_workflow_tasks_entity_not_exists_returns_ok ... ok
+test refresh_task_list_partition_config_success_accepts_partitioned_normal_list ... ok
+test refresh_workflow_tasks_nil_execution_is_forwarded ... ok
+test refresh_workflow_tasks_success_sends_domain_and_execution ... ok
+test register_domain_failover_callback_catch_up_advances_version_to_highest ... ignored, parity gap: Go registerDomainFailoverCallback is a private engine method that registers a catch-up function with a domainCache mock; Rust registers the equivalent catch-up inside the private start_domain_cache in matching_runtime.rs, and the registered callback is not reachable from tests/
+test register_domain_failover_callback_catch_up_without_updates_keeps_version ... ignored, parity gap: Go registerDomainFailoverCallback is a private engine method that registers a catch-up function with a domainCache mock; Rust registers the equivalent catch-up inside the private start_domain_cache in matching_runtime.rs, and the registered callback is not reachable from tests/
+test setup_executor_with_empty_config_installs_noop_executor ... ok
+test shard_distributor_onboarded_full_excludes_no_task_list ... ok
+test shard_distributor_onboarded_partial_percentage_is_engine_wide ... ok
+test shard_distributor_onboarded_zero_excludes_every_task_list ... ok
+test refresh_workflow_tasks_internal_status_is_propagated ... ok
+test refresh_workflow_tasks_canceled_context_is_propagated ... ok
+test refresh_workflow_tasks_generic_error_is_propagated ... ok
+
+test result: ok. 16 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 30.00s
+
+     Running tests/matching_engine_go_tests_d.rs (/home/runner/work/_temp/cargo-target-final/debug/build/cadence-matching/040b9b408903e763/out/matching_engine_go_tests_d-040b9b408903e763)
+
+running 14 tests
+test acquire_semaphore_undecodable_owner_is_refused_before_any_store_call ... ok
+test acquire_semaphore_full_bucket_answers_no_slot_rather_than_error ... ok
+test acquire_semaphore_free_slot_is_granted_and_named_in_response ... ok
+test get_or_create_semaphore_manager_domain_has_semaphores_disabled ... ok
+test get_or_create_semaphore_manager_bucket_is_owned_by_another_host ... ok
+test get_or_create_semaphore_manager_domain_lookup_fails ... ok
+test get_or_create_semaphore_manager_failed_start_is_not_left_registered ... ok
+test get_or_create_semaphore_manager_load_runs_outside_creation_lock ... ok
+test get_or_create_semaphore_manager_second_request_reuses_built_manager ... ok
+test get_or_create_semaphore_manager_refused_while_engine_shuts_down ... ok
+test unload_semaphore_manager_stops_it_and_next_request_builds_fresh ... ok
+test stop_semaphore_managers_stops_every_bucket_on_engine_stop ... ok
+test acquire_semaphore_request_during_load_gives_up_at_its_own_deadline ... ok
+test get_or_create_semaphore_manager_starts_unstarted_registered_manager ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/matching_forward_poll_fallback.rs (/home/runner/work/_temp/cargo-target-final/debug/build/cadence-matching/e8e26ea9b3903a72/out/matching_forward_poll_fallback-e8e26ea9b3903a72)
+
+running 2 tests
+test forwarded_decision_poll_failure_delivers_later_local_add ... ok
+test root_and_sticky_decision_polls_never_call_parent ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.01s
+
+     Running tests/matching_longpoll_expiry_parity.rs (/home/runner/work/_temp/cargo-target-final/debug/build/cadence-matching/20150b1c16fb027c/out/matching_longpoll_expiry_parity-20150b1c16fb027c)
+
+running 2 tests
+test activity_started_after_long_poll_window_still_returns_task ... ok
+test decision_started_after_long_poll_window_still_returns_task ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.21s
+
+     Running tests/matching_partial_upgrade_a.rs (/home/runner/work/_temp/cargo-target-final/debug/build/cadence-matching/79889e6831e66e2b/out/matching_partial_upgrade_a-79889e6831e66e2b)
+
+running 4 tests
+test go_handle_err_passes_typed_errors_through_unchanged ... ignored, parity gap: Rust has no generic handleErr. Go returns each of 14 typed errors (and their %w-wrapped forms) unchanged; Rust converts each RPC's errors to tonic::Status at its own call site, so identity pass-through cannot hold
+test go_new_config_every_field_has_a_rust_reader ... ignored, parity gap: Rust has no NewConfig equivalent. Go asserts all 66 Config fields (RangeSize, HostName, RPCConfig, TaskDispatchRPS, AllIsolationGroups, ...) against one key table; Rust reads each key inside its own module, so no single table covers them
+test go_handler_start_calls_engine_start_once_and_stop_calls_engine_stop_once ... ok
+test go_new_config_readers_return_go_test_values ... ok
+
+test result: ok. 2 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/matching_partial_upgrade_b.rs (/home/runner/work/_temp/cargo-target-final/debug/build/cadence-matching/3faa7fef129a8701/out/matching_partial_upgrade_b-3faa7fef129a8701)
+
+running 15 tests
+test go_handler_long_polls_without_deadline_return_context_timeout_not_set ... ok
+test go_handler_poll_for_activity_task_rate_limited_returns_service_busy ... ok
+test go_handler_poll_for_decision_task_rate_limited_returns_service_busy ... ok
+test poller_cancel_invokes_registered_callback_per_poll ... ok
+test poller_cancel_reports_whether_the_poll_is_known ... ok
+test poller_count_by_group_matches_go_cases ... ok
+test poller_count_keeps_expired_entries_like_go_size ... ok
+test poller_has_after_matches_go_cases ... ok
+test poller_has_group_after_matches_go_cases ... ok
+test poller_history_callback_fires_on_start_and_end_with_identity ... ok
+test poller_list_info_matches_go_cases ... ok
+test poller_start_without_identity_records_no_history ... ok
+test go_handler_add_decision_task_rate_limited_returns_service_busy ... ok
+test go_handler_add_activity_task_rate_limited_returns_service_busy ... ok
+test go_handler_poll_for_activity_task_returns_added_task_token ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/matching_partial_upgrade_c.rs (/home/runner/work/_temp/cargo-target-final/debug/build/cadence-matching/0d6a04650c0628a9/out/matching_partial_upgrade_c-0d6a04650c0628a9)
+
+running 1 test
+test matching_dispatch_timeout_matches_go_get_dispatch_timeout_table ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/matching_partial_upgrade_d.rs (/home/runner/work/_temp/cargo-target-final/debug/build/cadence-matching/03b77b977223b46e/out/matching_partial_upgrade_d-03b77b977223b46e)
+
+running 1 test
+test task_list_limiter_matches_go_limit_table ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/matching_partial_upgrade_e.rs (/home/runner/work/_temp/cargo-target-final/debug/build/cadence-matching/cc2836442578a49a/out/matching_partial_upgrade_e-cc2836442578a49a)
+
+running 10 tests
+test go_manager_start_root_adopts_persisted_partition_config ... ok
+test go_manager_start_non_root_reads_root_partition_config ... ok
+test go_refresh_partition_config_from_database_replaces_cache ... ok
+test go_refresh_partition_config_concurrency_keeps_highest_version ... ok
+test go_thrift_handler_internal_error_maps_to_internal_service_error ... ignored, parity gap: Go TestThriftHandler fails each handler method with InternalServiceError{Message:"test"} through a mock Handler and asserts the Thrift exception and zero-value response defaults; Rust dispatch() takes a concrete Matching with no injectable handler, so no public call can produce that failure
+test go_thrift_handler_routes_each_tested_method ... ok
+test go_refresh_partition_config_from_request_ignores_older_version ... ok
+test go_manager_start_root_pushes_loaded_config_to_remote_child_without_update_api ... ok
+test go_dispatch_task_active_offer_without_error_reaches_poller ... ok
+test go_update_partition_config_concurrency_advances_once_per_update ... ok
+
+test result: ok. 9 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.17s
+
+     Running tests/matching_tchannel_tls_guard.rs (/home/runner/work/_temp/cargo-target-final/debug/build/cadence-matching/c81a5ddd28bd36f1/out/matching_tchannel_tls_guard-c81a5ddd28bd36f1)
+
+running 2 tests
+test matching_tchannel_listener_is_plaintext_tcp ... ok
+test tchannel_serving_code_has_no_tls_path ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/native_delivery_pipeline.rs (/home/runner/work/_temp/cargo-target-final/debug/build/cadence-matching/24f2ce85eed3205f/out/native_delivery_pipeline-24f2ce85eed3205f)
+
+running 1 test
+test native_actors_deliver_raw_bytes_and_ack_only_persisted_tasks ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+
+     Running tests/native_raw_status_transport.rs (/home/runner/work/_temp/cargo-target-final/debug/build/cadence-matching/100d5c69050e2fb4/out/native_raw_status_transport-100d5c69050e2fb4)
+
+running 1 test
+test served_raw_status_normalizes_message_details_and_marker ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/native_transport_compat.rs (/home/runner/work/_temp/cargo-target-final/debug/build/cadence-matching/c85364b7a9643c1d/out/native_transport_compat-c85364b7a9643c1d)
+
+running 1 test
+test attached_native_api_thrift_listeners_preserve_bytes_and_enforce_deadlines ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.36s
+
+     Running tests/shard_distributor_go_interop.rs (/home/runner/work/_temp/cargo-target-final/debug/build/cadence-matching/b4ba1507dc46697e/out/shard_distributor_go_interop-b4ba1507dc46697e)
+
+running 1 test
+test rust_executor_and_spectator_interoperate_with_pinned_go_handlers ... ignored, mixed Go/Rust wire gate; requires Go dependency cache and serialized validation lane
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/sql_writer_fatal_process.rs (/home/runner/work/_temp/cargo-target-final/debug/build/cadence-matching/96883326f6d23d90/out/sql_writer_fatal_process-96883326f6d23d90)
+
+running 1 test
+test standalone_matching_sqlite_malformed_run_id_exits_process_with_two ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+   Doc-tests cadence_matching
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

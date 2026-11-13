@@ -1,0 +1,105 @@
+{
+  "total_count": 5,
+  "artifacts": [
+    {
+      "id": 14058832084,
+      "node_id": "MDg6QXJ0aWZhY3QxNDA1ODgzMjA4NA==",
+      "name": "rust-ci-logs",
+      "size_in_bytes": 733886,
+      "url": "https://api.github.com/repos/auenkr/cadence-rust/actions/artifacts/14058832084",
+      "archive_download_url": "https://api.github.com/repos/auenkr/cadence-rust/actions/artifacts/14058832084/zip",
+      "expired": false,
+      "digest": "sha256:86d8273ab3271dc6758492dabfdaf56432d4e0f3f1e83779b6d55bd1d24df632",
+      "created_at": "2026-11-13T16:48:55Z",
+      "updated_at": "2026-11-13T16:48:55Z",
+      "expires_at": "2026-11-16T16:48:54Z",
+      "workflow_run": {
+        "id": 43465041662,
+        "repository_id": 1418391116,
+        "head_repository_id": 1418391116,
+        "head_branch": "t3/matching-benchmark-harness",
+        "head_sha": "e7dcc4bedf8a533ff80dc652172c47d1b2989289"
+      }
+    },
+    {
+      "id": 14058792180,
+      "node_id": "MDg6QXJ0aWZhY3QxNDA1ODc5MjE4MA==",
+      "name": "matching-panic-quote-oracle",
+      "size_in_bytes": 686,
+      "url": "https://api.github.com/repos/auenkr/cadence-rust/actions/artifacts/14058792180",
+      "archive_download_url": "https://api.github.com/repos/auenkr/cadence-rust/actions/artifacts/14058792180/zip",
+      "expired": false,
+      "digest": "sha256:dead571d74bc214cba7b9fc2c1da898bb66aeefdf96271d5ef90d779d8b2626a",
+      "created_at": "2026-11-13T16:48:54Z",
+      "updated_at": "2026-11-13T16:48:54Z",
+      "expires_at": "2026-11-16T16:48:53Z",
+      "workflow_run": {
+        "id": 43465041662,
+        "repository_id": 1418391116,
+        "head_repository_id": 1418391116,
+        "head_branch": "t3/matching-benchmark-harness",
+        "head_sha": "e7dcc4bedf8a533ff80dc652172c47d1b2989289"
+      }
+    },
+    {
+      "id": 14057554088,
+      "node_id": "MDg6QXJ0aWZhY3QxNDA1NzU1NDA4OA==",
+      "name": "matching-describe-tasklist-go-oracle",
+      "size_in_bytes": 4431,
+      "url": "https://api.github.com/repos/auenkr/cadence-rust/actions/artifacts/14057554088",
+      "archive_download_url": "https://api.github.com/repos/auenkr/cadence-rust/actions/artifacts/14057554088/zip",
+      "expired": false,
+      "digest": "sha256:fd5bafbcf0c779e51603afc1a7016ee34a87046643a7fae5147a029592b842dd",
+      "created_at": "2026-11-13T16:42:54Z",
+      "updated_at": "2026-11-13T16:42:54Z",
+      "expires_at": "2026-11-16T16:42:53Z",
+      "workflow_run": {
+        "id": 43465041662,
+        "repository_id": 1418391116,
+        "head_repository_id": 1418391116,
+        "head_branch": "t3/matching-benchmark-harness",
+        "head_sha": "e7dcc4bedf8a533ff80dc652172c47d1b2989289"
+      }
+    },
+    {
+      "id": 14057274809,
+      "node_id": "MDg6QXJ0aWZhY3QxNDA1NzI3NDgwOQ==",
+      "name": "matching-raw-string-oracle",
+      "size_in_bytes": 11168,
+      "url": "https://api.github.com/repos/auenkr/cadence-rust/actions/artifacts/14057274809",
+      "archive_download_url": "https://api.github.com/repos/auenkr/cadence-rust/actions/artifacts/14057274809/zip",
+      "expired": false,
+      "digest": "sha256:55479d2e34b768ed09477e3ec958f8f638743c70062d0ab5213b74e3ef2d3a16",
+      "created_at": "2026-11-13T16:42:26Z",
+      "updated_at": "2026-11-13T16:42:26Z",
+      "expires_at": "2026-11-16T16:42:25Z",
+      "workflow_run": {
+        "id": 43465041662,
+        "repository_id": 1418391116,
+        "head_repository_id": 1418391116,
+        "head_branch": "t3/matching-benchmark-harness",
+        "head_sha": "e7dcc4bedf8a533ff80dc652172c47d1b2989289"
+      }
+    },
+    {
+      "id": 14057234864,
+      "node_id": "MDg6QXJ0aWZhY3QxNDA1NzIzNDg2NA==",
+      "name": "sqlblobs-go-golden-fixtures",
+      "size_in_bytes": 2319,
+      "url": "https://api.github.com/repos/auenkr/cadence-rust/actions/artifacts/14057234864",
+      "archive_download_url": "https://api.github.com/repos/auenkr/cadence-rust/actions/artifacts/14057234864/zip",
+      "expired": false,
+      "digest": "sha256:dad25d513ec822c9f3fe555b2b3b34bd1b3bf9041ef84e80f529a37c1926a8d0",
+      "created_at": "2026-11-13T16:42:36Z",
+      "updated_at": "2026-11-13T16:42:36Z",
+      "expires_at": "2026-11-16T16:42:36Z",
+      "workflow_run": {
+        "id": 43465041662,
+        "repository_id": 1418391116,
+        "head_repository_id": 1418391116,
+        "head_branch": "t3/matching-benchmark-harness",
+        "head_sha": "e7dcc4bedf8a533ff80dc652172c47d1b2989289"
+      }
+    }
+  ]
+}
