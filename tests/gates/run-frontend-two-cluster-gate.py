@@ -67,9 +67,10 @@ def persistence(db, vis):
     return ('persistence:\n  defaultStore: mysql-default\n  visibilityStore: mysql-visibility\n  numHistoryShards: 4\n  datastores:\n'
             + store('mysql-default', db, 20) + store('mysql-visibility', vis, 2))
 
+PRIMARY = 'cluster0' if args.two_history_graceful else 'cluster1'  # only the primary serves the domain replication queue
 def group_block(current, a_transport, b_transport, policy, target=''):
     """clusterGroupMetadata for a process; Go always sees gRPC, Rust Frontend gets the variant."""
-    return ('clusterGroupMetadata:\n  failoverVersionIncrement: 10\n  primaryClusterName: "cluster1"\n'
+    return ('clusterGroupMetadata:\n  failoverVersionIncrement: 10\n  primaryClusterName: "' + PRIMARY + '"\n'
             f'  currentClusterName: "{current}"\n  clusterGroup:\n'
             '    cluster0:\n      enabled: true\n      initialFailoverVersion: 0\n      rpcName: "cadence-frontend"\n'
             f'      rpcAddress: "127.0.0.1:{P["A_FE_GRPC"] if a_transport == "grpc" else P["A_FE"]}"\n      rpcTransport: "{a_transport}"\n'
@@ -261,11 +262,11 @@ try:
     record('rust-matching-listening', wait_port(P['A_RMATCH_GRPC'], 120, 'rust-matching'))
     time.sleep(20)
     dom = 'tc-gate-' + secrets.token_hex(3)
-    rc, out = cli(B_T, 'tchannel', '--domain', dom, 'domain', 'register', '--retention', '1', '--global_domain', 'true',
+    rc, out = cli(A_T if args.two_history_graceful else B_T, 'tchannel', '--domain', dom, 'domain', 'register', '--retention', '1', '--global_domain', 'true',
                   '--active_cluster', 'cluster1', '--cl', 'cluster0', '--cl', 'cluster1')
-    record('register-global-domain-on-B', rc == 0, out)
+    record('register-global-domain-on-B' if not args.two_history_graceful else 'register-global-domain-on-primary-A', rc == 0, out)
     def a_has_domain():
-        rc, out = cli(A_T, 'tchannel', '--domain', dom, 'domain', 'describe')
+        rc, out = cli(B_T if args.two_history_graceful else A_T, 'tchannel', '--domain', dom, 'domain', 'describe')
         return rc == 0 and 'cluster1' in out, out
     if not poll('domain-replicated-to-A', a_has_domain, 240):
         raise SystemExit(1)
