@@ -12,6 +12,10 @@ on:
         description: Kill and restart a Rust History host during SDK traffic
         type: boolean
         default: true
+      s3_archival:
+        description: Run only the Rust History S3 archival end-to-end phase (MinIO container, mysql lane)
+        type: boolean
+        default: false
       outbound:
         description: Rust service outbound transport
         type: choice
@@ -19,7 +23,7 @@ on:
         default: grpc
 
 concurrency:
-  group: history-mixed-${{ github.ref }}-${{ inputs.database }}-${{ inputs.outbound }}-${{ inputs.two_history }}-${{ github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || '' }}
+  group: history-mixed-${{ github.ref }}-${{ inputs.database }}-${{ inputs.outbound }}-${{ inputs.two_history }}-${{ inputs.s3_archival }}-${{ github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || '' }}
   cancel-in-progress: true
 
 jobs:
@@ -64,7 +68,10 @@ jobs:
           (cd tests/frontend-gate && go build -p 2 -o "$GITHUB_WORKSPACE/out/frontend-gate-driver" .)
       - name: SDK workflows and History crash recovery
         env:
-          CADENCE_GATE_TWO_HISTORY: ${{ inputs.two_history }}
+          CADENCE_GATE_TWO_HISTORY: ${{ inputs.s3_archival && 'false' || inputs.two_history }}
+          CADENCE_GATE_S3: ${{ inputs.s3_archival }}
+          CADENCE_S3_DOCKER: ${{ inputs.s3_archival }}
+          CADENCE_S3_READER: ${{ inputs.s3_archival }}
           RUST_BACKTRACE: 1
           RUST_LOG: warn,cadence_history::task=debug,cadence_history::queue=debug,cadence_history::wiring=debug,cadence_history::engine=debug
         run: |
@@ -76,6 +83,7 @@ jobs:
             --go-cli "$GITHUB_WORKSPACE/out/cadence-cli" \
             --driver "$GITHUB_WORKSPACE/out/frontend-gate-driver" \
             --rust-root "$GITHUB_WORKSPACE" \
+            ${{ inputs.s3_archival && '--rust-s3-archival-only' || '' }} \
             --rust-outbound "${{ inputs.outbound }}" > out/gate.log 2>&1
           result=$?
           echo "$result" > out/gate.exit
@@ -85,7 +93,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: history-mixed-gate-${{ inputs.database }}-${{ inputs.outbound }}
+          name: history-mixed-gate-${{ inputs.database }}-${{ inputs.outbound }}-s3${{ inputs.s3_archival }}
           retention-days: 3
           path: |
             out/

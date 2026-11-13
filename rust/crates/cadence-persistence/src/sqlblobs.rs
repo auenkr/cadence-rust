@@ -58,6 +58,20 @@ impl Encoding {
         }
     }
 
+    /// Go `serializerImpl.thriftrwEncode`/`thriftrwsnappyEncode`: codec preamble 0x59, then the struct (snappy wraps both).
+    pub fn encode_versioned(self, value: &Struct) -> Result<Vec<u8>> {
+        let plain = Encoding::ThriftRW.encode(value)?;
+        let mut bytes = Vec::with_capacity(plain.len() + 1);
+        bytes.push(0x59);
+        bytes.extend(plain);
+        match self {
+            Self::ThriftRW => Ok(bytes),
+            Self::ThriftRWSnappy => snap::raw::Encoder::new()
+                .compress_vec(&bytes)
+                .map_err(|error| Error::Invalid(format!("snappy encode: {error}"))),
+        }
+    }
+
     pub fn decode(self, data: &[u8]) -> Result<Struct> {
         let uncompressed;
         let bytes = match self {
@@ -69,6 +83,9 @@ impl Encoding {
                 &uncompressed
             }
         };
+        // Go persistence-serializer blobs (VersionHistories, ...) carry the codec preamble 0x59 before the struct;
+        // 0x59 is never a valid thrift field type, so a leading 0x59 is unambiguous.
+        let bytes = match bytes.first() { Some(0x59) => &bytes[1..], _ => bytes };
         let mut reader = Reader::new(bytes);
         let value = read_struct(&mut reader)?;
         if reader.remaining() != 0 {
@@ -1483,12 +1500,37 @@ fn processing_queue_states_blob(states: &std::collections::BTreeMap<String, Vec<
         }).collect();
         (string_field(cluster), Value::List(list))
     }).collect();
-    Encoding::ThriftRW.encode(&Struct { fields: vec![(10, Value::Map(entries))] })
+    versioned_blob(&Struct { fields: vec![(10, Value::Map(entries))] })
 }
-fn read_processing_queue_states(data: &[u8]) -> Result<std::collections::BTreeMap<String, Vec<ShardProcessingQueueRecord>>> {
+/// Go `codec.ThriftRWEncoder.Encode`: first byte is the version preamble 0x59, then the thriftrw struct.
+fn versioned_blob(value: &Struct) -> Result<Vec<u8>> {
+    let mut out = vec![0x59];
+    out.extend(Encoding::ThriftRW.encode(value)?);
+    Ok(out)
+}
+/// Go `serializerImpl.deserialize` for a DataBlob nested in ShardInfo: honour the sibling encoding field
+/// (`thriftrw` | `thriftrw_snappy`; Go's empty-encoding blobs are empty), then `ThriftRWEncoder.Decode`.
+fn read_versioned_blob(v: &Struct, data_id: i16, encoding_id: i16) -> Result<Option<Struct>> {
+    let data = contract_bytes(v, data_id)?;
+    if data.is_empty() { return Ok(None); }
+    let encoding = match contract_string(v, encoding_id)?.as_str() { "" => Encoding::ThriftRW, e => Encoding::parse(e)? };
+    let uncompressed;
+    let bytes = match encoding {
+        Encoding::ThriftRW => &data[..],
+        Encoding::ThriftRWSnappy => {
+            uncompressed = snap::raw::Decoder::new().decompress_vec(&data).map_err(|e| Error::Invalid(format!("snappy decode: {e}")))?;
+            &uncompressed[..]
+        }
+    };
+    match bytes.first() {
+        None => Err(Error::Invalid("Missing binary encoding version.".into())),
+        Some(0x59) => Ok(Some(Encoding::ThriftRW.decode(&bytes[1..])?)),
+        Some(_) => Err(Error::Invalid("Invalid binary encoding version.".into())),
+    }
+}
+fn read_processing_queue_states(v: &Struct, data_id: i16, encoding_id: i16) -> Result<std::collections::BTreeMap<String, Vec<ShardProcessingQueueRecord>>> {
     let mut out = std::collections::BTreeMap::new();
-    if data.is_empty() { return Ok(out); }
-    let root = Encoding::ThriftRW.decode(data)?;
+    let Some(root) = read_versioned_blob(v, data_id, encoding_id)? else { return Ok(out) };
     if let Some(Value::Map(entries)) = root.get(10) {
         for (k, v) in entries {
             let (Value::Bytes(k), Value::List(list)) = (k, v) else { return Err(Error::Invalid("bad ProcessingQueueStates entry".into())) };
@@ -1522,7 +1564,7 @@ impl ShardInfoRecord {
         if !self.cluster_replication_level.is_empty() { f.push((40, i64_map(&self.cluster_replication_level))); }
         if !self.pending_failover_markers.is_empty() {
             let list = self.pending_failover_markers.iter().map(|(d, v, c)| Value::Struct(Struct { fields: vec![(10, string_field(d)), (20, Value::I64(*v)), (30, Value::I64(*c))] })).collect();
-            let blob = Encoding::ThriftRW.encode(&Struct { fields: vec![(10, Value::List(list))] })?;
+            let blob = versioned_blob(&Struct { fields: vec![(10, Value::List(list))] })?;
             f.push((42, Value::Bytes(blob))); f.push((44, string_field("thriftrw")));
         }
         if !self.transfer_processing_queue_states.is_empty() {
@@ -1561,15 +1603,13 @@ impl ShardInfoRecord {
             cluster_transfer_ack_level: read_i64_map(v, 34)?, cluster_timer_ack_level: read_i64_map(v, 36)?, owner: contract_string(v, 38)?,
             cluster_replication_level: read_i64_map(v, 40)?, ..Default::default()
         };
-        let markers = contract_bytes(v, 42)?;
-        if !markers.is_empty() {
-            let root = Encoding::ThriftRW.decode(&markers)?;
+        if let Some(root) = read_versioned_blob(v, 42, 44)? {
             if let Some(Value::List(list)) = root.get(10) {
                 for item in list { if let Value::Struct(s) = item { rec.pending_failover_markers.push((contract_string(s, 10)?, contract_i64(s, 20)?, contract_i64(s, 30)?)); } }
             }
         }
-        rec.transfer_processing_queue_states = read_processing_queue_states(&contract_bytes(v, 50)?)?;
-        rec.timer_processing_queue_states = read_processing_queue_states(&contract_bytes(v, 55)?)?;
+        rec.transfer_processing_queue_states = read_processing_queue_states(v, 50, 51)?;
+        rec.timer_processing_queue_states = read_processing_queue_states(v, 55, 56)?;
         if let Some(Value::Map(entries)) = v.get(64) {
             for (k, s) in entries {
                 let (Value::I32(k), Value::Struct(s)) = (k, s) else { return Err(Error::Invalid("bad queueStates entry".into())) };

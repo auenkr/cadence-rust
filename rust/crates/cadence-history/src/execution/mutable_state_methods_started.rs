@@ -427,7 +427,7 @@ impl TypedMutableState {
                 use cadence_persistence::sqlblobs::Encoding;
                 use cadence_thrift::ToThrift;
                 let data = Encoding::ThriftRW
-                    .encode(&policy.to_thrift())
+                    .encode_versioned(&policy.to_thrift())
                     .map_err(|e| super::mutable_state_builder::TypedMutableStateError::Internal(format!("encode active cluster selection policy: {e}")))?;
                 Some(cadence_persistence::history_contract::DataBlob { encoding: "thriftrw".to_string(), data })
             }

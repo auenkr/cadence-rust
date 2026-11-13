@@ -81,43 +81,39 @@
 </style>
 </head>
 <body>
-<section style="padding:16px;border:2px solid #3a9a5b;margin:16px"><strong>ACTIVE — 2026-11-11 21:45 IST (master f3e7f821b).</strong><p>History mixed gate GREEN on mysql/grpc (1 and 2 History hosts with restart), mysql/tchannel, postgres/grpc (1 and 2 hosts). Cassandra lanes still fail: Rust History Cassandra stores being ported on branch history-cassandra (shard + execution store done; history v2 writers, visibility writer, env.rs wiring pending).</p><p>Merged today: ndcbuilder, ndctxn, gate-fix2, gate-fix3 (workflow resetter), gate-lanes, ndcgaps, decisiongaps (bad binary, attempt-limit terminate, cron validation, cross-domain, buffered queries). Remaining: local activity dispatch, Cassandra lanes, Go-mirroring unit tests, parity audit, final clean CI. See memory/history-pause-20261105.md.</p></section>
-<section id="history-1113" style="padding:16px;border:2px solid #c9a227;margin:16px"><strong>History status — 2026-11-13 (master e4e463056).</strong>
-<p>Sources: <code>memory/history-*-20261112*.md</code> and <code>memory/history-*-20261113*.md</code>. CI = GitHub Actions on auenkr/cadence-rust; "12 gates" = history-mixed-gate (mysql/postgres/cassandra × grpc/tchannel × two_history true/false), each log <code>GATE SUMMARY failed: []</code> unless noted.</p>
-<h3>Merged (master SHA → validation)</h3>
+<section style="padding:16px;border:2px solid #3a9a5b;margin:16px"><strong>ACTIVE — Last updated 2026-11-14.</strong><p>History has broad mixed-cluster coverage, including SQL/Cassandra, gRPC/TChannel, one/two History hosts, restart/recovery, replication, Go↔Rust DB swap, S3 archival, and Elasticsearch/OpenSearch visibility. This is progress, not a service-completion claim.</p><p>Matching: a soak stall is under investigation; RecordDecisionTaskStarted is dropped when polling is cancelled, and a fix is in progress. Frontend soak completes workflows but Rust tail latency remains about 3× Go. The admin CLI gate is in progress.</p></section>
+<section id="history-1114" style="padding:16px;border:2px solid #c9a227;margin:16px"><strong>History status — 2026-11-14.</strong>
+<p>Sources: the 2026-11-13 History and Frontend notes in <code>memory/</code>. CI evidence is from GitHub Actions; history-mixed-gate covers MySQL/Postgres/Cassandra × gRPC/TChannel × one/two History hosts.</p>
+<h3>Merged work</h3>
 <ul>
-<li>history-finalaudit <code>bf1cba71c</code> → rust-ci + 12 gates incl. new recovery phase: 43391579158 … 43391634727 success (rust-ci run 43385294461 on head 5f7bb28ef). Includes fix for MySQL connections broken by DB restart (not returned to pool).</li>
-<li>history-xreview-codex <code>bd9161312</code> and history-xreview-opus <code>48b50a828</code> — review notes only.</li>
-<li>history-xrfix <code>b1e361b6f</code> — cross-review fixes; rust-ci 43400393142 on 8e5a3e440, master validation recorded in memory.</li>
-<li>history-replgen <code>f9e9319d3</code> — replication task generation on active close; rust-ci 43407015440, 12 gates 43408777601 … 43408824699 success; on master 11 gates + rust-ci success, cassandra/tchannel/two_history=false (43411166710) failed once in dbrestart recovery and passed on rerun (flake).</li>
-<li>history-lastp2 <code>b8841442d</code> — last P2 fixes; rust-ci 43415629043 (head 5d2cafdaf), 12 gates 43417320587 … 43417368197 success; master rust-ci + 12 gates success (43419942522 … 43419999213).</li>
-<li>history-casflake <code>4da929f43</code> — shard-registry late-close-callback fix; rust-ci 43429232528, 12 gates 43429119172 … 43429223202 success (head f40651e31); 6/6 cassandra reruns (43422050490 … 43422108718); master 43431973159 … 43432037779 success. Evidence is supporting, not conclusive (flake was ~1 in 12).</li>
-<li>history-activerepl <code>21c36f7b2</code> — Rust History as ACTIVE source; gate run 43436024191 all rows pass; rust-ci 43437765487; 12 gates 43437788832 … 43437981246 success.</li>
-<li>history-uncovered <code>68620ea11</code> — retry/cron backoff fixes plus parent-close-policy gate rows; rust-ci 43434783763 and 43436285697 (4945b08) success.</li>
-<li>history-soak <code>3c48ab2b0</code> — soak gate harness (<code>history-soak.yml</code>, <code>tests/history-soak/</code>, <code>run-history-soak.py</code>); master validation <code>e4e463056</code> recorded in memory.</li>
+<li><a href="history-failcoord-20261113.md">failcoord</a> — failover coordinator parity audit and marker creation-time persistence. Cross-host marker routing was completed in <a href="history-markerroute-20261113.md">markerroute</a>.</li>
+<li><a href="history-esgate-20261113.md">esgate</a> — advanced-visibility gate and SDK coverage; the initial gate exposed the missing writer, subsequently implemented and validated in <a href="history-esvis-20261113.md">esvis</a>.</li>
+<li><a href="history-ttl-20261113.md">ttl</a> — adds Go-equivalent 2s gRPC deadline; two-cluster active gate and all 12 mixed-gate combinations pass without missing-TTL errors.</li>
+<li><a href="history-standbyrepl-20261113.md">standbyrepl</a> — fixes Go-active to Rust-standby event application; two-cluster gate and 12 mixed-gate combinations pass.</li>
+<li><a href="history-review2fix-20261113.md">review2fix</a> — shard close identity, NDC failover metadata, active NDC replication rows, and shard owner error details.</li>
+<li><a href="history-soakfix-20261113.md">soakfix</a> — timer-path pending-decision guard and missing-history error classification. These remove the original task errors; the remaining soak stall is tracked below.</li>
+<li><a href="frontend-soakfix-20261113.md">frontend-soakfix</a> — eliminates the query-returns-"init" failures; 3,000/3,000 workflows completed, while tail latency remains open.</li>
+<li><a href="history-s3gate-20261113.md">s3gate</a> — MinIO archival; Go s3store reads Rust history and visibility blobs, and SDK history/visibility reads pass over gRPC and TChannel.</li>
+<li><a href="history-swap-20261113.md">swap</a> — Go↔Rust History replacement on a shared database; all 36 workflows complete with identical Go/Rust histories on MySQL, Postgres, and Cassandra.</li>
+<li><a href="history-esvis-20261113.md">esvis</a> — Elasticsearch/OpenSearch advanced-visibility writer; both ES flavors and all 12 mixed-gate combinations pass.</li>
+<li><a href="history-s3race-20261113.md">s3race</a> — verified retention-zero visibility archive race also exists in Go; Rust matches Go behavior, so no code change was needed.</li>
+<li><a href="history-markerroute-20261113.md">markerroute</a> — routes failover marker notifications to the History host owning each domain shard; mixed gates and active two-cluster gate pass.</li>
+<li><a href="history-review3-20261113.md">review3 Codex</a> and <a href="history-review3-sonnet-20261113.md">review3 Sonnet</a> — independent static reviews completed; findings are being fixed below. Reviews do not establish runtime parity.</li>
 </ul>
-<h3>Parity audit</h3>
+<h3>Review 3 fixes in progress</h3>
 <ul>
-<li>Final audit (<code>history-parity-audit-20261113-final.md</code>): package-level mapping of <code>go/service/history/**</code>, all packages DONE; no P0/P1 known open at that time. P2 listed, not fixed: checksum-mismatch repair-by-rebuild, NDC task-notifier classification, non-blob JSON tag mismatches, test volume gaps. Not a new line-by-line re-read.</li>
-<li>Cross-review (Codex 9 P1 + 1 P2; Opus independent P1/P2 list): fixes merged in xrfix (history-size failure reason, DLQ shard id, DecisionTaskFailed no longer terminates, ShardOwnershipLost mapping, typed gRPC error details, async-event buffering, CancelTimer vs buffered TimerFired, replay ms→ns, NDC non-start batch load, timeout as possibly-successful, transient retry) and replgen/lastp2 (outbound replication tasks, active-domain checks, active-active DomainNotActive form, shard-ownership owner, queuev2 state persistence). ShardOwnershipLost from the persistence layer carried an empty owner in xrfix; owner host added in lastp2.</li>
-<li>"Not fully covered" areas (parent close policy, cron, retry, failover queue processors, DLQ processor): all MATCH except fixes listed above; <strong>failover coordinator OPEN: not audited</strong>.</li>
+<li>History event timestamps: normalize to nanoseconds at event creation/persistence instead of relying on millisecond-versus-nanosecond heuristics.</li>
+<li>Archive enum encoding: serialize nested event-attribute enums in the Go-compatible string form so Go can decode archived histories.</li>
+<li>Kafka TLS/SASL: support the existing authenticated Kafka configuration in the Rust visibility producer.</li>
+<li>Shard retain cycle: remove the strong-reference cycle that keeps retired shard state alive.</li>
+<li>Shard start/close race: synchronize startup/publication with close so an initializing engine cannot keep running after ownership loss.</li>
+<li>Transfer task <code>schedule_decision</code>: add Go's pending-decision guard (the timer path is already guarded).</li>
 </ul>
-<h3>Recovery scenarios (every history-mixed-gate combo)</h3>
-<p><code>killall</code> (SIGKILL all History hosts), <code>dbrestart</code> (docker restart of the DB), <code>killprimary</code> (two_history only). Each round checks an in-flight 30s timer, a 20s activity, an activity start-to-close timeout, signal before/after, an unanswered decision, and a workflow started during the failure. Passing on master with the one cassandra dbrestart flake above.</p>
-<h3>Replication gates (two-cluster)</h3>
+<h3>Other open items</h3>
 <ul>
-<li><strong>Rust History ACTIVE → Go standby: PASS</strong> — run 43436024191 (<code>--rust-history-side active</code>): start/signal/terminate replicate and standby event lists equal active.</li>
-<li><strong>Go active → Rust standby: IN PROGRESS</strong> — run 43425519511: domain replication, forwarding, noop and failover rows pass, but the three repl-standby rows fail (<code>replicate_events_v2 error=version histories are missing</code>; task goes to DLQ). Fix (version histories on the standby start path) not recorded as merged in memory yet.</li>
-</ul>
-<h3>Soak gate — FAILING (fix in progress)</h3>
-<p>Run 1: 43434980678 at head 594bbe032419, 45 min, two_history, 4 wf/s. All three lanes failed: mysql started 10800 / completed 12 / failed 10788; postgres 5676 / 12 / 10788; cassandra 5632 / 11 / 10789. Services alive, no panics, restart mid-soak recovered, History RSS 218→241 MB (mysql). Cause: Rust History retries <code>invalid history action DecisionTaskScheduled (pending decision)</code> forever; suspected missing <code>HasPendingDecision</code> guard in <code>queue_deps_timer_active.rs</code> <code>schedule_decision</code>. Fix in progress; re-run pending.</p>
-<h3>Open items</h3>
-<ul>
-<li>Failover coordinator audit (<code>failover/coordinator.rs</code>) not done.</li>
-<li>Anomaly: 12 retries of <code>matching add task: missing TTL</code> near workflow close against Go matching (activerepl); origin unidentified, no row affected.</li>
-<li>Swap, S3, admin and ES gates: in progress.</li>
-<li>Frontend soak fix (query sees "init", tail latency) deferred until History is complete.</li>
-<li>Other known P2: checksum repair-by-rebuild, NDC notifier classification, per-attempt gate artifact names.</li>
+<li>Matching soak stall: RecordDecisionTaskStarted is dropped when poll cancellation wins; fix in progress. The soakfix removed the earlier pending-decision retry loop, but the stall still needs its own fix and validation.</li>
+<li>Frontend soak tail latency: Rust e2e p95 14,045 ms vs Go 4,099 ms and p99 23,071 ms vs 6,552 ms (about 3×); root cause remains open.</li>
+<li>Admin CLI compatibility gate is in progress.</li>
 </ul></section>
 <header>
   <h1>Cadence migration: Go → Rust</h1>
@@ -131,7 +127,7 @@
   </div>
 </header>
 <main>
-<p class="note">History checkpoint 2026-11-09: Rust History/Frontend/Matching boot in the new mixed gate. StartWorkflowExecution and SignalWithStartWorkflowExecution now route through the real History engine after Go-equivalent handler checks, with race retry regression coverage; crate CI pending. Live queue processors are absent. Queue configuration adapter passed CI 42568401701. Timer-status corrections await CI 42581586431. Owned NDC state and lossless persistence bridge remain incomplete. No History completion claimed. <a href="history-runtime-20261109.md">Evidence and next tasks</a>.</p>
+<p class="note">History checkpoint 2026-11-14: merged work now covers standby replication, cross-host failover marker routing, Go↔Rust database swap/recovery, S3 archival, and advanced ES/OpenSearch visibility. Review 3 has identified remaining compatibility issues; timestamp units, archive enum encoding, authenticated Kafka, shard lifecycle, and the transfer decision guard remain open. Mixed-cluster service completion and the admin CLI gate are not yet established. See the <a href="#history-1114">History status and evidence notes</a>.</p>
   <section class="est">
     <h2>Frontend + Matching benchmark — verified results</h2>
     <p>Corrected capped run 41767896292 passed all 30,000 workflows in 30 measured runs. Five-run median Go/Rust throughput: concurrency1 12.77/10.78, concurrency16 33.58/29.82, concurrency64 31.13/27.55 workflows/s. Rust used more Frontend/Matching CPU time per fixed workload and less sampled cgroup memory. Strict CI/local evidence verification and report reproduction passed. Go History/Worker stayed constant; initial uncapped measurements remain separate.</p>

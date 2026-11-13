@@ -3,6 +3,7 @@
 pub mod active_cluster_manager;
 pub mod archiver_client;
 pub mod archiver_wiring;
+pub mod visibility_wiring;
 pub mod controller;
 pub mod engine_cache;
 pub mod engine_checksum;
@@ -22,6 +23,7 @@ pub mod engine_tasks;
 pub mod engine_timer;
 pub mod env;
 pub mod failover;
+pub mod failover_client;
 pub mod ndc_adapters;
 pub mod parent_close_policy_client;
 #[cfg(test)]

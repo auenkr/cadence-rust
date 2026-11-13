@@ -746,7 +746,7 @@ impl Operations for EngineOps<'_> {
         let blob = {
             use cadence_thrift::ToThrift;
             cadence_persistence::sqlblobs::Encoding::ThriftRW
-                .encode(&ev.to_thrift())
+                .encode_versioned(&ev.to_thrift())
                 .map_err(|e| internal(format!("encode child initiated event: {e}")))?
         };
         let batch_id = g.hist.iter().find(|e| e.event_id > 0).map(|e| e.event_id).unwrap_or(completed_id);
