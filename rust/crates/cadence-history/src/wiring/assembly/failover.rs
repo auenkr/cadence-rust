@@ -29,7 +29,14 @@ use crate::wiring::resources::domain_cache::HistoryDomainCache;
 
 /// Go `IsActiveIn`: a local (non-global) domain is active everywhere.
 pub fn domain_is_active_in(m: &MatchingDomainMetadata, cluster: &str) -> bool {
-    !m.is_global_domain || m.replication.active_cluster_name == cluster
+    if !m.is_global_domain {
+        return true;
+    }
+    // Go `IsDomainPendingActive` (failoverEndTime != nil) => not active yet.
+    if m.failover_end_time_nanos.is_some() {
+        return false;
+    }
+    m.replication.active_cluster_name == cluster
 }
 
 /// Go `ValidateAndUpdateFailoverMarkers` / `AddingPendingFailoverMarker` drop rule
