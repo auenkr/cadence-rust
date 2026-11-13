@@ -86,7 +86,7 @@ jobs:
           cp res/analysis/* res/up/ 2>/dev/null; cp res/lane/run/{steps.json,soak-driver.log,rust-binary.sha256} res/up/ 2>/dev/null || true
           cp res/lane/run/summary.json res/up/gate-summary.json 2>/dev/null || true
           cp bin/SHA256SUMS bin/commit.txt res/up/
-          mkdir -p res/up/full; for f in res/lane/run/{rust-matching,rust-frontend,go-frontend,go-matching}.log; do [ -f "$f" ] && gzip -c "$f" > "res/up/full/$(basename "$f").gz"; done
+          mkdir -p res/up/full; for f in res/lane/run/{rust-matching,rust-frontend,go-frontend,go-matching,go-history-worker}.log; do [ -f "$f" ] && gzip -c "$f" > "res/up/full/$(basename "$f").gz"; done
           for f in res/lane/run/*.log; do [ -f "$f" ] && tail -n 300 "$f" > "res/up/logs/$(basename "$f")"; done
           test -f res/analysis/summary.json
       - uses: actions/upload-artifact@v4
