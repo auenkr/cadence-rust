@@ -232,9 +232,12 @@ pub fn go_history_batch(mut batch: Value) -> Value {
                         m.remove(f);
                     }
                 }
-                // Rust events carry `timestamp` in milliseconds; Go's JSON field is nanoseconds.
+                // Go's JSON field is nanoseconds. Events read from persistence already carry nanoseconds
+                // (multiplying would saturate to i64::MAX); only millisecond-range values are scaled.
                 if let Some(ms) = m.get("timestamp").and_then(Value::as_i64) {
-                    m.insert("timestamp".into(), Value::from(ms.saturating_mul(1_000_000)));
+                    if ms != 0 && ms.abs() < 100_000_000_000_000 {
+                        m.insert("timestamp".into(), Value::from(ms.saturating_mul(1_000_000)));
+                    }
                 }
                 // `WorkflowExecutionStartedEventAttributes.Attempt` is `json:"attempt,omitempty"`.
                 if let Some(a) = m

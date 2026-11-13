@@ -326,10 +326,10 @@ impl TransferDependencies for TransferDepsImpl {
                 workflow_id: record.workflow_id.clone(),
                 run_id: record.run_id.clone(),
                 workflow_type_name: record.workflow_type_name.clone(),
-                start_timestamp: record.start_timestamp,
+                start_timestamp: archive_nanos(record.start_timestamp),
                 execution_timestamp: record.execution_timestamp,
-                close_timestamp: record.close_timestamp,
-                close_status: record.close_status,
+                close_timestamp: archive_nanos(record.close_timestamp),
+                close_status: thrift_close_status(record.close_status),
                 history_length: record.history_length,
                 memo: record.memo.clone(),
                 search_attributes: record.search_attributes.clone(),
@@ -548,6 +548,29 @@ impl CleanupDependencies for CleanupDepsImpl {
                 .map_err(pe)?;
         }
         Ok(())
+    }
+}
+
+/// Go `ArchiveRequest.StartTimestamp/CloseTimestamp` are Unix nanoseconds (s3store/gcloud index keys,
+/// `time.Unix(0, ts)`). The visibility record carries history-event timestamps, which arrive here in
+/// milliseconds: normalise values in the millisecond range to nanoseconds, leave nanosecond values alone.
+fn archive_nanos(ts: i64) -> i64 {
+    if ts != 0 && ts.abs() < 100_000_000_000_000 {
+        ts.saturating_mul(1_000_000)
+    } else {
+        ts
+    }
+}
+
+#[cfg(test)]
+mod archive_nanos_tests {
+    use super::archive_nanos;
+
+    #[test]
+    fn millis_become_nanos_and_nanos_are_kept() {
+        assert_eq!(archive_nanos(1_794_000_000_000), 1_794_000_000_000_000_000);
+        assert_eq!(archive_nanos(1_794_000_000_000_000_000), 1_794_000_000_000_000_000);
+        assert_eq!(archive_nanos(0), 0);
     }
 }
 

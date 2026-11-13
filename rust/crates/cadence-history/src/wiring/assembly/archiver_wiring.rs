@@ -8,10 +8,31 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use cadence_api::{enums::WorkflowIDReusePolicy, service_types as st, types as t};
-use cadence_common::cloud_archiver::go_history_batch;
+use cadence_common::cloud_archiver::go_history_batch as go_history_batch_base;
 use cadence_common::archiver::{ArchiveHistoryRequest, ArchiverError, HistoryBatchSource};
 use cadence_persistence::history_reader::{read_history_branch, HistoryNodeStore, HistoryReadError, ReadHistoryBranchRequest};
 use serde_json::{json, Value};
+
+/// Go `types.EventType` is a string enum in its JSON (`"WorkflowExecutionStarted"`); the Rust thrift
+/// `HistoryEvent.eventType` serialises as the numeric value, which the Go s3store reader cannot parse.
+fn go_history_batch(mut batch: Value) -> Value {
+    if let Some(events) = batch.get_mut("events").and_then(Value::as_array_mut) {
+        for e in events {
+            if let Some(m) = e.as_object_mut() {
+                let name = m
+                    .get("eventType")
+                    .and_then(Value::as_i64)
+                    .and_then(|n| i32::try_from(n).ok())
+                    .and_then(cadence_api::enums::EventType::from_i32)
+                    .map(|t| t.as_str());
+                if let Some(name) = name {
+                    m.insert("eventType".into(), Value::String(name.into()));
+                }
+            }
+        }
+    }
+    go_history_batch_base(batch)
+}
 
 use super::archiver_client::{AllowLimiter, ArchivalSignaler, ArchiveRequest, ArchiverClient, ArchivalTarget, FileInlineArchivers};
 use crate::config::Config;
