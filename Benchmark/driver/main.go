@@ -207,6 +207,7 @@ func main() {
 				defer func() { <-slots }()
 				s.ExpectedSHA256 = fmt.Sprintf("%x", sha256.Sum256([]byte(in.Payload)))
 				s.Started = time.Now()
+				s.LagMS = float64(s.Started.Sub(s.Scheduled)) / 1e6
 				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 				defer cancel()
 				r, e := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: s.ID, TaskList: *tl, ExecutionStartToCloseTimeout: time.Minute, DecisionTaskStartToCloseTimeout: 10 * time.Second}, oneActivity, in)
@@ -240,6 +241,9 @@ func main() {
 		must(f.Sync())
 	}
 	phase("warmup", *warmup)
+	if failed {
+		os.Exit(1)
+	}
 	if *startFile != "" {
 		must(os.WriteFile(*startFile, []byte(time.Now().UTC().Format(time.RFC3339Nano)), 0644))
 	}
