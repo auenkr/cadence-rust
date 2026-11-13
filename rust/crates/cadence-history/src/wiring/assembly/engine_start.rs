@@ -328,6 +328,31 @@ pub(super) async fn append_new_branch(
     ))
 }
 
+/// Allocates ids for the category-3 replication tasks (Go allocates them after transfer and
+/// timer tasks) and encodes them as `Task` rows. `max_read_level` is raised to the last id.
+pub(super) fn replication_rows(
+    core: &EngineCore,
+    tasks: &mut [pc::ReplicationTask],
+    max_read_level: &mut i64,
+) -> HResult<Vec<pc::Task>> {
+    let mut slots: Vec<(i64, i64)> = vec![(0, 0); tasks.len()];
+    core.shard.allocate_transfer_ids(&mut slots, max_read_level).map_err(shard_err)?;
+    let mut rows = Vec::with_capacity(tasks.len());
+    for (t, slot) in tasks.iter_mut().zip(slots.iter()) {
+        t.task_id = slot.0;
+        t.creation_time_unix_nanos = slot.1;
+        let s = cadence_persistence::sqlblobs::replication_task_to_struct(t)
+            .map_err(|e| HistoryError::internal(e.to_string()))?;
+        rows.push(pc::Task {
+            visibility_timestamp_unix_nanos: slot.1,
+            task_type: t.task_type,
+            task_id: slot.0,
+            data: task_blob(Encoding::ThriftRW.encode(&s))?,
+        });
+    }
+    Ok(rows)
+}
+
 #[allow(clippy::type_complexity)]
 pub(super) fn snapshot_of(core: &EngineCore, mut txn: ClosedTxn) -> HResult<(pc::WorkflowSnapshot, i64, Vec<pc::TransferTask>, Vec<pc::TimerTask>)> {
     let shard = &core.shard;
@@ -361,6 +386,7 @@ pub(super) fn snapshot_of(core: &EngineCore, mut txn: ClosedTxn) -> HResult<(pc:
             data: task_blob(Encoding::ThriftRW.encode(&s))?,
         });
     }
+    let replication_tasks = replication_rows(core, &mut txn.replication, &mut max_read_level)?;
     let m = txn.mutation;
     let mut snapshot = pc::WorkflowSnapshot {
         activity_heartbeats: m.activity_heartbeats,
@@ -383,6 +409,11 @@ pub(super) fn snapshot_of(core: &EngineCore, mut txn: ClosedTxn) -> HResult<(pc:
         snapshot
             .tasks_by_category
             .insert(pc::HistoryTaskCategory { category_type: 2, category_id: 2 }, timer_tasks);
+    }
+    if !replication_tasks.is_empty() {
+        snapshot
+            .tasks_by_category
+            .insert(pc::HistoryTaskCategory { category_type: 1, category_id: 3 }, replication_tasks);
     }
     Ok((snapshot, max_read_level, txn.transfer, txn.timer))
 }

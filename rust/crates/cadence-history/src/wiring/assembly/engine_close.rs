@@ -24,6 +24,57 @@ pub(super) struct ClosedTxn {
     pub mutation: pc::WorkflowMutation,
     pub transfer: Vec<pc::TransferTask>,
     pub timer: Vec<pc::TimerTask>,
+    /// Go `insertReplicationTasks` (category 3), ids not yet allocated.
+    pub replication: Vec<pc::ReplicationTask>,
+}
+
+/// `persistence.ReplicationTaskTypeHistory` / `ReplicationTaskTypeSyncActivity`.
+pub(super) const REPLICATION_TASK_TYPE_HISTORY: i32 = 0;
+pub(super) const REPLICATION_TASK_TYPE_SYNC_ACTIVITY: i32 = 1;
+
+/// Go `mergeContinueAsNewReplicationTasks`: the new run's first-batch replication task is folded
+/// into the closing run's history replication task as `NewRunBranchToken`.
+pub(super) fn merge_continue_as_new_replication(
+    current: &mut [pc::ReplicationTask],
+    close_status: i32,
+    new_snapshot: &mut Option<pc::WorkflowSnapshot>,
+) -> HResult<()> {
+    if close_status != crate::engine::deps::WORKFLOW_CLOSE_STATUS_CONTINUED_AS_NEW || current.is_empty() {
+        return Ok(());
+    }
+    let cat = pc::HistoryTaskCategory { category_type: 1, category_id: 3 };
+    let new_token = match new_snapshot.as_mut().and_then(|s| {
+        let list = s.tasks_by_category.get(&cat)?;
+        (list.len() == 1).then(|| list[0].clone())
+    }) {
+        Some(task) => {
+            let st = Encoding::ThriftRW
+                .decode(&task.data.data)
+                .map_err(|e| HistoryError::internal(e.to_string()))?;
+            let rt = cadence_persistence::sqlblobs::replication_task_from_struct(&st)
+                .map_err(|e| HistoryError::internal(e.to_string()))?;
+            rt.branch_token
+        }
+        None => {
+            return Err(HistoryError::internal(
+                "unable to find replication task from new workflow for continue as new replication",
+            ))
+        }
+    };
+    if let Some(s) = new_snapshot.as_mut() {
+        s.tasks_by_category.remove(&cat);
+    }
+    let mut updated = false;
+    for t in current.iter_mut().filter(|t| t.task_type == REPLICATION_TASK_TYPE_HISTORY) {
+        t.new_run_branch_token = new_token.clone();
+        updated = true;
+    }
+    if !updated {
+        return Err(HistoryError::internal(
+            "unable to find replication task from current workflow for continue as new replication",
+        ));
+    }
+    Ok(())
 }
 
 fn blob(data: Vec<u8>) -> pc::DataBlob {
@@ -266,13 +317,71 @@ impl EngineMutableState {
             condition: g.db_next_event_id,
             ..Default::default()
         };
+        let branch_token = self.branch_token_locked(&g);
+        let replication = if active { self.generate_replication_tasks(&g, &events, &branch_token)? } else { Vec::new() };
         Ok(ClosedTxn {
             events,
-            branch_token: self.branch_token_locked(&g),
+            branch_token,
             mutation,
             transfer: g.transfer_tasks.clone(),
             timer: g.timer_tasks.clone(),
+            replication,
         })
+    }
+
+    /// Go `canReplicateEvents`: multi-cluster (global, >1 cluster) domain and
+    /// `EnableReplicationTaskGeneration(domainID, workflowID)`.
+    fn can_replicate_events(&self, workflow_id: &str) -> bool {
+        let Some(policy) = &self.params.close_policy else { return false };
+        self.domain.is_global_domain
+            && self.domain.clusters.len() > 1
+            && (policy.replication_enabled)(&self.domain.info.id, workflow_id)
+    }
+
+    /// Go `prepareEventsAndReplicationTasks` (`eventsToReplicationTask` + `syncActivityToReplicationTask`),
+    /// active policy only.
+    fn generate_replication_tasks(
+        &self,
+        g: &crate::wiring::assembly::engine_state::Inner,
+        events: &[HistoryEvent],
+        branch_token: &[u8],
+    ) -> HResult<Vec<pc::ReplicationTask>> {
+        if !self.can_replicate_events(&g.pc_exec.workflow_id) {
+            return Ok(Vec::new());
+        }
+        let policy = self.params.close_policy.as_ref().expect("checked by can_replicate_events");
+        let mut out = Vec::new();
+        if let (Some(first), Some(last)) = (events.first(), events.last()) {
+            let source = policy.cluster.cluster_name_for_failover_version(first.version)?;
+            if policy.cluster.get_current_cluster_name() != source {
+                return Err(HistoryError::internal("mutableStateBuilder encounter contradicting version & transaction policy"));
+            }
+            out.push(pc::ReplicationTask {
+                domain_id: g.pc_exec.domain_id.clone(),
+                workflow_id: g.pc_exec.workflow_id.clone(),
+                run_id: g.pc_exec.run_id.clone(),
+                task_type: REPLICATION_TASK_TYPE_HISTORY,
+                version: first.version,
+                first_event_id: first.event_id,
+                next_event_id: last.event_id + 1,
+                branch_token: branch_token.to_vec(),
+                ..Default::default()
+            });
+        }
+        for sid in &g.sync_activity_tasks {
+            if let Some(a) = g.pc_acts.get(sid) {
+                out.push(pc::ReplicationTask {
+                    domain_id: g.pc_exec.domain_id.clone(),
+                    workflow_id: g.pc_exec.workflow_id.clone(),
+                    run_id: g.pc_exec.run_id.clone(),
+                    task_type: REPLICATION_TASK_TYPE_SYNC_ACTIVITY,
+                    version: a.version,
+                    scheduled_id: *sid,
+                    ..Default::default()
+                });
+            }
+        }
+        Ok(out)
     }
 
     /// Go `closeTransactionWithPolicyCheck`: an active close of a multi-cluster domain whose current
@@ -324,6 +433,7 @@ impl EngineMutableState {
         g.hist.clear();
         g.transfer_tasks.clear();
         g.timer_tasks.clear();
+        g.sync_activity_tasks.clear();
         g.upsert_acts.clear();
         g.upsert_timers.clear();
         g.delete_timers.clear();
@@ -433,6 +543,87 @@ mod tests {
         assert!(s.close_transaction(1_700_000_000_000_000_000, false).is_ok());
         s.domain.clusters = vec!["cluster-a".into()];
         assert!(s.close_transaction(1_700_000_000_000_000_000, true).is_ok());
+    }
+
+    struct SameCluster;
+    impl crate::engine::deps::ClusterMetadata for SameCluster {
+        fn get_current_cluster_name(&self) -> String {
+            "cluster-a".into()
+        }
+        fn cluster_name_for_failover_version(&self, _: i64) -> HResult<String> {
+            Ok("cluster-a".into())
+        }
+    }
+
+    fn global_state(enabled: bool, global: bool) -> EngineMutableState {
+        let mut s = state(false, 0, 3);
+        s.domain.is_global_domain = global;
+        s.domain.clusters = vec!["cluster-a".into(), "cluster-b".into()];
+        s.params.close_policy = Some(crate::wiring::assembly::engine_state::ClosePolicy {
+            cluster: Arc::new(SameCluster),
+            replication_enabled: Arc::new(move |_, _| enabled),
+        });
+        s
+    }
+
+    #[test]
+    fn active_close_of_global_domain_emits_history_and_sync_activity_tasks() {
+        let s = global_state(true, true);
+        s.add_decision_task_scheduled(false).unwrap();
+        {
+            let mut g = s.inner.lock().unwrap();
+            let a = pc::ActivityInfo { version: 7, ..Default::default() };
+            g.pc_acts.insert(9, a);
+            g.sync_activity_tasks.insert(9);
+            g.sync_activity_tasks.insert(10); // not pending: skipped like Go
+        }
+        let c = s.close_transaction(1_700_000_000_000_000_000, true).unwrap();
+        assert_eq!(c.replication.len(), 2);
+        let h = &c.replication[0];
+        assert_eq!(h.task_type, REPLICATION_TASK_TYPE_HISTORY);
+        assert_eq!(h.first_event_id, c.events.first().unwrap().event_id);
+        assert_eq!(h.next_event_id, c.events.last().unwrap().event_id + 1);
+        let sa = &c.replication[1];
+        assert_eq!((sa.task_type, sa.scheduled_id, sa.version), (REPLICATION_TASK_TYPE_SYNC_ACTIVITY, 9, 7));
+    }
+
+    #[test]
+    fn no_replication_tasks_for_local_domain_disabled_config_or_passive_close() {
+        for (enabled, global) in [(true, false), (false, true)] {
+            let s = global_state(enabled, global);
+            s.add_decision_task_scheduled(false).unwrap();
+            assert!(s.close_transaction(1_700_000_000_000_000_000, true).unwrap().replication.is_empty());
+        }
+        let s = global_state(true, true);
+        s.inner.lock().unwrap().sync_activity_tasks.insert(1);
+        assert!(s.close_transaction(1_700_000_000_000_000_000, false).unwrap().replication.is_empty());
+    }
+
+    #[test]
+    fn continue_as_new_merges_new_run_branch_token() {
+        let cat = pc::HistoryTaskCategory { category_type: 1, category_id: 3 };
+        let new_run = pc::ReplicationTask {
+            domain_id: "00000000-0000-0000-0000-000000000001".into(),
+            run_id: "00000000-0000-0000-0000-000000000002".into(),
+            branch_token: vec![9, 9],
+            ..Default::default()
+        };
+        let st = cadence_persistence::sqlblobs::replication_task_to_struct(&new_run).unwrap();
+        let mut snap = pc::WorkflowSnapshot::default();
+        snap.tasks_by_category.insert(
+            cat.clone(),
+            vec![pc::Task { data: blob(Encoding::ThriftRW.encode(&st).unwrap()), ..Default::default() }],
+        );
+        let mut new_snapshot = Some(snap);
+        let mut cur = vec![pc::ReplicationTask { task_type: REPLICATION_TASK_TYPE_HISTORY, ..Default::default() }];
+        merge_continue_as_new_replication(&mut cur, crate::engine::deps::WORKFLOW_CLOSE_STATUS_CONTINUED_AS_NEW, &mut new_snapshot)
+            .unwrap();
+        assert_eq!(cur[0].new_run_branch_token, vec![9, 9]);
+        assert!(!new_snapshot.unwrap().tasks_by_category.contains_key(&cat));
+        // no new-run task: error; other close status: untouched
+        let mut none = None;
+        assert!(merge_continue_as_new_replication(&mut cur, crate::engine::deps::WORKFLOW_CLOSE_STATUS_CONTINUED_AS_NEW, &mut none).is_err());
+        assert!(merge_continue_as_new_replication(&mut cur, 1, &mut none).is_ok());
     }
 
     #[test]

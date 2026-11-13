@@ -57,6 +57,8 @@ pub struct EngineOps<'a> {
     pub domains: Arc<dyn DomainCache>,
     pub domain_name: String,
     pub identity: String,
+    /// Go `workflowSizeChecker.completedID`: the DecisionTaskCompleted event id.
+    pub completed_id: i64,
     /// Go `semaphoreMetadataManager.GetSemaphore` results, resolved asynchronously before the
     /// synchronous decision handler runs (see [`resolve_semaphore_lookups`]).
     pub semaphore_lookups: std::collections::HashMap<String, SemaphoreLookup>,
@@ -190,7 +192,7 @@ impl Operations for EngineOps<'_> {
         };
         let d = &self.domain_name;
         if size > (self.config.history_size_limit_error)(d) || count > (self.config.history_count_limit_error)(d) {
-            let completed = self.state.inner.lock().unwrap().next_event_id - 1;
+            let completed = self.completed_id;
             self.fail_workflow(completed, crate::decision::FAILURE_REASON_HISTORY_SIZE_EXCEEDS_LIMIT, b"Workflow history size / count exceeds limit.")?;
             return Ok(true);
         }
@@ -199,7 +201,7 @@ impl Operations for EngineOps<'_> {
 
     fn check_blob_size(&mut self, _kind: DecisionType, blob: &[u8], message: &str) -> Result<bool> {
         if blob.len() as i64 > (self.config.blob_size_limit_error)(&self.domain_name) {
-            let completed = self.state.inner.lock().unwrap().next_event_id - 1;
+            let completed = self.completed_id;
             self.fail_workflow(completed, "DECISION_BLOB_SIZE_EXCEEDS_LIMIT", message.as_bytes())?;
             return Ok(true);
         }
@@ -1018,6 +1020,7 @@ mod tests {
             domains: Arc::new(Domains),
             domain_name: "test-domain".into(),
             identity: "id".into(),
+            completed_id: 4,
             semaphore_lookups: Default::default(),
         };
         TaskHandler::new(ops, "id".into(), 4)
@@ -1038,6 +1041,7 @@ mod tests {
             domains: Arc::new(Domains),
             domain_name: "test-domain".into(),
             identity: "id".into(),
+            completed_id: 4,
             semaphore_lookups: Default::default(),
         };
         let mut h = TaskHandler::new(ops, "id".into(), 4);

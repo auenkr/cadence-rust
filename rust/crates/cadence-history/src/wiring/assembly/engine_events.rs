@@ -318,7 +318,10 @@ impl EngineMutableState {
         let Some(mut a) = g.pc_acts.get(&schedule_id).cloned() else {
             return Err(Self::invalid_action("ActivityTaskStarted", g.next_event_id));
         };
-        if a.has_retry_policy {
+        let transient = a.has_retry_policy;
+        if transient {
+            // Go `AddActivityTaskStartedEvent` (retry policy): version bump + sync activity task.
+            a.version = g.current_version;
             a.started_id = TRANSIENT_EVENT_ID;
         } else {
             let attempt = a.attempt;
@@ -339,6 +342,9 @@ impl EngineMutableState {
         a.started_identity = identity.to_string();
         g.pc_acts.insert(schedule_id, a);
         g.refresh_activity(schedule_id);
+        if transient {
+            g.sync_activity_tasks.insert(schedule_id);
+        }
         Ok(g.activities[&schedule_id].clone())
     }
 
@@ -487,6 +493,7 @@ impl EngineMutableState {
         let (version, attempt) = (a.version, a.attempt as i64);
         g.pc_acts.insert(info.schedule_id, a);
         g.refresh_activity(info.schedule_id);
+        g.sync_activity_tasks.insert(info.schedule_id);
         g.gen_activity_retry_timer(info.schedule_id, next, attempt, version);
         Ok(true)
     }
