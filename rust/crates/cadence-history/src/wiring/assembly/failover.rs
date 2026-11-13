@@ -94,13 +94,6 @@ pub fn marker_stale_by_cache(
     }
 }
 
-fn now_nanos() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos() as i64)
-        .unwrap_or(0)
-}
-
 /// `failover.ShardContext` over the real shard context.
 pub struct FailoverShardAdapter {
     pub shard: Arc<ShardContext>,
@@ -119,13 +112,12 @@ impl FailoverShard for FailoverShardAdapter {
             .shard
             .validate_and_update_failover_markers(|m| marker_stale_by_cache(&domains, &cluster, m))
             .map_err(|e| e.to_string())?;
-        let now = now_nanos();
         Ok(remaining
             .into_iter()
             .map(|m| FailoverMarkerAttributes {
                 domain_id: Some(m.domain_id),
                 failover_version: Some(m.failover_version),
-                creation_time: Some(now),
+                creation_time: Some(m.creation_time),
             })
             .collect())
     }
