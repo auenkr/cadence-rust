@@ -82,6 +82,7 @@ jobs:
           CADENCE_GATE_TWO_HISTORY: ${{ env.TWO_HISTORY }}
           RUST_BACKTRACE: 1
           RUST_LOG: warn
+          HISTORY_RUST_LOG: warn,cadence_history::queue=debug,cadence_history::task=debug,cadence_history::shard_context=info
         run: |
           set +e
           export SOAK_SECONDS=$(( ${{ env.DURATION }} * 60 ))
