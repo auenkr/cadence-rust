@@ -664,7 +664,7 @@ impl a::admin_api_server::AdminApi for Admin {
         let r = request.into_inner();
         let input = cadence_api::admin::RemoveTaskRequest {
             shard_id: r.shard_id,
-            task_type: Some(r.task_type),
+            task_type: admin_task_type_from_proto(r.task_type),
             task_id: r.task_id,
             visibility_timestamp: r.visibility_time.map(|t| {
                 t.seconds
@@ -686,7 +686,7 @@ impl a::admin_api_server::AdminApi for Admin {
         let input = cadence_api::admin::ResetQueueRequest {
             shard_id: r.shard_id,
             cluster_name: r.cluster_name,
-            task_type: Some(r.task_type),
+            task_type: admin_task_type_from_proto(r.task_type),
         };
         let _: cadence_api::admin::ResetQueueResponse =
             self.call("/api/v1/admin/queues/reset", &input).await?;
@@ -701,7 +701,7 @@ impl a::admin_api_server::AdminApi for Admin {
         let input = cadence_api::admin::DescribeQueueRequest {
             shard_id: r.shard_id,
             cluster_name: r.cluster_name,
-            task_type: Some(r.task_type),
+            task_type: admin_task_type_from_proto(r.task_type),
         };
         let v: cadence_api::admin::DescribeQueueResponse =
             self.call("/api/v1/admin/queues/describe", &input).await?;
@@ -1204,5 +1204,17 @@ mod fix_fe_admin_tests {
             (Some(3), Some(11), Some(9), Some(12))
         );
         assert_eq!((input.workflow_id.as_str(), input.run_id.as_str()), ("w", "r"));
+    }
+}
+
+/// Go mapper/proto ToTaskType: admin.v1.TaskType -> internal TaskType
+/// (2 transfer, 3 timer, 4 replication, 6 cross-cluster); INVALID -> nil.
+fn admin_task_type_from_proto(t: i32) -> Option<i32> {
+    match t {
+        1 => Some(2),
+        2 => Some(3),
+        3 => Some(4),
+        4 => Some(6),
+        _ => None,
     }
 }
