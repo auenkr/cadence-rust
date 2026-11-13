@@ -166,7 +166,8 @@ impl HistoryEnv {
                 let cfg = config.clone();
                 Arc::new(move || (cfg.write_visibility_store_name)())
             },
-        )?;
+        )
+        .await?;
         let persistence = HistoryPersistence {
             shard_store: Arc::new(SqlShardStore::new(shard_rows.clone())),
             shard_persistence: Arc::new(SqlShardPersistence::new(shard_rows.clone())),

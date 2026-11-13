@@ -25,7 +25,7 @@ fn persistence_history_blob_matches_go() {
     use cadence_thrift::history_blob::{decode, encode};
     let events = vec![HistoryEvent {
         event_id: 7,
-        timestamp: Some(1_700_000_000_123),
+        timestamp: Some(1_700_000_000_123_000_000),
         event_type: Some(EventType::WorkflowExecutionSignaled),
         version: -24,
         task_id: 19,

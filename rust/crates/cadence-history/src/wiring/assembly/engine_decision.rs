@@ -122,7 +122,7 @@ impl EngineMutableState {
         let mut schedule_id = g.next_event_id;
         if attempt == 0 {
             let tl = task_list.clone();
-            let ev = g.push_event(EventType::DecisionTaskScheduled, now / 1_000_000, |e| {
+            let ev = g.push_event(EventType::DecisionTaskScheduled, now, |e| {
                 e.decision_task_scheduled_event_attributes = Some(DecisionTaskScheduledEventAttributes {
                     task_list: Some(TaskList { name: tl, ..Default::default() }),
                     start_to_close_timeout_seconds: Some((timeout_nanos / 1_000_000_000) as i32),
@@ -183,7 +183,7 @@ impl EngineMutableState {
                 // New events arrived after the transient decision was scheduled.
                 let timeout = g.pc_exec.decision_timeout_nanos;
                 let tl = task_list.to_string();
-                let ev = g.push_event(EventType::DecisionTaskScheduled, now / 1_000_000, |e| {
+                let ev = g.push_event(EventType::DecisionTaskScheduled, now, |e| {
                     e.decision_task_scheduled_event_attributes = Some(DecisionTaskScheduledEventAttributes {
                         task_list: Some(TaskList { name: tl, ..Default::default() }),
                         start_to_close_timeout_seconds: Some((timeout / 1_000_000_000) as i32),
@@ -195,7 +195,7 @@ impl EngineMutableState {
             }
             if attempt == 0 {
                 let (rid, ident) = (request_id.to_string(), identity.to_string());
-                let ev = g.push_event(EventType::DecisionTaskStarted, now / 1_000_000, |e| {
+                let ev = g.push_event(EventType::DecisionTaskStarted, now, |e| {
                     e.decision_task_started_event_attributes = Some(DecisionTaskStartedEventAttributes {
                         scheduled_event_id: sid,
                         identity: ident,
@@ -286,9 +286,9 @@ impl EngineMutableState {
             let timeout = g.pc_exec.decision_timeout_nanos;
             let task_list =
                 if g.exec.sticky_task_list.is_empty() { g.exec.task_list.clone() } else { g.exec.sticky_task_list.clone() };
-            let scheduled_ms = g.pc_exec.decision_scheduled_time_unix_nanos / 1_000_000;
-            let started_ms = g.pc_exec.decision_started_time_unix_nanos / 1_000_000;
-            let ev = g.push_event(EventType::DecisionTaskScheduled, scheduled_ms, |e| {
+            let scheduled_ns = g.pc_exec.decision_scheduled_time_unix_nanos;
+            let started_ns = g.pc_exec.decision_started_time_unix_nanos;
+            let ev = g.push_event(EventType::DecisionTaskScheduled, scheduled_ns, |e| {
                 e.decision_task_scheduled_event_attributes = Some(DecisionTaskScheduledEventAttributes {
                     task_list: Some(TaskList { name: task_list, ..Default::default() }),
                     start_to_close_timeout_seconds: Some((timeout / 1_000_000_000) as i32),
@@ -298,7 +298,7 @@ impl EngineMutableState {
             sid = ev.event_id;
             let request_id = g.pc_exec.decision_request_id.clone();
             let ident = identity.to_string();
-            let ev = g.push_event(EventType::DecisionTaskStarted, started_ms, |e| {
+            let ev = g.push_event(EventType::DecisionTaskStarted, started_ns, |e| {
                 e.decision_task_started_event_attributes = Some(DecisionTaskStartedEventAttributes {
                     scheduled_event_id: sid,
                     identity: ident,
@@ -308,7 +308,7 @@ impl EngineMutableState {
             stid = ev.event_id;
         }
         let (ctx, ident, checksum) = (execution_context.to_vec(), identity.to_string(), binary_checksum.to_string());
-        let completed = g.push_event(EventType::DecisionTaskCompleted, ms, |e| {
+        let completed = g.push_event(EventType::DecisionTaskCompleted, ms * 1_000_000, |e| {
             e.decision_task_completed_event_attributes = Some(DecisionTaskCompletedEventAttributes {
                 execution_context: ctx,
                 scheduled_event_id: sid,
@@ -361,7 +361,7 @@ impl EngineMutableState {
         // Only record the event when the decision is not a transient retry.
         if g.pc_exec.decision_attempt == 0 {
             let (details, identity, checksum) = (details.to_vec(), identity.to_string(), binary_checksum.to_string());
-            g.push_event(EventType::DecisionTaskFailed, now / 1_000_000, |e| {
+            g.push_event(EventType::DecisionTaskFailed, now, |e| {
                 e.decision_task_failed_event_attributes = Some(DecisionTaskFailedEventAttributes {
                     scheduled_event_id: schedule_id,
                     started_event_id: started_id,
@@ -385,7 +385,7 @@ impl EngineMutableState {
             return Err(invalid_action("DecisionTaskTimedOut (schedule to start)", g.next_event_id));
         }
         if g.pc_exec.decision_attempt == 0 {
-            g.push_event(EventType::DecisionTaskTimedOut, now / 1_000_000, |e| {
+            g.push_event(EventType::DecisionTaskTimedOut, now, |e| {
                 e.decision_task_timed_out_event_attributes = Some(DecisionTaskTimedOutEventAttributes {
                     scheduled_event_id: schedule_id,
                     started_event_id: 0,
@@ -421,7 +421,7 @@ impl EngineMutableState {
             // Transient decision: the events are not in the history yet.
             let scheduled = HistoryEvent {
                 event_id: d.schedule_id,
-                timestamp: Some(d.scheduled_nanos / 1_000_000),
+                timestamp: Some(d.scheduled_nanos),
                 event_type: Some(EventType::DecisionTaskScheduled),
                 version: d.version,
                 decision_task_scheduled_event_attributes: Some(DecisionTaskScheduledEventAttributes {
@@ -433,7 +433,7 @@ impl EngineMutableState {
             };
             let started = HistoryEvent {
                 event_id: d.schedule_id + 1,
-                timestamp: Some(d.started_nanos / 1_000_000),
+                timestamp: Some(d.started_nanos),
                 event_type: Some(EventType::DecisionTaskStarted),
                 version: d.version,
                 decision_task_started_event_attributes: Some(DecisionTaskStartedEventAttributes {

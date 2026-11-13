@@ -92,6 +92,8 @@ pub struct KafkaConfig {
     #[serde(default)]
     pub tls: KafkaTls,
     #[serde(default)]
+    pub sasl: KafkaSasl,
+    #[serde(default)]
     pub clusters: HashMap<String, KafkaClusterConfig>,
     #[serde(default)]
     pub topics: HashMap<String, KafkaTopicConfig>,
@@ -101,11 +103,39 @@ pub struct KafkaConfig {
     pub version: String,
 }
 
-/// Go `config.TLS` subset (only `enabled` is interpreted by the History producer).
+/// Go `config.TLS` (yaml keys as in `common/config/tls.go`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KafkaTls {
     #[serde(default)]
     pub enabled: bool,
+    #[serde(default, rename = "certFile")]
+    pub cert_file: String,
+    #[serde(default, rename = "keyFile")]
+    pub key_file: String,
+    #[serde(default, rename = "caFile")]
+    pub ca_file: String,
+    #[serde(default, rename = "caFiles")]
+    pub ca_files: Vec<String>,
+    #[serde(default, rename = "enableHostVerification")]
+    pub enable_host_verification: bool,
+    #[serde(default, rename = "requireClientAuth")]
+    pub require_client_auth: bool,
+    #[serde(default, rename = "serverName")]
+    pub server_name: String,
+}
+
+/// Go `config.SASL` (`common/config/sasl.go`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KafkaSasl {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub user: String,
+    #[serde(default)]
+    pub password: String,
+    /// plain, sha512 or sha256
+    #[serde(default)]
+    pub algorithm: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

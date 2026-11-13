@@ -93,12 +93,12 @@ impl Inner {
     pub(super) fn push_event(
         &mut self,
         ty: EventType,
-        now_ms: i64,
+        now_nanos: i64,
         fill: impl FnOnce(&mut HistoryEvent),
     ) -> HistoryEvent {
         let buffer = self.in_flight() && is_bufferable(ty);
         let mut ev = HistoryEvent {
-            timestamp: Some(now_ms),
+            timestamp: Some(now_nanos),
             event_type: Some(ty),
             version: self.current_version,
             task_id: EMPTY_EVENT_TASK_ID,
@@ -261,7 +261,7 @@ impl Inner {
         if a.started_id != TRANSIENT_EVENT_ID {
             return Ok(a.started_id);
         }
-        let started_ms = a.started_time_unix_nanos / 1_000_000;
+        let started_ns = a.started_time_unix_nanos;
         let (attempt, request_id, identity) = (a.attempt, a.request_id.clone(), a.started_identity.clone());
         let reason = if a.retry_last_failure_reason.is_empty() { None } else { Some(a.retry_last_failure_reason.clone()) };
         let details = a.retry_last_failure_details.clone();
@@ -273,7 +273,7 @@ impl Inner {
         } else {
             None
         };
-        let ev = self.push_event(EventType::ActivityTaskStarted, started_ms, |e| {
+        let ev = self.push_event(EventType::ActivityTaskStarted, started_ns, |e| {
             e.activity_task_started_event_attributes = Some(ActivityTaskStartedEventAttributes {
                 scheduled_event_id: schedule_id,
                 identity,
@@ -326,7 +326,7 @@ impl EngineMutableState {
         } else {
             let attempt = a.attempt;
             let (rid, ident) = (request_id.to_string(), identity.to_string());
-            let ev = g.push_event(EventType::ActivityTaskStarted, now / 1_000_000, |e| {
+            let ev = g.push_event(EventType::ActivityTaskStarted, now, |e| {
                 e.activity_task_started_event_attributes = Some(ActivityTaskStartedEventAttributes {
                     scheduled_event_id: schedule_id,
                     identity: ident,
@@ -367,7 +367,7 @@ impl EngineMutableState {
         Self::check_activity_close(&g, schedule_id, started_id, "ActivityTaskCompleted")?;
         let started = g.add_transient_started(schedule_id)?;
         let (result, identity) = (request.result.clone(), request.identity.clone());
-        g.push_event(EventType::ActivityTaskCompleted, ms, |e| {
+        g.push_event(EventType::ActivityTaskCompleted, ms * 1_000_000, |e| {
             e.activity_task_completed_event_attributes = Some(ActivityTaskCompletedEventAttributes {
                 result,
                 scheduled_event_id: schedule_id,
@@ -390,7 +390,7 @@ impl EngineMutableState {
         Self::check_activity_close(&g, schedule_id, started_id, "ActivityTaskFailed")?;
         let started = g.add_transient_started(schedule_id)?;
         let r = request.clone();
-        g.push_event(EventType::ActivityTaskFailed, ms, |e| {
+        g.push_event(EventType::ActivityTaskFailed, ms * 1_000_000, |e| {
             e.activity_task_failed_event_attributes = Some(ActivityTaskFailedEventAttributes {
                 reason: r.reason,
                 details: r.details,
@@ -420,7 +420,7 @@ impl EngineMutableState {
         }
         let started = g.add_transient_started(schedule_id)?;
         let (details, identity) = (details.to_vec(), identity.to_string());
-        g.push_event(EventType::ActivityTaskCanceled, ms, |e| {
+        g.push_event(EventType::ActivityTaskCanceled, ms * 1_000_000, |e| {
             e.activity_task_canceled_event_attributes = Some(ActivityTaskCanceledEventAttributes {
                 details,
                 latest_cancel_requested_event_id: cancel_request_id,
@@ -503,7 +503,7 @@ impl EngineMutableState {
         let ms = self.now_millis();
         let mut g = self.inner.lock().unwrap();
         let (n, i, id, r) = (name.to_string(), input.to_vec(), identity.to_string(), request_id.to_string());
-        g.push_event(EventType::WorkflowExecutionSignaled, ms, |e| {
+        g.push_event(EventType::WorkflowExecutionSignaled, ms * 1_000_000, |e| {
             e.workflow_execution_signaled_event_attributes =
                 Some(cadence_api::service_types::WorkflowExecutionSignaledEventAttributes {
                     signal_name: n,
@@ -532,7 +532,7 @@ impl EngineMutableState {
         let (cause, ext_id, ext_exec) =
             (cause.to_string(), request.external_initiated_event_id, request.external_workflow_execution.clone());
         let (identity, request_id) = (cancel.identity.clone(), cancel.request_id.clone());
-        g.push_event(EventType::WorkflowExecutionCancelRequested, ms, |e| {
+        g.push_event(EventType::WorkflowExecutionCancelRequested, ms * 1_000_000, |e| {
             e.workflow_execution_cancel_requested_event_attributes =
                 Some(cadence_api::service_types::WorkflowExecutionCancelRequestedEventAttributes {
                     cause,
@@ -556,7 +556,7 @@ impl EngineMutableState {
             return Err(Self::invalid_action("WorkflowExecutionTerminated", g.next_event_id));
         }
         let (reason, details, identity) = (reason.to_string(), details.to_vec(), identity.to_string());
-        let ev = g.push_event(EventType::WorkflowExecutionTerminated, ms, |e| {
+        let ev = g.push_event(EventType::WorkflowExecutionTerminated, ms * 1_000_000, |e| {
             e.workflow_execution_terminated_event_attributes =
                 Some(cadence_api::service_types::WorkflowExecutionTerminatedEventAttributes { reason, details, identity });
         });
@@ -591,7 +591,7 @@ impl EngineMutableState {
         let (domain, wt, started) = self.child_info(&g, initiated_id, "ChildWorkflowExecutionCompleted")?;
         let result = attrs.map(|a| a.result.clone()).unwrap_or_default();
         let exec = execution.clone();
-        g.push_event(EventType::ChildWorkflowExecutionCompleted, ms, |e| {
+        g.push_event(EventType::ChildWorkflowExecutionCompleted, ms * 1_000_000, |e| {
             e.child_workflow_execution_completed_event_attributes = Some(ChildWorkflowExecutionCompletedEventAttributes {
                 result,
                 domain,
@@ -615,7 +615,7 @@ impl EngineMutableState {
         let (domain, wt, started) = self.child_info(&g, initiated_id, "ChildWorkflowExecutionFailed")?;
         let (reason, details) = attrs.map(|a| (a.reason.clone(), a.details.clone())).unwrap_or_default();
         let exec = execution.clone();
-        g.push_event(EventType::ChildWorkflowExecutionFailed, ms, |e| {
+        g.push_event(EventType::ChildWorkflowExecutionFailed, ms * 1_000_000, |e| {
             e.child_workflow_execution_failed_event_attributes = Some(ChildWorkflowExecutionFailedEventAttributes {
                 reason,
                 details,
@@ -640,7 +640,7 @@ impl EngineMutableState {
         let (domain, wt, started) = self.child_info(&g, initiated_id, "ChildWorkflowExecutionCanceled")?;
         let details = attrs.map(|a| a.details.clone()).unwrap_or_default();
         let exec = execution.clone();
-        g.push_event(EventType::ChildWorkflowExecutionCanceled, ms, |e| {
+        g.push_event(EventType::ChildWorkflowExecutionCanceled, ms * 1_000_000, |e| {
             e.child_workflow_execution_canceled_event_attributes = Some(ChildWorkflowExecutionCanceledEventAttributes {
                 details,
                 domain,
@@ -663,7 +663,7 @@ impl EngineMutableState {
         let mut g = self.inner.lock().unwrap();
         let (domain, wt, started) = self.child_info(&g, initiated_id, "ChildWorkflowExecutionTerminated")?;
         let exec = execution.clone();
-        g.push_event(EventType::ChildWorkflowExecutionTerminated, ms, |e| {
+        g.push_event(EventType::ChildWorkflowExecutionTerminated, ms * 1_000_000, |e| {
             e.child_workflow_execution_terminated_event_attributes = Some(ChildWorkflowExecutionTerminatedEventAttributes {
                 domain,
                 workflow_execution: Some(exec),
@@ -686,7 +686,7 @@ impl EngineMutableState {
         let (domain, wt, started) = self.child_info(&g, initiated_id, "ChildWorkflowExecutionTimedOut")?;
         let timeout_type = attrs.and_then(|a| a.timeout_type);
         let exec = execution.clone();
-        g.push_event(EventType::ChildWorkflowExecutionTimedOut, ms, |e| {
+        g.push_event(EventType::ChildWorkflowExecutionTimedOut, ms * 1_000_000, |e| {
             e.child_workflow_execution_timed_out_event_attributes = Some(ChildWorkflowExecutionTimedOutEventAttributes {
                 timeout_type,
                 domain,

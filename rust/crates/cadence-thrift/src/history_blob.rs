@@ -7,7 +7,7 @@ use cadence_api::types::DataBlob;
 use crate::value::{read_struct, write_struct};
 use crate::{Error, FromThrift, Reader, Result, ToThrift, Writer};
 
-/// The converter translates internal millisecond timestamps to wire nanoseconds.
+/// `HistoryEvent.timestamp` is Unix nanoseconds in memory and on the wire (Go parity).
 pub fn encode(events: Vec<HistoryEvent>) -> DataBlob {
     let mut writer = Writer::new();
     writer.write_u8(0x59);
@@ -33,12 +33,9 @@ pub fn decode(blob: &DataBlob) -> Result<Vec<HistoryEvent>> {
     if reader.read_u8()? != 0x59 {
         return Err(Error::Invalid("invalid ThriftRW history version".into()));
     }
-    let mut history = History::from_thrift(&read_struct(&mut reader)?)?;
+    let history = History::from_thrift(&read_struct(&mut reader)?)?;
     if reader.remaining() != 0 {
         return Err(Error::Invalid("trailing history blob bytes".into()));
-    }
-    for event in &mut history.events {
-        event.timestamp = event.timestamp.map(|nanos| nanos / 1_000_000);
     }
     Ok(history.events)
 }

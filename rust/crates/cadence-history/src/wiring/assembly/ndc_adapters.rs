@@ -152,16 +152,14 @@ impl NdcStateBuilder for TypedNdcStateBuilder {
         };
         let now = owned.now_nanos();
         let env = owned.task_gen_env().clone();
-        let events_ns = crate::execution::state_builder::events_millis_to_nanos(events);
-        let new_events_ns = crate::execution::state_builder::events_millis_to_nanos(new_events);
         let new_typed = crate::execution::state_builder::StateBuilder::apply_events_typed_with_new_run(
             owned.typed_mut(),
             domain_id,
             request_id,
             execution,
-            &events_ns,
+            events,
             new_execution.as_ref(),
-            &new_events_ns,
+            new_events,
         )
         .map_err(|e| {
             use crate::execution::state_builder::StateBuilderError as E;
