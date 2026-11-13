@@ -1,0 +1,25 @@
+{
+  "total_count": 1,
+  "artifacts": [
+    {
+      "id": 14058374995,
+      "node_id": "MDg6QXJ0aWZhY3QxNDA1ODM3NDk5NQ==",
+      "name": "frontend-mixed-gate",
+      "size_in_bytes": 283731,
+      "url": "https://api.github.com/repos/auenkr/cadence-rust/actions/artifacts/14058374995",
+      "archive_download_url": "https://api.github.com/repos/auenkr/cadence-rust/actions/artifacts/14058374995/zip",
+      "expired": false,
+      "digest": "sha256:d0f6e5aa7fa443be4ce9a18226211f4e9adad4b7085314628cb855c8da5a220e",
+      "created_at": "2026-11-13T16:59:55Z",
+      "updated_at": "2026-11-13T16:59:55Z",
+      "expires_at": "2026-11-16T16:59:55Z",
+      "workflow_run": {
+        "id": 43466508274,
+        "repository_id": 1418391116,
+        "head_repository_id": 1418391116,
+        "head_branch": "t3/matching-benchmark-harness",
+        "head_sha": "ebd8588fc1d30ebbe55af58f84c0811b162403f5"
+      }
+    }
+  ]
+}

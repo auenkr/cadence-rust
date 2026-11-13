@@ -1,0 +1,4 @@
+  [94m     WORKFLOW TYPE      [0m | [94m                    WORKFLOW ID                    [0m | [94m               RUN ID               [0m | [94mTASK LIST[0m | [94mIS CRON[0m | [94mSTART TIME[0m | [94mEXECUTION TIME[0m | [94mCLOSE STATUS[0m | [94mHISTORY LENGTH[0m | [94mUPDATE TIME[0m | [94mEXECUTION STATUS[0m  
+  main.SignalQueryWorkflow | fe-gate-958c9051-8dee-418f-82a3-a4d44178cfae-sws-id | f674583a-b56c-4c0a-93c9-efd2bab7568d |           | false   | 16:54:37   | 16:54:37       | COMPLETED    |              0 | 00:00:00    | PENDING           
+  main.SignalQueryWorkflow | fe-gate-958c9051-8dee-418f-82a3-a4d44178cfae-cancel | 107e132e-34ac-4ea9-8111-7eb912d774d1 |           | false   | 16:53:48   | 16:53:48       | COMPLETED    |              0 | 00:00:00    | PENDING           
+

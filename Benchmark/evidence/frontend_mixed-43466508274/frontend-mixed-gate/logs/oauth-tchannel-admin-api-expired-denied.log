@@ -1,0 +1,4 @@
+Error: Failed to list dynamic config value(s). Ensure the domain and cluster are correct.
+Error details:
+  code:invalid-argument message
+  error AccessDeniedError (Request unauthorized.) not declared for AdminService::ListDynamicConfig

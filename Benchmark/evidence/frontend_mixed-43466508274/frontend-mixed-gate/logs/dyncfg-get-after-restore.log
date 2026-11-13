@@ -1,0 +1,4 @@
+Error: Failed to get dynamic config value
+Error details:
+  code:invalid-argument message
+  error EntityNotExistsError not declared for AdminService::GetDynamicConfig

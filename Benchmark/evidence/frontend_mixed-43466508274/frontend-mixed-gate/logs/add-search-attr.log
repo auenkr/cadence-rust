@@ -1,0 +1,2 @@
+Are you trying to add key [GateAttr6345] with Type [Int]? y/N
+Success. Note that for a multi-node Cadence cluster, DynamicConfig MUST be updated separately to whitelist the new attributes.

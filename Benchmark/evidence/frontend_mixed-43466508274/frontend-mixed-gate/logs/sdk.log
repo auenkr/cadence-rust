@@ -1,0 +1,167 @@
+STEP describe-domain ok
+{"level":"info","ts":"2026-11-13T16:53:48.488Z","caller":"internal/internal_worker.go:182","msg":"No logger configured for cadence worker. Created default one."}
+{"level":"info","ts":"2026-11-13T16:53:48.488Z","caller":"internal/internal_worker.go:186","msg":"No metrics scope configured for cadence worker. Use NoopScope as default."}
+{"level":"info","ts":"2026-11-13T16:53:48.534Z","caller":"internal/internal_worker.go:858","msg":"Started Workflow Worker","Domain":"fe-gate-t-002332","TaskList":"fe-gate-958c9051-8dee-418f-82a3-a4d44178cfae","WorkerID":"11327@runnervmccnms@fe-gate-958c9051-8dee-418f-82a3-a4d44178cfae@2ab32967-9be5-4758-bd6c-b866042d295f"}
+{"level":"info","ts":"2026-11-13T16:53:48.536Z","caller":"internal/internal_worker.go:883","msg":"Started Activity Worker","Domain":"fe-gate-t-002332","TaskList":"fe-gate-958c9051-8dee-418f-82a3-a4d44178cfae","WorkerID":"11327@runnervmccnms@fe-gate-958c9051-8dee-418f-82a3-a4d44178cfae@2ab32967-9be5-4758-bd6c-b866042d295f"}
+STEP worker-start ok
+STEP start-echo ok
+STEP complete-echo ok
+STEP describe-closed ok
+STEP workflow-id-250-chars-accepted ok
+STEP workflow-id-1001-chars-rejected ok
+STEP start-child ok
+STEP complete-child ok
+STEP describe-task-list ok
+STEP list-task-list-partitions ok
+STEP get-task-lists-by-domain ok
+STEP start-cancel ok
+STEP refresh-workflow-tasks ok
+STEP reset-sticky-task-list ok
+STEP cancel-workflow-execution ok
+STEP start-terminate ok
+STEP terminate-workflow-execution ok
+SDK schedule Schedule created successfully. ScheduleID: fe-gate-958c9051-8dee-418f-82a3-a4d44178cfae-schedule
+
+STEP sched-create-grpc ok
+SDK schedule Backfill requested for schedule "fe-gate-958c9051-8dee-418f-82a3-a4d44178cfae-schedule" (2024-01-01T00:00:00Z to 2025-01-01T00:00:00Z).
+
+STEP sched-backfill-grpc ok
+STEP sched-backfill-completed ok
+SDK schedule Schedule Configuration:
+  Cron Expression:    0 0 1 1 *
+  Workflow Type:      main.ScheduledWorkflow
+  Task List:          fe-gate-958c9051-8dee-418f-82a3-a4d44178cfae
+  Workflow ID Prefix: fe-gate-958c9051-8dee-418f-82a3-a4d44178cfae-schedule
+  Execution Timeout:  3600s
+  Decision Timeout:   10s
+  Overlap Policy:     INVALID
+  Catch-up Policy:    INVALID
+  Status:             ACTIVE
+
+Schedule Runtime:
+  Total Runs:         2
+  Last Run:           2025-01-01T00:00:00Z
+  Next Run:           1971-01-01T00:00:00Z
+  Created:            1970-01-01T00:29:54Z
+  Last Updated:       1970-01-01T00:29:54Z
+
+STEP sched-describe-after-backfill-grpc ok
+SDK schedule Schedule "fe-gate-958c9051-8dee-418f-82a3-a4d44178cfae-schedule" updated successfully.
+
+STEP sched-update-grpc ok
+SDK schedule Schedule "fe-gate-958c9051-8dee-418f-82a3-a4d44178cfae-schedule" paused successfully.
+
+STEP sched-pause-grpc ok
+SDK schedule Schedule "fe-gate-958c9051-8dee-418f-82a3-a4d44178cfae-schedule" unpaused successfully.
+
+STEP sched-unpause-grpc ok
+SDK schedule   fe-gate-958c9051-8dee-418f-82a3-a4d44178cfae-schedule                                              active
+
+  ... more schedules exist. Use --pagesize to increase the page size.
+
+STEP sched-list-grpc ok
+SDK schedule Schedule "fe-gate-958c9051-8dee-418f-82a3-a4d44178cfae-schedule" deleted successfully.
+
+STEP sched-delete-grpc ok
+STEP start-signal-query ok
+STEP signal ok
+STEP query ok
+STEP describe-open ok
+STEP list-open ok
+STEP restart-handshake ok
+STEP signal-after-restart ok
+STEP signal-done ok
+STEP complete-after-restart ok
+STEP list-closed ok
+STEP api-get-cluster-info ok
+STEP api-get-search-attributes ok
+STEP api-register-e ok
+STEP api-register-b ok
+STEP api-list-domains ok
+STEP api-delete-domain-not-deprecated ok
+STEP api-deprecate-domain ok
+STEP api-delete-domain-deprecated ok
+STEP api-delete-domain-with-executions ok
+STEP api-delete-domain-missing ok
+STEP api-failover-domain-empty-rejected ok
+STEP api-failover-domain ok
+STEP api-list-failover-history-no-domain-id ok
+STEP api-list-failover-history ok
+STEP api-signal-with-start ok
+STEP api-signal-with-start-identity-not-validated ok
+STEP api-manual-start ok
+{"level":"error","ts":"2026-11-13T16:54:37.579Z","caller":"internal/internal_workflow.go:816","msg":"Corrupt signal received on channel . Error deserializing","Domain":"fe-gate-t-002332","TaskList":"fe-gate-958c9051-8dee-418f-82a3-a4d44178cfae","WorkerID":"11327@runnervmccnms@fe-gate-958c9051-8dee-418f-82a3-a4d44178cfae@2ab32967-9be5-4758-bd6c-b866042d295f","WorkflowType":"main.SignalQueryWorkflow","WorkflowID":"fe-gate-958c9051-8dee-418f-82a3-a4d44178cfae-sws-id","RunID":"f674583a-b56c-4c0a-93c9-efd2bab7568d","error":"unable to decode argument: 0, *string, with json error: EOF","stacktrace":"go.uber.org/cadence/internal.(*channelImpl).assignValue\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_workflow.go:816\ngo.uber.org/cadence/internal.(*channelImpl).Receive\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_workflow.go:641\nmain.SignalQueryWorkflow.func3\n\t/home/runner/work/cadence-rust/cadence-rust/tests/frontend-gate/main.go:46\ngo.uber.org/cadence/internal.(*selectorImpl).Select\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_workflow.go:1080\nmain.SignalQueryWorkflow\n\t/home/runner/work/cadence-rust/cadence-rust/tests/frontend-gate/main.go:47\nreflect.Value.call\n\t/opt/hostedtoolcache/go/1.25.0/x64/src/reflect/value.go:581\nreflect.Value.Call\n\t/opt/hostedtoolcache/go/1.25.0/x64/src/reflect/value.go:365\ngo.uber.org/cadence/internal.(*workflowEnvironmentInterceptor).ExecuteWorkflow\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/workflow.go:706\ngo.uber.org/cadence/internal.(*workflowExecutor).Execute\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_worker.go:691\ngo.uber.org/cadence/internal.(*syncWorkflowDefinition).Execute.func1\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_workflow.go:503\ngo.uber.org/cadence/internal.(*dispatcherImpl).newNamedCoroutine.func1\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_workflow.go:920"}
+STEP api-respond-decision-task-failed-identity-too-long ok
+STEP api-respond-decision-task-failed ok
+STEP api-poll-decision-after-failure ok
+STEP api-respond-decision-schedule-activities ok
+STEP api-poll-activities ok
+STEP api-record-activity-heartbeat ok
+STEP api-record-activity-heartbeat-identity-too-long ok
+STEP api-respond-activity-failed-identity-too-long ok
+STEP api-respond-activity-failed ok
+STEP api-record-activity-heartbeat-by-id ok
+STEP api-respond-activity-completed-by-id-identity-too-long ok
+STEP api-respond-activity-completed-by-id ok
+STEP api-respond-activity-failed-by-id ok
+STEP api-respond-activity-canceled ok
+STEP api-respond-activity-canceled-by-id ok
+STEP api-history-raw-supported-client ok
+STEP api-history-raw-unsupported-client ok
+STEP api-reset-workflow-execution ok
+STEP api-reset-invalid-event-rejected ok
+STEP api-restart-workflow-execution ok
+STEP api-diagnose-workflow-execution ok
+STEP api-diagnose-missing-run-id-rejected ok
+STEP api-admin-cluster-describe-tchannel ok
+STEP api-admin-workflow-describe-tchannel ok
+STEP api-admin-workflow-refresh-tasks-tchannel ok
+STEP api-admin-history-host-describe-tchannel ok
+STEP api-admin-isolation-groups-get-global-tchannel ok
+STEP api-admin-isolation-groups-get-domain-tchannel ok
+STEP api-admin-tasklist-list-tchannel ok
+STEP api-admin-shard-list-tchannel ok
+STEP api-admin-shard-list-page-tchannel ok
+STEP api-admin-dlq-count-history-tchannel ok
+STEP api-admin-dlq-count-domain-tchannel ok
+STEP api-admin-dlq-read-domain-tchannel ok
+STEP api-admin-dlq-read-history-tchannel ok
+STEP api-admin-dlq-purge-domain-tchannel ok
+STEP api-admin-dlq-purge-history-tchannel ok
+STEP api-admin-dlq-merge-domain-tchannel ok
+STEP api-admin-dlq-merge-history-tchannel ok
+STEP api-admin-queue-describe-transfer-tchannel ok
+STEP api-admin-queue-describe-timer-tchannel ok
+STEP api-admin-queue-describe-no-cluster-rejected-tchannel ok
+STEP api-admin-workflow-fix-corruption-tchannel ok
+STEP api-admin-workflow-delete-remote-tchannel ok
+STEP api-admin-dynconfig-operational-list-tchannel ok
+STEP api-admin-dynconfig-operational-get-tchannel ok
+STEP api-admin-dynconfig-operational-list-values-tchannel ok
+STEP api-admin-cluster-describe-grpc ok
+STEP api-admin-workflow-describe-grpc ok
+STEP api-admin-workflow-refresh-tasks-grpc ok
+STEP api-admin-history-host-describe-grpc ok
+STEP api-admin-isolation-groups-get-global-grpc ok
+STEP api-admin-isolation-groups-get-domain-grpc ok
+STEP api-admin-tasklist-list-grpc ok
+STEP api-admin-shard-list-grpc ok
+STEP api-admin-shard-list-page-grpc ok
+STEP api-admin-dlq-count-history-grpc ok
+STEP api-admin-dlq-count-domain-grpc ok
+STEP api-admin-dlq-read-domain-grpc ok
+STEP api-admin-dlq-read-history-grpc ok
+STEP api-admin-dlq-purge-domain-grpc ok
+STEP api-admin-dlq-purge-history-grpc ok
+STEP api-admin-dlq-merge-domain-grpc ok
+STEP api-admin-dlq-merge-history-grpc ok
+STEP api-admin-queue-describe-transfer-grpc ok
+STEP api-admin-queue-describe-timer-grpc ok
+STEP api-admin-queue-describe-no-cluster-rejected-grpc ok
+STEP api-admin-workflow-fix-corruption-grpc ok
+STEP api-admin-workflow-delete-remote-grpc ok
+STEP api-admin-dynconfig-operational-list-grpc ok
+STEP api-admin-dynconfig-operational-get-grpc ok
+STEP api-admin-dynconfig-operational-list-values-grpc ok
+RESULT failures=0
+{"level":"info","ts":"2026-11-13T16:54:38.773Z","caller":"internal/internal_worker.go:1010","msg":"Stopped Worker","Domain":"fe-gate-t-002332","TaskList":"fe-gate-958c9051-8dee-418f-82a3-a4d44178cfae","WorkerID":"11327@runnervmccnms@fe-gate-958c9051-8dee-418f-82a3-a4d44178cfae@2ab32967-9be5-4758-bd6c-b866042d295f"}

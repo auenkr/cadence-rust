@@ -1,0 +1,7 @@
+{"name": "get-cross-cluster-tasks-empty-cluster", "ok": true, "detail": "want=INVALID_ARGUMENT Cluster name is not set. got=INVALID_ARGUMENT Cluster name is not set."}
+{"name": "get-cross-cluster-tasks-deprecated", "ok": true, "detail": "want=INTERNAL The cross-cluster feature has been deprecated got=INTERNAL The cross-cluster feature has been deprecated."}
+{"name": "reapply-events-no-domain", "ok": true, "detail": "want=INVALID_ARGUMENT Domain not set on request. got=INVALID_ARGUMENT Domain not set on request."}
+{"name": "reapply-events-no-execution", "ok": true, "detail": "want=INVALID_ARGUMENT Execution is not set on request. got=INVALID_ARGUMENT Execution is not set on request."}
+{"name": "reapply-events-no-workflow-id", "ok": true, "detail": "want=INVALID_ARGUMENT WorkflowId is not set on request. got=INVALID_ARGUMENT WorkflowId is not set on request."}
+{"name": "reapply-events-unknown-domain", "ok": true, "detail": "want=NOT_FOUND  got=NOT_FOUND Domain no-such-domain-probe does not exist."}
+{"name": "reapply-events-unknown-workflow", "ok": true, "detail": "want=INTERNAL DeserializeBatchEvents got=INTERNAL cadence deserialization error: DeserializeBatchEvents encoding: \"thriftrw\", error: Invalid binary encoding version."}

@@ -1,0 +1,11 @@
+[
+  {
+    "Name": "frontend.visibilityMaxPageSize",
+    "Values": [
+      {
+        "Value": 777,
+        "Filters": []
+      }
+    ]
+  }
+]

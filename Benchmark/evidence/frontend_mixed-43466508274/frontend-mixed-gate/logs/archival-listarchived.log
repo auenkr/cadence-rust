@@ -1,0 +1,4 @@
+  [94mWORKFLOW TYPE[0m | [94m WORKFLOW ID  [0m | [94m               RUN ID               [0m | [94mTASK LIST[0m | [94mIS CRON[0m | [94mSTART TIME[0m | [94mEXECUTION TIME[0m | [94mEND TIME[0m | [94mCLOSE STATUS[0m | [94mHISTORY LENGTH[0m | [94mUPDATE TIME[0m | [94mEXECUTION STATUS[0m  
+  ArchGateType  | arch-wf-af4731 | 733af948-18ad-4880-bb08-34220399dac0 |           | false   | 16:58:20   | 16:58:20       | 16:58:20 | TERMINATED   |              3 | 00:00:00    |                   
+  ArchGateType  | arch-wf-9fdc5a | 2df97231-9803-462a-bd4a-812202553811 |           | false   | 16:58:20   | 16:58:20       | 16:58:20 | TERMINATED   |              3 | 00:00:00    |                   
+

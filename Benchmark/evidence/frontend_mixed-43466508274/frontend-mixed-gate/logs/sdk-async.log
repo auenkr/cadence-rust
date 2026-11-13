@@ -1,0 +1,24 @@
+{"level":"info","ts":"2026-11-13T16:54:39.204Z","caller":"internal/internal_worker.go:182","msg":"No logger configured for cadence worker. Created default one."}
+{"level":"info","ts":"2026-11-13T16:54:39.204Z","caller":"internal/internal_worker.go:186","msg":"No metrics scope configured for cadence worker. Use NoopScope as default."}
+{"level":"info","ts":"2026-11-13T16:54:39.251Z","caller":"internal/internal_worker.go:858","msg":"Started Workflow Worker","Domain":"fe-gate-async-b154e4","TaskList":"fe-gate-async-12ca81f3-ce11-4f4e-94e7-ae2830e90457","WorkerID":"11862@runnervmccnms@fe-gate-async-12ca81f3-ce11-4f4e-94e7-ae2830e90457@b32b421c-6403-40c1-a3a1-b8e1b7a2ea5f"}
+{"level":"info","ts":"2026-11-13T16:54:39.253Z","caller":"internal/internal_worker.go:883","msg":"Started Activity Worker","Domain":"fe-gate-async-b154e4","TaskList":"fe-gate-async-12ca81f3-ce11-4f4e-94e7-ae2830e90457","WorkerID":"11862@runnervmccnms@fe-gate-async-12ca81f3-ce11-4f4e-94e7-ae2830e90457@b32b421c-6403-40c1-a3a1-b8e1b7a2ea5f"}
+STEP async-worker-start ok
+STEP async-start-accepted ok
+STEP async-start-executes ok
+STEP async-signal-with-start-accepted ok
+STEP async-signal-with-start-signal-delivered ok
+STEP async-signal-with-start-done-signal ok
+STEP async-signal-with-start-executes ok
+STEP async-invalid-workflow-bad-request ok
+STEP async-disabled-domain-bad-request ok
+STEP broker-down-handshake ok
+STEP async-broker-down-returns-error ok
+STEP broker-up-handshake ok
+STEP async-start-after-broker-restart-accepted ok
+STEP async-start-after-broker-restart-executes ok
+STEP async-failed-start-not-executed ok
+STEP frontend-restart-handshake ok
+STEP async-frontend-restart-no-lost-messages ok
+INFO async frontend restart: 40/40 accepted before retry
+RESULT failures=0
+{"level":"info","ts":"2026-11-13T16:57:14.011Z","caller":"internal/internal_worker.go:1010","msg":"Stopped Worker","Domain":"fe-gate-async-b154e4","TaskList":"fe-gate-async-12ca81f3-ce11-4f4e-94e7-ae2830e90457","WorkerID":"11862@runnervmccnms@fe-gate-async-12ca81f3-ce11-4f4e-94e7-ae2830e90457@b32b421c-6403-40c1-a3a1-b8e1b7a2ea5f"}

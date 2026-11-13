@@ -1,0 +1,18 @@
+Name: fe-gate-arch-883d93
+UUID: 01a1d5d8-5a4d-7405-a8d6-8a28f7cf9a2a
+Description: 
+OwnerEmail: 
+DomainData: map[]
+Status: REGISTERED
+RetentionInDays: 1
+EmitMetrics: true
+IsGlobal(XDC)Domain: true
+ActiveClusterName: cluster0
+IsActiveActiveDomain: false
+Clusters: [cluster0]
+HistoryArchivalStatus: ENABLED
+HistoryArchivalURI: file:///home/runner/work/cadence-rust/cadence-rust/out/gate/run/history-archive
+VisibilityArchivalStatus: ENABLED
+VisibilityArchivalURI: file:///home/runner/work/cadence-rust/cadence-rust/out/gate/run/visibility-archive
+
+

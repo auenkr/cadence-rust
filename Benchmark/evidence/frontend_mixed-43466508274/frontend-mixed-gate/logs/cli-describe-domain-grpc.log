@@ -1,0 +1,18 @@
+Name: fe-gate-g-3eca1c
+UUID: 01a1d5d4-333f-70a9-99bc-04c07de9cafb
+Description: 
+OwnerEmail: 
+DomainData: map[]
+Status: REGISTERED
+RetentionInDays: 1
+EmitMetrics: true
+IsGlobal(XDC)Domain: true
+ActiveClusterName: cluster0
+IsActiveActiveDomain: false
+Clusters: [cluster0]
+HistoryArchivalStatus: ENABLED
+HistoryArchivalURI: file:///home/runner/work/cadence-rust/cadence-rust/out/gate/run/history-archive
+VisibilityArchivalStatus: ENABLED
+VisibilityArchivalURI: file:///home/runner/work/cadence-rust/cadence-rust/out/gate/run/visibility-archive
+
+
