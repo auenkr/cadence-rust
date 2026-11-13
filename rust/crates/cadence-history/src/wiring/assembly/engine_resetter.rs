@@ -407,11 +407,11 @@ impl EngineWorkflowResetter {
         let shard = &core.shard;
 
         // PersistNonStartWorkflowBatchEvents on the forked branch.
-        let ids = shard.generate_task_ids(prepared.events.len()).map_err(shard_err)?;
+        let ids = shard.generate_task_ids(prepared.events.len()).map_err(shard_err(shard.shard_id()))?;
         for (event, id) in prepared.events.iter_mut().zip(ids.iter()) {
             event.task_id = *id;
         }
-        let transaction_id = shard.generate_task_id().map_err(shard_err)?;
+        let transaction_id = shard.generate_task_id().map_err(shard_err(shard.shard_id()))?;
         let manager = SqlHistoryManager::new(core.history_v2.clone(), shard.shard_id());
         let blob = manager
             .append_history_nodes(&prepared.branch_token, &prepared.events, transaction_id, false, "")

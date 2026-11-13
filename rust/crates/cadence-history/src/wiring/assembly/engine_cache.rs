@@ -159,9 +159,10 @@ impl EngineCore {
     }
 }
 
-pub(super) fn shard_err(e: ShardContextError) -> HistoryError {
-    match e {
-        ShardContextError::ShardOwnershipLost(m) => HistoryError::PersistenceShardOwnershipLost { message: m, shard_id: None },
+/// Go carries the persistence error ShardID into `convertError`; the owner lookup needs it.
+pub(super) fn shard_err(shard_id: i32) -> impl Fn(ShardContextError) -> HistoryError + Copy {
+    move |e| match e {
+        ShardContextError::ShardOwnershipLost(m) => HistoryError::PersistenceShardOwnershipLost { message: m, shard_id: Some(shard_id) },
         other => HistoryError::internal(other.to_string()),
     }
 }
@@ -266,7 +267,7 @@ impl EngineExecutionContext {
             };
         }
         self.core.domains.get_domain_name(&events.key.domain_id)?;
-        let transaction_id = self.core.shard.generate_task_id().map_err(shard_err)?;
+        let transaction_id = self.core.shard.generate_task_id().map_err(shard_err(self.core.shard.shard_id()))?;
         let manager = SqlHistoryManager::new(self.core.history_v2.clone(), self.core.shard.shard_id());
         let cleanup = if new_branch {
             format!("{}:{}:{}", events.key.domain_id, events.key.workflow_id, events.key.run_id)
@@ -360,12 +361,12 @@ impl EngineExecutionContext {
         let mut history_size = state.history_size();
         let mut last_event_task_id = None;
         if !txn.events.is_empty() {
-            let ids = shard.generate_task_ids(txn.events.len()).map_err(shard_err)?;
+            let ids = shard.generate_task_ids(txn.events.len()).map_err(shard_err(shard.shard_id()))?;
             for (ev, id) in txn.events.iter_mut().zip(ids.iter()) {
                 ev.task_id = *id;
             }
             last_event_task_id = ids.last().copied();
-            let transaction_id = shard.generate_task_id().map_err(shard_err)?;
+            let transaction_id = shard.generate_task_id().map_err(shard_err(shard.shard_id()))?;
             let manager = SqlHistoryManager::new(core.history_v2.clone(), shard.shard_id());
             let blob = manager
                 .append_history_nodes(&txn.branch_token, &txn.events, transaction_id, false, "")
@@ -388,10 +389,10 @@ impl EngineExecutionContext {
         };
         let mut max_read_level = 0i64;
         let mut transfer_slots: Vec<(i64, i64)> = txn.transfer.iter().map(|_| (0, 0)).collect();
-        shard.allocate_transfer_ids(&mut transfer_slots, &mut max_read_level).map_err(shard_err)?;
+        shard.allocate_transfer_ids(&mut transfer_slots, &mut max_read_level).map_err(shard_err(shard.shard_id()))?;
         let mut timer_slots: Vec<(i64, i64)> =
             txn.timer.iter().map(|t| (0, t.visibility_timestamp_unix_nanos)).collect();
-        shard.allocate_timer_ids(&core.current_cluster, &mut timer_slots).map_err(shard_err)?;
+        shard.allocate_timer_ids(&core.current_cluster, &mut timer_slots).map_err(shard_err(shard.shard_id()))?;
 
         let mut transfer_tasks = Vec::new();
         for (t, slot) in txn.transfer.iter_mut().zip(transfer_slots.iter()) {
