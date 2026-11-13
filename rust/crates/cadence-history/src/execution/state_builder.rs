@@ -137,6 +137,8 @@ impl StateBuilder {
                             event,
                             false,
                         )?;
+                        // Go: mutableState.SetHistoryTree(runID) right after the started event.
+                        state.set_history_tree(&workflow_execution.run_id)?;
                     }
                     Some(EventType::DecisionTaskScheduled) => {
                         let a = event.decision_task_scheduled_event_attributes.as_ref().ok_or(StateBuilderError::InvalidEvent { event_type: event.event_type, event_id: event.event_id })?;
@@ -246,6 +248,9 @@ impl StateBuilder {
             }
             state.execution_info.last_first_event_id = first.event_id;
             state.execution_info.next_event_id = last.event_id.saturating_add(1);
+            // Go: mutableState.SetHistoryBuilder(NewHistoryBuilderFromEvents(history, ..)) so the
+            // replicated batch is persisted when the transaction closes.
+            state.history_events = events.to_vec();
             // Go only persists these rows when strong idempotency is enabled.
             // This API has no domain policy input, so never retain fabricated payloads.
             state.insert_workflow_requests.truncate(requests_before_replay);
@@ -433,7 +438,8 @@ mod typed_replay_tests {
         assert!(state.pending_activity_info_ids.contains_key(&14));
         assert_eq!(state.pending_activity_id_to_event_id.get("activity-a"), Some(&14));
         assert_eq!(state.pending_activity_info_ids[&14].scheduled_event_batch_id, 13);
-        assert!(state.history_events.is_empty());
+        // Go SetHistoryBuilder(NewHistoryBuilderFromEvents): replicated batch kept for persistence.
+        assert_eq!(state.history_events.iter().map(|e| e.event_id).collect::<Vec<_>>(), vec![13, 14]);
         assert!(state.transfer_tasks.is_empty());
         assert!(state.timer_tasks.is_empty());
     }
@@ -491,6 +497,23 @@ mod typed_replay_tests {
     }
 
     #[test]
+    fn passive_close_persists_replicated_batch_without_readvancing_version_history() {
+        let mut state = state();
+        let workflow = WorkflowExecution::new("wf", "run");
+        let start = HistoryEvent {
+            event_id: 1, timestamp: Some(100), event_type: Some(EventType::WorkflowExecutionStarted), version: 7, task_id: 90,
+            workflow_execution_started_event_attributes: Some(WorkflowExecutionStartedEventAttributes { request_id: "r".into(), ..Default::default() }),
+            ..Default::default()
+        };
+        StateBuilder::apply_events_typed(&mut state, "domain-id", "request", &workflow, &[start]).unwrap();
+        let (snapshot, events) = state.prepare_close_snapshot(1, crate::execution::workflow::TransactionPolicy::Passive).unwrap();
+        assert_eq!(events.iter().map(|e| e.event_id).collect::<Vec<_>>(), vec![1]);
+        let items = &snapshot.version_histories.unwrap().histories[0].items;
+        assert_eq!(items.len(), 1);
+        assert_eq!((items[0].event_id, items[0].version), (1, 7));
+    }
+
+    #[test]
     fn typed_replay_start_decision_timeout_retry_spans_batches_without_active_tasks() {
         let mut state = state();
         let workflow = WorkflowExecution::new("wf", "run");
@@ -501,6 +524,10 @@ mod typed_replay_tests {
         };
         StateBuilder::apply_events_typed(&mut state, "domain-id", "request", &workflow, &[start]).unwrap();
         assert_eq!(state.execution_info.domain_id, "domain-id");
+        // Go SetHistoryTree(runID): started event installs a fresh branch token for the run.
+        let token = &state.version_histories.as_ref().unwrap().histories[0].branch_token;
+        assert_ne!(token, &vec![1u8]);
+        assert!(!token.is_empty());
         assert_eq!(state.execution_info.create_request_id, "from-history");
         assert_eq!(state.execution_info.run_id, "run");
 
@@ -529,7 +556,7 @@ mod typed_replay_tests {
         StateBuilder::apply_events_typed(&mut state, "domain-id", "request", &workflow, &[timeout]).unwrap();
         assert_eq!(state.execution_info.decision_attempt, 1);
         assert_eq!(state.execution_info.decision_schedule_id, 4); // transient retry uses the current next event ID
-        assert!(state.history_events.is_empty());
+        assert_eq!(state.history_events.len(), 1);
         assert!(state.transfer_tasks.is_empty());
         assert!(state.timer_tasks.is_empty());
     }
