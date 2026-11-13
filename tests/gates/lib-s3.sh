@@ -8,7 +8,7 @@
 # Needs ARTIFACTS and RUN_ID.
 S3_PID=""
 S3_CONTAINER=""
-S3_IMAGE=${CADENCE_S3_IMAGE:-quay.io/minio/minio:RELEASE.2024-10-13T13-34-11Z}
+S3_IMAGE=${CADENCE_S3_IMAGE:-minio/minio:RELEASE.2024-10-13T13-34-11Z}
 S3_ARGS=()
 S3_PORT=${CADENCE_S3_PORT:-19000}
 S3_VERSION=${CADENCE_S3_VERSION:-RELEASE.2024-10-13T13-34-11Z}
@@ -72,11 +72,13 @@ s3_start() {
     done
     if [[ "${CADENCE_S3_READER:-}" == "true" ]]; then
       # s3-reader reads archives with the Go s3store archivers; it must live in the Go module to build.
+      local abs_art
+      abs_art="$(cd "$ARTIFACTS" && pwd)"
       mkdir -p "$ROOT/go/cmd/tools/s3-reader"
       cp "$ROOT/tests/gates/s3-reader/main.go" "$ROOT/go/cmd/tools/s3-reader/main.go"
-      (cd "$ROOT/go" && go build -o "$(cd "$ARTIFACTS" && pwd)/s3-reader" ./cmd/tools/s3-reader) || { echo "s3-reader build failed" >&2; exit 18; }
+      (cd "$ROOT/go" && go build -o "$abs_art/s3-reader" ./cmd/tools/s3-reader) || { echo "s3-reader build failed" >&2; exit 18; }
       rm -rf "$ROOT/go/cmd/tools/s3-reader"
-      S3_ARGS+=(--s3-reader "$(cd "$ARTIFACTS" && pwd)/s3-reader")
+      S3_ARGS+=(--s3-reader "$abs_art/s3-reader")
     fi
     S3_ARGS+=(--s3-endpoint "http://127.0.0.1:${S3_PORT}" --s3-bucket "$S3_BUCKET")
   fi
