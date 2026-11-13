@@ -39,10 +39,10 @@ pub fn check_ownership(shard_id: u32, who_am_i: &str, owner: Option<&Host>) -> H
             "no history hosts in the membership ring to own shard {shard_id}"
         ))),
         Some(h) if h.identity() == who_am_i => Ok(()),
-        Some(h) => Err(cadence_api::errors::ShardOwnershipLostError::new(format!(
-            "Shard {shard_id} is not owned by this host, owner: {}",
-            h.address
-        ))
+        Some(h) => Err(cadence_api::errors::ShardOwnershipLostError::with_owner(
+            format!("Shard {shard_id} is not owned by this host, owner: {}", h.address),
+            h.address.clone(),
+        )
         .into()),
     }
 }
@@ -284,6 +284,9 @@ mod tests {
     fn foreign_shard_reports_owner_address() {
         let err = check_ownership(3, "a", Some(&host("b", "b:7934"))).unwrap_err();
         assert!(err.to_string().contains("b:7934"), "{err}");
+        let HistoryError::Cadence(c) = &err else { panic!("expected cadence error") };
+        let cadence_api::CadenceError::ShardOwnershipLost(x) = &**c else { panic!("expected ownership lost") };
+        assert_eq!(x.owner, "b:7934");
     }
 
     #[test]

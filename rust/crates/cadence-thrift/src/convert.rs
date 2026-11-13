@@ -6674,7 +6674,29 @@ message_exception!(InternalServiceError);
 message_exception!(LimitExceededError);
 message_exception!(QueryFailedError);
 message_exception!(RemoteSyncMatchedError);
-message_exception!(ShardOwnershipLostError);
+
+/// shared.thrift ShardOwnershipLostError: 10 message, 20 owner.
+impl FromThrift for ShardOwnershipLostError {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        let text = |id: i16| match s.get(id) {
+            Some(Value::Bytes(b)) => Some(String::from_utf8_lossy(b).into_owned()),
+            _ => None,
+        };
+        Ok(Self {
+            message: text(10).or_else(|| text(1)).unwrap_or_default(),
+            owner: text(20).unwrap_or_default(),
+        })
+    }
+}
+
+impl ToThrift for ShardOwnershipLostError {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.fields.push((10, Value::Bytes(self.message.as_bytes().to_vec())));
+        f.fields.push((20, Value::Bytes(self.owner.as_bytes().to_vec())));
+        f.finish()
+    }
+}
 message_exception!(EventAlreadyStartedError);
 message_exception!(StickyWorkerUnavailableError);
 message_exception!(ReadOnlyPartitionError);

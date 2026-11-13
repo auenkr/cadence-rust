@@ -67,7 +67,17 @@ pub fn classify(e: &HistoryError) -> (&'static str, Struct) {
             CadenceError::LimitExceeded(x) => return (LE, msg_struct(1, &x.message)),
             CadenceError::EntityNotExists(x) => return (ENE, x.to_thrift()),
             CadenceError::ServiceBusy(x) => return (SB, x.to_thrift()),
-            CadenceError::ShardOwnershipLost(x) => return (SOL, msg_struct(10, &x.message)),
+            CadenceError::ShardOwnershipLost(x) => {
+                return (
+                    SOL,
+                    Struct {
+                        fields: vec![
+                            (10, Value::Bytes(x.message.as_bytes().to_vec())),
+                            (20, Value::Bytes(x.owner.as_bytes().to_vec())),
+                        ],
+                    },
+                )
+            }
             CadenceError::RetryTaskV2(x) => return (RT, x.to_thrift()),
             CadenceError::ClientVersionNotSupported(x) => return (CVNS, x.to_thrift()),
             _ => {}
@@ -202,11 +212,12 @@ mod tests {
 
     #[test]
     fn shard_ownership_lost_is_encoded_with_message_field_10() {
-        let e: HistoryError = ShardOwnershipLostError::new("lost").into();
+        let e: HistoryError = ShardOwnershipLostError::with_owner("lost", "h:1").into();
         match fail(&e, D_SYNC_SHARD_STATUS) {
             Outcome::Ok(s) => {
                 let Some(Value::Struct(ex)) = s.get(4) else { panic!("missing field 4") };
                 assert_eq!(ex.get(10), Some(&Value::Bytes(b"lost".to_vec())));
+                assert_eq!(ex.get(20), Some(&Value::Bytes(b"h:1".to_vec())));
             }
             _ => panic!("expected result struct"),
         }

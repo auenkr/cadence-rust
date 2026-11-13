@@ -38,7 +38,27 @@ message_error!(InternalServiceError);
 message_error!(LimitExceededError);
 message_error!(QueryFailedError);
 message_error!(RemoteSyncMatchedError);
-message_error!(ShardOwnershipLostError);
+/// ShardOwnershipLostError carries the owner host address (Go `Owner`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Error)]
+#[error("{message}")]
+pub struct ShardOwnershipLostError {
+    #[serde(rename = "message", default)]
+    pub message: String,
+    #[serde(rename = "owner", default)]
+    pub owner: String,
+}
+
+impl ShardOwnershipLostError {
+    #[must_use]
+    pub fn new(message: impl Into<String>) -> Self {
+        Self { message: message.into(), owner: String::new() }
+    }
+
+    #[must_use]
+    pub fn with_owner(message: impl Into<String>, owner: impl Into<String>) -> Self {
+        Self { message: message.into(), owner: owner.into() }
+    }
+}
 message_error!(EventAlreadyStartedError);
 message_error!(StickyWorkerUnavailableError);
 message_error!(ReadOnlyPartitionError);
