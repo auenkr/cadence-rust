@@ -413,6 +413,13 @@ pub(crate) fn normalize_mysql_error_on_lease(
     normalize_mysql_error(error)
 }
 
+impl ConnectionLease {
+    /// Shared flag that makes `Drop` discard this connection instead of pooling it.
+    pub(crate) fn discard_flag(&self) -> Arc<AtomicBool> {
+        self.discard.clone()
+    }
+}
+
 impl Deref for ConnectionLease {
     type Target = Conn;
     fn deref(&self) -> &Self::Target {
