@@ -1,0 +1,15 @@
+{
+  "scheduled_task_id": "scheduled-task:b0623669-a2f7-49fc-bdb4-c2cd7ecd80a5",
+  "benchmark_run_id": 43460144386,
+  "benchmark_status": "in_progress",
+  "branch": "t3/matching-benchmark-harness",
+  "requested_sequence": [
+    "Wait for benchmark completion",
+    "Run cadence-frontend and cadence-matching clean-target clippy/tests on Actions",
+    "Run Matching mixed SDK restart/recovery gate",
+    "Run Frontend mixed SDK gate after Matching gate finishes",
+    "Retain conclusions, hashes, logs and disable scheduled task"
+  ],
+  "test_runs": {},
+  "next_check_utc": "2026-11-13T16:19:39.673Z"
+}
