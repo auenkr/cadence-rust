@@ -438,7 +438,8 @@ mod typed_replay_tests {
         assert!(state.pending_activity_info_ids.contains_key(&14));
         assert_eq!(state.pending_activity_id_to_event_id.get("activity-a"), Some(&14));
         assert_eq!(state.pending_activity_info_ids[&14].scheduled_event_batch_id, 13);
-        assert!(state.history_events.is_empty());
+        // Go SetHistoryBuilder(NewHistoryBuilderFromEvents): replicated batch kept for persistence.
+        assert_eq!(state.history_events.iter().map(|e| e.event_id).collect::<Vec<_>>(), vec![13, 14]);
         assert!(state.transfer_tasks.is_empty());
         assert!(state.timer_tasks.is_empty());
     }
@@ -538,7 +539,7 @@ mod typed_replay_tests {
         StateBuilder::apply_events_typed(&mut state, "domain-id", "request", &workflow, &[timeout]).unwrap();
         assert_eq!(state.execution_info.decision_attempt, 1);
         assert_eq!(state.execution_info.decision_schedule_id, 4); // transient retry uses the current next event ID
-        assert!(state.history_events.is_empty());
+        assert_eq!(state.history_events.len(), 1);
         assert!(state.transfer_tasks.is_empty());
         assert!(state.timer_tasks.is_empty());
     }
