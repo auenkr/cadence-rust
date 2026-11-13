@@ -1159,7 +1159,7 @@ impl NativeTaskDispatcher {
                 response = &mut response => response,
                 _ = &mut cancelled => return Ok(R::default()),
                 _ = &mut released => {
-                    if blocked_poller.as_ref().is_some_and(|(manager, id)| manager.lock().expect("poller history lock").contains_poll(id.as_bytes())) {
+                    if !claimed.load(Ordering::SeqCst) && blocked_poller.as_ref().is_some_and(|(manager, id)| manager.lock().expect("poller history lock").contains_poll(id.as_bytes())) {
                         return Ok(R::default());
                     }
                     response.await
@@ -1422,6 +1422,7 @@ impl NativeTaskDispatcher {
                 tokio::select! {
                     biased;
                     _ = &mut closed => {
+                        eprintln!("NATIVE-TRACE poll receiver dropped during start; requeueing task");
                         self.finish_delivery(task, Err(Status::cancelled("Poll cancelled during start."))).await;
                         return;
                     },
