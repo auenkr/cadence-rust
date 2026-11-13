@@ -12,7 +12,7 @@ from pathlib import Path
 ap = argparse.ArgumentParser()
 ap.add_argument('--database', choices=['mysql', 'postgres', 'cassandra'], default='mysql')
 ap.add_argument('--out', type=Path, required=True)
-ap.add_argument('--mode', choices=['go', 'rust'], default='rust', help='go: all-Go baseline; rust: Rust Frontend+Matching, Go History/Worker')
+ap.add_argument('--mode', choices=['go', 'rust', 'rust-fe', 'rust-mt'], default='rust', help='go: all-Go baseline; rust: Rust Frontend+Matching, Go History/Worker; rust-fe: Rust Frontend + Go Matching; rust-mt: Go Frontend + Rust Matching')
 ap.add_argument('--rust-binary', type=Path, default=Path('/nonexistent-rust-binary'))
 ap.add_argument('--go-server', type=Path, required=True)
 ap.add_argument('--go-cli', type=Path, required=True)
@@ -35,6 +35,8 @@ ap.add_argument('--gcs-endpoint', help='http://host:port of fake-gcs-server; ena
 ap.add_argument('--gcs-bucket', default='cadence-archival-gate-gcs')
 ap.add_argument('--gcs-seed', help='path of the gcs-seed Go helper (prints Go gstorage history filenames)')
 args = ap.parse_args()
+RUST_FE = args.mode in ('rust', 'rust-fe')
+RUST_MT = args.mode in ('rust', 'rust-mt')
 if args.gcs_endpoint:
     # Go (storage client) and the Rust Frontend honour STORAGE_EMULATOR_HOST and skip authentication.
     os.environ['STORAGE_EMULATOR_HOST'] = args.gcs_endpoint.replace('http://', '')
@@ -89,7 +91,7 @@ if args.es_url:
 (work / 'dynamic-config.yaml').write_text(dyn)
 (work / 'rust-dynamic-config.yaml').write_text(dyn + f'\nsystem.enableGRPCOutbound:\n  - value: {str(args.rust_outbound == "grpc").lower()}\nfrontend.sendRawWorkflowHistory:\n  - value: true\n')
 (work / 'config/base.yaml').write_text((root / 'go/config/base.yaml').read_text())
-seeds = ', '.join(f'"127.0.0.1:{ports[k]}"' for k in ['FRONTEND_PORT', 'HISTORY_PORT', 'WORKER_PORT', 'RUST_MATCHING_PORT' if args.mode == 'rust' else 'MATCHING_PORT'] + (['HISTORY2_PORT'] if args.two_history else []))
+seeds = ', '.join(f'"127.0.0.1:{ports[k]}"' for k in ['FRONTEND_PORT', 'HISTORY_PORT', 'WORKER_PORT', 'RUST_MATCHING_PORT' if RUST_MT else 'MATCHING_PORT'] + (['HISTORY2_PORT'] if args.two_history else []))
 text = (root / 'go/config/development.yaml').read_text()
 for k, v in ports.items():
     text = re.sub(r'\$\{' + k + r':\d+\}', v, text)
@@ -161,7 +163,7 @@ if args.es_url:
     (work / f'config/development_{plugin}.yaml').write_text(persistence)
     if args.two_history:
         (work / f'config2/development_{plugin}.yaml').write_text(persistence)
-if args.mode == 'rust':
+if args.mode != 'go':
     rt = (args.rust_root / 'rust/config/development.yaml').read_text()
     for k, v in ports.items():
         rt = re.sub(r'\$\{' + k + r':\d+\}', v, rt)
@@ -245,7 +247,8 @@ def run(name, cmd, timeout=120, env=None):
     record(name, r.returncode == 0, out.strip())
     return r.returncode == 0
 
-FE, MT = ('rust-frontend', 'rust-matching') if args.mode == 'rust' else ('go-frontend', 'go-matching')
+FE = 'rust-frontend' if RUST_FE else 'go-frontend'
+MT = 'rust-matching' if RUST_MT else 'go-matching'
 rust_matching = lambda: [args.rust_binary, 'start', '--config', work / 'rust.yaml', '--root', work, '--services', 'matching', '--port', '0',
     '--history-grpc-port', ports['HISTORY_PORT_GRPC'], '--matching-grpc-port', ports['RUST_MATCHING_PORT_GRPC'],
     '--matching-tchannel-port', ports['RUST_MATCHING_PORT'], '--data-dir', work / 'rust-matching-data']
@@ -254,17 +257,17 @@ rust_frontend = lambda: [args.rust_binary, 'start', '--config', work / 'rust.yam
 frontend_env = {
     **os.environ,
     'CADENCE_HISTORY_TCHANNEL_ADDR': f'127.0.0.1:{ports["HISTORY_PORT"]}',
-    'CADENCE_MATCHING_TCHANNEL_ADDR': f'127.0.0.1:{ports["RUST_MATCHING_PORT"]}',
+    'CADENCE_MATCHING_TCHANNEL_ADDR': f'127.0.0.1:{ports["RUST_MATCHING_PORT" if RUST_MT else "MATCHING_PORT"]}',
 }
 go_matching = lambda: [args.go_server, '--config', work / 'config', '--zone', plugin, 'start', '--services', 'matching']
 go_frontend = lambda: [args.go_server, '--config', work / 'config', '--zone', plugin, 'start', '--services', 'frontend']
-frontend_cmd = rust_frontend if args.mode == 'rust' else go_frontend
-frontend_env = frontend_env if args.mode == 'rust' else None
+frontend_cmd = rust_frontend if RUST_FE else go_frontend
+frontend_env = frontend_env if RUST_FE else None
 cli_t = [args.go_cli, '--address', f'127.0.0.1:{ports["FRONTEND_PORT"]}', '--transport', 'tchannel']
 cli_g = [args.go_cli, '--address', f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', '--transport', 'grpc']
 status = 0
 try:
-    if args.mode == 'rust':
+    if args.mode != 'go':
         (work / 'rust-binary.sha256').write_text(subprocess.run(['sha256sum', str(args.rust_binary)], capture_output=True, text=True).stdout)
     start('go-history-worker', [args.go_server, '--config', work / 'config', '--zone', plugin, 'start', '--auto-setup', '--services', 'history,worker'])
     history_ready = wait_port(ports['HISTORY_PORT_GRPC'], 240, 'go-history-worker')
@@ -280,9 +283,9 @@ try:
             raise SystemExit(1)
     # Matching opens gRPC only after Ringpop bootstrap. Launch its Frontend
     # seed before waiting for Matching readiness so both can join the ring.
-    start(MT, (rust_matching if args.mode == 'rust' else go_matching)())
+    start(MT, (rust_matching if RUST_MT else go_matching)())
     start(FE, frontend_cmd(), env=frontend_env)
-    mt_port = ports['RUST_MATCHING_PORT_GRPC'] if args.mode == 'rust' else ports['MATCHING_PORT_GRPC']
+    mt_port = ports['RUST_MATCHING_PORT_GRPC'] if RUST_MT else ports['MATCHING_PORT_GRPC']
     matching_ready = wait_port(mt_port, 120, MT)
     record(MT + '-listening', matching_ready)
     fe_t = wait_port(ports['FRONTEND_PORT'], 120, FE)
