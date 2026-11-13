@@ -26,3 +26,23 @@ Head SHA tested: 8ee911975882f4412fcffcedb10c4adef78b4d7d (code unchanged since;
 - rust-ci package=cadence-history: success https://github.com/auenkr/cadence-rust/actions/runs/43506131715
 - history-mixed-gate two_history=true, all success AND `GATE SUMMARY failed: []`, run order mysql/grpc, mysql/tchannel, postgres/grpc, postgres/tchannel, cassandra/grpc, cassandra/tchannel:
   43507148597, 43507154108, 43507159837, 43507164987, 43507170076, 43507175899 (https://github.com/auenkr/cadence-rust/actions/runs/<id>)
+
+## Part 2 (branch history-respondparity2)
+
+Per-file audit (Go line refs -> Rust):
+- decision/checker.go (L125-958): MATCH (decision/checker.rs, decision/mod.rs).
+- decision/task_handler.go (L60-1241): FIXED one divergence. `ErrTooManyPendingActivities` text was "Too many pending activities." (trailing dot) in Rust, so the task-handler text compare (Go task_handler.go L293-300) never matched and the workflow was not failed on PENDING_ACTIVITY_EXCEEDS_LIMIT. Now the shared const `ERR_TOO_MANY_PENDING_ACTIVITIES`; test `too_many_pending_activities_fails_workflow_with_go_reason`.
+- decision/handler.go HandleDecisionTaskCompleted (L345-948), Rust wiring/assembly/engine_decision.rs `completed_run`: FIXED three divergences.
+  1. failDecisionHelper (L893-915): DecisionRetryMaxAttempts exceeded now terminates with DECISION_ATTEMPTS_EXCEEDS_LIMIT (was missing in the real engine path).
+  2. L624-627: a closed workflow returns an empty response (no local dispatch / started response).
+  3. L645: StartedResponse.StickyExecutionEnabled = true for a new decision returned from RespondDecisionTaskCompleted.
+  Test: `attempts_exceeded_message_matches_go_format`.
+  KNOWN GAP: L574-602 TransactionSizeLimitError -> terminate has no Rust persistence error type (not implemented, logic exists only in the generic decision/handler.rs).
+- reset_workflow_execution.go (L44-296): MATCH (engine/reset_workflow_execution.rs).
+- start_workflow_execution.go (L53-1050, incl. SignalWithStart L473-640, getStartRequest, validate, terminateAndStart, reuse policy, cleanup): MATCH (engine/start_workflow_execution.rs).
+
+### CI evidence (head SHA 4af3200ff519fae2e0fc18cb4f12df5429e96b03)
+- rust-ci cadence-history: https://github.com/auenkr/cadence-rust/actions/runs/43510732283 success
+- history-mixed-gate two_history=true, all success with `GATE SUMMARY failed: []`:
+  mysql/grpc 43511691578, mysql/tchannel 43511697645, postgres/grpc 43511702825, postgres/tchannel 43511708734, cassandra/grpc 43511713195, cassandra/tchannel 43511717968
+  (https://github.com/auenkr/cadence-rust/actions/runs/<id>)
