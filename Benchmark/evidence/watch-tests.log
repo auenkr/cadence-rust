@@ -1,0 +1,42 @@
++ gh run watch 43460144386 --repo auenkr/cadence-rust --interval 60
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* t3/matching-benchmark-harness Frontend + Matching paired benchmark · 43460144386
+Triggered via workflow_dispatch about 25 minutes ago
+
+JOBS
+* sdk-matching-smoke (ID 132004748170)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run actions/setup-go@v5
+  * Run bash Benchmark/ci.sh
+  * Run actions/upload-artifact@v4
+  * Post Run actions/setup-go@v5
+  * Post Run actions/checkout@v4
+- paired-benchmark in 0s (ID 132004750637)
+Traceback (most recent call last):
+  File "/home/ubuntu/.t3/worktrees/cadence-rust/t3-de576e9f-729bfd59a9c94d4b/Benchmark/watch-tests.py", line 111, in <module>
+    state['benchmark']=wait(43460144386)
+                       ~~~~^^^^^^^^^^^^^
+  File "/home/ubuntu/.t3/worktrees/cadence-rust/t3-de576e9f-729bfd59a9c94d4b/Benchmark/watch-tests.py", line 37, in wait
+    gh('run','watch',run_id,'--repo',REPO,'--interval','60')
+    ~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/.t3/worktrees/cadence-rust/t3-de576e9f-729bfd59a9c94d4b/Benchmark/watch-tests.py", line 28, in gh
+    subprocess.run(cmd, check=True)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 557, in run
+    stdout, stderr = process.communicate(input, timeout=timeout)
+                     ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 1213, in communicate
+    self.wait()
+    ~~~~~~~~~^^
+  File "/usr/lib/python3.14/subprocess.py", line 1279, in wait
+    return self._wait(timeout=timeout)
+           ~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 2084, in _wait
+    (pid, sts) = self._try_wait(0)
+                 ~~~~~~~~~~~~~~^^^
+  File "/usr/lib/python3.14/subprocess.py", line 2042, in _try_wait
+    (pid, sts) = os.waitpid(self.pid, wait_flags)
+                 ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt

@@ -1,0 +1,1745 @@
+{
+  "containers": {
+    "cadence-sdk-benchmark-frontend-1": {
+      "average_cpu_cores": 0.04331806954108666,
+      "cgroup_version": "v2",
+      "cpu_seconds": 1.310088,
+      "disk_read_bytes": 0,
+      "disk_write_bytes": 4096,
+      "final_cpu_ns": 1992522000,
+      "initial_cpu_ns": 682434000,
+      "network_receive_bytes": 5303329,
+      "network_transmit_bytes": 4806440,
+      "peak_cgroup_memory_bytes": 35807232,
+      "peak_summed_process_rss_bytes": 107286528
+    },
+    "cadence-sdk-benchmark-history-1": {
+      "average_cpu_cores": 0.10572169125425586,
+      "cgroup_version": "v2",
+      "cpu_seconds": 3.197389,
+      "disk_read_bytes": 0,
+      "disk_write_bytes": 4096,
+      "final_cpu_ns": 4492945000,
+      "initial_cpu_ns": 1295556000,
+      "network_receive_bytes": 9161961,
+      "network_transmit_bytes": 8184763,
+      "peak_cgroup_memory_bytes": 46317568,
+      "peak_summed_process_rss_bytes": 125583360
+    },
+    "cadence-sdk-benchmark-matching-1": {
+      "average_cpu_cores": 0.021700101509854,
+      "cgroup_version": "v2",
+      "cpu_seconds": 0.656286,
+      "disk_read_bytes": 0,
+      "disk_write_bytes": 4096,
+      "final_cpu_ns": 1079331000,
+      "initial_cpu_ns": 423045000,
+      "network_receive_bytes": 912926,
+      "network_transmit_bytes": 1023196,
+      "peak_cgroup_memory_bytes": 32153600,
+      "peak_summed_process_rss_bytes": 99540992
+    },
+    "cadence-sdk-benchmark-mysql-1": {
+      "average_cpu_cores": 0.12854001825263428,
+      "cgroup_version": "v2",
+      "cpu_seconds": 3.887494,
+      "disk_read_bytes": 0,
+      "disk_write_bytes": 83353600,
+      "final_cpu_ns": 10186805000,
+      "initial_cpu_ns": 6299311000,
+      "network_receive_bytes": 7110239,
+      "network_transmit_bytes": 9584480,
+      "peak_cgroup_memory_bytes": 596885504,
+      "peak_summed_process_rss_bytes": 488386560
+    },
+    "cadence-sdk-benchmark-worker-1": {
+      "average_cpu_cores": 0.0034781412035652932,
+      "cgroup_version": "v2",
+      "cpu_seconds": 0.105191,
+      "disk_read_bytes": 0,
+      "disk_write_bytes": 4096,
+      "final_cpu_ns": 560594000,
+      "initial_cpu_ns": 455403000,
+      "network_receive_bytes": 147946,
+      "network_transmit_bytes": 117146,
+      "peak_cgroup_memory_bytes": 29208576,
+      "peak_summed_process_rss_bytes": 95387648
+    }
+  },
+  "cpu_method": "exact delta of cumulative cgroup cpu usage counters",
+  "duration_seconds": 30.243452995000098,
+  "ended_at_utc": "2026-11-13T16:37:43.951800+00:00",
+  "interval_method": "start/end marker files",
+  "memory_method": "peak sampled cgroup memory usage; includes charged cache and is not RSS",
+  "mysql_note": "Global SQL counters and total Performance Schema wait; includes observer queries. Query tail latency unavailable.",
+  "mysql_samples": [
+    {
+      "counters": {
+        "Aborted_connects": 0,
+        "Com_delete": 50,
+        "Com_insert": 946,
+        "Com_select": 1746,
+        "Com_update": 538,
+        "Connections": 329,
+        "Questions": 4824,
+        "Threads_connected": 18,
+        "Threads_running": 2,
+        "statement_count": 1158,
+        "statement_wait_ps": 649073108000
+      },
+      "elapsed_seconds": 0
+    },
+    {
+      "counters": {
+        "Aborted_connects": 0,
+        "Com_delete": 75,
+        "Com_insert": 1407,
+        "Com_select": 2512,
+        "Com_update": 792,
+        "Connections": 461,
+        "Questions": 7002,
+        "Threads_connected": 18,
+        "Threads_running": 2,
+        "statement_count": 1650,
+        "statement_wait_ps": 801750336000
+      },
+      "elapsed_seconds": 5.0795167350001975
+    },
+    {
+      "counters": {
+        "Aborted_connects": 0,
+        "Com_delete": 101,
+        "Com_insert": 1864,
+        "Com_select": 3283,
+        "Com_update": 1048,
+        "Connections": 588,
+        "Questions": 9172,
+        "Threads_connected": 18,
+        "Threads_running": 2,
+        "statement_count": 2139,
+        "statement_wait_ps": 966001447000
+      },
+      "elapsed_seconds": 10.165623264000033
+    },
+    {
+      "counters": {
+        "Aborted_connects": 0,
+        "Com_delete": 128,
+        "Com_insert": 2314,
+        "Com_select": 4029,
+        "Com_update": 1298,
+        "Connections": 715,
+        "Questions": 11298,
+        "Threads_connected": 18,
+        "Threads_running": 2,
+        "statement_count": 2618,
+        "statement_wait_ps": 1137102313000
+      },
+      "elapsed_seconds": 15.239601515000004
+    },
+    {
+      "counters": {
+        "Aborted_connects": 0,
+        "Com_delete": 159,
+        "Com_insert": 2782,
+        "Com_select": 4825,
+        "Com_update": 1558,
+        "Connections": 847,
+        "Questions": 13532,
+        "Threads_connected": 18,
+        "Threads_running": 2,
+        "statement_count": 3120,
+        "statement_wait_ps": 1291339764000
+      },
+      "elapsed_seconds": 20.317074701000138
+    },
+    {
+      "counters": {
+        "Aborted_connects": 0,
+        "Com_delete": 185,
+        "Com_insert": 3232,
+        "Com_select": 5569,
+        "Com_update": 1808,
+        "Connections": 974,
+        "Questions": 15655,
+        "Threads_connected": 18,
+        "Threads_running": 2,
+        "statement_count": 3599,
+        "statement_wait_ps": 1443576817000
+      },
+      "elapsed_seconds": 25.41807735700013
+    },
+    {
+      "counters": {
+        "Aborted_connects": 0,
+        "Com_delete": 208,
+        "Com_insert": 3646,
+        "Com_select": 6270,
+        "Com_update": 2038,
+        "Connections": 1091,
+        "Questions": 17624,
+        "Threads_connected": 18,
+        "Threads_running": 2,
+        "statement_count": 4044,
+        "statement_wait_ps": 1584319857000
+      },
+      "elapsed_seconds": 30.243452995000098
+    }
+  ],
+  "samples": 121,
+  "sampling_interval_seconds": 0.25,
+  "schema_version": 2,
+  "started_at_utc": "2026-11-13T16:37:13.647189+00:00",
+  "timeline": [
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 682434000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 31367168,
+          "network_receive_bytes": 1924727,
+          "network_transmit_bytes": 1717891,
+          "rss_bytes": 102547456
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 1295556000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 34631680,
+          "network_receive_bytes": 3207347,
+          "network_transmit_bytes": 2859530,
+          "rss_bytes": 107270144
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 423045000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 28102656,
+          "network_receive_bytes": 468361,
+          "network_transmit_bytes": 456049,
+          "rss_bytes": 95404032
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 6299311000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 307544064,
+          "memory_bytes": 566132736,
+          "network_receive_bytes": 2591823,
+          "network_transmit_bytes": 3502527,
+          "rss_bytes": 478945280
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 455403000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 22876160,
+          "network_receive_bytes": 119403,
+          "network_transmit_bytes": 127817,
+          "rss_bytes": 89157632
+        }
+      },
+      "elapsed_seconds": 0
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 722609000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 31428608,
+          "network_receive_bytes": 2100089,
+          "network_transmit_bytes": 1877697,
+          "rss_bytes": 102567936
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 1417885000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 34283520,
+          "network_receive_bytes": 3519055,
+          "network_transmit_bytes": 3134263,
+          "rss_bytes": 107384832
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 452329000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 28102656,
+          "network_receive_bytes": 497791,
+          "network_transmit_bytes": 490393,
+          "rss_bytes": 95690752
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 6450773000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 325242880,
+          "memory_bytes": 576528384,
+          "network_receive_bytes": 2828473,
+          "network_transmit_bytes": 3822643,
+          "rss_bytes": 481480704
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 458214000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 23138304,
+          "network_receive_bytes": 123298,
+          "network_transmit_bytes": 131784,
+          "rss_bytes": 89161728
+        }
+      },
+      "elapsed_seconds": 1.0615359600001284
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 774021000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 33501184,
+          "network_receive_bytes": 2277356,
+          "network_transmit_bytes": 2038130,
+          "rss_bytes": 104488960
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 1523318000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 36024320,
+          "network_receive_bytes": 3824204,
+          "network_transmit_bytes": 3406630,
+          "rss_bytes": 108507136
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 473486000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 28131328,
+          "network_receive_bytes": 528454,
+          "network_transmit_bytes": 524443,
+          "rss_bytes": 95928320
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 6566011000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 327012352,
+          "memory_bytes": 577314816,
+          "network_receive_bytes": 3065454,
+          "network_transmit_bytes": 4143515,
+          "rss_bytes": 481775616
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 461235000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 22847488,
+          "network_receive_bytes": 128865,
+          "network_transmit_bytes": 135750,
+          "rss_bytes": 89165824
+        }
+      },
+      "elapsed_seconds": 2.065594701000009
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 814281000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 33247232,
+          "network_receive_bytes": 2452844,
+          "network_transmit_bytes": 2197894,
+          "rss_bytes": 104579072
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 1619271000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 35999744,
+          "network_receive_bytes": 4128926,
+          "network_transmit_bytes": 3678784,
+          "rss_bytes": 108527616
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 492482000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 28131328,
+          "network_receive_bytes": 557266,
+          "network_transmit_bytes": 557741,
+          "rss_bytes": 95948800
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 6674801000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 328495104,
+          "memory_bytes": 577523712,
+          "network_receive_bytes": 3300342,
+          "network_transmit_bytes": 4458198,
+          "rss_bytes": 481832960
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 463869000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 23105536,
+          "network_receive_bytes": 132486,
+          "network_transmit_bytes": 139311,
+          "rss_bytes": 89169920
+        }
+      },
+      "elapsed_seconds": 3.07171497000013
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 855662000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 33517568,
+          "network_receive_bytes": 2629301,
+          "network_transmit_bytes": 2357635,
+          "rss_bytes": 104660992
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 1728052000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 36626432,
+          "network_receive_bytes": 4432982,
+          "network_transmit_bytes": 3951258,
+          "rss_bytes": 109584384
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 513155000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 28258304,
+          "network_receive_bytes": 588225,
+          "network_transmit_bytes": 591877,
+          "rss_bytes": 95973376
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 6794003000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 329940992,
+          "memory_bytes": 578199552,
+          "network_receive_bytes": 3536533,
+          "network_transmit_bytes": 4777171,
+          "rss_bytes": 481964032
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 466965000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 23105536,
+          "network_receive_bytes": 137854,
+          "network_transmit_bytes": 143211,
+          "rss_bytes": 89174016
+        }
+      },
+      "elapsed_seconds": 4.075615028000129
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 905019000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 33181696,
+          "network_receive_bytes": 2804689,
+          "network_transmit_bytes": 2517663,
+          "rss_bytes": 104775680
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 1825542000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 37072896,
+          "network_receive_bytes": 4738877,
+          "network_transmit_bytes": 4224211,
+          "rss_bytes": 109637632
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 532068000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 28434432,
+          "network_receive_bytes": 616681,
+          "network_transmit_bytes": 624581,
+          "rss_bytes": 95973376
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 6945380000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 331395072,
+          "memory_bytes": 578801664,
+          "network_receive_bytes": 3775998,
+          "network_transmit_bytes": 5097023,
+          "rss_bytes": 482082816
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 469626000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 22884352,
+          "network_receive_bytes": 141176,
+          "network_transmit_bytes": 146591,
+          "rss_bytes": 89174016
+        }
+      },
+      "elapsed_seconds": 5.0795167350001975
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 949792000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 33619968,
+          "network_receive_bytes": 2997152,
+          "network_transmit_bytes": 2690184,
+          "rss_bytes": 104837120
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 1968785000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 37822464,
+          "network_receive_bytes": 5095253,
+          "network_transmit_bytes": 4540187,
+          "rss_bytes": 110596096
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 555514000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 29229056,
+          "network_receive_bytes": 654449,
+          "network_transmit_bytes": 664581,
+          "rss_bytes": 96788480
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 7108162000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 334442496,
+          "memory_bytes": 580300800,
+          "network_receive_bytes": 4052558,
+          "network_transmit_bytes": 5468131,
+          "rss_bytes": 483299328
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 473995000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 23855104,
+          "network_receive_bytes": 149181,
+          "network_transmit_bytes": 151102,
+          "rss_bytes": 89890816
+        }
+      },
+      "elapsed_seconds": 6.143717073000062
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 998311000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 33570816,
+          "network_receive_bytes": 3172126,
+          "network_transmit_bytes": 2849454,
+          "rss_bytes": 104890368
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 2069298000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 38342656,
+          "network_receive_bytes": 5395098,
+          "network_transmit_bytes": 4809049,
+          "rss_bytes": 110690304
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 586296000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 29212672,
+          "network_receive_bytes": 682750,
+          "network_transmit_bytes": 697298,
+          "rss_bytes": 96858112
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 7218046000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 335810560,
+          "memory_bytes": 580759552,
+          "network_receive_bytes": 4282997,
+          "network_transmit_bytes": 5776839,
+          "rss_bytes": 483381248
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 476820000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 23863296,
+          "network_receive_bytes": 152868,
+          "network_transmit_bytes": 154729,
+          "rss_bytes": 89890816
+        }
+      },
+      "elapsed_seconds": 7.149891773000036
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 1040693000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 33705984,
+          "network_receive_bytes": 3362096,
+          "network_transmit_bytes": 3020115,
+          "rss_bytes": 104980480
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 2176148000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 38313984,
+          "network_receive_bytes": 5712614,
+          "network_transmit_bytes": 5094403,
+          "rss_bytes": 110718976
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 608948000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 29257728,
+          "network_receive_bytes": 715161,
+          "network_transmit_bytes": 732741,
+          "rss_bytes": 96866304
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 7336817000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 338071552,
+          "memory_bytes": 581029888,
+          "network_receive_bytes": 4531919,
+          "network_transmit_bytes": 6115690,
+          "rss_bytes": 483463168
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 480423000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 23859200,
+          "network_receive_bytes": 158368,
+          "network_transmit_bytes": 158761,
+          "rss_bytes": 89903104
+        }
+      },
+      "elapsed_seconds": 8.155448004000164
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 1083566000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 33906688,
+          "network_receive_bytes": 3546111,
+          "network_transmit_bytes": 3188545,
+          "rss_bytes": 105066496
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 2276906000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 38268928,
+          "network_receive_bytes": 6018580,
+          "network_transmit_bytes": 5367173,
+          "rss_bytes": 110751744
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 630269000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 29233152,
+          "network_receive_bytes": 744224,
+          "network_transmit_bytes": 766418,
+          "rss_bytes": 96886784
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 7454930000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 340320256,
+          "memory_bytes": 581554176,
+          "network_receive_bytes": 4766830,
+          "network_transmit_bytes": 6436670,
+          "rss_bytes": 483672064
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 482839000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 23855104,
+          "network_receive_bytes": 161326,
+          "network_transmit_bytes": 161828,
+          "rss_bytes": 89993216
+        }
+      },
+      "elapsed_seconds": 9.15994730300008
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 1133233000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 33886208,
+          "network_receive_bytes": 3723282,
+          "network_transmit_bytes": 3348624,
+          "rss_bytes": 105152512
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 2385381000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 39464960,
+          "network_receive_bytes": 6323342,
+          "network_transmit_bytes": 5639715,
+          "rss_bytes": 111898624
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 649422000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 28975104,
+          "network_receive_bytes": 774625,
+          "network_transmit_bytes": 799969,
+          "rss_bytes": 96894976
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 7603015000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 342433792,
+          "memory_bytes": 582201344,
+          "network_receive_bytes": 5008285,
+          "network_transmit_bytes": 6761868,
+          "rss_bytes": 483819520
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 486267000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 24051712,
+          "network_receive_bytes": 167125,
+          "network_transmit_bytes": 166041,
+          "rss_bytes": 90116096
+        }
+      },
+      "elapsed_seconds": 10.165623264000033
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 1172330000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 33738752,
+          "network_receive_bytes": 3898702,
+          "network_transmit_bytes": 3508190,
+          "rss_bytes": 105160704
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 2507810000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 39419904,
+          "network_receive_bytes": 6629577,
+          "network_transmit_bytes": 5912936,
+          "rss_bytes": 111964160
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 669273000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 29057024,
+          "network_receive_bytes": 803720,
+          "network_transmit_bytes": 833608,
+          "rss_bytes": 96919552
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 7742360000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 346693632,
+          "memory_bytes": 583737344,
+          "network_receive_bytes": 5243037,
+          "network_transmit_bytes": 7076683,
+          "rss_bytes": 484995072
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 489000000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 24121344,
+          "network_receive_bytes": 170315,
+          "network_transmit_bytes": 169355,
+          "rss_bytes": 90247168
+        }
+      },
+      "elapsed_seconds": 11.222971262000101
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 1212562000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 33705984,
+          "network_receive_bytes": 4076267,
+          "network_transmit_bytes": 3668557,
+          "rss_bytes": 105181184
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 2611934000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 39940096,
+          "network_receive_bytes": 6934384,
+          "network_transmit_bytes": 6185001,
+          "rss_bytes": 112533504
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 689130000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 29319168,
+          "network_receive_bytes": 834729,
+          "network_transmit_bytes": 868082,
+          "rss_bytes": 96927744
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 7857419000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 349028352,
+          "memory_bytes": 584478720,
+          "network_receive_bytes": 5479579,
+          "network_transmit_bytes": 7397042,
+          "rss_bytes": 485179392
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 492330000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 24121344,
+          "network_receive_bytes": 175451,
+          "network_transmit_bytes": 173008,
+          "rss_bytes": 90374144
+        }
+      },
+      "elapsed_seconds": 12.227249651000193
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 1261287000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 33484800,
+          "network_receive_bytes": 4251109,
+          "network_transmit_bytes": 3827827,
+          "rss_bytes": 105328640
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 2704417000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 40189952,
+          "network_receive_bytes": 7239430,
+          "network_transmit_bytes": 6458191,
+          "rss_bytes": 112558080
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 708154000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 29175808,
+          "network_receive_bytes": 863179,
+          "network_transmit_bytes": 901342,
+          "rss_bytes": 97234944
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 7969535000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 351330304,
+          "memory_bytes": 585105408,
+          "network_receive_bytes": 5714347,
+          "network_transmit_bytes": 7710681,
+          "rss_bytes": 485457920
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 495196000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 24305664,
+          "network_receive_bytes": 179072,
+          "network_transmit_bytes": 176437,
+          "rss_bytes": 90513408
+        }
+      },
+      "elapsed_seconds": 13.231440994000195
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 1304726000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 33906688,
+          "network_receive_bytes": 4428377,
+          "network_transmit_bytes": 3988243,
+          "rss_bytes": 105365504
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 2815928000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 40693760,
+          "network_receive_bytes": 7543902,
+          "network_transmit_bytes": 6730780,
+          "rss_bytes": 113156096
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 732337000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 30998528,
+          "network_receive_bytes": 894469,
+          "network_transmit_bytes": 935259,
+          "rss_bytes": 98689024
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 8095761000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 354660352,
+          "memory_bytes": 586870784,
+          "network_receive_bytes": 5951411,
+          "network_transmit_bytes": 8031316,
+          "rss_bytes": 485613568
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 498691000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 24305664,
+          "network_receive_bytes": 184506,
+          "network_transmit_bytes": 180403,
+          "rss_bytes": 90677248
+        }
+      },
+      "elapsed_seconds": 14.235590299000023
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 1346377000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 33996800,
+          "network_receive_bytes": 4603319,
+          "network_transmit_bytes": 4147496,
+          "rss_bytes": 105377792
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 2913871000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 40427520,
+          "network_receive_bytes": 7848278,
+          "network_transmit_bytes": 7003167,
+          "rss_bytes": 113238016
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 763233000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 31666176,
+          "network_receive_bytes": 922857,
+          "network_transmit_bytes": 968636,
+          "rss_bytes": 99311616
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 8245156000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 356782080,
+          "memory_bytes": 587337728,
+          "network_receive_bytes": 6190774,
+          "network_transmit_bytes": 8349452,
+          "rss_bytes": 485720064
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 501137000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 24748032,
+          "network_receive_bytes": 187398,
+          "network_transmit_bytes": 183338,
+          "rss_bytes": 90812416
+        }
+      },
+      "elapsed_seconds": 15.239601515000004
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 1402196000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 34541568,
+          "network_receive_bytes": 4794290,
+          "network_transmit_bytes": 4318045,
+          "rss_bytes": 106131456
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 3055980000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 41406464,
+          "network_receive_bytes": 8164547,
+          "network_transmit_bytes": 7285593,
+          "rss_bytes": 114053120
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 789047000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 31735808,
+          "network_receive_bytes": 967620,
+          "network_transmit_bytes": 1013146,
+          "rss_bytes": 99368960
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 8407492000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 358957056,
+          "memory_bytes": 588099584,
+          "network_receive_bytes": 6432542,
+          "network_transmit_bytes": 8687841,
+          "rss_bytes": 485998592
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 509453000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 0,
+          "memory_bytes": 25903104,
+          "network_receive_bytes": 204111,
+          "network_transmit_bytes": 194273,
+          "rss_bytes": 92028928
+        }
+      },
+      "elapsed_seconds": 16.299680296000133
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 1441826000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 34263040,
+          "network_receive_bytes": 4972611,
+          "network_transmit_bytes": 4480736,
+          "rss_bytes": 106143744
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 3149917000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 41496576,
+          "network_receive_bytes": 8472610,
+          "network_transmit_bytes": 7561328,
+          "rss_bytes": 114094080
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 808270000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 31682560,
+          "network_receive_bytes": 995900,
+          "network_transmit_bytes": 1046677,
+          "rss_bytes": 99373056
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 8522458000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 361181184,
+          "memory_bytes": 588636160,
+          "network_receive_bytes": 6670882,
+          "network_transmit_bytes": 9003360,
+          "rss_bytes": 486133760
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 512070000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 26312704,
+          "network_receive_bytes": 207413,
+          "network_transmit_bytes": 197548,
+          "rss_bytes": 92168192
+        }
+      },
+      "elapsed_seconds": 17.304165306000186
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 1481587000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 34508800,
+          "network_receive_bytes": 5149681,
+          "network_transmit_bytes": 4640592,
+          "rss_bytes": 106151936
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 3256871000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 41451520,
+          "network_receive_bytes": 8781307,
+          "network_transmit_bytes": 7838569,
+          "rss_bytes": 114106368
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 827694000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 31825920,
+          "network_receive_bytes": 1027057,
+          "network_transmit_bytes": 1080856,
+          "rss_bytes": 99389440
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 8641509000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 363429888,
+          "memory_bytes": 589099008,
+          "network_receive_bytes": 6911775,
+          "network_transmit_bytes": 9327696,
+          "rss_bytes": 486256640
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 515579000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 26312704,
+          "network_receive_bytes": 212782,
+          "network_transmit_bytes": 201448,
+          "rss_bytes": 92348416
+        }
+      },
+      "elapsed_seconds": 18.308500520000052
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 1530721000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 35753984,
+          "network_receive_bytes": 5326243,
+          "network_transmit_bytes": 4801984,
+          "rss_bytes": 107118592
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 3355232000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 41832448,
+          "network_receive_bytes": 9098881,
+          "network_transmit_bytes": 8120850,
+          "rss_bytes": 114114560
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 846595000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 31825920,
+          "network_receive_bytes": 1055805,
+          "network_transmit_bytes": 1114006,
+          "rss_bytes": 99397632
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 8766406000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 365985792,
+          "memory_bytes": 589979648,
+          "network_receive_bytes": 7154663,
+          "network_transmit_bytes": 9651854,
+          "rss_bytes": 486535168
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 518362000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 26419200,
+          "network_receive_bytes": 216403,
+          "network_transmit_bytes": 205009,
+          "rss_bytes": 92512256
+        }
+      },
+      "elapsed_seconds": 19.312681803000032
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 1569977000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 35737600,
+          "network_receive_bytes": 5502999,
+          "network_transmit_bytes": 4961906,
+          "rss_bytes": 107134976
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 3454590000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 41840640,
+          "network_receive_bytes": 9410058,
+          "network_transmit_bytes": 8398825,
+          "rss_bytes": 114155520
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 867334000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 31854592,
+          "network_receive_bytes": 1087875,
+          "network_transmit_bytes": 1149542,
+          "rss_bytes": 99397632
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 8929141000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 368439296,
+          "memory_bytes": 590573568,
+          "network_receive_bytes": 7401848,
+          "network_transmit_bytes": 9985191,
+          "rss_bytes": 486715392
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 521546000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 26591232,
+          "network_receive_bytes": 221406,
+          "network_transmit_bytes": 208662,
+          "rss_bytes": 92680192
+        }
+      },
+      "elapsed_seconds": 20.317074701000138
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 1615494000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 35495936,
+          "network_receive_bytes": 5708826,
+          "network_transmit_bytes": 5148982,
+          "rss_bytes": 107151360
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 3600695000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 42659840,
+          "network_receive_bytes": 9747915,
+          "network_transmit_bytes": 8702095,
+          "rss_bytes": 114970624
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 889373000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 31842304,
+          "network_receive_bytes": 1119908,
+          "network_transmit_bytes": 1187544,
+          "rss_bytes": 99405824
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 9094679000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 370966528,
+          "memory_bytes": 591343616,
+          "network_receive_bytes": 7662940,
+          "network_transmit_bytes": 10336788,
+          "rss_bytes": 486916096
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 524964000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 26730496,
+          "network_receive_bytes": 225093,
+          "network_transmit_bytes": 212289,
+          "rss_bytes": 92848128
+        }
+      },
+      "elapsed_seconds": 21.399479864000114
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 1663996000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 35311616,
+          "network_receive_bytes": 5886392,
+          "network_transmit_bytes": 5309398,
+          "rss_bytes": 107163648
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 3694351000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 42700800,
+          "network_receive_bytes": 10052755,
+          "network_transmit_bytes": 8974455,
+          "rss_bytes": 115011584
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 917411000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 31641600,
+          "network_receive_bytes": 1150887,
+          "network_transmit_bytes": 1221577,
+          "rss_bytes": 99414016
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 9205994000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 373153792,
+          "memory_bytes": 591872000,
+          "network_receive_bytes": 7899919,
+          "network_transmit_bytes": 10657873,
+          "rss_bytes": 487022592
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 528049000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 26599424,
+          "network_receive_bytes": 230594,
+          "network_transmit_bytes": 216321,
+          "rss_bytes": 93032448
+        }
+      },
+      "elapsed_seconds": 22.403762474000132
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 1703253000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 35536896,
+          "network_receive_bytes": 6061600,
+          "network_transmit_bytes": 5468842,
+          "rss_bytes": 107192320
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 3799059000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 42811392,
+          "network_receive_bytes": 10355986,
+          "network_transmit_bytes": 9246453,
+          "rss_bytes": 115183616
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 936242000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 31870976,
+          "network_receive_bytes": 1178947,
+          "network_transmit_bytes": 1254561,
+          "rss_bytes": 99414016
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 9315122000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 375390208,
+          "memory_bytes": 591978496,
+          "network_receive_bytes": 8134018,
+          "network_transmit_bytes": 10969916,
+          "rss_bytes": 487145472
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 530676000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 27090944,
+          "network_receive_bytes": 233784,
+          "network_transmit_bytes": 219503,
+          "rss_bytes": 93167616
+        }
+      },
+      "elapsed_seconds": 23.408320914000114
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 1746631000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 35512320,
+          "network_receive_bytes": 6238801,
+          "network_transmit_bytes": 5628867,
+          "rss_bytes": 107196416
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 3896513000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 42811392,
+          "network_receive_bytes": 10661089,
+          "network_transmit_bytes": 9518835,
+          "rss_bytes": 115187712
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 957048000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 31580160,
+          "network_receive_bytes": 1209841,
+          "network_transmit_bytes": 1288306,
+          "rss_bytes": 99418112
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 9431958000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 377593856,
+          "memory_bytes": 592482304,
+          "network_receive_bytes": 8370924,
+          "network_transmit_bytes": 11291265,
+          "rss_bytes": 487272448
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 534087000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 27090944,
+          "network_receive_bytes": 239218,
+          "network_transmit_bytes": 223469,
+          "rss_bytes": 93351936
+        }
+      },
+      "elapsed_seconds": 24.412987506000036
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 1795261000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 35278848,
+          "network_receive_bytes": 6412799,
+          "network_transmit_bytes": 5787692,
+          "rss_bytes": 107274240
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 4008895000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 46317568,
+          "network_receive_bytes": 10964672,
+          "network_transmit_bytes": 9790090,
+          "rss_bytes": 125583360
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 976119000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 31645696,
+          "network_receive_bytes": 1238738,
+          "network_transmit_bytes": 1322096,
+          "rss_bytes": 99430400
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 9579006000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 379768832,
+          "memory_bytes": 592949248,
+          "network_receive_bytes": 8609803,
+          "network_transmit_bytes": 11608609,
+          "rss_bytes": 487358464
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 537027000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 27480064,
+          "network_receive_bytes": 242839,
+          "network_transmit_bytes": 226898,
+          "rss_bytes": 93528064
+        }
+      },
+      "elapsed_seconds": 25.41807735700013
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 1836181000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 35364864,
+          "network_receive_bytes": 6593498,
+          "network_transmit_bytes": 5948834,
+          "rss_bytes": 107278336
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 4120765000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 43216896,
+          "network_receive_bytes": 11274091,
+          "network_transmit_bytes": 10064859,
+          "rss_bytes": 115769344
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 997020000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 31875072,
+          "network_receive_bytes": 1272252,
+          "network_transmit_bytes": 1356893,
+          "rss_bytes": 99430400
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 9724451000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 381915136,
+          "memory_bytes": 593489920,
+          "network_receive_bytes": 8848970,
+          "network_transmit_bytes": 11939858,
+          "rss_bytes": 487575552
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 542512000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 28721152,
+          "network_receive_bytes": 250711,
+          "network_transmit_bytes": 231343,
+          "rss_bytes": 94625792
+        }
+      },
+      "elapsed_seconds": 26.476689065000073
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 1875651000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 35348480,
+          "network_receive_bytes": 6768935,
+          "network_transmit_bytes": 6108598,
+          "rss_bytes": 107286528
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 4229985000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 43167744,
+          "network_receive_bytes": 11577276,
+          "network_transmit_bytes": 10336252,
+          "rss_bytes": 115785728
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 1017188000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 31834112,
+          "network_receive_bytes": 1301374,
+          "network_transmit_bytes": 1390683,
+          "rss_bytes": 99442688
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 9843730000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 385179648,
+          "memory_bytes": 595030016,
+          "network_receive_bytes": 9083070,
+          "network_transmit_bytes": 12252957,
+          "rss_bytes": 487739392
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 545579000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 28454912,
+          "network_receive_bytes": 254100,
+          "network_transmit_bytes": 234591,
+          "rss_bytes": 94773248
+        }
+      },
+      "elapsed_seconds": 27.48078229900011
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 1926780000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 35459072,
+          "network_receive_bytes": 6945691,
+          "network_transmit_bytes": 6268574,
+          "rss_bytes": 107163648
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 4328851000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 43114496,
+          "network_receive_bytes": 11882130,
+          "network_transmit_bytes": 10608429,
+          "rss_bytes": 115810304
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 1038379000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 32067584,
+          "network_receive_bytes": 1332694,
+          "network_transmit_bytes": 1424925,
+          "rss_bytes": 99459072
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 9965672000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 387215360,
+          "memory_bytes": 595734528,
+          "network_receive_bytes": 9320105,
+          "network_transmit_bytes": 12574108,
+          "rss_bytes": 487940096
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 548838000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 28454912,
+          "network_receive_bytes": 259767,
+          "network_transmit_bytes": 238738,
+          "rss_bytes": 94961664
+        }
+      },
+      "elapsed_seconds": 28.485083092000195
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 1968776000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 35704832,
+          "network_receive_bytes": 7120352,
+          "network_transmit_bytes": 6427551,
+          "rss_bytes": 107180032
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 4437045000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 43110400,
+          "network_receive_bytes": 12186205,
+          "network_transmit_bytes": 10880404,
+          "rss_bytes": 115830784
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 1067288000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 32038912,
+          "network_receive_bytes": 1361460,
+          "network_transmit_bytes": 1458242,
+          "rss_bytes": 99528704
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 10081656000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 389378048,
+          "memory_bytes": 596246528,
+          "network_receive_bytes": 9554071,
+          "network_transmit_bytes": 12887009,
+          "rss_bytes": 488235008
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 550974000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 28979200,
+          "network_receive_bytes": 262228,
+          "network_transmit_bytes": 241426,
+          "rss_bytes": 95100928
+        }
+      },
+      "elapsed_seconds": 29.489526509000143
+    },
+    {
+      "containers": {
+        "cadence-sdk-benchmark-frontend-1": {
+          "cpu_ns": 1992522000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 35307520,
+          "network_receive_bytes": 7228056,
+          "network_transmit_bytes": 6524331,
+          "rss_bytes": 107188224
+        },
+        "cadence-sdk-benchmark-history-1": {
+          "cpu_ns": 4492945000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 43638784,
+          "network_receive_bytes": 12369308,
+          "network_transmit_bytes": 11044293,
+          "rss_bytes": 115847168
+        },
+        "cadence-sdk-benchmark-matching-1": {
+          "cpu_ns": 1079331000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 31715328,
+          "network_receive_bytes": 1381287,
+          "network_transmit_bytes": 1479245,
+          "rss_bytes": 99540992
+        },
+        "cadence-sdk-benchmark-mysql-1": {
+          "cpu_ns": 10186805000,
+          "disk_read_bytes": 131072,
+          "disk_write_bytes": 390897664,
+          "memory_bytes": 596885504,
+          "network_receive_bytes": 9702062,
+          "network_transmit_bytes": 13087007,
+          "rss_bytes": 488386560
+        },
+        "cadence-sdk-benchmark-worker-1": {
+          "cpu_ns": 560594000,
+          "disk_read_bytes": 0,
+          "disk_write_bytes": 4096,
+          "memory_bytes": 29208576,
+          "network_receive_bytes": 267349,
+          "network_transmit_bytes": 244963,
+          "rss_bytes": 95387648
+        }
+      },
+      "elapsed_seconds": 30.243452995000098
+    }
+  ]
+}
