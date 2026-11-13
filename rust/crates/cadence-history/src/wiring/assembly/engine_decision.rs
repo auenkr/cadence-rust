@@ -513,6 +513,28 @@ fn failed_cause(name: &str) -> Option<DecisionTaskFailedCause> {
     })
 }
 
+/// Go `failDecisionHelper` message (`%v` of cause and details bytes).
+fn decision_attempts_exceeded_message(cause: Option<&str>, details: &[u8]) -> String {
+    format!(
+        "Decision attempt exceeds limit. Last decision failure cause and details: {} - [{}]",
+        cause.unwrap_or_default(),
+        details.iter().map(u8::to_string).collect::<Vec<_>>().join(" ")
+    )
+}
+
+#[cfg(test)]
+mod respond_parity2_tests {
+    use super::*;
+
+    #[test]
+    fn attempts_exceeded_message_matches_go_format() {
+        assert_eq!(
+            decision_attempts_exceeded_message(Some("BAD_BINARY"), b"ab"),
+            "Decision attempt exceeds limit. Last decision failure cause and details: BAD_BINARY - [97 98]"
+        );
+    }
+}
+
 fn history_error(e: OperationError) -> HistoryError {
     match e.kind {
         ErrorKind::BadRequest => HistoryError::bad_request(e.message),
@@ -723,6 +745,18 @@ impl EngineDecisionHandler {
                         &req.binary_checksum,
                     )?;
                     has_unhandled = true;
+                    // Go failDecisionHelper: DecisionRetryMaxAttempts exceeded terminates.
+                    let max_attempts = (self.config.decision_retry_max_attempts)(&domain_name);
+                    let attempt_now = state.inner.lock().unwrap().pc_exec.decision_attempt;
+                    if max_attempts > 0 && attempt_now > max_attempts {
+                        let message = decision_attempts_exceeded_message(cause, details.as_bytes());
+                        state.terminate_workflow(
+                            state.get_next_event_id(),
+                            "DECISION_ATTEMPTS_EXCEEDS_LIMIT",
+                            message.as_bytes(),
+                            "history-service",
+                        )?;
+                    }
                 }
             }
             let running = state.is_workflow_execution_running();
@@ -797,6 +831,10 @@ impl EngineDecisionHandler {
             if timed_out {
                 return Err(HistoryError::entity_not_exists("decision heartbeat timeout"));
             }
+            if !state.is_workflow_execution_running() {
+                // Go: closed workflow, nothing to dispatch.
+                return Ok(HistoryRespondDecisionTaskCompletedResponse::default());
+            }
             let mut resp = HistoryRespondDecisionTaskCompletedResponse {
                 activities_to_dispatch_locally: local_dispatch
                     .into_iter()
@@ -805,7 +843,10 @@ impl EngineDecisionHandler {
                 ..Default::default()
             };
             if let Some(started) = started {
-                resp.started_response = Some(state.record_started_response(&started, &req.identity));
+                let mut sr = state.record_started_response(&started, &req.identity);
+                // Go: sticky is always enabled for a new decision from RespondDecisionTaskCompleted.
+                sr.sticky_execution_enabled = true;
+                resp.started_response = Some(sr);
             }
             return Ok(resp);
         }
