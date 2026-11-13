@@ -6,3 +6,4 @@ pub mod queues;
 pub mod replication;
 pub mod domain_dlq;
 pub mod visibility;
+pub mod es_visibility;

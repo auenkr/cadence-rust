@@ -81,6 +81,74 @@ pub struct Config {
     /// Go `headerForwardingRules`: inbound headers copied to outbound calls.
     #[serde(default, rename = "headerForwardingRules")]
     pub header_forwarding_rules: Vec<crate::header_forwarding::HeaderRule>,
+    /// Go `common/config.Config.Kafka` (`kafkaConfig.go`): clusters, topics and applications.
+    #[serde(default)]
+    pub kafka: KafkaConfig,
+}
+
+/// Go `config.KafkaConfig`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KafkaConfig {
+    #[serde(default)]
+    pub tls: KafkaTls,
+    #[serde(default)]
+    pub clusters: HashMap<String, KafkaClusterConfig>,
+    #[serde(default)]
+    pub topics: HashMap<String, KafkaTopicConfig>,
+    #[serde(default)]
+    pub applications: HashMap<String, KafkaTopicList>,
+    #[serde(default)]
+    pub version: String,
+}
+
+/// Go `config.TLS` subset (only `enabled` is interpreted by the History producer).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KafkaTls {
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KafkaClusterConfig {
+    #[serde(default)]
+    pub brokers: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KafkaTopicConfig {
+    #[serde(default)]
+    pub cluster: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KafkaTopicList {
+    #[serde(default)]
+    pub topic: String,
+    #[serde(default, rename = "dlq-topic")]
+    pub dlq_topic: String,
+}
+
+impl KafkaConfig {
+    /// Go `KafkaConfig.GetTopicsForApplication`/`GetKafkaClusterForTopic`/
+    /// `GetBrokersForKafkaCluster` plus the `NewKafkaClient` ":9092" default port.
+    pub fn producer_target(&self, app: &str) -> Result<(String, Vec<String>), String> {
+        let topics = self.applications.get(app).ok_or_else(|| format!("Missing Topics Config for application {app}"))?;
+        let topic = &topics.topic;
+        let topic_cfg = self.topics.get(topic).ok_or_else(|| format!("Missing Topic Config for Topic {topic}"))?;
+        let cluster = self
+            .clusters
+            .get(&topic_cfg.cluster)
+            .ok_or_else(|| format!("Missing Kafka Cluster Config for Cluster {}", topic_cfg.cluster))?;
+        if cluster.brokers.is_empty() {
+            return Err(format!("Missing Kafka Brokers Config for Cluster {}", topic_cfg.cluster));
+        }
+        let brokers = cluster
+            .brokers
+            .iter()
+            .map(|b| if b.contains(':') { b.clone() } else { format!("{b}:9092") })
+            .collect();
+        Ok((topic.clone(), brokers))
+    }
 }
 
 /// Go `config.PublicClient`. Empty `hostPort` is filled from the current

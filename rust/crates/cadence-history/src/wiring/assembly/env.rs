@@ -64,6 +64,8 @@ pub struct HistoryEnvParams {
     pub dynamic_client: Option<Arc<dyn DynamicClient>>,
     /// Go `provider.ArchiverProvider` built from the service config `archival` section.
     pub archiver_provider: Arc<cadence_common::archiver::ArchiverProvider>,
+    /// Go `config.Kafka` (advanced visibility producer topics/brokers).
+    pub kafka: cadence_service_core::config::KafkaConfig,
 }
 
 /// All process-wide shared dependencies.
@@ -104,8 +106,9 @@ pub struct HistoryEnv {
 impl HistoryEnv {
     /// Opens persistence and builds every shared resource.
     pub async fn build(params: HistoryEnvParams) -> anyhow::Result<Arc<Self>> {
-        let HistoryEnvParams { config, persistence, cluster, who_am_i, hosts, matching_resolver, dynamic_client, archiver_provider } =
+        let HistoryEnvParams { config, persistence, cluster, who_am_i, hosts, matching_resolver, dynamic_client, archiver_provider, kafka } =
             params;
+        let advanced_visibility_store = persistence.advanced_visibility_store.clone();
         let active = cluster.current_cluster_name.clone();
         let semaphore_metadata = cadence_matching::matching_task_store::open_configured_semaphore_store(&persistence).await?;
 
@@ -155,6 +158,15 @@ impl HistoryEnv {
                 Arc::new(crate::wiring::persistence::visibility::SqlVisibilityWriter::new(visibility_backend)),
             )
         };
+        let visibility = super::visibility_wiring::build_visibility_writer(
+            visibility,
+            &advanced_visibility_store,
+            &kafka,
+            {
+                let cfg = config.clone();
+                Arc::new(move || (cfg.write_visibility_store_name)())
+            },
+        )?;
         let persistence = HistoryPersistence {
             shard_store: Arc::new(SqlShardStore::new(shard_rows.clone())),
             shard_persistence: Arc::new(SqlShardPersistence::new(shard_rows.clone())),
