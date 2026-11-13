@@ -378,6 +378,18 @@ try:
             break
         time.sleep(SAMPLE)
     record('soak-driver-exit', drv.returncode == 0, f'exit={drv.returncode}')
+    # Diagnostics (non-gating): task list pollers/backlog and one workflow history as the Frontend sees them.
+    try:
+        _dl = driver_log.read_text(errors='replace')
+        _tl = re.search(r'"TaskList":"(fe-soak-[0-9a-f-]+)"', _dl)
+        _wf = re.search(r'FAIL (fe-soak-[0-9a-f-]+-\d+)', _dl)
+        if _tl:
+            for t in ('decision', 'activity'):
+                run('diag-tasklist-' + t, [*cli_t, '--domain', dom_t, 'tasklist', 'describe', '--tl', _tl.group(1), '--tlt', t], timeout=60)
+        if _wf:
+            run('diag-workflow-show', [*cli_t, '--domain', dom_t, 'workflow', 'show', '--wid', _wf.group(1)], timeout=60)
+    except Exception as _e:
+        print('diag failed', _e, flush=True)
     print('DRIVER TAIL\n' + '\n'.join(driver_log.read_text(errors='replace').splitlines()[-8:]), flush=True)
     record_services_alive('after-soak')
     for n in [FE, MT]:
