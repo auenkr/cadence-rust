@@ -81,6 +81,9 @@ pub enum HistoryError {
     /// `activecluster.ClusterAttributeNotFoundError`
     #[error("{0}")]
     ClusterAttributeNotFound(String),
+    /// `persistence.TransactionSizeLimitError`
+    #[error("{0}")]
+    TransactionSizeLimit(String),
     /// Anything else (Go `errors.New` / `fmt.Errorf`).
     #[error("{0}")]
     Other(String),

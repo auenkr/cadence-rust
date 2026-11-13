@@ -513,6 +513,9 @@ fn failed_cause(name: &str) -> Option<DecisionTaskFailedCause> {
     })
 }
 
+/// Go `common.FailureReasonTransactionSizeExceedsLimit`.
+const TRANSACTION_SIZE_EXCEEDS_LIMIT: &str = "TRANSACTION_SIZE_EXCEEDS_LIMIT";
+
 /// Go `failDecisionHelper` message (`%v` of cause and details bytes).
 fn decision_attempts_exceeded_message(cause: Option<&str>, details: &[u8]) -> String {
     format!(
@@ -789,6 +792,21 @@ impl EngineDecisionHandler {
                         context.clear();
                     }
                     continue;
+                }
+                Err(HistoryError::TransactionSizeLimit(message)) => {
+                    // Go handler.go L574-602: reload (the failed update cleared the
+                    // state), terminate the workflow, persist, then return the error
+                    // (the history handler maps it to BadRequestError).
+                    context.clear();
+                    let state = context.load_state().await?;
+                    state.terminate_workflow(
+                        state.get_next_event_id(),
+                        TRANSACTION_SIZE_EXCEEDS_LIMIT,
+                        message.as_bytes(),
+                        "history-service",
+                    )?;
+                    context.update_as_active(self.core.clock.now()).await?;
+                    return Err(HistoryError::bad_request(message));
                 }
                 Err(e) => return Err(e),
                 Ok(()) => {}

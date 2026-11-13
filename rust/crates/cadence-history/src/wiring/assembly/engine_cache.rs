@@ -55,6 +55,8 @@ pub struct EngineCore {
     pub strong_idempotency_sanity_check: Arc<dyn Fn(&str) -> bool + Send + Sync>,
     /// Go `config.IsAdvancedVisibilityWritingEnabled()` (evaluated per use).
     pub advanced_visibility_writing: Arc<dyn Fn() -> bool + Send + Sync>,
+    /// Go `config.TransactionSizeLimit` (`system.transactionSizeLimit`).
+    pub transaction_size_limit: Arc<dyn Fn() -> i64 + Send + Sync>,
     /// Go `shard.GetActiveClusterManager()`.
     pub active_cluster_manager: Arc<dyn crate::engine::runtime::ActiveClusterManager>,
     /// Go `clientBean.GetRemoteAdminClient`.
@@ -287,7 +289,8 @@ impl EngineExecutionContext {
         }
         self.core.domains.get_domain_name(&events.key.domain_id)?;
         let transaction_id = self.core.shard.generate_task_id().map_err(shard_err(self.core.shard.shard_id()))?;
-        let manager = SqlHistoryManager::new(self.core.history_v2.clone(), self.core.shard.shard_id());
+        let manager = SqlHistoryManager::new(self.core.history_v2.clone(), self.core.shard.shard_id())
+            .with_transaction_size_limit(self.core.transaction_size_limit.clone());
         let cleanup = if new_branch {
             format!("{}:{}:{}", events.key.domain_id, events.key.workflow_id, events.key.run_id)
         } else {
@@ -386,7 +389,8 @@ impl EngineExecutionContext {
             }
             last_event_task_id = ids.last().copied();
             let transaction_id = shard.generate_task_id().map_err(shard_err(shard.shard_id()))?;
-            let manager = SqlHistoryManager::new(core.history_v2.clone(), shard.shard_id());
+            let manager = SqlHistoryManager::new(core.history_v2.clone(), shard.shard_id())
+                .with_transaction_size_limit(core.transaction_size_limit.clone());
             let blob = manager
                 .append_history_nodes(&txn.branch_token, &txn.events, transaction_id, false, "")
                 .await
