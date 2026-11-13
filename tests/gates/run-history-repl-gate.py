@@ -200,11 +200,13 @@ def compare(tag, name, wid, rid, active, standby):
     """Poll until standby events equal active events, then compare version histories."""
     state = {}
     def f():
-        rc1, ea, _ = show(active, wid, rid)
+        rc1, ea, raw1 = show(active, wid, rid)
         rc2, es, raw2 = show(standby, wid, rid)
         state['ea'], state['es'] = ea, es
         ok = rc1 == 0 and rc2 == 0 and len(ea) > 0 and ea == es
-        return ok, f'{active}: n={len(ea)} last={ea[-1] if ea else None} | {standby}: n={len(es)} last={es[-1] if es else None}'
+        if not ok and (rc1 != 0 or rc2 != 0):
+            state['cliout'] = f'rc1={rc1} rc2={rc2} out1={str(raw1)[:300]} out2={str(raw2)[:300]}'
+        return ok, state.get('cliout', '') + f' {active}: n={len(ea)} last={ea[-1] if ea else None} | {standby}: n={len(es)} last={es[-1] if es else None}'
     ok = poll(f'{tag}-{name}-history-equal({active}->{standby})', f, 300)
     if ok:
         ea = state['ea']
