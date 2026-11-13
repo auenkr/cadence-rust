@@ -2,6 +2,10 @@ name: Frontend + Matching paired benchmark
 on:
   workflow_dispatch:
     inputs:
+      sdk_openloop:
+        description: Run the isolated Matching fixed-arrival harness in Benchmark/
+        type: boolean
+        default: false
       requests:
         description: Measured workflows per concurrency and arm
         type: number
@@ -26,7 +30,29 @@ concurrency:
   group: frontend-matching-benchmark-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  sdk-matching-smoke:
+    if: ${{ inputs.sdk_openloop == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: Benchmark/go.mod
+          cache-dependency-path: |
+            Benchmark/go.sum
+            go/go.sum
+      - run: bash Benchmark/ci.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdk-matching-benchmark
+          path: Benchmark/evidence/run/
+          retention-days: 3
   paired-benchmark:
+    if: ${{ inputs.sdk_openloop != true }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:

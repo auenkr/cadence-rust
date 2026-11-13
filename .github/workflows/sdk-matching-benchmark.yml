@@ -1,0 +1,50 @@
+name: SDK Matching fixed arrival benchmark
+on:
+  workflow_dispatch:
+    inputs:
+      rate:
+        description: Fixed workflow starts per second
+        default: '5'
+      duration:
+        description: Measurement seconds per arm (smoke default)
+        default: '30'
+      warmup:
+        description: Warmup seconds per arm
+        default: '10'
+      repetitions:
+        description: Fresh-database alternating pairs (fit total inside 90 minutes)
+        default: '1'
+      repetition_offset:
+        description: Starting pair index (odd runs Rust first)
+        default: '0'
+concurrency:
+  group: sdk-matching-benchmark-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  matching-pair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: Benchmark/go.mod
+          cache-dependency-path: |
+            Benchmark/go.sum
+            go/go.sum
+      - name: Build and benchmark (all implementation in Benchmark)
+        env:
+          RATE: ${{ inputs.rate }}
+          DURATION: ${{ inputs.duration }}
+          WARMUP: ${{ inputs.warmup }}
+          REPETITIONS: ${{ inputs.repetitions }}
+          REPETITION_OFFSET: ${{ inputs.repetition_offset }}
+        run: bash Benchmark/ci.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdk-matching-benchmark
+          path: Benchmark/evidence/run/
+          retention-days: 3
