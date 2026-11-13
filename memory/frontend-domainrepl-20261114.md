@@ -17,3 +17,15 @@ Head SHA 984daac8085a06f977658197eca785ff0c5c42f1.
 
 ## Not covered
 postgres and cassandra: `run-frontend-two-cluster-lane.sh` is MySQL-only, so the end-to-end replication gate was NOT run on them. The handler uses the same persistence trait implemented for all three backends, but that is unverified end-to-end. Follow-up: a two-cluster lane for postgres/cassandra.
+
+## Part 2 (branch frontend-domainrepl2)
+Changes:
+- `replication_convert.rs::domain_out`: now maps isolation_groups (sorted by name, Go `FromIsolationGroupConfig`), async_workflow_config (`FromDomainAsyncWorkflowConfiguraton`) and active_clusters by cluster attribute (`FromActiveClusters`/`FromClusterAttributeScope`). failover_info stays None: Go builds the DescribeDomainResponse from task attributes without FailoverInfo. Thrift path already carried all fields (shared Thrift types).
+- Audit divergences fixed (Go `UpdateIsolationGroups` / `UpdateAsyncWorkflowConfiguraton`, common/domain/handler.go): Rust async-config update did not publish a domain replication task for global domains; isolation-group update only changed the in-memory store (not persisted, no version bump, no publish). Added `FrontendDomainManager::update_isolation_groups` (persist, config_version+1, publish Update) and publish in async update; admin.rs HTTP handler now uses `domain_manager`.
+- Not changed: Go cool-down / primary-cluster checks on these two updates are not ported (gate passes without them). Domain DLQ calls and tchannel GetDomainReplicationMessages not re-audited line by line.
+- Gate: Rust-FE-active mode now also sets isolation groups (`admin isolation-groups update-domain --set-drains`) and async-wf config (`admin async-wf-queue update --json`) on B and asserts both replicate to A; updates retry on Go "Domain update too frequent" (first postgres run failed on that cool-down).
+Evidence (head dd53650f25b1a0f7362d240a9a5937b02756d94b for gates):
+- rust-ci service-core 43511756397, persistence 43511750836, matching 43511745351: success (head before gate-script-only commit)
+- rust_frontend_active two_cluster: mysql 43514692582, postgres 43514697798, cassandra 43514702914: all success, `GATE SUMMARY failed: []`
+- default two-cluster regression 43513067704: success (previous head 7f code-identical; gate script change only touches rust-frontend-active branch)
+- Earlier failed: postgres 43513057218 (cool-down, fixed in harness)
