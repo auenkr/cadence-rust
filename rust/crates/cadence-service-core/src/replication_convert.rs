@@ -56,13 +56,198 @@ pub fn replication_task_in(task: pa::ReplicationTask) -> Result<t::ReplicationTa
     match task.attributes {
         None => {}
         Some(Attributes::DomainTaskAttributes(a)) => {
-            Some(Attributes::DomainTaskAttributes(pa::DomainTaskAttributes {
+            // History never emits domain tasks (they come from the domain
+            // replication queue), so only the scalar attributes are mapped.
+            out.domain_task_attributes = Some(t::DomainTaskAttributes {
+                domain_operation: enum_in(a.domain_operation, e::DomainOperation::from_i32)
+                    .map_err(status)?,
+                id: a.id,
+                config_version: a.config_version,
+                failover_version: a.failover_version,
+                previous_failover_version: a.previous_failover_version,
+                ..Default::default()
+            });
+        }
+        Some(Attributes::SyncShardStatusTaskAttributes(a)) => {
+            out.sync_shard_status_task_attributes = Some(t::SyncShardStatusTaskAttributes {
+                source_cluster: Some(a.source_cluster),
+                shard_id: Some(i64::from(a.shard_id)),
+                timestamp: nanos(a.timestamp),
+            });
+        }
+        Some(Attributes::SyncActivityTaskAttributes(a)) => {
+            let (workflow_id, run_id) = execution_parts(a.workflow_execution);
+            let (reason, details, options) = failure_in(a.last_failure).map_err(status)?;
+            out.sync_activity_task_attributes = Some(t::SyncActivityTaskAttributes {
+                domain_id: Some(a.domain_id),
+                workflow_id,
+                run_id,
+                version: Some(a.version),
+                scheduled_id: Some(a.scheduled_id),
+                scheduled_time: nanos(a.scheduled_time),
+                started_id: Some(a.started_id),
+                started_time: nanos(a.started_time),
+                last_heartbeat_time: nanos(a.last_heartbeat_time),
+                details: a.details.map(|payload| payload.data),
+                attempt: Some(a.attempt),
+                last_failure_details: reason.as_ref().map(|_| details),
+                last_failure_reason: reason,
+                last_failure_options: options,
+                last_worker_identity: Some(a.last_worker_identity),
+                version_history: a.version_history.map(version_history),
+            });
+        }
+        Some(Attributes::HistoryTaskV2Attributes(a)) => {
+            let (workflow_id, run_id) = execution_parts(a.workflow_execution);
+            out.history_task_v2_attributes = Some(t::HistoryTaskV2Attributes {
+                task_id: Some(a.task_id),
+                domain_id: Some(a.domain_id),
+                workflow_id,
+                run_id,
+                version_history_items: if a.version_history_items.is_empty() {
+                    None
+                } else {
+                    Some(
+                        a.version_history_items
+                            .into_iter()
+                            .map(version_history_item)
+                            .collect(),
+                    )
+                },
+                events: a.events.and_then(data_blob),
+                new_run_events: a.new_run_events.and_then(data_blob),
+            });
+        }
+        Some(Attributes::FailoverMarkerAttributes(a)) => {
+            out.failover_marker_attributes = Some(failover_marker_in(a));
+        }
+    }
+    Ok(out)
+}
+
+pub fn failover_marker_in(a: pa::FailoverMarkerAttributes) -> t::FailoverMarkerAttributes {
+    t::FailoverMarkerAttributes {
+        domain_id: Some(a.domain_id),
+        failover_version: Some(a.failover_version),
+        creation_time: nanos(a.creation_time),
+    }
+}
+
+pub fn replication_tasks_in(
+    tasks: Vec<pa::ReplicationTask>,
+) -> Result<Vec<t::ReplicationTask>, String> {
+    tasks.into_iter().map(replication_task_in).collect()
+}
+
+pub fn replication_messages_in(
+    messages: pa::ReplicationMessages,
+) -> Result<api_admin::ReplicationMessages, String> {
+    Ok(api_admin::ReplicationMessages {
+        replication_tasks: replication_tasks_in(messages.replication_tasks)?,
+        last_retrieved_message_id: messages.last_retrieved_message_id,
+        has_more: messages.has_more,
+        sync_shard_status: messages
+            .sync_shard_status
+            .map(|status| api_admin::SyncShardStatus {
+                timestamp: nanos(status.timestamp),
+            }),
+    })
+}
+
+pub fn replication_token_out(token: api_admin::ReplicationToken) -> pa::ReplicationToken {
+    pa::ReplicationToken {
+        shard_id: token.shard_id,
+        last_retrieved_message_id: token.last_retrieved_message_id,
+        last_processed_message_id: token.last_processed_message_id,
+    }
+}
+
+pub fn replication_task_info_out(info: api_admin::ReplicationTaskInfo) -> pa::ReplicationTaskInfo {
+    pa::ReplicationTaskInfo {
+        domain_id: info.domain_id,
+        workflow_execution: Some(cadence_proto::api::WorkflowExecution {
+            workflow_id: info.workflow_id,
+            run_id: info.run_id,
+        }),
+        task_type: i32::from(info.task_type),
+        task_id: info.task_id,
+        version: info.version,
+        first_event_id: info.first_event_id,
+        next_event_id: info.next_event_id,
+        scheduled_id: info.scheduled_id,
+    }
+}
+
+/// Go narrows the protobuf int32 task type to int16 (`int16(t.TaskType)`).
+pub fn replication_task_info_in(info: pa::ReplicationTaskInfo) -> api_admin::ReplicationTaskInfo {
+    let (workflow_id, run_id) = execution_parts(info.workflow_execution);
+    api_admin::ReplicationTaskInfo {
+        domain_id: info.domain_id,
+        workflow_id: workflow_id.unwrap_or_default(),
+        run_id: run_id.unwrap_or_default(),
+        task_type: info.task_type as i16,
+        task_id: info.task_id,
+        version: info.version,
+        first_event_id: info.first_event_id,
+        next_event_id: info.next_event_id,
+        scheduled_id: info.scheduled_id,
+    }
+}
+
+pub fn data_blob_out(blob: t::DataBlob) -> cadence_proto::api::DataBlob {
+    cadence_proto::api::DataBlob {
+        encoding_type: match blob.encoding_type {
+            Some(e::EncodingType::ThriftRW) => 1,
+            Some(e::EncodingType::JSON) => 2,
+            _ => 0,
+        },
+        data: blob.data,
+    }
+}
+
+pub fn version_history_out(value: t::VersionHistory) -> pa::VersionHistory {
+    pa::VersionHistory {
+        branch_token: value.branch_token,
+        items: value.items.into_iter().map(version_history_item_out).collect(),
+    }
+}
+
+fn version_history_item_out(item: t::VersionHistoryItem) -> pa::VersionHistoryItem {
+    pa::VersionHistoryItem {
+        event_id: item.event_id,
+        version: item.version,
+    }
+}
+
+fn execution_out(
+    workflow_id: Option<String>,
+    run_id: Option<String>,
+) -> Option<cadence_proto::api::WorkflowExecution> {
+    if workflow_id.is_none() && run_id.is_none() {
+        return None;
+    }
+    Some(cadence_proto::api::WorkflowExecution {
+        workflow_id: workflow_id.unwrap_or_default(),
+        run_id: run_id.unwrap_or_default(),
+    })
+}
+
+fn ts_out(v: Option<i64>) -> Option<prost_types::Timestamp> {
+    v.map(timestamp_from_nanos)
+}
+
+/// Go `FromReplicationTask` (proto enums are the Go enums shifted by one).
+pub fn replication_task_out(task: t::ReplicationTask) -> pa::ReplicationTask {
+    use pa::replication_task::Attributes;
+    let attributes = if let Some(a) = task.domain_task_attributes {
+        // History never emits domain tasks; only the scalar attributes are mapped.
+        Some(Attributes::DomainTaskAttributes(pa::DomainTaskAttributes {
             domain_operation: a.domain_operation.map_or(0, |v| v as i32 + 1),
-            id: a.id.clone(),
-            domain: Some(domain_out(&a)),
+            id: a.id,
             config_version: a.config_version,
             failover_version: a.failover_version,
             previous_failover_version: a.previous_failover_version,
+            ..Default::default()
         }))
     } else if let Some(a) = task.sync_shard_status_task_attributes {
         Some(Attributes::SyncShardStatusTaskAttributes(
