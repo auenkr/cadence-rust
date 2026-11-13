@@ -13,24 +13,9 @@ use cadence_common::archiver::{ArchiveHistoryRequest, ArchiverError, HistoryBatc
 use cadence_persistence::history_reader::{read_history_branch, HistoryNodeStore, HistoryReadError, ReadHistoryBranchRequest};
 use serde_json::{json, Value};
 
-/// Go `types.EventType` is a string enum in its JSON (`"WorkflowExecutionStarted"`); the Rust thrift
-/// `HistoryEvent.eventType` serialises as the numeric value, which the Go s3store reader cannot parse.
-fn go_history_batch(mut batch: Value) -> Value {
-    if let Some(events) = batch.get_mut("events").and_then(Value::as_array_mut) {
-        for e in events {
-            if let Some(m) = e.as_object_mut() {
-                let name = m
-                    .get("eventType")
-                    .and_then(Value::as_i64)
-                    .and_then(|n| i32::try_from(n).ok())
-                    .and_then(cadence_api::enums::EventType::from_i32)
-                    .map(|t| t.as_str());
-                if let Some(name) = name {
-                    m.insert("eventType".into(), Value::String(name.into()));
-                }
-            }
-        }
-    }
+/// Go `types.*` enums marshal as text; the history is serialised with `to_go_json_value`
+/// (all enums, including nested attribute enums, become their Go string names).
+fn go_history_batch(batch: Value) -> Value {
     go_history_batch_base(batch)
 }
 
@@ -87,7 +72,7 @@ impl HistoryBatchSource for HistoryNodeBatchSource {
             for b in resp.batches.into_iter().filter(|b| !b.is_empty()) {
                 events += b.len() as i64;
                 batches.push(go_history_batch(
-                    serde_json::to_value(st::History { events: b }).map_err(|e| ArchiverError::Other(e.to_string()))?,
+                    cadence_api::enums::to_go_json_value(&st::History { events: b }).map_err(|e| ArchiverError::Other(e.to_string()))?,
                 ));
             }
             if events >= HISTORY_PAGE_SIZE || resp.next_page_token.is_empty() {
@@ -137,7 +122,7 @@ impl HistoryBatchSource for HistoryNodeBatchSource {
         batches
             .into_iter()
             .map(|events| {
-                serde_json::to_value(st::History { events })
+                cadence_api::enums::to_go_json_value(&st::History { events })
                     .map(go_history_batch)
                     .map_err(|e| ArchiverError::Other(e.to_string()))
             })
