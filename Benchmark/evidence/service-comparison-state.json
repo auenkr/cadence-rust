@@ -2,7 +2,8 @@
   "source_head": "c1bbd3ae71c84a71d5a226a70b0d8b71d021cb5b",
   "runs": {
     "history": 43479770520,
-    "frontend": 43480575061
+    "frontend": 43480575061,
+    "matching": 43480728156
   },
   "protocol": {
     "rate": 5,
@@ -19,6 +20,7 @@
   },
   "execution": "parallel CI runners; serialized evidence collection",
   "dispatched": {
-    "frontend": "2026-11-13T18:13:50.097260+00:00"
+    "frontend": "2026-11-13T18:13:50.097260+00:00",
+    "matching": "2026-11-13T18:14:46.187517+00:00"
   }
 }
