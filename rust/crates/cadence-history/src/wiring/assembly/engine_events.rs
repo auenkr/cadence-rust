@@ -55,31 +55,6 @@ fn is_bufferable(ty: EventType) -> bool {
     )
 }
 
-#[cfg(test)]
-mod buffer_tests {
-    use super::*;
-
-    #[test]
-    fn async_results_are_buffered_like_go() {
-        for ty in [
-            EventType::TimerFired,
-            EventType::StartChildWorkflowExecutionFailed,
-            EventType::ExternalWorkflowExecutionSignaled,
-            EventType::SignalExternalWorkflowExecutionFailed,
-            EventType::ExternalWorkflowExecutionCancelRequested,
-            EventType::RequestCancelExternalWorkflowExecutionFailed,
-            EventType::SemaphoreAcquired,
-            EventType::ActivityTaskCompleted,
-            EventType::WorkflowExecutionSignaled,
-        ] {
-            assert!(is_bufferable(ty), "{ty:?}");
-        }
-        for ty in [EventType::TimerStarted, EventType::DecisionTaskCompleted, EventType::WorkflowExecutionCompleted] {
-            assert!(!is_bufferable(ty), "{ty:?}");
-        }
-    }
-}
-
 fn is_close_event(ty: Option<EventType>) -> bool {
     matches!(
         ty,
@@ -855,5 +830,30 @@ impl EngineMutableState {
             // into persistence.WorkflowMutableState, so it must be an event list.
             "bufferedEvents": g.buffered.iter().chain(g.update_buffered.iter()).collect::<Vec<_>>(),
         }))
+    }
+}
+
+#[cfg(test)]
+mod buffer_tests {
+    use super::*;
+
+    #[test]
+    fn async_results_are_buffered_like_go() {
+        for ty in [
+            EventType::TimerFired,
+            EventType::StartChildWorkflowExecutionFailed,
+            EventType::ExternalWorkflowExecutionSignaled,
+            EventType::SignalExternalWorkflowExecutionFailed,
+            EventType::ExternalWorkflowExecutionCancelRequested,
+            EventType::RequestCancelExternalWorkflowExecutionFailed,
+            EventType::SemaphoreAcquired,
+            EventType::ActivityTaskCompleted,
+            EventType::WorkflowExecutionSignaled,
+        ] {
+            assert!(is_bufferable(ty), "{ty:?}");
+        }
+        for ty in [EventType::TimerStarted, EventType::DecisionTaskCompleted, EventType::WorkflowExecutionCompleted] {
+            assert!(!is_bufferable(ty), "{ty:?}");
+        }
     }
 }
