@@ -933,11 +933,25 @@ impl a::admin_api_server::AdminApi for Admin {
 
     async fn get_domain_replication_messages(
         &self,
-        _request: Request<a::GetDomainReplicationMessagesRequest>,
+        request: Request<a::GetDomainReplicationMessagesRequest>,
     ) -> Result<Response<a::GetDomainReplicationMessagesResponse>, Status> {
-        Err(Status::internal(
-            "domain replication queue not enabled for cluster",
-        ))
+        let r = request.into_inner();
+        let req = cadence_api::admin::GetDomainReplicationMessagesRequest {
+            last_retrieved_message_id: r.last_retrieved_message_id,
+            last_processed_message_id: r.last_processed_message_id,
+            cluster_name: r.cluster_name,
+        };
+        let response =
+            cadence_service_core::admin::domain_replication_messages_response(
+                &self.frontend.state,
+                req,
+            )
+            .map_err(Status::internal)?;
+        Ok(Response::new(a::GetDomainReplicationMessagesResponse {
+            messages: response
+                .messages
+                .map(cadence_service_core::replication_convert::replication_messages_out),
+        }))
     }
 
     async fn count_dlq_messages(
