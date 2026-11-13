@@ -23,6 +23,7 @@ pub mod engine_tasks;
 pub mod engine_timer;
 pub mod env;
 pub mod failover;
+pub mod failover_client;
 pub mod ndc_adapters;
 pub mod parent_close_policy_client;
 #[cfg(test)]
