@@ -1117,6 +1117,10 @@ impl NativeTaskDispatcher {
         let blocked_poller = lifecycle
             .as_ref()
             .map(|poll| (poll.manager.clone(), poll.id.clone()));
+        // Go CancelOutstandingPoll cancels only the GetTask wait (pollerCtx); a
+        // task already taken still runs RecordDecisionTaskStarted on the request
+        // context and is returned. Handle cancel here, where the claim is known.
+        let cancel = lifecycle.as_ref().and_then(|l| l.cancel.clone());
         let worker = self.clone();
         let deadline = tokio::time::Instant::now() + expiration;
         let poll_started = tokio::time::Instant::now();
@@ -1138,9 +1142,22 @@ impl NativeTaskDispatcher {
         let response = {
             let response = tokio::time::timeout(expiration, &mut receiver);
             tokio::pin!(response);
+            let cancelled = async {
+                match &cancel {
+                    Some(cancel) => loop {
+                        cancel.notified().await;
+                        if !claimed.load(Ordering::SeqCst) {
+                            break;
+                        }
+                    },
+                    None => std::future::pending().await,
+                }
+            };
+            tokio::pin!(cancelled);
             tokio::select! {
                 biased;
                 response = &mut response => response,
+                _ = &mut cancelled => return Ok(R::default()),
                 _ = &mut released => {
                     if blocked_poller.as_ref().is_some_and(|(manager, id)| manager.lock().expect("poller history lock").contains_poll(id.as_bytes())) {
                         return Ok(R::default());

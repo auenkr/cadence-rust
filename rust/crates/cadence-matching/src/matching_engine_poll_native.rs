@@ -239,10 +239,12 @@ impl NativeMatchingEngine {
             }
             result = async {
                 if active { queue.dispatcher.poll_decision_with_poller(payload, expiration, lifecycle, Some(deadline)).await }
-                else { queue.dispatcher.forward_query_poll(payload, expiration, lifecycle).await }
+                else { tokio::select! { r = queue.dispatcher.forward_query_poll(payload, expiration, lifecycle) => r, _ = registration.cancel.notified() => Ok(Default::default()) } }
             } => result?,
-            _ = failover => { self.registry.release_blocked_pollers_for_domain(domain); Default::default() },
-            _ = registration.cancel.notified() => Default::default(),
+            // Failover/cancel end only the wait for a task (handled inside the
+            // dispatcher, which knows whether a task was claimed); they must not
+            // drop a task whose RecordDecisionTaskStarted is in flight.
+            _ = async { failover.await; self.registry.release_blocked_pollers_for_domain(domain); std::future::pending::<()>().await } => Default::default(),
         };
         response.load_balancer_hints = hints(&queue);
         response.partition_config = response_config(&queue);
@@ -330,10 +332,9 @@ impl NativeMatchingEngine {
         let mut response = tokio::select! {
             result = async {
                 if context.domain_active(&request.domain_id)? { queue.dispatcher.poll_activity_with_poller(payload, expiration, lifecycle, Some(deadline)).await }
-                else { let _wait = lifecycle.begin(); tokio::time::sleep(expiration).await; Ok(Default::default()) }
+                else { let _wait = lifecycle.begin(); tokio::select! { _ = tokio::time::sleep(expiration) => {}, _ = registration.cancel.notified() => {} } Ok(Default::default()) }
             } => result?,
-            _ = async { if queue.queue.task_list_kind() == 0 { failover.await } else { std::future::pending().await } } => { self.registry.release_blocked_pollers_for_domain(domain); Default::default() },
-            _ = registration.cancel.notified() => Default::default(),
+            _ = async { if queue.queue.task_list_kind() == 0 { failover.await; self.registry.release_blocked_pollers_for_domain(domain); } std::future::pending::<()>().await } => Default::default(),
         };
         response.load_balancer_hints = hints(&queue);
         response.partition_config = response_config(&queue);
