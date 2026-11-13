@@ -178,7 +178,7 @@ try:
     if args.rust_history_binary:
         # schema is created by go-a's --auto-setup before its worker listens; then Rust History serves cluster A
         ok = wait_port(P['B_FE_GRPC'], 300, 'go-b') and wait_port(P['A_WORKER'], 300, 'go-a-history-worker')
-        (work / 'rust-history.yaml').write_text(rust_yaml('noop', '', 'tchannel'))
+        (work / 'rust-history.yaml').write_text(rust_yaml('noop', '', 'grpc'))  # Rust History replication fetchers need grpc remotes
         (work / 'rust-history-binary.sha256').write_text(subprocess.run(['sha256sum', str(args.rust_history_binary)], capture_output=True, text=True).stdout)
         start('rust-history', [args.rust_history_binary, '--config', work / 'rust-history.yaml', '--root', work, 'start', '--services', 'history'])
         ok = ok and wait_port(P['A_HIST_GRPC'], 240, 'rust-history')
