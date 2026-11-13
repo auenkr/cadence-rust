@@ -124,16 +124,28 @@ func main() {
 		step(name+"-signal-s1", retry(func() error { return c.SignalWorkflow(ctx, run.GetID(), run.GetRunID(), "s1", "one") }))
 		if parkFlag {
 			ok := false
+			last := "no query result"
 			for i := 0; i < 90 && !ok; i++ {
 				resp, qerr := c.QueryWorkflow(ctx, run.GetID(), run.GetRunID(), "stage")
 				var st string
-				if qerr == nil && resp.Get(&st) == nil && st == "waiting-finish" {
-					ok = true
+				if qerr != nil {
+					last = "query error: " + qerr.Error()
+				} else if gerr := resp.Get(&st); gerr != nil {
+					last = "decode error: " + gerr.Error()
+				} else if st != "waiting-finish" {
+					last = "stage=" + st
 				} else {
+					ok = true
+				}
+				if !ok {
 					time.Sleep(2 * time.Second)
 				}
 			}
-			step(name+"-parked-waiting-finish", map[bool]error{true: nil, false: fmt.Errorf("never reached waiting-finish")}[ok])
+			var perr error
+			if !ok {
+				perr = fmt.Errorf("never reached waiting-finish: %s", last)
+			}
+			step(name+"-parked-waiting-finish", perr)
 			return
 		}
 		step(name+"-signal-finish", retry(func() error { return c.SignalWorkflow(ctx, run.GetID(), run.GetRunID(), "finish", "fin") }))

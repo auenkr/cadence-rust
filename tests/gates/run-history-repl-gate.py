@@ -175,7 +175,7 @@ def show(side, wid, rid):
 
 def norm(o):
     if isinstance(o, dict):
-        return {k: norm(v) for k, v in o.items() if 'branchtoken' not in k.lower()}
+        return {k.lower(): norm(v) for k, v in o.items() if 'branchtoken' not in k.lower() and not (k.lower() == 'currentversionhistoryindex' and v == 0)}
     if isinstance(o, list):
         return [norm(v) for v in o]
     return o
