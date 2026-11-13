@@ -28,6 +28,7 @@ ap.add_argument('--rust-binary', type=Path, required=True)
 ap.add_argument('--go-server', type=Path, required=True)
 ap.add_argument('--go-cli', type=Path, required=True)
 ap.add_argument('--rust-root', type=Path, required=True)
+ap.add_argument('--rust-history-binary', type=Path, help='run cluster A History as Rust History (replication from Go cluster B)')
 args = ap.parse_args()
 root = Path(__file__).resolve().parents[2]
 work = args.out.resolve(); work.mkdir(parents=True, exist_ok=True)
@@ -173,8 +174,16 @@ status = 0
 try:
     (work / 'rust-binary.sha256').write_text(subprocess.run(['sha256sum', str(args.rust_binary)], capture_output=True, text=True).stdout)
     start('go-b', [args.go_server, '--config', b_dir, '--zone', 'mysql', 'start', '--auto-setup'])
-    start('go-a-history-worker', [args.go_server, '--config', a_dir, '--zone', 'mysql', 'start', '--auto-setup', '--services', 'history,worker'])
-    ok = wait_port(P['B_FE_GRPC'], 300, 'go-b') and wait_port(P['A_HIST_GRPC'], 300, 'go-a-history-worker')
+    start('go-a-history-worker', [args.go_server, '--config', a_dir, '--zone', 'mysql', 'start', '--auto-setup', '--services', 'worker' if args.rust_history_binary else 'history,worker'])
+    if args.rust_history_binary:
+        # schema is created by go-a's --auto-setup before its worker listens; then Rust History serves cluster A
+        ok = wait_port(P['B_FE_GRPC'], 300, 'go-b') and wait_port(P['A_WORKER'], 300, 'go-a-history-worker')
+        (work / 'rust-history.yaml').write_text(rust_yaml('noop', '', 'grpc'))  # Rust History replication fetchers need grpc remotes
+        (work / 'rust-history-binary.sha256').write_text(subprocess.run(['sha256sum', str(args.rust_history_binary)], capture_output=True, text=True).stdout)
+        start('rust-history', [args.rust_history_binary, '--config', work / 'rust-history.yaml', '--root', work, 'start', '--services', 'history'])
+        ok = ok and wait_port(P['A_HIST_GRPC'], 240, 'rust-history')
+    else:
+        ok = wait_port(P['B_FE_GRPC'], 300, 'go-b') and wait_port(P['A_HIST_GRPC'], 300, 'go-a-history-worker')
     record('go-clusters-listening', ok)
     if not ok:
         raise SystemExit(1)
@@ -201,6 +210,28 @@ try:
     m = re.search(r'UUID:\s*(\S+)', out); domain_id = m.group(1) if m else ''
     record('domain-uuid', bool(domain_id), out)
     wids = {}
+    if args.rust_history_binary:
+        # Replication row: workflow runs on active B (Go), standby A (Rust History) must receive its history.
+        rwid = 'tc-repl-' + secrets.token_hex(3)
+        rc, out = cli(B_T, 'tchannel', '--domain', dom, 'workflow', 'start', '--tl', 'tc-tl', '--wt', 'TcType', '--wid', rwid, '--et', '600', '--dt', '10')
+        record('repl-start-on-active-B', rc == 0, out)
+        m = re.search(r'run Id:\s*(\S+)', out, re.I); rrid = m.group(1) if m else ''
+        def a_has_started():
+            rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'show', '--wid', rwid, '--rid', rrid)
+            return rc == 0 and 'WorkflowExecutionStarted' in out, out
+        poll('repl-standby-A-received-started-history', a_has_started, 240)
+        rc, out = cli(B_T, 'tchannel', '--domain', dom, 'workflow', 'signal', '--wid', rwid, '--name', 'sig', '--input', '"x"')
+        record('repl-signal-on-active-B', rc == 0, out)
+        def a_has_signal():
+            rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'show', '--wid', rwid, '--rid', rrid)
+            return rc == 0 and 'WorkflowExecutionSignaled' in out, out
+        poll('repl-standby-A-received-signal-event', a_has_signal, 240)
+        rc, out = cli(B_T, 'tchannel', '--domain', dom, 'workflow', 'terminate', '--wid', rwid, '--reason', 'repl-gate')
+        record('repl-terminate-on-active-B', rc == 0, out)
+        def a_closed():
+            rc, out = cli(A_T, 'tchannel', '--domain', dom, 'workflow', 'describe', '--wid', rwid, '--rid', rrid)
+            return rc == 0 and 'terminated' in out.lower(), out
+        poll('repl-standby-A-sees-closed-terminated', a_closed, 240)
     def start_wf(tag, addr='A'):
         wid = f'tc-{tag}-{secrets.token_hex(3)}'
         rc, out = cli(A_T if addr == 'A' else B_T, 'tchannel', '--domain', dom, 'workflow', 'start', '--tl', 'tc-tl', '--wt', 'TcType', '--wid', wid, '--et', '600', '--dt', '10')
@@ -324,7 +355,7 @@ try:
         record('resend-replication-tasks-thrift-remote', rc == 0 and 'unknown method' not in out.lower(), out)
         rc, out = cli(A_T, 'tchannel', 'admin', 'kafka', 'rereplicate', '--source_cluster', 'no-such-cluster', '--domain_id', domain_id, '--wid', wid, '--rid', rid)
         record('resend-unknown-cluster-fails-thrift', rc != 0 and 'unknown method' not in out.lower(), out)
-    for n in ['go-b', 'go-a-history-worker', 'rust-matching', 'rust-frontend']:
+    for n in ['go-b', 'go-a-history-worker', 'rust-matching', 'rust-frontend'] + (['rust-history'] if args.rust_history_binary else []):
         record(f'{n}-alive-at-end', procs[n].poll() is None, f'exit={procs[n].poll()}')
 except SystemExit:
     pass

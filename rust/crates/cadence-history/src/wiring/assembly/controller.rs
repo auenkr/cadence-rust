@@ -72,6 +72,16 @@ pub fn convert_shard_ownership_lost(
 
 type Cell = Arc<OnceCell<Arc<ShardEntry>>>;
 
+/// True when the registered cell belongs to the closing shard context (`closing`); an unset
+/// `closing` (callback fired before the context was published) keeps the previous remove-any behavior.
+fn remove_matches(current: Option<&Cell>, closing: Option<&std::sync::Weak<ShardContext>>) -> bool {
+    let (Some(cell), Some(closing)) = (current, closing) else { return current.is_some() };
+    match cell.get() {
+        Some(entry) => std::sync::Weak::ptr_eq(closing, &Arc::downgrade(&entry.shard)),
+        None => false,
+    }
+}
+
 pub struct ShardRegistry {
     env: Arc<HistoryEnv>,
     factory: Arc<ShardFactory>,
@@ -172,6 +182,8 @@ impl ShardRegistry {
         let entry = tokio::task::spawn_blocking(move || -> HResult<Arc<ShardEntry>> {
             let id = shard_id as i32;
             let on_close = entries.clone();
+            let my_shard: Arc<OnceLock<std::sync::Weak<ShardContext>>> = Arc::new(OnceLock::new());
+            let my_shard_cb = my_shard.clone();
             // Go `removeEngineForShard`: the engine is stopped when the shard goes away.
             let closed_scope = scope.clone();
             let close_callback: Arc<dyn Fn(i32) + Send + Sync> = Arc::new(move |closed: i32| {
@@ -179,13 +191,23 @@ impl ShardRegistry {
                 closed_scope.inc_counter("ShardClosedCounter");
                 closed_scope.inc_counter("ShardItemRemovedCounter");
                 tracing::info!(shard_id = closed, reason = "shardClosedCallback", "Shard controller state changed: stopping shard");
-                let cell = on_close.lock().unwrap().remove(&(closed as u32));
+                // Go `removeEngineForShard(shardID, shardItem)` only removes the item that owns the closing
+                // context: a late callback of a replaced shard must not tear down its healthy successor.
+                let cell = {
+                    let mut map = on_close.lock().unwrap();
+                    if remove_matches(map.get(&(closed as u32)), my_shard_cb.get()) {
+                        map.remove(&(closed as u32))
+                    } else {
+                        None
+                    }
+                };
                 if let Some(entry) = cell.and_then(|c| c.get().cloned()) {
                     let engine = entry.engine.clone();
                     handle.spawn(async move { engine.stop().await });
                 }
             });
             let shard = factory.new_shard_context(id, close_callback)?;
+            let _ = my_shard.set(Arc::downgrade(&shard));
             let (core, cache) = super::engine_factory::build_core(&env, &shard);
             let ctx = ShardBuildCtx {
                 env: env.clone(),
@@ -320,6 +342,15 @@ mod tests {
 
     fn host(identity: &str, address: &str) -> Host {
         Host { address: address.into(), identity: identity.into(), grpc_address: String::new() }
+    }
+
+    #[test]
+    fn late_close_callback_keeps_uninitialized_or_unknown_successor() {
+        let empty: Cell = Arc::new(OnceCell::new());
+        let closing = std::sync::Weak::<ShardContext>::new();
+        assert!(!remove_matches(None, Some(&closing)));
+        assert!(!remove_matches(Some(&empty), Some(&closing)));
+        assert!(remove_matches(Some(&empty), None));
     }
 
     #[test]
