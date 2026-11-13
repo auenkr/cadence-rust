@@ -568,6 +568,78 @@ try:
     print('SCEN SDK LOG TAIL\n' + '\n'.join((work / 'sdk-scen.log').read_text().splitlines()[-40:]), flush=True)
     record('sdk-scen-driver-exit', sdrv.returncode == 0, f'exit={sdrv.returncode}')
     record_services_alive('after-scen-sdk')
+    # ---- recovery phase: kill all History hosts / restart the DB / kill the primary host with in-flight
+    # timers, activities, activity timeouts, signals and a started decision; every SDK workflow must still complete.
+    if args.rust_history_binary:
+        db_container = os.environ.get(prefix + '_DOCKER_CONTAINER')
+        rounds = ['killall'] + (['dbrestart'] if db_container else []) + (['killprimary'] if args.two_history else [])
+        dom_rc = 'fe-gate-recover-' + secrets.token_hex(3)
+        run('recover-register-domain', [*cli_t, '--domain', dom_rc, 'domain', 'register', '--retention', '1'])
+        time.sleep(12)  # domain cache refresh
+        rmarks = work / 'recover-marks'; rmarks.mkdir(exist_ok=True)
+        renv = {**env, 'FE_MODE': 'recover', 'FE_DOMAIN': dom_rc, 'FE_MARK_DIR': str(rmarks), 'FE_RECOVER_ROUNDS': ','.join(rounds)}
+        rdrv = subprocess.Popen([str(args.driver)], cwd=work, stdout=(work / 'sdk-recover.log').open('w'), stderr=subprocess.STDOUT, env=renv, start_new_session=True)
+        procs['sdk-recover-driver'] = rdrv
+        rdeadline = time.monotonic() + 2400
+        def start_history(name, cmd):
+            start(name, cmd)
+            return wait_port(ports['HISTORY_PORT_GRPC' if name == history_name else 'HISTORY2_PORT_GRPC'], 240, name)
+        def db_ready():
+            for _ in range(90):
+                if plugin == 'mysql':
+                    q = ['docker', 'exec', db_container, 'mysql', '-uroot', f'-p{my_pass}', '-h127.0.0.1', '-e', 'SELECT 1']
+                elif plugin == 'postgres':
+                    q = ['docker', 'exec', db_container, 'pg_isready', '-U', my_user]
+                else:
+                    q = ['docker', 'exec', db_container, 'cqlsh', '-e', 'DESCRIBE CLUSTER']
+                if subprocess.run(q, capture_output=True, timeout=60).returncode == 0:
+                    return True
+                time.sleep(5)
+            return False
+        done_rounds = set()
+        while rdrv.poll() is None:
+            if time.monotonic() >= rdeadline:
+                record('sdk-recover-driver-timeout', False, 'exceeded 2400s')
+                kill('sdk-recover-driver')
+                break
+            for rd in rounds:
+                if rd in done_rounds or not (rmarks / f'{rd}-request').exists():
+                    continue
+                done_rounds.add(rd)
+                if rd == 'killall':
+                    kill(history_name)
+                    if args.two_history:
+                        kill(history2_name)
+                    record('recover-killall-history-killed', True)
+                    time.sleep(5)
+                    ok = start_history(history_name, history_cmd(work / 'rust.yaml'))
+                    if args.two_history:
+                        ok = start_history(history2_name, history2_cmd()) and ok
+                    record('recover-killall-history-restarted-listening', ok)
+                    time.sleep(30)
+                elif rd == 'dbrestart':
+                    r = subprocess.run(['docker', 'restart', '-t', '5', db_container], capture_output=True, text=True, timeout=300)
+                    record('recover-dbrestart-docker-restart', r.returncode == 0, r.stdout + r.stderr)
+                    record('recover-dbrestart-db-ready', db_ready())
+                    time.sleep(30)  # services reconnect
+                    record_services_alive('after-recover-dbrestart')
+                elif rd == 'killprimary':
+                    kill(history_name)
+                    record('recover-killprimary-killed', True)
+                    time.sleep(25)  # shards move to the surviving host
+                    record(f'{history2_name}-alive-during-killprimary', procs[history2_name].poll() is None)
+                    ok = start_history(history_name, history_cmd(work / 'rust.yaml'))
+                    record('recover-killprimary-restarted-listening', ok)
+                    time.sleep(30)
+                (rmarks / f'{rd}-done').write_text('x')
+            time.sleep(1)
+        for line in (work / 'sdk-recover.log').read_text().splitlines():
+            m = re.match(r'STEP (\S+) (ok|FAIL)\s*(.*)', line)
+            if m:
+                record('sdk-' + m.group(1), m.group(2) == 'ok', m.group(3))
+        print('RECOVER SDK LOG TAIL\n' + '\n'.join((work / 'sdk-recover.log').read_text().splitlines()[-40:]), flush=True)
+        record('sdk-recover-driver-exit', rdrv.returncode == 0, f'exit={rdrv.returncode}')
+        record_services_alive('after-recover-sdk')
     # ---- archival phase: Go History/Worker archive (filestore), Rust Frontend registers/reads
     hist_uri, vis_uri = f'file://{work / "history-archive"}', f'file://{work / "visibility-archive"}'
     dom_ar = 'fe-gate-arch-' + secrets.token_hex(3)

@@ -103,6 +103,10 @@ func main() {
 		scenMain(rpc, domain, os.Getenv("FE_DOMAIN_ARCH"), os.Getenv("FE_ARCH_DIR"))
 		os.Exit(map[bool]int{true: 1, false: 0}[failures > 0])
 	}
+	if os.Getenv("FE_MODE") == "recover" {
+		recoverMain(rpc, domain, marks)
+		os.Exit(map[bool]int{true: 1, false: 0}[failures > 0])
+	}
 	if os.Getenv("FE_MODE") == "async" {
 		asyncMain(rpc, domain, os.Getenv("FE_DOMAIN_NOASYNC"), marks)
 		return
