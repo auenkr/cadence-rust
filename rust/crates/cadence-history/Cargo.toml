@@ -39,3 +39,4 @@ bytes = "1"
 tokio-stream = { version = "0.1", features = ["net"] }
 crc32fast = "1"
 crc32c = "0.6"
+rskafka = { version = "0.6", default-features = false }
