@@ -129,6 +129,8 @@ pub struct FailoverLevel {
 pub struct FailoverMarker {
     pub domain_id: String,
     pub failover_version: i64,
+    /// `FailoverMarkerAttributes.CreationTime` (unix nanos); persisted with the shard.
+    pub creation_time: i64,
 }
 
 /// `persistence.ShardInfo`.
