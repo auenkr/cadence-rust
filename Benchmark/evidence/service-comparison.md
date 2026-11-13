@@ -16,3 +16,5 @@ Same pinned source and workload. Three fresh-database pairs per service; 10s war
 History observed completion rate during the arrival window: Go 5.00/s, Rust 1.67/s. Resource figures are not an equal-throughput improvement. The ~20s completion-observation delay needs diagnosis; task schedule-to-start p99 remains below 30ms.
 
 Frontend failed in its first all-Go arm: the Go system Worker fatally exited while creating its system domain (domain metadata update conflict), before load generation. No Frontend performance conclusion is available. The harness now serializes benchmark-domain registration before Worker startup.
+
+Frontend rerun 43487649192: startup serialization allowed the all-Go arm to finish (150 measured workflows correct). Rust Frontend failed all 50 warmup workflows with START_TO_CLOSE timeouts; no measured phase. Backend traces show attempts to reach History on the Frontend container IP, with connection refused. Routing/discovery requires investigation; no valid performance comparison.
