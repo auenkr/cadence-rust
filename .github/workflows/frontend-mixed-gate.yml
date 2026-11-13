@@ -52,7 +52,7 @@ on:
         default: ""
 
 concurrency:
-  group: frontend-mixed-gate-${{ github.ref }}-${{ inputs.database }}-${{ inputs.es_flavor }}-${{ inputs.es }}-${{ inputs.gcs }}-${{ inputs.two_history_graceful }}-${{ inputs.rust_history }}-${{ inputs.two_cluster }}
+  group: frontend-mixed-gate-${{ github.ref }}-${{ inputs.database }}-${{ inputs.es_flavor }}-${{ inputs.es }}-${{ inputs.gcs }}-${{ inputs.two_history_graceful }}-${{ inputs.rust_history }}-${{ inputs.two_cluster }}-${{ inputs.rust_history_side }}
   cancel-in-progress: true
 
 jobs:
@@ -105,7 +105,8 @@ jobs:
         run: |
           set +e
           if [ "${{ inputs.two_cluster }}" = true ]; then
-            tests/gates/run-frontend-two-cluster-lane.sh out/gate \
+            if [ "${{ inputs.database || 'mysql' }}" = mysql ]; then LANE=(tests/gates/run-frontend-two-cluster-lane.sh out/gate); else LANE=(tests/gates/run-frontend-two-cluster-lane-db.sh "${{ inputs.database }}" out/gate); fi
+            "${LANE[@]}" \
               --rust-binary "$CARGO_TARGET_DIR/debug/cadence-server" \
               --go-server "$GITHUB_WORKSPACE/out/cadence-go-server" \
               --go-cli "$GITHUB_WORKSPACE/out/cadence-cli" \
