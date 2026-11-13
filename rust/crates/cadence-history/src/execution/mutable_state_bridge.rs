@@ -133,7 +133,7 @@ pub fn mutation_to_persistence(
     let version_histories = match mutation.version_histories.as_ref() {
         Some(histories) => Some(pc::DataBlob {
             encoding: "thriftrw".into(),
-            data: sqlblobs::Encoding::ThriftRW.encode(&crate::wiring::server::thrift_types_g2::version_histories_to_thrift(histories))
+            data: sqlblobs::Encoding::ThriftRW.encode_versioned(&crate::wiring::server::thrift_types_g2::version_histories_to_thrift(histories))
                 .map_err(|e| HistoryError::internal(format!("encode version histories: {e}")))?,
         }),
         None => envelope.snapshot.version_histories.clone(),
@@ -335,7 +335,7 @@ pub fn typed_snapshot_to_persistence(
     if let Some(histories) = snapshot.version_histories.as_ref() {
         result.version_histories = Some(pc::DataBlob {
             encoding: "thriftrw".into(),
-            data: sqlblobs::Encoding::ThriftRW.encode(&crate::wiring::server::thrift_types_g2::version_histories_to_thrift(histories))
+            data: sqlblobs::Encoding::ThriftRW.encode_versioned(&crate::wiring::server::thrift_types_g2::version_histories_to_thrift(histories))
                 .map_err(|e| HistoryError::internal(format!("encode version histories: {e}")))?,
         });
     }

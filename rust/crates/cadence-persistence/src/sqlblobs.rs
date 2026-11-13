@@ -58,6 +58,20 @@ impl Encoding {
         }
     }
 
+    /// Go `serializerImpl.thriftrwEncode`/`thriftrwsnappyEncode`: codec preamble 0x59, then the struct (snappy wraps both).
+    pub fn encode_versioned(self, value: &Struct) -> Result<Vec<u8>> {
+        let plain = Encoding::ThriftRW.encode(value)?;
+        let mut bytes = Vec::with_capacity(plain.len() + 1);
+        bytes.push(0x59);
+        bytes.extend(plain);
+        match self {
+            Self::ThriftRW => Ok(bytes),
+            Self::ThriftRWSnappy => snap::raw::Encoder::new()
+                .compress_vec(&bytes)
+                .map_err(|error| Error::Invalid(format!("snappy encode: {error}"))),
+        }
+    }
+
     pub fn decode(self, data: &[u8]) -> Result<Struct> {
         let uncompressed;
         let bytes = match self {
@@ -69,6 +83,9 @@ impl Encoding {
                 &uncompressed
             }
         };
+        // Go persistence-serializer blobs (VersionHistories, ...) carry the codec preamble 0x59 before the struct;
+        // 0x59 is never a valid thrift field type, so a leading 0x59 is unambiguous.
+        let bytes = match bytes.first() { Some(0x59) => &bytes[1..], _ => bytes };
         let mut reader = Reader::new(bytes);
         let value = read_struct(&mut reader)?;
         if reader.remaining() != 0 {

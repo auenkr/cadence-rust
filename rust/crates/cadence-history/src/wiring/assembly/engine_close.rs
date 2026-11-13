@@ -226,7 +226,7 @@ impl EngineMutableState {
 
         let version_histories = match &g.version_histories {
             Some(vh) => {
-                Some(blob(enc(&crate::wiring::server::thrift_types_g2::version_histories_to_thrift(vh))?))
+                Some(blob(Encoding::ThriftRW.encode_versioned(&crate::wiring::server::thrift_types_g2::version_histories_to_thrift(vh)).map_err(|e| HistoryError::internal(format!("encode version histories: {e}")))?))
             }
             None => self.snapshot.version_histories.clone(),
         };
