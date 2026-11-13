@@ -299,6 +299,8 @@ try:
         if not ready:
             raise SystemExit(1)
         history2_cmd = lambda: [args.go_server, '--config', work / 'config2', '--zone', plugin, 'start', '--services', 'history']
+        history_cmd = lambda cfg: history2_cmd()
+        history_env = dict(os.environ)
     if args.two_history:
         start(history2_name, history2_cmd(), env=history_env)
     # Matching opens gRPC only after Ringpop bootstrap. Launch its Frontend
@@ -340,7 +342,6 @@ try:
     dump_domain_rows('before-sdk')
     record_services_alive('before-sdk')
 
-    assert args.rust_history_binary, '--rust-history-binary is required'
     SOAK_SECONDS = int(os.environ.get('SOAK_SECONDS', '2700'))
     SOAK_RATE = os.environ.get('SOAK_RATE', '4')
     RESTART_AT = int(os.environ.get('SOAK_RESTART_AT', str(SOAK_SECONDS // 2)))

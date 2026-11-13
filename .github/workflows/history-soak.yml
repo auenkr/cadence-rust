@@ -22,6 +22,10 @@ on:
       rate:
         description: Workflows started per second
         default: "4"
+      go_history:
+        description: Baseline lane, History stays Go (use with two_history=true; Go History-2 is restarted)
+        type: boolean
+        default: false
 
 concurrency:
   group: history-soak-${{ github.ref }}-${{ github.run_id }}
@@ -90,7 +94,7 @@ jobs:
           export SOAK_RATE='${{ env.RATE }}'
           tests/gates/run-frontend-${{ matrix.database }}-lane.sh out/gate \
             --rust-binary "$CARGO_TARGET_DIR/debug/cadence-server" \
-            --rust-history-binary "$CARGO_TARGET_DIR/debug/cadence-history" \
+            ${{ inputs.go_history && ' ' || '--rust-history-binary "$CARGO_TARGET_DIR/debug/cadence-history"' }} \
             --go-server "$GITHUB_WORKSPACE/out/cadence-go-server" \
             --go-cli "$GITHUB_WORKSPACE/out/cadence-cli" \
             --driver "$GITHUB_WORKSPACE/out/history-soak-driver" \
