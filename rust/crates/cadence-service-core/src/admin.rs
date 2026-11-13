@@ -2491,11 +2491,16 @@ pub async fn update_domain_isolation_groups(
         return bad_request(BadRequestError::new("Domain is not set on request."));
     }
     match state
-        .domains
-        .update_domain_isolation_groups(&req.domain, req.isolation_groups)
+        .domain_manager
+        .update_isolation_groups(&req.domain, req.isolation_groups)
     {
         Ok(()) => ok_json(cadence_api::admin::UpdateDomainIsolationGroupsResponse {}),
-        Err(e) => entity_not_exists(e),
+        Err(cadence_persistence::FrontendDomainError::NotFound(e)) => entity_not_exists(e),
+        Err(e) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            e.to_string(),
+        ),
     }
 }
 

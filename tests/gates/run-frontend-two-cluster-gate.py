@@ -227,6 +227,23 @@ try:
         rc, out = cli(B_T, 'tchannel', '--domain', dom, 'domain', 'update', '--description', 'd1-updated', '--retention', '2')
         record('update-global-domain-on-rust-frontend-B', rc == 0, out)
         poll('domain-update-replicated-to-A', a_dom('d1-updated'), 240)
+        # Isolation-group + async-workflow config set on Rust Frontend B must replicate to A
+        # (Go UpdateIsolationGroups / UpdateAsyncWorkflowConfiguraton publish Update tasks;
+        # Go FromDescribeDomainResponseDomain maps both into the Domain proto).
+        time.sleep(5)
+        rc, out = cli(B_T, 'tchannel', '--domain', dom, 'admin', 'isolation-groups', 'update-domain', '--set-drains', 'zone-gate-1')
+        record('set-isolation-groups-on-rust-frontend-B', rc == 0, out)
+        def a_ig():
+            rc, out = cli(A_T, 'tchannel', '--domain', dom, 'admin', 'isolation-groups', 'get-domain')
+            return rc == 0 and 'zone-gate-1' in out, out
+        poll('isolation-groups-replicated-to-A', a_ig, 240)
+        rc, out = cli(B_T, 'tchannel', '--domain', dom, 'admin', 'async-wf-queue', 'update', '--json',
+                      '{"Enabled":false,"PredefinedQueueName":"gate-queue","QueueType":"kafka"}')
+        record('set-async-workflow-config-on-rust-frontend-B', rc == 0, out)
+        def a_async():
+            rc, out = cli(A_T, 'tchannel', '--domain', dom, 'admin', 'async-wf-queue', 'get')
+            return rc == 0 and 'gate-queue' in out, out
+        poll('async-workflow-config-replicated-to-A', a_async, 240)
         for n in ['go-a', 'go-b-hmw', 'rust-frontend-b']:
             record(f'{n}-alive-at-end', procs[n].poll() is None, f'exit={procs[n].poll()}')
         raise SystemExit(0)

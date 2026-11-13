@@ -284,6 +284,69 @@ fn domain_out(a: &t::DomainTaskAttributes) -> cadence_proto::api::Domain {
                 cluster_name: c.cluster_name,
             })
             .collect(),
+        // Go FromIsolationGroupConfig: nil/absent -> None, otherwise sorted by name.
+        isolation_groups: config.isolation_groups.map(|c| {
+            let mut groups: Vec<_> = c
+                .isolation_groups
+                .into_iter()
+                .map(|g| cadence_proto::api::IsolationGroupPartition {
+                    name: g.name,
+                    state: g.state.map_or(0, |s| s as i32),
+                })
+                .collect();
+            groups.sort_by(|a, b| a.name.cmp(&b.name));
+            cadence_proto::api::IsolationGroupConfiguration {
+                isolation_groups: groups,
+            }
+        }),
+        // Go FromDomainAsyncWorkflowConfiguraton.
+        async_workflow_config: config.async_workflow_config.map(|c| {
+            cadence_proto::api::AsyncWorkflowConfiguration {
+                enabled: c.enabled,
+                predefined_queue_name: c.predefined_queue_name,
+                queue_type: c.queue_type,
+                queue_config: c.queue_config.map(data_blob_out),
+            }
+        }),
+        // Go FromActiveClusters: only the by-cluster-attribute map is mapped; an
+        // empty attribute map becomes None (Go `len > 0`).
+        active_clusters: repl.active_clusters.map(|ac| cadence_proto::api::ActiveClusters {
+            active_clusters_by_cluster_attribute: ac
+                .active_clusters_by_cluster_attribute
+                .map(|m| {
+                    m.into_iter()
+                        .map(|(k, scope)| {
+                            (
+                                k,
+                                cadence_proto::api::ClusterAttributeScope {
+                                    cluster_attributes: scope
+                                        .cluster_attributes
+                                        .filter(|a| !a.is_empty())
+                                        .map(|a| {
+                                            a.into_iter()
+                                                .map(|(n, i)| {
+                                                    (
+                                                        n,
+                                                        cadence_proto::api::ActiveClusterInfo {
+                                                            active_cluster_name: i
+                                                                .active_cluster_name,
+                                                            failover_version: i.failover_version,
+                                                        },
+                                                    )
+                                                })
+                                                .collect()
+                                        })
+                                        .unwrap_or_default(),
+                                },
+                            )
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            ..Default::default()
+        }),
+        // failover_info: Go's DescribeDomainResponse built from task attributes has no
+        // FailoverInfo, so it stays None.
         ..Default::default()
     }
 }
