@@ -82,25 +82,6 @@ impl Encoding {
 
 fn value_type(value: &cadence_thrift::Value) -> TType {
     use cadence_thrift::Value;
-
-    /// types.QueueState keeps queue ids, slice ranges and predicates through the thrift shard blob (Go context.go UpdateQueueState).
-    #[test]
-    fn shard_queue_state_roundtrip_is_lossless() {
-        let mut rec = ShardInfoRecord::default();
-        let mut q = ShardQueueStateRecord { exclusive_max_read_level: (9, 100), ..Default::default() };
-        q.virtual_queue_states.insert(0, vec![
-            ShardVirtualSliceRecord { inclusive_min: (1, 10), exclusive_max: (2, 20), predicate: Some(ShardPredicateRecord::Universal) },
-            ShardVirtualSliceRecord { inclusive_min: (3, 30), exclusive_max: (4, 40), predicate: Some(ShardPredicateRecord::Empty) },
-        ]);
-        q.virtual_queue_states.insert(5, vec![ShardVirtualSliceRecord {
-            inclusive_min: (5, 50), exclusive_max: (6, 60),
-            predicate: Some(ShardPredicateRecord::DomainId { domain_ids: vec!["a".into(), "b".into()], is_exclusive: Some(true) }),
-        }]);
-        q.virtual_queue_states.insert(7, vec![]);
-        rec.queue_states.insert(3, q);
-        let back = ShardInfoRecord::decode(&rec.encode(Encoding::ThriftRW).unwrap(), Encoding::ThriftRW).unwrap();
-        assert_eq!(back.queue_states, rec.queue_states);
-    }
     match value {
         Value::Bool(_) => TType::Bool,
         Value::I8(_) => TType::Byte,
@@ -1049,6 +1030,25 @@ mod tests {
     use super::*;
     use crate::history_contract::{HistoryTreeInfo, ReplicationTask};
     use cadence_thrift::Value;
+
+    /// types.QueueState keeps queue ids, slice ranges and predicates through the thrift shard blob (Go context.go UpdateQueueState).
+    #[test]
+    fn shard_queue_state_roundtrip_is_lossless() {
+        let mut rec = ShardInfoRecord::default();
+        let mut q = ShardQueueStateRecord { exclusive_max_read_level: (9, 100), ..Default::default() };
+        q.virtual_queue_states.insert(0, vec![
+            ShardVirtualSliceRecord { inclusive_min: (1, 10), exclusive_max: (2, 20), predicate: Some(ShardPredicateRecord::Universal) },
+            ShardVirtualSliceRecord { inclusive_min: (3, 30), exclusive_max: (4, 40), predicate: Some(ShardPredicateRecord::Empty) },
+        ]);
+        q.virtual_queue_states.insert(5, vec![ShardVirtualSliceRecord {
+            inclusive_min: (5, 50), exclusive_max: (6, 60),
+            predicate: Some(ShardPredicateRecord::DomainId { domain_ids: vec!["a".into(), "b".into()], is_exclusive: Some(true) }),
+        }]);
+        q.virtual_queue_states.insert(7, vec![]);
+        rec.queue_states.insert(3, q);
+        let back = ShardInfoRecord::decode(&rec.encode(Encoding::ThriftRW).unwrap(), Encoding::ThriftRW).unwrap();
+        assert_eq!(back.queue_states, rec.queue_states);
+    }
 
     // Go sqlblobs.TaskInfo emits these exact field bytes for scheduleID=7.
     const TASK_INFO_SCHEDULE_ID_7: &[u8] = &[10, 0, 13, 0, 0, 0, 0, 0, 0, 0, 7, 0];
