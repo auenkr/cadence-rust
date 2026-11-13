@@ -1161,6 +1161,18 @@ fn resend_replication_input(
     }
 }
 
+/// Go mapper/proto ToTaskType: admin.v1.TaskType -> internal TaskType
+/// (2 transfer, 3 timer, 4 replication, 6 cross-cluster); INVALID -> nil.
+fn admin_task_type_from_proto(t: i32) -> Option<i32> {
+    match t {
+        1 => Some(2),
+        2 => Some(3),
+        3 => Some(4),
+        4 => Some(6),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod fix_fe_admin_tests {
     use super::*;
@@ -1204,17 +1216,5 @@ mod fix_fe_admin_tests {
             (Some(3), Some(11), Some(9), Some(12))
         );
         assert_eq!((input.workflow_id.as_str(), input.run_id.as_str()), ("w", "r"));
-    }
-}
-
-/// Go mapper/proto ToTaskType: admin.v1.TaskType -> internal TaskType
-/// (2 transfer, 3 timer, 4 replication, 6 cross-cluster); INVALID -> nil.
-fn admin_task_type_from_proto(t: i32) -> Option<i32> {
-    match t {
-        1 => Some(2),
-        2 => Some(3),
-        3 => Some(4),
-        4 => Some(6),
-        _ => None,
     }
 }
