@@ -45,3 +45,7 @@ Fix details are in the commits; no REJECTED findings (every P1 examined was conf
 
 All 12 combos green on head 8e5a3e440743a3c2d6c8000f64426be3f2e74504 (no merge needed: origin/master had no newer commits).
 Note: Codex P1 #1 (outbound replication tasks) is OPEN, so mixed-cluster replication behaviour is not covered by these gates.
+
+## Post-merge master validation
+
+Master b1e361b6f (2026-11-13): 43404892093: success 43404896446: success 43404900435: success 43404904269: success 43404907733: success 43404911625: success 43404915864: success 43404919768: success 43404924661: success 43404928698: success 43404933071: success 43404937436: success 43404941553: success 
