@@ -2013,7 +2013,7 @@ pub async fn remove_task(
         });
     let request = cadence_proto::history::RemoveTaskRequest {
         shard_id: req.shard_id,
-        task_type: req.task_type.unwrap_or_default(),
+        task_type: admin_task_type_to_proto(req.task_type),
         task_id: req.task_id,
         visibility_time,
         cluster_name: req.cluster_name,
@@ -2064,7 +2064,7 @@ pub async fn reset_queue(
     let request = cadence_proto::history::ResetQueueRequest {
         shard_id: req.shard_id,
         cluster_name: req.cluster_name,
-        task_type: req.task_type.unwrap_or_default(),
+        task_type: admin_task_type_to_proto(req.task_type),
     };
     let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
     let response = match client.reset_queue(history_admin_request(request)).await {
@@ -2115,7 +2115,7 @@ pub async fn describe_queue(
     let request = cadence_proto::history::DescribeQueueRequest {
         shard_id: req.shard_id,
         cluster_name: req.cluster_name,
-        task_type: req.task_type.unwrap_or_default(),
+        task_type: admin_task_type_to_proto(req.task_type),
     };
     let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
     match client.describe_queue(history_admin_request(request)).await {
@@ -3256,5 +3256,17 @@ mod dynamic_config_admin_tests {
             stored["CustomKw"],
             cadence_api::enums::IndexedValueType::Keyword.value()
         );
+    }
+}
+
+/// Go mapper/proto FromTaskType: internal TaskType (2 transfer, 3 timer, 4 replication, 6 cross-cluster)
+/// -> admin.v1.TaskType (1..4); anything else is TASK_TYPE_INVALID.
+fn admin_task_type_to_proto(t: Option<i32>) -> i32 {
+    match t {
+        Some(2) => 1,
+        Some(3) => 2,
+        Some(4) => 3,
+        Some(6) => 4,
+        _ => 0,
     }
 }

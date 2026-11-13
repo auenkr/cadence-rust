@@ -552,7 +552,7 @@ try:
             adm_wid = 'admin-gate-' + secrets.token_hex(3)
             run('admin-gate-start-wf', [*cli_g, '--domain', dom_t, 'workflow', 'start', '--tl', 'admin-gate-tl', '--wt', 'AdminGate', '--wid', adm_wid, '--et', '600', '--dt', '10'])
             pr = subprocess.run([sys.executable, str(Path(__file__).resolve().parent / 'history_admin_cli.py'), str(args.go_cli),
-                                 f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["FRONTEND_PORT"]}', dom_t, 'test', adm_wid, str(work)],
+                                 f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["FRONTEND_PORT"]}', dom_t, 'cluster0', adm_wid, str(work)],
                                 capture_output=True, text=True, timeout=900)
             (work / 'history-admin-cli.log').write_text(pr.stdout + pr.stderr)
             for line in pr.stdout.splitlines():
