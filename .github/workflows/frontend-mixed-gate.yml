@@ -52,7 +52,7 @@ on:
         default: ""
 
 concurrency:
-  group: frontend-mixed-gate-${{ github.ref }}-${{ inputs.database }}-${{ inputs.es_flavor }}-${{ inputs.es }}-${{ inputs.gcs }}-${{ inputs.two_history_graceful }}-${{ inputs.rust_history }}-${{ inputs.two_cluster }}
+  group: frontend-mixed-gate-${{ github.ref }}-${{ inputs.database }}-${{ inputs.es_flavor }}-${{ inputs.es }}-${{ inputs.gcs }}-${{ inputs.two_history_graceful }}-${{ inputs.rust_history }}-${{ inputs.two_cluster }}-${{ inputs.rust_history_side }}
   cancel-in-progress: true
 
 jobs:
