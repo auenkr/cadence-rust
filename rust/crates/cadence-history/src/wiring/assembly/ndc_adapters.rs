@@ -415,11 +415,11 @@ impl HistoryReplicatorEnv for EngineNdcEnv {
         self.clock.now()
     }
     fn new_mutable_state(&self, domain_id: &str, execution: &WorkflowExecution) -> NdcResult<Box<dyn NdcMutableState>> {
-        Ok(Box::new(OwnedNdcMutableState::new(
+        // Go `NewMutableStateBuilderWithVersionHistories(.., EmptyVersion)`: one empty version history.
+        Ok(Box::new(new_state_with_empty_version_histories(
             domain_id,
             execution,
             self.now_nanos(),
-            crate::execution::mutable_state_methods_common::TaskGenEnv::default(),
         )))
     }
     fn standby_cluster_delay_nanos(&self) -> i64 {
@@ -427,6 +427,41 @@ impl HistoryReplicatorEnv for EngineNdcEnv {
     }
     fn set_current_time(&self, cluster: &str, nanos: i64) {
         self.shard.set_current_time(cluster, nanos);
+    }
+}
+
+fn new_state_with_empty_version_histories(
+    domain_id: &str,
+    execution: &WorkflowExecution,
+    now_nanos: i64,
+) -> OwnedNdcMutableState {
+    let mut state = OwnedNdcMutableState::new(
+        domain_id,
+        execution,
+        now_nanos,
+        crate::execution::mutable_state_methods_common::TaskGenEnv::default(),
+    );
+    state.typed_mut().version_histories = Some(cadence_api::types::VersionHistories {
+        current_version_history_index: 0,
+        histories: vec![cadence_persistence::version_history::new_history(Vec::new(), &[])],
+    });
+    state
+}
+
+#[cfg(test)]
+mod empty_version_histories_tests {
+    use super::*;
+    use crate::ndc::NdcMutableState;
+
+    #[test]
+    fn replicator_new_state_has_empty_current_version_history() {
+        let exec = WorkflowExecution { workflow_id: "w".into(), run_id: "r".into() };
+        let state = new_state_with_empty_version_histories("d", &exec, 1);
+        let h = state.get_version_histories().expect("version histories present");
+        assert_eq!(h.current_version_history_index, 0);
+        assert_eq!(h.histories.len(), 1);
+        assert!(h.histories[0].items.is_empty());
+        assert!(h.histories[0].branch_token.is_empty());
     }
 }
 
