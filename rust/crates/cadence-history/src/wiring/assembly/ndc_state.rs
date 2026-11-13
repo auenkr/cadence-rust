@@ -39,7 +39,7 @@ fn active_replication_rows(
     domain_id: &str,
     workflow_id: &str,
     run_id: &str,
-    events: &[cadence_api::types::HistoryEvent],
+    events: &[cadence_api::service_types::HistoryEvent],
     branch_token: &[u8],
 ) -> NdcResult<Vec<cadence_persistence::history_contract::Task>> {
     use cadence_persistence::history_contract as pc;
