@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -42,22 +43,25 @@ func oneActivity(ctx workflow.Context, in Input) (string, error) {
 }
 
 type Sample struct {
-	ID           string    `json:"workflow_id"`
-	RunID        string    `json:"run_id"`
-	Phase        string    `json:"phase"`
-	Scheduled    time.Time `json:"scheduled"`
-	Started      time.Time `json:"started"`
-	Completed    time.Time `json:"completed"`
-	StartMS      float64   `json:"start_rpc_ms"`
-	CompletionMS float64   `json:"completion_ms"`
-	LagMS        float64   `json:"generator_lag_ms"`
-	ActivitySTS  []float64 `json:"activity_schedule_to_start_ms"`
-	DecisionSTS  []float64 `json:"decision_schedule_to_start_ms"`
-	ActivityMS   []float64 `json:"activity_ms"`
-	StartedOK    bool      `json:"start_ok"`
-	Correct      bool      `json:"correct"`
-	Error        string    `json:"error,omitempty"`
-	Dropped      bool      `json:"generator_dropped"`
+	ExpectedSHA256      string    `json:"expected_result_sha256"`
+	ObservedSHA256      string    `json:"observed_result_sha256"`
+	ActivityCompletions []int64   `json:"activity_completion_unix_nano"`
+	ID                  string    `json:"workflow_id"`
+	RunID               string    `json:"run_id"`
+	Phase               string    `json:"phase"`
+	Scheduled           time.Time `json:"scheduled"`
+	Started             time.Time `json:"started"`
+	Completed           time.Time `json:"completed"`
+	StartMS             float64   `json:"start_rpc_ms"`
+	CompletionMS        float64   `json:"completion_ms"`
+	LagMS               float64   `json:"generator_lag_ms"`
+	ActivitySTS         []float64 `json:"activity_schedule_to_start_ms"`
+	DecisionSTS         []float64 `json:"decision_schedule_to_start_ms"`
+	ActivityMS          []float64 `json:"activity_ms"`
+	StartedOK           bool      `json:"start_ok"`
+	Correct             bool      `json:"correct"`
+	Error               string    `json:"error,omitempty"`
+	Dropped             bool      `json:"generator_dropped"`
 }
 
 func history(ctx context.Context, rpc workflowserviceclient.Interface, domain string, s *Sample) error {
@@ -97,6 +101,7 @@ func history(ctx context.Context, rpc workflowserviceclient.Interface, domain st
 				s.DecisionSTS = append(s.DecisionSTS, float64(e.GetTimestamp()-t)/1e6)
 				decisions++
 			case shared.EventTypeActivityTaskCompleted:
+				s.ActivityCompletions = append(s.ActivityCompletions, e.GetTimestamp())
 				id := e.GetActivityTaskCompletedEventAttributes().GetStartedEventId()
 				t, ok := started[id]
 				if !ok {
@@ -200,6 +205,7 @@ func main() {
 			go func(s Sample) {
 				defer wg.Done()
 				defer func() { <-slots }()
+				s.ExpectedSHA256 = fmt.Sprintf("%x", sha256.Sum256([]byte(in.Payload)))
 				s.Started = time.Now()
 				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 				defer cancel()
@@ -210,6 +216,7 @@ func main() {
 					s.RunID = r.GetRunID()
 					var value string
 					e = r.Get(ctx, &value)
+					s.ObservedSHA256 = fmt.Sprintf("%x", sha256.Sum256([]byte(value)))
 					s.Completed = time.Now()
 					s.CompletionMS = float64(s.Completed.Sub(s.Scheduled)) / 1e6
 					if e == nil && value != in.Payload {

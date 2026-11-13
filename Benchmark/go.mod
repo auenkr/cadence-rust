@@ -1,4 +1,4 @@
-module cadence-rust-frontend-gate
+module cadence-rust-sdk-benchmark
 
 go 1.24
 

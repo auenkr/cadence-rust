@@ -74,7 +74,7 @@ def main():
                     cpu_affinity={'generator':cpus[0], 'sdk_worker':cpus[1], 'services_and_db':cpus[2:4]},
                     hardware=capture(['lscpu']), protocol='open-loop-one-activity-v1',
                     metrics_unavailable=['database query latency/ops/connections', 'server retry counters',
-                                         'server queue backlog age', 'network bytes', 'disk IO'],
+                                         'server queue backlog age'],
                     scope='Matching only; Go Frontend, History and system Worker in both arms')
     for arm, image in [('go','cadence-go:ci'),('rust','cadence-rust:ci')]:
         manifest[arm+'_image_id'] = capture(['docker','image','inspect',image,'--format','{{.Id}}'])
@@ -105,6 +105,8 @@ def main():
                         cid=capture(compose+['ps','-q',service],arm_env)
                         identity=json.loads(capture(['docker','inspect',cid]))[0]
                         if identity['Config']['Image']!=image: raise RuntimeError('unexpected service image')
+                        run(['docker','exec',cid,'cat','/etc/cadence/config/docker.yaml'],key+'-config-'+service)
+                        run(['docker','exec',cid,'cat','/etc/cadence/dynamicconfig/development.yaml'],key+'-dynamic-'+service)
                         identities[service]=identity
                         containers.append(identity['Name'].lstrip('/'))
                         run(['docker','top',cid,'-eo','pid,comm,args'],key+'-process-'+service)
@@ -121,7 +123,7 @@ def main():
                     if sdk_worker.poll() is not None: raise RuntimeError('SDK worker died')
                     start,end,ready=[OUT/(key+'.'+suffix) for suffix in ('start','end','ready')]
                     for path in (start,end,ready):path.unlink(missing_ok=True)
-                    collector_cmd=['python3',str(ROOT/'collect_resources.py'),'--start-event',str(start),
+                    collector_cmd=['taskset','-c',str(cpus[0]),'python3',str(ROOT/'collect_resources.py'),'--start-event',str(start),
                         '--end-event',str(end),'--ready-event',str(ready),'--event-timeout',str(a.warmup+a.duration+300),
                         '--interval','0.25','--output',str(OUT/(key+'-resources.json')),'--containers',*containers]
                     with (OUT/(key+'-collector.log')).open('w') as log:

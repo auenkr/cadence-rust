@@ -2,10 +2,13 @@
 """Collect cumulative cgroup CPU and memory measurements for Docker containers."""
 import argparse
 import json
+import os
 import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+PIDS = {}
 
 
 def parse_cgroups(entries):
@@ -24,6 +27,7 @@ def _container_cgroups():
         name, pid = line.lstrip("/").split("\t", 1)
         if int(pid) <= 0:
             continue
+        PIDS[name] = int(pid)
         entries = Path(f"/proc/{pid}/cgroup").read_text().splitlines()
         groups = parse_cgroups(entries)
         # Cgroup v2 stores cpu.stat and memory.current under the unified path.
@@ -49,7 +53,32 @@ def snapshot(containers):
             cpu, memory = paths
             cpu_ns = int((cpu / "cpuacct.usage").read_text())
             memory_bytes = int((memory / "memory.usage_in_bytes").read_text())
-        current[name] = {"cpu_ns": cpu_ns, "memory_bytes": memory_bytes}
+        # Docker containers each have their own network namespace. Read from the
+        # service init PID; namespace totals include all its processes.
+        net = Path(f"/proc/{PIDS[name]}/net/dev").read_text().splitlines()[2:]
+        receive = transmit = 0
+        for line in net:
+            _, counters = line.split(":", 1)
+            values = counters.split()
+            receive += int(values[0]); transmit += int(values[8])
+        read_bytes = write_bytes = rss = 0
+        if version == "v2":
+            for line in (paths / "io.stat").read_text().splitlines():
+                fields = dict(item.split("=") for item in line.split()[1:])
+                read_bytes += int(fields.get("rbytes", 0))
+                write_bytes += int(fields.get("wbytes", 0))
+            # Sum resident pages for processes in this container's cgroup.
+            # Shared pages can be counted more than once; cgroup memory is also retained.
+            for pid in (paths / "cgroup.procs").read_text().splitlines():
+                try:
+                    rss += int(Path(f"/proc/{pid}/statm").read_text().split()[1]) * os.sysconf("SC_PAGE_SIZE")
+                except FileNotFoundError:
+                    pass  # process exited between membership and statm reads
+        current[name] = {"cpu_ns": cpu_ns, "memory_bytes": memory_bytes,
+                         "rss_bytes": rss if version == "v2" else None,
+                         "network_receive_bytes": receive, "network_transmit_bytes": transmit,
+                         "disk_read_bytes": read_bytes if version == "v2" else None,
+                         "disk_write_bytes": write_bytes if version == "v2" else None}
     return current
 
 
@@ -90,6 +119,7 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
     if ready_event:
         Path(ready_event).write_text(started_at, encoding="utf-8")
     peak = dict((name, data["memory_bytes"]) for name, data in first.items())
+    rss_peak = {name: data["rss_bytes"] for name,data in first.items()}
     samples = 1
     while True:
         if end_event and Path(end_event).exists():
@@ -103,12 +133,16 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
         now = snapshot(selected)
         for name, data in now.items():
             peak[name] = max(peak[name], data["memory_bytes"])
+            if data["rss_bytes"] is not None:
+                rss_peak[name] = max(rss_peak[name], data["rss_bytes"])
         last = now
         samples += 1
     last = snapshot(selected)
     samples += 1
     for name, data in last.items():
         peak[name] = max(peak[name], data["memory_bytes"])
+        if data["rss_bytes"] is not None:
+            rss_peak[name] = max(rss_peak[name], data["rss_bytes"])
     elapsed = time.monotonic() - started
     containers_result = {}
     for name, (_, version) in selected.items():
@@ -118,7 +152,13 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
             raise RuntimeError(f"{error} for {name}") from error
         containers_result[name] = {"cpu_seconds": consumed_cpu_seconds, "average_cpu_cores": consumed_cpu_seconds / elapsed,
                                    "peak_cgroup_memory_bytes": peak[name], "cgroup_version": version,
-                                   "initial_cpu_ns": first[name]["cpu_ns"], "final_cpu_ns": last[name]["cpu_ns"]}
+                                   "initial_cpu_ns": first[name]["cpu_ns"], "final_cpu_ns": last[name]["cpu_ns"],
+                                   "peak_summed_process_rss_bytes": rss_peak[name]}
+        for metric in ("network_receive_bytes", "network_transmit_bytes", "disk_read_bytes", "disk_write_bytes"):
+            before, after = first[name][metric], last[name][metric]
+            if before is not None and after < before:
+                raise RuntimeError(f"counter reset: {name}/{metric}")
+            containers_result[name][metric] = after - before if before is not None else None
     result = {"schema_version": 2, "started_at_utc": started_at, "duration_seconds": elapsed,
               "ended_at_utc": datetime.now(timezone.utc).isoformat(),
               "sampling_interval_seconds": interval, "samples": samples,

@@ -16,12 +16,16 @@ def percentiles(values):
 def summarize(rows, manifest):
     measured=[r for r in rows if r['phase']=='measure']
     expected=math.ceil(manifest['rate']*manifest['duration'])
+    if len([r for r in rows if r['phase']=='warmup'])!=math.ceil(manifest.get('warmup',0)*manifest['rate']):
+        raise ValueError('missing warmup ledger entries')
     if len(measured)!=expected or len({r['workflow_id'] for r in rows})!=len(rows):
         raise ValueError('missing or duplicate workflow ledger entries')
     if any(not r['correct'] or not r['start_ok'] or r['generator_dropped'] or r.get('error') for r in rows):
         raise ValueError('workflow correctness or generator failure (including warmup)')
     if any(len(r['activity_ms'])!=1 or len(r['activity_schedule_to_start_ms'])!=1 or len(r['decision_schedule_to_start_ms'])<2 for r in measured):
         raise ValueError('missing task processing evidence')
+    if any(not r.get('run_id') or not r.get('expected_result_sha256') or r['expected_result_sha256']!=r.get('observed_result_sha256') for r in rows):
+        raise ValueError('missing run identity or result digest mismatch')
     fields=['start_rpc_ms','completion_ms','generator_lag_ms','activity_ms',
             'activity_schedule_to_start_ms','decision_schedule_to_start_ms']
     latency={key:percentiles([v for r in measured for v in (r[key] if isinstance(r[key],list) else [r[key]])]) for key in fields}
@@ -37,8 +41,7 @@ def summarize(rows, manifest):
     return dict(scheduled=expected,correct=len(measured),errors=0,arrival_rate=manifest['rate'],
                 successful_starts_per_second=started_in_window/manifest['duration'],
                 completions_per_second=completed_in_window/manifest['duration'],
-                activity_tasks_per_second=completed_in_window/manifest['duration'],
-                activity_throughput_note='one verified activity per completion; completion-window proxy, not task event rate',
+                activity_tasks_per_second=sum(begin.timestamp()<=t/1e9<end for r in measured for t in r['activity_completion_unix_nano'])/manifest['duration'],
                 outstanding_at_arrival_end=expected-completed_in_window,latency_ms=latency)
 
 

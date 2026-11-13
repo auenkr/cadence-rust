@@ -8,7 +8,7 @@ from run import deployments
 class PipelineTests(unittest.TestCase):
     def setUp(self):
         now=datetime.now(timezone.utc).isoformat()
-        self.row=dict(workflow_id='w1',phase='measure',correct=True,start_ok=True,
+        self.row=dict(run_id='r1',expected_result_sha256='hash',observed_result_sha256='hash',activity_completion_unix_nano=[int(datetime.now(timezone.utc).timestamp()*1e9)],workflow_id='w1',phase='measure',correct=True,start_ok=True,
                       generator_dropped=False,scheduled=now,started=now,completed=now,
                       start_rpc_ms=1,completion_ms=2,generator_lag_ms=0,
                       activity_ms=[1],activity_schedule_to_start_ms=[1],
