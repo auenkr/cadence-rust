@@ -16,3 +16,7 @@ Regression tests: state_builder (history builder kept, branch token set, passive
 - Two-cluster gate (two_cluster=true rust_history=true kafka=false) PASS, `GATE SUMMARY failed: []`: run 43443911055 at head with fix 5 (code commit "IsCurrentWorkflowGuaranteed uses stateInDB (Go)").
 - rust-ci cadence-history at same code: 43443905150 success.
 - Final head SHA / 12 combo run IDs: see section below.
+
+## Final validation at head 434b9e1b88672318fc0a042e53ae9b6da3c999df (code identical to the two-cluster PASS; master merged cleanly)
+- rust-ci (full workspace): 43446177994 success.
+- All 12 history-mixed-gate combos (mysql/postgres/cassandra x grpc/tchannel x two_history true/false), dispatched in order database,outbound,two_history: 43446182828 43446198152 43446211837 43446225011 43446239695 43446258501 43446274710 43446288456 43446304941 43446318373 43446331588 43446346453: all success; each log shows `GATE SUMMARY failed: []`.
