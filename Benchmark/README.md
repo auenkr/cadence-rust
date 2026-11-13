@@ -48,7 +48,8 @@ before the audit and includes generator delay. Start latency includes SDK retrie
 missing task samples, invalid latency, and excessive generator lag. Reports include
 p50/p95/p99/p999, starts/completions per arrival-window second, History-timestamp
 activity throughput, and outstanding executions at the arrival-window end.
-The complete raw ledger remains available, including drained completions. Low
+The complete raw ledger, including drained completions, is available in the
+three-day CI artifact; it is not committed to Git. Low
 sample-count p999 values are not statistically strong tail estimates.
 
 `collect_resources.py` uses a warmup-excluding baseline handshake and end marker.
@@ -77,6 +78,11 @@ gh workflow run sdk-matching-benchmark.yml --ref t3/matching-benchmark-harness \
 
 Artifacts contain `Benchmark/evidence/run/` contents. Retain compact real evidence
 here before the artifacts expire, with run URL, tested head and conclusion.
+`compact_evidence.py` retains reports, correctness counts, hashes, commands,
+exit codes and exact configurations. It drops raw ledgers, time series, verbose
+logs, container inventories and unrelated oracle fixtures. Raw evidence expires
+with the CI artifacts; archive it separately before expiry for any important
+performance claim. Compact summaries cannot reconstruct raw percentiles.
 `ci.sh` records its final exit even on error. `run.py` records subprocess commands,
 exits and logs and always tears down database/service containers. It alternates
 Go/Rust order by repetition index. Use odd offsets to start with Rust.

@@ -1,3 +1,11 @@
 bin/
 evidence/run/
 __pycache__/
+
+# Raw CI downloads and watcher output are temporary, not Git evidence.
+evidence/raw-archive/
+evidence/watch-tests.log
+evidence/**/*.jsonl
+evidence/**/*-samples.json
+evidence/**/*-resources.json
+evidence/**/*.log

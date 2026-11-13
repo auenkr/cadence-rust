@@ -1,1 +1,0 @@
-tests/gates/run-mysql-lane.sh out/gate /tmp/cadence-cargo-target-mysql-43465066608/debug/cadence-matching --matching-restart --matching-failure-recovery --matching-idle-check-seconds 3

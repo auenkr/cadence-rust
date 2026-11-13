@@ -1,7 +1,0 @@
-[2026-11-13 16:53:11,423] WARN [AdminClient clientId=adminclient-1] Connection to node -1 (localhost/127.0.0.1:9094) could not be established. Node may not be available. (org.apache.kafka.clients.NetworkClient)
-[2026-11-13 16:53:11,428] WARN [AdminClient clientId=adminclient-1] Connection to node -1 (localhost/127.0.0.1:9094) could not be established. Node may not be available. (org.apache.kafka.clients.NetworkClient)
-[2026-11-13 16:53:11,529] WARN [AdminClient clientId=adminclient-1] Connection to node -1 (localhost/127.0.0.1:9094) could not be established. Node may not be available. (org.apache.kafka.clients.NetworkClient)
-[2026-11-13 16:53:11,731] WARN [AdminClient clientId=adminclient-1] Connection to node -1 (localhost/127.0.0.1:9094) could not be established. Node may not be available. (org.apache.kafka.clients.NetworkClient)
-[2026-11-13 16:53:12,137] WARN [AdminClient clientId=adminclient-1] Connection to node -1 (localhost/127.0.0.1:9094) could not be established. Node may not be available. (org.apache.kafka.clients.NetworkClient)
-[2026-11-13 16:53:13,046] WARN [AdminClient clientId=adminclient-1] Connection to node -1 (localhost/127.0.0.1:9094) could not be established. Node may not be available. (org.apache.kafka.clients.NetworkClient)
-Created topic cadence-async-gate.

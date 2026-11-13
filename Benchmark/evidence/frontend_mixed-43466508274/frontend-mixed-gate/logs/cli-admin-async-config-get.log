@@ -1,7 +1,0 @@
-Async workflow queue config for domain fe-gate-async-b154e4:
-{
-  "Enabled": true,
-  "PredefinedQueueName": "gate-async-queue",
-  "QueueType": "",
-  "QueueConfig": null
-}

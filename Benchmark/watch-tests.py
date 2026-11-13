@@ -2,11 +2,11 @@
 """Watch CI and dispatch service tests after the benchmark, without local builds."""
 import json
 from pathlib import Path
-import shutil
 import subprocess
 import tempfile
 import time
 from datetime import datetime, timezone
+from compact_evidence import export_compact
 
 ROOT = Path(__file__).resolve().parent
 STATE = ROOT / 'evidence/after-benchmark-tests.json'
@@ -51,19 +51,7 @@ def retain_raw(run_id, name):
     with tempfile.TemporaryDirectory(prefix='cadence-ci-evidence-') as tmp:
         if not artifacts['artifacts']:return
         gh('run','download',run_id,'--repo',REPO,'--dir',tmp)
-        for source in Path(tmp).rglob('*'):
-            if not source.is_file():continue
-            relative=source.relative_to(tmp)
-            if source.suffix not in ('.json','.jsonl','.md','.yaml','.yml','.txt','.sha256','.exit','.log'):
-                continue
-            if source.stat().st_size>2_000_000:continue
-            target=destination/relative
-            target.parent.mkdir(parents=True,exist_ok=True)
-            # Preserve full raw benchmark ledgers and compact metadata; keep tails
-            # for verbose service/build logs instead of committing huge logs.
-            if source.suffix=='.log' and source.stat().st_size>100_000:
-                target.write_text(''.join(source.read_text(errors='replace').splitlines(keepends=True)[-200:]))
-            else:shutil.copyfile(source,target)
+        export_compact(tmp,destination)
 
 
 def retain(run_id,name):
