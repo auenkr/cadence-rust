@@ -187,7 +187,7 @@ try:
         ok = wait_port(P['A_FE_GRPC'], 300, 'go-a') and wait_port(P['B_FE_GRPC'], 300, 'go-b-fmw') and wait_port(P['B_WORKER'], 300, 'go-b-fmw')
         (work / 'rust-history.yaml').write_text(rust_yaml('noop', '', 'grpc', 'B_', ('cadence_b', 'cadence_b_visibility'), b_seeds, 'cluster1'))
         (work / 'rust-history-binary.sha256').write_text(subprocess.run(['sha256sum', str(args.rust_history_binary)], capture_output=True, text=True).stdout)
-        start('rust-history', [args.rust_history_binary, '--config', work / 'rust-history.yaml', '--root', work, 'start', '--services', 'history'])
+        start('rust-history', [args.rust_history_binary, '--config', work / 'rust-history.yaml', '--root', work, 'start', '--services', 'history'], env={**os.environ, 'RUST_LOG': 'info'})
         ok = ok and wait_port(P['B_HIST_GRPC'], 240, 'rust-history')
         record('go-clusters-listening', ok)
         if not ok:
@@ -197,7 +197,7 @@ try:
             for a, b in [('B_HIST_GRPC', 'B_HIST2_GRPC'), ('B_PPROF3', 'B_PPROF5'), ('B_HIST', 'B_HIST2')]:
                 y2 = re.sub(r'(?m)^(      (?:port|grpcPort): )' + P[a] + r'$', lambda m: m.group(1) + P[b], y2)
             (work / 'rust-history2.yaml').write_text(y2)
-            start('rust-history-2', [args.rust_history_binary, '--config', work / 'rust-history2.yaml', '--root', work, 'start', '--services', 'history'])
+            start('rust-history-2', [args.rust_history_binary, '--config', work / 'rust-history2.yaml', '--root', work, 'start', '--services', 'history'], env={**os.environ, 'RUST_LOG': 'info'})
             ok = ok and wait_port(P['B_HIST2_GRPC'], 240, 'rust-history-2')
             record('rust-history-2-listening', ok)
         time.sleep(20)
