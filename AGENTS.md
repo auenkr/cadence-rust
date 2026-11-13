@@ -39,8 +39,6 @@ Subagents may work independently on parts of the current service. Keep
 working through its remaining gaps and mixed Go/Rust validation, then repeat
 for the next service until the entire cluster runs in Rust without Go.
 
-Use tmux session: cadence-rust for running long process
-
 After each compaction,
 update the [progress-dashboard.html](memory/progress-dashboard.html)
 save the progress in memory and commit and push changes to origin
@@ -52,15 +50,10 @@ For doing actual work use cheap dump model(But give them enugh instruction so th
 
 Why? So that i improve token efficiency. Try to keep minimal token for the orchestrator model as it will be costly.
 
-Worker AGENT:
-Like gpt 6 luna, haiku 5.5, or opencode free model(Medium thinking mode). Normal speed mode(Not fast mode)
-
 ## NOTE
 This machine has 4 CPUs (i5-7300HQ), 7.7GB RAM and ~117GB free on /mnt/storage, so clean up the things which are not needed or saved already.
 
 CI builds (user requirement 2026-10-24): run ALL Cargo commands (build, clippy, test, check and formatting) on GitHub Actions CI/CD runners, never on this slow dev host. This supersedes earlier local quick-iteration and local final-target instructions. Use `gh workflow run rust-ci.yml --ref <branch> [-f package=cadence-matching]`. Final validation must use a fresh, uncached dedicated target directory on the CI runner, with clippy followed by workspace tests; mixed gates must record the Rust binary SHA256. Record run URL, head SHA and conclusion in memory/evidence. Prefer existing GitHub Actions gate workflows for mixed-cluster validation too.
-
-Local long-running low-CPU tasks (user requirement 2026-11-03): tasks that run for a long time but use little CPU (e.g. soak/long-duration tests against an already-built binary, waiting on timers/retention, log tailing, idle service runs) run on this machine instead of CI. Run them in tmux session cadence-rust under `/mnt/storage/service/bin/work-safe` with `nice -n 10 ionice -c3`, follow the load/RAM guards (load <= 6, MemAvailable >= 2GB) and Docker limits, and record command, exit code and logs in memory/evidence. CPU-heavy work stays on CI: all Cargo commands, Go builds/tests and full mixed-cluster gates.
 
 The local Cargo lock, shared-cache and `cargo-safe` guidance below is historical resource guidance, not permission to run Cargo locally. Recovering a failed worker or fixing formatting does not create an exception; dispatch CI for those commands too.
 
