@@ -96,11 +96,26 @@ fn postgres_params(params: &[Value]) -> Vec<&(dyn postgres::types::ToSql + Sync)
         })
         .collect()
 }
-impl SqlTx for mysql::Transaction<'_> {
+/// MySQL transaction that poisons its pooled connection on connectivity errors.
+struct MySqlTx<'a, 'b> {
+    tx: mysql::Transaction<'b>,
+    discard: &'a std::sync::atomic::AtomicBool,
+}
+impl MySqlTx<'_, '_> {
+    fn fail(&self, error: mysql::Error) -> PersistenceError {
+        if error.is_connectivity_error() {
+            self.discard
+                .store(true, std::sync::atomic::Ordering::Release);
+        }
+        mysql_error(error)
+    }
+}
+impl SqlTx for MySqlTx<'_, '_> {
     fn execute(&mut self, sql: &str, params: &[Value]) -> Result<u64, PersistenceError> {
-        self.exec_drop(sql, mysql_params(params))
-            .map_err(mysql_error)?;
-        Ok(self.affected_rows())
+        self.tx
+            .exec_drop(sql, mysql_params(params))
+            .map_err(|e| self.fail(e))?;
+        Ok(self.tx.affected_rows())
     }
     fn query(
         &mut self,
@@ -108,7 +123,10 @@ impl SqlTx for mysql::Transaction<'_> {
         params: &[Value],
         columns: &[Column],
     ) -> Result<Vec<Vec<Value>>, PersistenceError> {
-        let rows: Vec<mysql::Row> = self.exec(sql, mysql_params(params)).map_err(mysql_error)?;
+        let rows: Vec<mysql::Row> = self
+            .tx
+            .exec(sql, mysql_params(params))
+            .map_err(|e| self.fail(e))?;
         rows.into_iter()
             .map(|row| {
                 columns
@@ -210,11 +228,24 @@ impl SqlBackend {
         match &self.0 {
             Backend::MySql(pool) => {
                 let mut conn = pool.checkout().map_err(internal)?;
-                let mut tx = conn
+                // A connection broken by a DB restart must not return to the pool
+                // (Go database/sql drops connections that report driver.ErrBadConn).
+                let discard = conn.discard_flag();
+                let poison = |error: mysql::Error| {
+                    if error.is_connectivity_error() {
+                        discard.store(true, std::sync::atomic::Ordering::Release);
+                    }
+                    mysql_error(error)
+                };
+                let tx = conn
                     .start_transaction(mysql::TxOpts::default())
-                    .map_err(mysql_error)?;
-                let result = run(&mut tx)?;
-                tx.commit().map_err(mysql_error)?;
+                    .map_err(poison)?;
+                let mut wrapped = MySqlTx {
+                    tx,
+                    discard: &discard,
+                };
+                let result = run(&mut wrapped)?;
+                wrapped.tx.commit().map_err(poison)?;
                 Ok(result)
             }
             Backend::Postgres(pool) => {
