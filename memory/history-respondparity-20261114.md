@@ -40,3 +40,9 @@ Per-file audit (Go line refs -> Rust):
   KNOWN GAP: L574-602 TransactionSizeLimitError -> terminate has no Rust persistence error type (not implemented, logic exists only in the generic decision/handler.rs).
 - reset_workflow_execution.go (L44-296): MATCH (engine/reset_workflow_execution.rs).
 - start_workflow_execution.go (L53-1050, incl. SignalWithStart L473-640, getStartRequest, validate, terminateAndStart, reuse policy, cleanup): MATCH (engine/start_workflow_execution.rs).
+
+### CI evidence (head SHA 4af3200ff519fae2e0fc18cb4f12df5429e96b03)
+- rust-ci cadence-history: https://github.com/auenkr/cadence-rust/actions/runs/43510732283 success
+- history-mixed-gate two_history=true, all success with `GATE SUMMARY failed: []`:
+  mysql/grpc 43511691578, mysql/tchannel 43511697645, postgres/grpc 43511702825, postgres/tchannel 43511708734, cassandra/grpc 43511713195, cassandra/tchannel 43511717968
+  (https://github.com/auenkr/cadence-rust/actions/runs/<id>)
