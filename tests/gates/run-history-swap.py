@@ -280,6 +280,7 @@ cli_g = [args.go_cli, '--address', f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', '
 status = 0
 ctl = work / 'ctl'; ctl.mkdir(exist_ok=True)
 seq = [0]
+BENIGN = re.compile(r'DLQ handler (?:started|stopped)|data-corruption-workflow|check-data-corruption', re.I)
 BAD = re.compile(r'dlq|dead.?letter|corrupt|checksum|panicked at|\npanic:|fatal error:|unknown encoding|failed to deserialize|decode (?:error|failed)', re.I)
 history_logs = []
 def go_history_cmd():
@@ -380,7 +381,7 @@ try:
     time.sleep(3)
     for p in sorted(work.glob('*.log')):
         t = p.read_text(errors='replace')
-        hits = [l for l in t.splitlines() if BAD.search(l)]
+        hits = [l for l in t.splitlines() if BAD.search(l) and not BENIGN.search(l)]
         record(f'log-clean-{p.stem}', not hits, ' | '.join(h[:200] for h in hits[:5]))
 except SystemExit:
     pass
