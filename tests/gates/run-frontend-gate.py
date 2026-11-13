@@ -397,7 +397,10 @@ try:
                     st, blob = s3c('GET', f'/{bkt}/{kx}')
                     (work / f'rs3-blob-{wid}-{kx.rsplit("/", 1)[-1]}.json').write_text(blob)
             record('rs3-rust-wrote-history-blobs', bool(runs) and all(hist_keys.values()), json.dumps(hist_keys)[:500])
-            record('rs3-rust-wrote-visibility-records', len(vis_keys) >= 4 * len(runs) > 0, '\n'.join(vis_keys[:10]))
+            # retention 0 races the close transfer task against the delete timer (same in Go): a run deleted before its
+            # CloseExecutionTask is processed gets no visibility archive. Require visibility for >= 2 of the runs.
+            vis_runs = {w: r_ for w, r_ in runs.items() if any(f'/workflowID/{w}/closeTimeout/' in k for k in vis_keys)}
+            record('rs3-rust-wrote-visibility-records', len(vis_runs) >= 2 and len(vis_keys) >= 4 * len(vis_runs), f'{sorted(vis_runs)}\n' + '\n'.join(vis_keys[:10]))
             # 2) wait for retention deletion (describe fails once the run left persistence)
             gone = {}
             for wid, rid in runs.items():
@@ -421,7 +424,7 @@ try:
                 for _ in range(12):
                     r = subprocess.run([*cli, '--domain', dom_r, 'workflow', 'listarchived', '--query', f"WorkflowTypeName = '{wtype}'", '--all'], capture_output=True, text=True, timeout=60)
                     out = r.stdout + r.stderr
-                    if r.returncode == 0 and all(w in out for w in runs):
+                    if r.returncode == 0 and all(w in out for w in vis_runs):
                         found = True
                         break
                     time.sleep(5)
@@ -436,7 +439,7 @@ try:
                     record(f'rs3-go-reads-rust-history-{wid}', r.returncode == 0 and 'WorkflowExecutionStarted' in r.stdout and 'WorkflowExecutionTerminated' in r.stdout, r.stdout + r.stderr)
                 r = subprocess.run([rd, 'visibility', args.s3_endpoint, rs_vis, dom_id, f"WorkflowTypeName = '{wtype}'"], capture_output=True, text=True, timeout=60)
                 (work / 'rs3-go-reader-visibility.log').write_text(r.stdout + r.stderr)
-                record('rs3-go-reads-rust-visibility', r.returncode == 0 and all(w in r.stdout for w in runs), r.stdout + r.stderr)
+                record('rs3-go-reads-rust-visibility', r.returncode == 0 and all(w in r.stdout for w in vis_runs), r.stdout + r.stderr)
         raise SystemExit(0)
     dom_t, dom_g = 'fe-gate-t-' + secrets.token_hex(3), 'fe-gate-g-' + secrets.token_hex(3)
     run('cli-register-domain-tchannel', [*cli_t, '--domain', dom_t, 'domain', 'register', '--retention', '1'])
