@@ -22,3 +22,7 @@ The history mixed gate runs a single cluster. A global domain needs a second clu
   - URLs: https://github.com/auenkr/cadence-rust/actions/runs/<id>
 
 Earlier failed CI runs (fixed): 43411827881 (test in fn scope), 43412444504 (duplicate splice), 43413085021 (unused imports).
+
+## Post-merge master validation
+
+Master b8841442d (2026-11-13): rust-ci + 12 gates success, every gate log GATE SUMMARY failed: []. Runs: 43419942522 43419947594 43419952633 43419957564 43419962240 43419966923 43419971264 43419975894 43419980050 43419984645 43419988984 43419993407 43419999213 
