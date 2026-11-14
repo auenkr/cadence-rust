@@ -50,3 +50,5 @@ be recorded below after child-completion investigation and fresh Rust tests.
 | pending | pending | cassandra | not dispatched |
 
 Soak predecessor now passes all4800 workflows and RSS on e2167b61a (run43558072143). Cancellation-safe cache lease fixes uncommitted child removal retained across RPC deadline cancellation; Go deferred release clears before unlock. MySQL recovery gate dispatched after soak completed.
+
+2026-11-14T05:47Z checkpoint: MySQL run43561066779 completed fresh release build and began fault/load phase at05:35:56Z; still running. No final outcome yet; PostgreSQL/Cassandra remain undispatched so recovery gates run sequentially.
