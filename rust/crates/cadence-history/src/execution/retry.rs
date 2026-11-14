@@ -9,9 +9,9 @@ use cadence_api::enums::FailureCategory;
 /// activity info must go through this mapping to stay readable by Go History.
 pub fn failure_category_to_go_i32(c: Option<FailureCategory>) -> i32 {
     match c {
-        None | Some(FailureCategory::Standard) => 0,
         Some(FailureCategory::Poll) => 1,
         Some(FailureCategory::Fatal) => 2,
+        _ => 0, // None / Standard
     }
 }
 

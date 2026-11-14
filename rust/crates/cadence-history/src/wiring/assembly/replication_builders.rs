@@ -116,6 +116,8 @@ fn to_activity_info(
         last_failure_reason: p.retry_last_failure_reason,
         last_failure_details: p.retry_last_failure_details,
         last_retry_interval_seconds: p.retry_last_retry_interval_seconds,
+        last_failure_category: p.retry_last_failure_category,
+        task_list_kind: p.task_list_kind,
         last_worker_identity: p.retry_last_worker_identity,
     }
 }
