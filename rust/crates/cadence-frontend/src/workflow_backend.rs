@@ -48,6 +48,7 @@ pub struct ProductionBackend {
     pub(crate) visibility:
         Option<std::sync::Arc<dyn cadence_persistence::visibility_reader::VisibilityStore>>,
     pub(crate) es: Option<crate::workflow_visibility::EsBinding>,
+    pub(crate) list_sampler: Option<std::sync::Arc<crate::workflow_visibility::ListSampler>>,
     header_rules: std::sync::Arc<Vec<cadence_service_core::header_forwarding::HeaderRule>>,
     pub(crate) history_page_size:
         Option<std::sync::Arc<dyn crate::handler_workflow::HistoryPageSizePolicy>>,
@@ -220,6 +221,7 @@ impl ProductionBackend {
             history_page_size: None,
             visibility: None,
             es: None,
+            list_sampler: None,
             domains: None,
             header_rules: Default::default(),
         }
@@ -377,7 +379,7 @@ impl ProductionBackend {
                 &[],
             ),
             &writer.into_bytes(),
-            timeout,
+            cadence_service_core::header_forwarding::clamp_to_inbound_deadline(timeout),
         )
         .await;
         eprintln!(
@@ -816,14 +818,24 @@ impl cadence_service_core::workflow_api::WorkflowApi for HandlerApi {
                 feature_version: header("cadence-client-feature-version"),
                 deadline: ctx.deadline,
                 original_headers: ctx.headers.clone(),
+                transport_caller: ctx
+                    .headers
+                    .get("rpc-caller")
+                    .or_else(|| ctx.headers.get("cn"))
+                    .cloned()
+                    .unwrap_or_default(),
+                transport: ctx.transport.to_owned(),
                 ..Default::default()
             };
             let inbound = ctx.headers.clone();
-            cadence_service_core::header_forwarding::INBOUND_HEADERS
+            cadence_service_core::header_forwarding::INBOUND_DEADLINE
                 .scope(
-                    inbound,
-                    self.handler
-                        .dispatch_with_metadata(operation, request, &caller),
+                    ctx.deadline,
+                    cadence_service_core::header_forwarding::INBOUND_HEADERS.scope(
+                        inbound,
+                        self.handler
+                            .dispatch_with_metadata(operation, request, &caller),
+                    ),
                 )
                 .await
         })
@@ -1097,6 +1109,32 @@ pub fn build_workflow_api(
     }
     if let Some(store) = ctx.state.visibility_store.clone() {
         backend = backend.with_visibility_store(store);
+        let (o1, o2) = (
+            ctx.state.admin.dynamic_config.clone(),
+            ctx.state.admin.dynamic_config.clone(),
+        );
+        backend = backend.with_list_sampler(std::sync::Arc::new(
+            crate::workflow_visibility::ListSampler::new(
+                std::sync::Arc::new(move || {
+                    o1.lock().is_ok_and(|o| {
+                        cadence_persistence::dynamic_config::boolean(
+                            o.property_values("system.enableVisibilitySampling"),
+                            None,
+                            false,
+                        )
+                    })
+                }),
+                std::sync::Arc::new(move |d: &str| {
+                    o2.lock().map_or(10, |o| {
+                        cadence_persistence::dynamic_config::integer(
+                            o.property_values("frontend.visibilityListMaxQPS"),
+                            Some(d),
+                            10,
+                        )
+                    })
+                }),
+            ),
+        ));
     }
     match cadence_service_core::es_mapping::search_client_from_persistence(&ctx.config.persistence)
     {
@@ -1147,15 +1185,16 @@ pub fn build_workflow_api(
         Ok(None) => {}
         Err(e) => return Err(anyhow::anyhow!(e)),
     }
-    let version_check_enabled = {
+    let version_check_enabled: std::sync::Arc<dyn Fn() -> bool + Send + Sync> = {
         let overlay = ctx.state.admin.dynamic_config.clone();
-        let guard = overlay.lock();
-        guard.is_ok_and(|overlay| {
-            cadence_persistence::dynamic_config::boolean(
-                overlay.property_values("frontend.enableClientVersionCheck"),
-                None,
-                false,
-            )
+        std::sync::Arc::new(move || {
+            overlay.lock().is_ok_and(|overlay| {
+                cadence_persistence::dynamic_config::boolean(
+                    overlay.property_values("frontend.enableClientVersionCheck"),
+                    None,
+                    false,
+                )
+            })
         })
     };
     let overlay = ctx.state.admin.dynamic_config.clone();
@@ -1305,14 +1344,17 @@ pub fn build_workflow_api(
         p = p.with_global_collections(domain_collection, tl_collection);
         std::sync::Arc::new(p) as std::sync::Arc<dyn crate::wrappers::ratelimited::Policy>
     };
-    let max_poll_delay_nanos = {
-        let guard = overlay.lock();
-        guard.map_or(0, |o| {
-            cadence_persistence::dynamic_config::duration(
-                o.property_values("frontend.maxWorkerPollDelay"),
-                None,
-                0,
-            )
+    let max_poll_delay: crate::wrappers::ratelimited::DomainDelaySource = {
+        let overlay = overlay.clone();
+        std::sync::Arc::new(move |domain: &str| {
+            let nanos = overlay.lock().map_or(0, |o| {
+                cadence_persistence::dynamic_config::duration(
+                    o.property_values("frontend.maxWorkerPollDelay"),
+                    Some(domain),
+                    0,
+                )
+            });
+            std::time::Duration::from_nanos(nanos.max(0) as u64)
         })
     };
     let rate_limit = crate::wrappers::ratelimited::HandlerRateLimit::new(
@@ -1368,7 +1410,7 @@ pub fn build_workflow_api(
                 )
             })
         })),
-        std::time::Duration::from_nanos(max_poll_delay_nanos.max(0) as u64),
+        max_poll_delay,
     );
     let async_domains: std::sync::Arc<dyn crate::async_publisher::AsyncDomainConfigLookup> =
         std::sync::Arc::new(crate::async_publisher::PersistenceAsyncDomainConfig::new(

@@ -87,6 +87,21 @@ tokio::task_local! {
     pub static INBOUND_HEADERS: HashMap<String, String>;
 }
 
+tokio::task_local! {
+    /// Deadline of the inbound RPC currently being handled (Go context deadline).
+    pub static INBOUND_DEADLINE: Option<std::time::Instant>;
+}
+
+/// Go context propagation: outbound wire TTL is `min(configured, caller remaining)`.
+pub fn clamp_to_inbound_deadline(configured: std::time::Duration) -> std::time::Duration {
+    let remaining = INBOUND_DEADLINE
+        .try_with(|d| *d)
+        .ok()
+        .flatten()
+        .map(|d| d.saturating_duration_since(std::time::Instant::now()));
+    remaining.map_or(configured, |r| configured.min(r))
+}
+
 /// Go `getForwardingRules` element parsing: `{"Add": bool, "Match": regex}`.
 pub fn rules_from_dynamic(items: &[serde_json::Value]) -> Result<Vec<HeaderRule>, String> {
     items
@@ -132,7 +147,9 @@ pub fn forward_for_current_call(
     INBOUND_HEADERS
         .try_with(|inbound| {
             let outbound: HashMap<String, String> = existing.iter().cloned().collect();
-            forwarded_headers(rules, inbound, &outbound).into_iter().collect()
+            forwarded_headers(rules, inbound, &outbound)
+                .into_iter()
+                .collect()
         })
         .unwrap_or_default()
 }
@@ -140,6 +157,28 @@ pub fn forward_for_current_call(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn clamp_uses_min_of_budget_and_caller_remaining_solfix10() {
+        use std::time::{Duration, Instant};
+        assert_eq!(
+            clamp_to_inbound_deadline(Duration::from_secs(30)),
+            Duration::from_secs(30)
+        );
+        let d = Instant::now() + Duration::from_secs(5);
+        let got = INBOUND_DEADLINE
+            .scope(Some(d), async {
+                clamp_to_inbound_deadline(Duration::from_secs(30))
+            })
+            .await;
+        assert!(got <= Duration::from_secs(5));
+        let got = INBOUND_DEADLINE
+            .scope(Some(d), async {
+                clamp_to_inbound_deadline(Duration::from_secs(1))
+            })
+            .await;
+        assert_eq!(got, Duration::from_secs(1));
+    }
 
     fn rules(yaml: &str) -> Vec<HeaderRule> {
         serde_yaml::from_str(yaml).unwrap()

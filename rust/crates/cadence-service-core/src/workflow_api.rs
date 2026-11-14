@@ -27,6 +27,9 @@ pub struct CallerContext {
     pub deadline: Option<Instant>,
     /// Transport headers, lower-cased names.
     pub headers: HashMap<String, String>,
+    /// Go `req.Transport` (`grpc`, `tchannel`, `http`) for the inbound metrics
+    /// middleware's `transport` tag; empty when unknown.
+    pub transport: &'static str,
 }
 
 pub type ApiFuture<'a> =
@@ -70,8 +73,7 @@ pub enum DomainGuardError {
     Internal(String),
 }
 
-pub type GuardFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<(), DomainGuardError>> + Send + 'a>>;
+pub type GuardFuture<'a> = Pin<Box<dyn Future<Output = Result<(), DomainGuardError>> + Send + 'a>>;
 
 /// Seam so the domain/semaphore handlers served from this crate run the
 /// Frontend's ported `RequestValidator` and graceful-failover checks exactly
@@ -80,12 +82,20 @@ pub trait DomainValidator: Send + Sync {
     /// Go `requestValidator.Validate<Op>Request`. `operation` is one of
     /// RegisterDomain, UpdateDomain, DeprecateDomain, DeleteDomain,
     /// FailoverDomain, CreateSemaphore; `request` is the camelCase JSON form.
-    fn validate(&self, operation: &str, request: &serde_json::Value)
-        -> Result<(), DomainGuardError>;
+    fn validate(
+        &self,
+        operation: &str,
+        request: &serde_json::Value,
+    ) -> Result<(), DomainGuardError>;
     /// Go `checkOngoingFailover`.
     fn check_ongoing_failover<'a>(&'a self, domain: &'a str) -> GuardFuture<'a>;
     /// Go graceful failover counters. `failure_reason` is `None` for success.
-    fn graceful_failover_metric(&self, operation: &str, domain: &str, failure_reason: Option<&str>) {
+    fn graceful_failover_metric(
+        &self,
+        operation: &str,
+        domain: &str,
+        failure_reason: Option<&str>,
+    ) {
         let _ = (operation, domain, failure_reason);
     }
 }
@@ -300,10 +310,10 @@ macro_rules! op {
 }
 
 fn codec(method: &str) -> Option<Codec> {
+    use cadence_api::schedule as sc;
     use cadence_api::service_types as st;
     use cadence_api::tasks as tk;
     use cadence_api::types as ty;
-    use cadence_api::schedule as sc;
     Some(match method {
         "CreateSchedule" => op!(sc::CreateScheduleRequest, sc::CreateScheduleResponse),
         "DescribeSchedule" => op!(sc::DescribeScheduleRequest, sc::DescribeScheduleResponse),

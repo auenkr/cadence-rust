@@ -54,8 +54,13 @@ impl Bucket {
     }
 }
 
+/// Go `DynamicRateLimiter.getLimitAndBurst`: `max(ceil(rps), minBurst)`, and
+/// zero burst at zero rps so permits are cut off immediately.
 fn burst(rps: f64) -> f64 {
-    rps.max(1.0)
+    if rps == 0.0 {
+        return 0.0;
+    }
+    rps.ceil().max(1.0)
 }
 
 pub struct TokenBucketPolicy {
@@ -207,20 +212,25 @@ impl Policy for TokenBucketPolicy {
         self.reserve(info).is_ok()
     }
 
-    fn wait(&self, info: &QuotaInfo, timeout: Duration) -> Result<(), WaitFailure> {
-        let deadline = Instant::now() + timeout;
-        loop {
-            match self.reserve(info) {
-                Ok(()) => return Ok(()),
-                Err(delay) => {
-                    let now = Instant::now();
-                    if now + delay > deadline {
-                        return Err(WaitFailure::Deadline);
+    fn wait<'a>(
+        &'a self,
+        info: &'a QuotaInfo,
+        timeout: Duration,
+    ) -> super::ratelimited::WaitFuture<'a> {
+        Box::pin(async move {
+            let deadline = tokio::time::Instant::now() + timeout;
+            loop {
+                match self.reserve(info) {
+                    Ok(()) => return Ok(()),
+                    Err(delay) => {
+                        if tokio::time::Instant::now() + delay > deadline {
+                            return Err(WaitFailure::Deadline);
+                        }
+                        tokio::time::sleep(delay).await;
                     }
-                    std::thread::sleep(delay);
                 }
             }
-        }
+        })
     }
 }
 
@@ -355,13 +365,30 @@ mod tests {
         assert!(!policy.allow(&info("b")));
     }
 
-    #[test]
-    fn wait_times_out_when_exhausted() {
+    #[tokio::test]
+    async fn wait_times_out_when_exhausted() {
         let policy = TokenBucketPolicy::new(Arc::new(|| 1.0), Arc::new(|_| 1.0));
         assert!(policy.allow(&info("a")));
         assert_eq!(
-            policy.wait(&info("a"), Duration::from_millis(5)),
+            policy.wait(&info("a"), Duration::from_millis(5)).await,
             Err(WaitFailure::Deadline)
         );
+    }
+
+    #[test]
+    fn solfix13_zero_rps_has_no_burst() {
+        let policy = TokenBucketPolicy::new(Arc::new(|| 0.0), Arc::new(|_| 1000.0));
+        assert!(!policy.allow(&info("a")));
+        let live = Arc::new(std::sync::atomic::AtomicI64::new(5));
+        let source = live.clone();
+        let policy = TokenBucketPolicy::new(
+            Arc::new(move || source.load(std::sync::atomic::Ordering::SeqCst) as f64),
+            Arc::new(|_| 1000.0),
+        );
+        assert!(policy.allow(&info("a")));
+        live.store(0, std::sync::atomic::Ordering::SeqCst);
+        assert!(!policy.allow(&info("a")));
+        assert_eq!(burst(0.4), 1.0);
+        assert_eq!(burst(2.2), 3.0);
     }
 }

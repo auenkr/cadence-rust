@@ -2415,6 +2415,7 @@ fn schedule_caller_context(headers: &HeaderMap) -> crate::workflow_api::CallerCo
     crate::workflow_api::CallerContext {
         deadline: Some(std::time::Instant::now() + std::time::Duration::from_millis(ttl_ms)),
         headers: forwarded,
+        transport: "http",
     }
 }
 
@@ -3293,7 +3294,10 @@ mod frontend_drain_tests {
             crate::admin::DynamicConfigOverlay::from_file(&path).unwrap();
         std::fs::remove_file(path).unwrap();
 
-        assert_eq!(state.domain_policy("payments").cooldown_nanos, 2_000_000_000);
+        assert_eq!(
+            state.domain_policy("payments").cooldown_nanos,
+            2_000_000_000
+        );
         assert_eq!(state.domain_policy("billing").cooldown_nanos, 1_000_000_000);
     }
 

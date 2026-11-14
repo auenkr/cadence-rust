@@ -367,6 +367,28 @@ pub struct CallerMetadata {
     pub deadline: Option<std::time::Instant>,
     /// Original transport headers copied into Go's async queue message.
     pub original_headers: HashMap<String, String>,
+    /// Go `InboundMetricsMiddleware` tags: RPC caller name and transport.
+    pub transport_caller: String,
+    pub transport: String,
+}
+
+/// Go `metrics.CallerTag` / `metrics.TransportTag` added by the inbound
+/// metrics middleware to every request scope.
+pub(crate) fn transport_tags(caller: &CallerMetadata) -> Vec<crate::wrappers::metered::MetricTag> {
+    let mut tags = Vec::new();
+    if !caller.transport_caller.is_empty() {
+        tags.push(crate::wrappers::metered::MetricTag {
+            key: "caller",
+            value: caller.transport_caller.clone(),
+        });
+    }
+    if !caller.transport.is_empty() {
+        tags.push(crate::wrappers::metered::MetricTag {
+            key: "transport",
+            value: caller.transport.clone(),
+        });
+    }
+    tags
 }
 
 /// Go checks task-list isolation health for selected workflow operations.
@@ -483,17 +505,22 @@ pub trait RequestAuthorization: Send + Sync {
     }
 }
 
+pub type RateLimitFuture<'a> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), CadenceError>> + Send + 'a>>;
+
 pub trait RequestRateLimit: Send + Sync {
     fn allow(&self, operation: &str, request: &Value) -> Result<(), CadenceError>;
     /// Like `allow`, with the inbound transport headers (lower-cased) so the
-    /// caller-type bypass can read `cadence-caller-type`.
-    fn allow_with_headers(
-        &self,
-        operation: &str,
-        request: &Value,
-        _headers: &HashMap<String, String>,
-    ) -> Result<(), CadenceError> {
-        self.allow(operation, request)
+    /// caller-type bypass can read `cadence-caller-type`, and the caller's
+    /// deadline so worker-poll waits are bounded by it (Go `waitForPolicy`).
+    fn allow_with_headers<'a>(
+        &'a self,
+        operation: &'a str,
+        request: &'a Value,
+        _headers: &'a HashMap<String, String>,
+        _deadline: Option<std::time::Instant>,
+    ) -> RateLimitFuture<'a> {
+        Box::pin(async move { self.allow(operation, request) })
     }
 }
 
@@ -557,7 +584,8 @@ pub trait SearchAttributeProvider: Send + Sync {
 
 #[derive(Clone)]
 struct VersionCheck {
-    enabled: bool,
+    /// Go evaluates `frontend.enableClientVersionCheck` on every call.
+    enabled: Arc<dyn Fn() -> bool + Send + Sync>,
     checker: Arc<dyn crate::wrappers::versioncheck::VersionChecker + Send + Sync>,
 }
 
@@ -705,7 +733,7 @@ impl<B: WorkflowBackend> Handler<B> {
     /// request preflight and before the API handler, inside metering.
     pub fn with_version_check(
         mut self,
-        enabled: bool,
+        enabled: Arc<dyn Fn() -> bool + Send + Sync>,
         checker: Arc<dyn crate::wrappers::versioncheck::VersionChecker + Send + Sync>,
     ) -> Self {
         self.version_check = Some(VersionCheck { enabled, checker });
@@ -927,6 +955,7 @@ impl<B: WorkflowBackend> Handler<B> {
             let start = std::time::Instant::now();
             let mut tags = crate::wrappers::metered::request_tags(operation.name(), &request);
             self.augment_metric_tags(operation, &request, &mut tags);
+            tags.extend(transport_tags(caller));
             self.metrics
                 .increment_requests_tagged(operation.name(), &tags);
             let result = self
@@ -1041,12 +1070,19 @@ impl<B: WorkflowBackend> Handler<B> {
     ) -> Result<Value, CadenceError> {
         validate_ratelimit_wrapper_request(operation, &request)?;
         if let Some(rate_limit) = &self.rate_limit {
-            rate_limit.allow_with_headers(operation.name(), &request, &caller.original_headers)?;
+            rate_limit
+                .allow_with_headers(
+                    operation.name(),
+                    &request,
+                    &caller.original_headers,
+                    caller.deadline,
+                )
+                .await?;
         }
         if let Some(version_check) = &self.version_check {
             crate::wrappers::versioncheck::check(
                 operation.name(),
-                version_check.enabled,
+                (version_check.enabled)(),
                 &caller.client_impl,
                 &caller.feature_version,
                 version_check.checker.as_ref(),
@@ -3754,7 +3790,7 @@ mod tests {
         )
         .with_access_control(authorization.clone())
         .with_rate_limit(rate_limit.clone())
-        .with_version_check(true, version.clone());
+        .with_version_check(Arc::new(|| true), version.clone());
         let error = handler
             .dispatch_with_metadata(
                 "DescribeWorkflowExecution",
@@ -3767,6 +3803,7 @@ mod tests {
                     partition_config: None,
                     original_headers: HashMap::new(),
                     deadline: None,
+                    ..Default::default()
                 },
             )
             .await
@@ -5283,6 +5320,22 @@ mod tests {
         assert_eq!(
             shape_decision_poll_response(serde_json::json!({"pollerID": "internal-poller"})),
             serde_json::json!({})
+        );
+    }
+
+    #[test]
+    fn solfix14_transport_tags_follow_caller_metadata() {
+        assert!(transport_tags(&CallerMetadata::default()).is_empty());
+        let tags = transport_tags(&CallerMetadata {
+            transport_caller: "svc".into(),
+            transport: "tchannel".into(),
+            ..Default::default()
+        });
+        assert_eq!(
+            tags.iter()
+                .map(|t| (t.key, t.value.as_str()))
+                .collect::<Vec<_>>(),
+            [("caller", "svc"), ("transport", "tchannel")]
         );
     }
 }

@@ -28,17 +28,93 @@ pub trait VersionChecker {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct GoVersionChecker;
 
-fn parse_semver(value: &str) -> Option<(u64, u64, u64)> {
-    let value = value.trim().trim_start_matches('v');
-    let core = value.split(['-', '+']).next()?;
-    let mut parts = core.split('.');
-    let major = parts.next()?.parse().ok()?;
-    let minor = parts.next().map_or(Some(0), |p| p.parse().ok())?;
-    let patch = parts.next().map_or(Some(0), |p| p.parse().ok())?;
-    if parts.next().is_some() {
-        return None;
+/// hashicorp/go-version `NewVersion` result: numeric segments (padded to at
+/// least three) plus whether a prerelease part was present.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ParsedVersion {
+    segments: Vec<u64>,
+    prerelease: bool,
+}
+
+impl ParsedVersion {
+    /// Go constraint `Check` for `>=` / `<=` against a prerelease-free
+    /// constraint: a prerelease version never satisfies it (go-version
+    /// `prereleaseCheck`).
+    fn cmp_release(&self, other: &[u64; 3]) -> Option<std::cmp::Ordering> {
+        if self.prerelease {
+            return None;
+        }
+        let len = self.segments.len().max(3);
+        for k in 0..len {
+            let a = self.segments.get(k).copied().unwrap_or(0);
+            let b = other.get(k).copied().unwrap_or(0);
+            if a != b {
+                return Some(a.cmp(&b));
+            }
+        }
+        Some(std::cmp::Ordering::Equal)
     }
-    Some((major, minor, patch))
+}
+
+fn is_ident_part(part: &str) -> bool {
+    !part.is_empty()
+        && part
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'~')
+}
+
+fn is_ident_dotted(value: &str) -> bool {
+    !value.is_empty() && value.split('.').all(is_ident_part)
+}
+
+/// Port of go-version's anchored `versionRegexp`; no whitespace trimming.
+fn parse_version(value: &str) -> Option<ParsedVersion> {
+    let rest = value.strip_prefix('v').unwrap_or(value);
+    let bytes = rest.as_bytes();
+    let mut pos = 0;
+    let mut segments = Vec::new();
+    loop {
+        let start = pos;
+        while pos < bytes.len() && bytes[pos].is_ascii_digit() {
+            pos += 1;
+        }
+        if pos == start {
+            return None;
+        }
+        segments.push(rest[start..pos].parse::<u64>().ok()?);
+        if pos + 1 < bytes.len() && bytes[pos] == b'.' && bytes[pos + 1].is_ascii_digit() {
+            pos += 1;
+        } else {
+            break;
+        }
+    }
+    let tail = &rest[pos..];
+    let (pre, meta) = match tail.split_once('+') {
+        Some((pre, meta)) => (pre, Some(meta)),
+        None => (tail, None),
+    };
+    let mut prerelease = false;
+    if !pre.is_empty() {
+        let ident = match pre.strip_prefix('-') {
+            Some(ident) => ident,
+            // Without the dash the part must start with a letter, '-' or '~'.
+            None if !pre.as_bytes()[0].is_ascii_digit() => pre,
+            None => return None,
+        };
+        if !is_ident_dotted(ident) {
+            return None;
+        }
+        prerelease = true;
+    }
+    if let Some(meta) = meta {
+        if !is_ident_dotted(meta) {
+            return None;
+        }
+    }
+    Some(ParsedVersion {
+        segments,
+        prerelease,
+    })
 }
 
 impl VersionChecker for GoVersionChecker {
@@ -56,9 +132,9 @@ impl VersionChecker for GoVersionChecker {
             "uber-java" => "1.5.0",
             _ => return Ok(()),
         };
-        let max = parse_semver(highest).expect("constant version");
-        match parse_semver(feature_version) {
-            Some(version) if version <= max => Ok(()),
+        let max = [1_u64, if highest == "1.5.0" { 5 } else { 7 }, 0];
+        match parse_version(feature_version).and_then(|v| v.cmp_release(&max)) {
+            Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal) => Ok(()),
             _ => Err(ClientVersionNotSupportedError {
                 feature_version: feature_version.to_owned(),
                 client_impl: client_impl.to_owned(),
@@ -76,11 +152,14 @@ pub fn supports_raw_history_query(client_impl: &str, feature_version: &str) -> b
         return false;
     }
     let minimum = match client_impl {
-        "uber-go" | "cli" => (1, 6, 0),
+        "uber-go" | "cli" => (1, 6, 0_u64),
         "uber-java" => (1, 3, 0),
         _ => return false,
     };
-    parse_semver(feature_version).is_some_and(|version| version >= minimum)
+    let minimum = [minimum.0, minimum.1, minimum.2];
+    parse_version(feature_version)
+        .and_then(|v| v.cmp_release(&minimum))
+        .is_some_and(|o| o != std::cmp::Ordering::Less)
 }
 
 pub fn check(
@@ -149,5 +228,31 @@ mod tests {
         assert!(supports_raw_history_query("cli", "1.7.0"));
         assert!(!supports_raw_history_query("unknown", "9.0.0"));
         assert!(!supports_raw_history_query("uber-go", "not-a-version"));
+    }
+
+    #[test]
+    fn solfix18_prerelease_and_malformed_versions_follow_go_version() {
+        // go-version: a prerelease never satisfies a release-only constraint.
+        assert!(!supports_raw_history_query("uber-go", "1.6.0-rc.1"));
+        assert!(supports_raw_history_query("uber-go", "v1.6.0+build.5"));
+        assert!(supports_raw_history_query("uber-go", "1.6"));
+        assert!(supports_raw_history_query("uber-go", "1.6.0.1"));
+        assert!(!supports_raw_history_query("uber-go", " 1.6.0"));
+        assert!(!supports_raw_history_query("uber-go", "1.6.0-"));
+        assert!(!supports_raw_history_query("uber-go", "1.6.0-!"));
+        assert!(parse_version("1.0beta").unwrap().prerelease);
+        assert!(parse_version("1.0+").is_none());
+        let checker = GoVersionChecker;
+        assert!(checker.client_supported(true, "uber-go", "1.7.0").is_ok());
+        assert!(checker
+            .client_supported(true, "uber-go", "1.7.0.1")
+            .is_err());
+        assert!(checker
+            .client_supported(true, "uber-go", "1.7.0-rc.1")
+            .is_err());
+        assert!(checker.client_supported(true, "uber-java", "1.5").is_ok());
+        assert!(checker
+            .client_supported(true, "uber-java", "1.5.1")
+            .is_err());
     }
 }
