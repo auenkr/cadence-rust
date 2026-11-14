@@ -10571,13 +10571,14 @@ mod workflow_timeout_tests {
             .unwrap();
         let execution = WorkflowExecution::new("timeout", response.run_id);
         let task = store.poll_decision("d", "tasks", "worker").unwrap();
-        let start = store
+        let start_nanos = store
             .describe("d", &execution)
             .unwrap()
             .workflow_execution_info
             .unwrap()
             .start_time
             .unwrap();
+        let start = start_nanos / 1_000_000;
         assert_eq!(store.expire_due_workflows(start + 1999), 0);
         assert_eq!(store.expire_due_workflows(start + 2000), 1);
         assert_eq!(store.expire_due_workflows(start + 3000), 0);

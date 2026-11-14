@@ -3254,7 +3254,6 @@ mod p1_handler_tests {
                 activity_id: "activity".into(),
                 result: Some(p::Payload {
                     data: vec![1, 2],
-                    ..Default::default()
                 }),
                 ..Default::default()
             },
