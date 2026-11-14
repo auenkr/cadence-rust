@@ -249,13 +249,26 @@ pub fn admin_scope_operation(method: &str) -> String {
         | "RefreshWorkflowTasks"
         | "ResendReplicationTasks" => method.to_owned(),
         "DescribeShardDistribution" => "AdminShardList".to_owned(),
-        "RemoveTask" | "CloseShard" | "ResetQueue" | "DescribeQueue" | "ReadDLQMessages"
-        | "PurgeDLQMessages" | "CountDLQMessages" | "MergeDLQMessages"
-        | "GetDLQReplicationMessages" | "GetCrossClusterTasks"
-        | "RespondCrossClusterTasksCompleted" | "GetDynamicConfig" | "UpdateDynamicConfig"
-        | "RestoreDynamicConfig" | "ListDynamicConfig" | "GetOperationalDynamicConfig"
-        | "UpdateOperationalDynamicConfig" | "RestoreOperationalDynamicConfig"
-        | "ListOperationalDynamicConfig" | "DeleteWorkflow" => format!("Admin{method}"),
+        "RemoveTask"
+        | "CloseShard"
+        | "ResetQueue"
+        | "DescribeQueue"
+        | "ReadDLQMessages"
+        | "PurgeDLQMessages"
+        | "CountDLQMessages"
+        | "MergeDLQMessages"
+        | "GetDLQReplicationMessages"
+        | "GetCrossClusterTasks"
+        | "RespondCrossClusterTasksCompleted"
+        | "GetDynamicConfig"
+        | "UpdateDynamicConfig"
+        | "RestoreDynamicConfig"
+        | "ListDynamicConfig"
+        | "GetOperationalDynamicConfig"
+        | "UpdateOperationalDynamicConfig"
+        | "RestoreOperationalDynamicConfig"
+        | "ListOperationalDynamicConfig"
+        | "DeleteWorkflow" => format!("Admin{method}"),
         other => other.to_owned(),
     }
 }
@@ -646,7 +659,10 @@ mod tests {
             last(O::BadRequest),
             Some(("cadence_errors_bad_request", "AdminGetDynamicConfig".into()))
         );
-        assert_eq!(last(O::ServiceBusy).unwrap().0, "cadence_errors_service_busy");
+        assert_eq!(
+            last(O::ServiceBusy).unwrap().0,
+            "cadence_errors_service_busy"
+        );
         assert_eq!(last(O::Failure).unwrap().0, "cadence_errors");
         // EntityNotExists: no counter, last event is the latency histogram.
         assert_eq!(last(O::NotExists).unwrap().0, "cadence_latency_ns");
