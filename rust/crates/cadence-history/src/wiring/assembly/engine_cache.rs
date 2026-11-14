@@ -598,6 +598,36 @@ mod evict_tests {
         assert!(make_cache_room(&mut entries, 11, 10, 1));
         assert!(entries.is_empty());
     }
+
+    #[tokio::test]
+    async fn configured_cache_capacity_and_ttl_apply_to_real_contexts() {
+        use crate::wiring::assembly::real_engine_harness::{Harness, DOMAIN_ID};
+        let h = Harness::build_with_config(|_| {}, |config| {
+            config.history_cache_max_size = Arc::new(|| 2);
+            config.history_cache_ttl = Arc::new(|| std::time::Duration::from_secs(1));
+        });
+        let execution = |id: &str| WorkflowExecution { workflow_id: id.into(), run_id: uuid::Uuid::new_v4().to_string() };
+        let first = execution("first");
+        let second = execution("second");
+        let third = execution("third");
+        let (original, release_first) = h.cache.acquire(DOMAIN_ID, &first, false).await.unwrap();
+        let (_, release_second) = h.cache.acquire(DOMAIN_ID, &second, false).await.unwrap();
+        assert!(h.cache.acquire(DOMAIN_ID, &third, false).await.is_err());
+        assert_eq!(h.cache.entries.lock().unwrap().len(), 2);
+        release_first(None);
+        let (_, release_third) = h.cache.acquire(DOMAIN_ID, &third, false).await.unwrap();
+        assert_eq!(h.cache.entries.lock().unwrap().len(), 2);
+        release_second(None);
+        release_third(None);
+        let (replacement, release) = h.cache.acquire(DOMAIN_ID, &first, false).await.unwrap();
+        assert!(!Arc::ptr_eq(&original, &replacement));
+        release(None);
+        h.clock.0.fetch_add(2_000_000_000, Ordering::Relaxed);
+        let (expired, release) = h.cache.acquire(DOMAIN_ID, &first, false).await.unwrap();
+        assert!(!Arc::ptr_eq(&replacement, &expired));
+        release(None);
+    }
+
 }
 
 /// Go `execution.cacheImpl`: contexts keyed by domain/workflow/run, each guarded
