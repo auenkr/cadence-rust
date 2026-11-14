@@ -665,12 +665,17 @@ mod failure_category_persist_tests {
     #[test]
     fn scheduled_activity_records_task_list_kind() {
         let mut state = TypedMutableState::new();
-        let attrs = ScheduleActivityTaskDecisionAttributes {
+        let attrs = ActivityTaskScheduledEventAttributes {
             activity_id: "a".into(),
             task_list: Some(cadence_api::types::TaskList { name: "tl".into(), kind: Some(cadence_api::enums::TaskListKind::Sticky), ..Default::default() }),
             ..Default::default()
         };
-        let (_, ai) = state.add_activity_task_scheduled_event(1, 4, &attrs, "d").unwrap();
+        let event = HistoryEvent {
+            event_id: 5,
+            activity_task_scheduled_event_attributes: Some(attrs),
+            ..Default::default()
+        };
+        let ai = state.replicate_activity_task_scheduled_event(4, &event, "d").unwrap();
         assert_eq!(ai.task_list_kind, 1);
     }
 }

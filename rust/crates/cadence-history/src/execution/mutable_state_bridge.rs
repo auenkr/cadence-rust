@@ -441,7 +441,7 @@ mod tests {
         source.timer_infos.push(pc::KeyedBlob { key: "timer".into(), value: blob(sqlblobs::Encoding::ThriftRW.encode(&sqlblobs::timer_info_to_struct(&pc::TimerInfo { started_id: 3, task_id: 0x21, ..Default::default() })).unwrap()) });
         let envelope = snapshot_to_envelope(source).unwrap();
         let changed = TypedWorkflowMutation {
-            upsert_activity_infos: vec![crate::mutable_state_activity::ActivityInfo { schedule_id: 11, version: 12, activity_id: "new-id".into(), timer_task_status: 0x44, ..Default::default() }],
+            upsert_activity_infos: vec![crate::mutable_state_activity::ActivityInfo { schedule_id: 11, version: 12, activity_id: "new-id".into(), timer_task_status: 0x44, task_list_kind: 7, last_failure_category: 4, ..Default::default() }],
             upsert_timer_infos: vec![super::super::timer::TimerInfo { timer_id: "timer".into(), version: 8, started_id: 13, expiry_time_unix_nanos: 99, task_status: 0x55 }],
             upsert_child_execution_infos: vec![super::super::child_workflow::ChildExecutionInfo { initiated_id: 21, version: 2, started_workflow_id: "child".into(), ..Default::default() }],
             upsert_request_cancel_infos: vec![super::super::cancellation::RequestCancelInfo { initiated_id: 31, cancel_request_id: "cancel".into(), ..Default::default() }],
