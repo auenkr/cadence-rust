@@ -272,6 +272,7 @@ func main() {
 					fmt.Printf("HISTDUMP %s #%d %v ts=%d\n", id, ev.GetEventId(), ev.GetEventType(), ev.GetTimestamp())
 				}
 				dcancel()
+				dumpChain(ctx, c, id)
 			}
 			return
 		}
@@ -360,9 +361,6 @@ func dumpChain(ctx context.Context, c client.Client, id string) {
 		if ev, e := it.Next(); e == nil && ev.WorkflowExecutionStartedEventAttributes != nil {
 			prev = ev.WorkflowExecutionStartedEventAttributes.GetContinuedExecutionRunId()
 		}
-	}
-	if prev == "" {
-		return
 	}
 	children := []string{}
 	it = c.GetWorkflowHistory(dctx, id, prev, false, 0)

@@ -54,6 +54,7 @@ pub struct Inner {
 #[derive(Default)]
 pub struct MemExecutions {
     pub inner: Mutex<Inner>,
+    pub update_pause: Mutex<Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>>,
 }
 
 fn merge_keyed<K: Clone + Ord>(dst: &mut Vec<pc::KeyedBlob<K>>, upserts: &[pc::KeyedBlob<K>], deletes: &[K]) {
@@ -200,6 +201,11 @@ impl pc::GoExecutionStore for MemExecutions {
             .ok_or_else(|| PersistenceError::EntityNotExists("workflow execution not found".into()))
     }
     async fn update_workflow_execution(&self, r: pc::UpdateWorkflowExecutionRequest) -> Result<(), PersistenceError> {
+        let pause = self.update_pause.lock().unwrap().clone();
+        if let Some((entered, resume)) = pause {
+            entered.notify_one();
+            resume.notified().await;
+        }
         let mut g = self.inner.lock().unwrap();
         if let Some(e) = g.update_errors.pop_front() {
             return Err(e);
@@ -552,7 +558,7 @@ impl Harness {
                 Arc::new(move |_| StateParams { retention_days: 1, history_nodes: Some(nodes.clone()), ..StateParams::default() })
             },
         });
-        let cache = EngineExecutionCache::new(core.clone());
+        let cache = EngineExecutionCache::new(core.clone(), config.clone());
         let mut engine = nop_engine();
         engine.current_cluster_name = CLUSTER.into();
         engine.cluster_metadata = Arc::new(TestClusterMetadata);

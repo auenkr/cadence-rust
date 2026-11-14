@@ -13,6 +13,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use async_trait::async_trait;
 use cadence_persistence::history_contract::{self as pc, GoExecutionStore, GoHistoryV2Store};
@@ -551,45 +552,114 @@ impl ExecutionContext for EngineExecutionContext {
     }
 }
 
-struct Entry {
+struct CacheEntry<V> {
     lock: Arc<tokio::sync::Mutex<()>>,
-    context: Arc<EngineExecutionContext>,
+    context: V,
+    created: i64,
+    accessed: AtomicI64,
 }
 
+type Entry = CacheEntry<Arc<EngineExecutionContext>>;
 type Key = (String, String, String);
 
-/// Drops entries whose workflow lock nobody holds or has pinned (a pinned/held lock owns an extra
-/// clone of the mutex `Arc`); returns the number evicted.
-fn evict_unheld<V>(entries: &mut HashMap<Key, V>, lock: impl Fn(&V) -> &Arc<tokio::sync::Mutex<()>>) -> usize {
-    let before = entries.len();
-    entries.retain(|_, e| Arc::strong_count(lock(e)) > 1);
-    before - entries.len()
+/// Go LRU: expire only unpinned entries, then evict the least recently accessed
+/// unpinned entry. Never invalidate a context held by a caller waiting on its lock.
+fn make_cache_room<V>(entries: &mut HashMap<Key, Arc<CacheEntry<V>>>, now: i64, ttl: i64, max: usize) -> bool {
+    entries.retain(|_, e| Arc::strong_count(&e.lock) > 1 || ttl == 0 || now <= e.created.saturating_add(ttl));
+    while entries.len() >= max {
+        let oldest = entries.iter()
+            .filter(|(_, e)| Arc::strong_count(&e.lock) == 1)
+            .min_by_key(|(_, e)| e.accessed.load(Ordering::Relaxed))
+            .map(|(key, _)| key.clone());
+        let Some(oldest) = oldest else { return false; };
+        entries.remove(&oldest);
+    }
+    true
 }
 
 #[cfg(test)]
 mod evict_tests {
     use super::*;
 
-    fn key(n: &str) -> Key {
-        ("d".into(), n.into(), "r".into())
+    fn key(n: &str) -> Key { ("d".into(), n.into(), "r".into()) }
+    fn entry(created: i64, accessed: i64) -> Arc<CacheEntry<()>> {
+        Arc::new(CacheEntry { lock: Arc::new(tokio::sync::Mutex::new(())), context: (), created, accessed: AtomicI64::new(accessed) })
     }
 
-    /// Go cache pins on Get/PutIfNotExist before taking the workflow lock: an entry whose lock Arc was
-    /// cloned (pinned or locked) is never evicted, an idle one is, and the pin is released on drop.
     #[tokio::test]
-    async fn eviction_keeps_pinned_and_locked_entries() {
-        let mut map: HashMap<Key, Arc<tokio::sync::Mutex<()>>> = HashMap::new();
-        for n in ["idle", "pinned", "locked"] {
-            map.insert(key(n), Arc::new(tokio::sync::Mutex::new(())));
-        }
-        let pin = map[&key("pinned")].clone();
-        let guard = map[&key("locked")].clone().lock_owned().await;
-        assert_eq!(evict_unheld(&mut map, |l| l), 1);
-        assert!(map.contains_key(&key("pinned")) && map.contains_key(&key("locked")) && !map.contains_key(&key("idle")));
+    async fn eviction_respects_lru_ttl_and_pins() {
+        let mut entries = HashMap::from([(key("old"), entry(0, 1)), (key("recent"), entry(0, 3)), (key("pinned"), entry(0, 0))]);
+        let pin = entries[&key("pinned")].lock.clone();
+        assert!(make_cache_room(&mut entries, 5, 10, 3));
+        assert!(!entries.contains_key(&key("old")));
+        assert!(entries.contains_key(&key("recent")));
+        assert!(make_cache_room(&mut entries, 11, 10, 3));
+        assert_eq!(entries.len(), 1);
+        assert!(!make_cache_room(&mut entries, 11, 10, 1));
         drop(pin);
-        drop(guard);
-        assert_eq!(evict_unheld(&mut map, |l| l), 2);
-        assert!(map.is_empty());
+        assert!(make_cache_room(&mut entries, 11, 10, 1));
+        assert!(entries.is_empty());
+    }
+
+    #[tokio::test]
+    async fn configured_cache_capacity_and_ttl_apply_to_real_contexts() {
+        use crate::wiring::assembly::real_engine_harness::{Harness, DOMAIN_ID};
+        let h = Harness::build_with_config(|_| {}, |config| {
+            config.history_cache_max_size = Arc::new(|| 2);
+            config.history_cache_ttl = Arc::new(|| std::time::Duration::from_secs(1));
+        });
+        let execution = |id: &str| WorkflowExecution { workflow_id: id.into(), run_id: uuid::Uuid::new_v4().to_string() };
+        let first = execution("first");
+        let second = execution("second");
+        let third = execution("third");
+        let (original, release_first) = h.cache.acquire(DOMAIN_ID, &first, false).await.unwrap();
+        let (_, release_second) = h.cache.acquire(DOMAIN_ID, &second, false).await.unwrap();
+        assert!(h.cache.acquire(DOMAIN_ID, &third, false).await.is_err());
+        assert_eq!(h.cache.entries.lock().unwrap().len(), 2);
+        release_first(None);
+        let (_, release_third) = h.cache.acquire(DOMAIN_ID, &third, false).await.unwrap();
+        assert_eq!(h.cache.entries.lock().unwrap().len(), 2);
+        release_second(None);
+        release_third(None);
+        let (replacement, release) = h.cache.acquire(DOMAIN_ID, &first, false).await.unwrap();
+        assert!(!Arc::ptr_eq(&original, &replacement));
+        release(None);
+        h.clock.0.fetch_add(2_000_000_000, Ordering::Relaxed);
+        let (expired, release) = h.cache.acquire(DOMAIN_ID, &first, false).await.unwrap();
+        assert!(!Arc::ptr_eq(&replacement, &expired));
+        release(None);
+    }
+
+}
+
+/// Owns the workflow lock until explicit release or cancellation. A dropped
+/// operation may have changed mutable state without committing it; discard that
+/// state before another operation can acquire the lock.
+struct ExecutionLease {
+    context: Arc<EngineExecutionContext>,
+    guard: Mutex<Option<OwnedMutexGuard<()>>>,
+    force_clear: bool,
+}
+
+impl ExecutionLease {
+    fn release(&self, failed: bool) {
+        let mut slot = self.guard.lock().unwrap();
+        if slot.is_some() {
+            if failed || self.force_clear {
+                self.context.clear();
+            }
+            drop(slot.take());
+        }
+    }
+}
+
+impl Drop for ExecutionLease {
+    fn drop(&mut self) {
+        let slot = self.guard.get_mut().unwrap();
+        if slot.is_some() {
+            self.context.clear();
+            drop(slot.take());
+        }
     }
 }
 
@@ -598,7 +668,7 @@ mod evict_tests {
 pub struct EngineExecutionCache {
     core: Arc<EngineCore>,
     entries: Mutex<HashMap<Key, Arc<Entry>>>,
-    max_size: usize,
+    config: Arc<crate::config::Config>,
 }
 
 impl EngineExecutionCache {
@@ -612,8 +682,8 @@ impl EngineExecutionCache {
         self.entries.lock().unwrap().clear();
     }
 
-    pub fn new(core: Arc<EngineCore>) -> Arc<Self> {
-        Arc::new(Self { core, entries: Mutex::new(HashMap::new()), max_size: 10_000 })
+    pub fn new(core: Arc<EngineCore>, config: Arc<crate::config::Config>) -> Arc<Self> {
+        Arc::new(Self { core, entries: Mutex::new(HashMap::new()), config })
     }
 
     /// Go `validateWorkflowExecutionInfo`: fills the current run id when empty.
@@ -665,29 +735,38 @@ impl EngineExecutionCache {
     /// Returns the entry and whether it was newly created (a cache miss).
     /// The returned lock Arc is cloned while the map mutex is held, which pins the entry against
     /// eviction (Go pins on Get/PutIfNotExist before taking the workflow lock).
-    fn entry(&self, key: &Key, domain_id: &str, execution: &WorkflowExecution) -> (Arc<Entry>, Arc<tokio::sync::Mutex<()>>, bool) {
+    fn entry(&self, key: &Key, domain_id: &str, execution: &WorkflowExecution) -> HResult<(Arc<Entry>, Arc<tokio::sync::Mutex<()>>, bool)> {
         let lru = self.lru_scope();
         let mut entries = self.entries.lock().unwrap();
+        let now = self.core.clock.now();
+        let ttl = (self.config.history_cache_ttl)().as_nanos().min(i64::MAX as u128) as i64;
         if let Some(e) = entries.get(key) {
-            lru.inc_counter("BaseCacheHit");
-            return (e.clone(), e.lock.clone(), false);
+            if Arc::strong_count(&e.lock) > 1 || ttl == 0 || now <= e.created.saturating_add(ttl) {
+                lru.inc_counter("BaseCacheHit");
+                e.accessed.store(now, Ordering::Relaxed);
+                return Ok((e.clone(), e.lock.clone(), false));
+            }
         }
+        entries.remove(key);
         lru.inc_counter("BaseCacheMiss");
-        if entries.len() >= self.max_size {
+        let max_size = (self.config.history_cache_max_size)().max(1) as usize;
+        let before = entries.len();
+        if !make_cache_room(&mut entries, now, ttl, max_size) {
             lru.inc_counter("BaseCacheFullCounter");
-            // Evict entries nobody holds (a held lock owns a clone of the mutex Arc).
-            let evicted = evict_unheld(&mut entries, |e| &e.lock);
-            lru.add_counter("BaseCacheEvictCounter", evicted as i64);
+            return Err(HistoryError::internal("cache capacity is fully occupied with pinned elements"));
         }
+        lru.add_counter("BaseCacheEvictCounter", (before - entries.len()) as i64);
         let entry = Arc::new(Entry {
             lock: Arc::new(tokio::sync::Mutex::new(())),
             context: EngineExecutionContext::new(self.core.clone(), domain_id, execution),
+            created: now,
+            accessed: AtomicI64::new(now),
         });
         let pin = entry.lock.clone();
         entries.insert(key.clone(), entry.clone());
         lru.update_gauge("BaseCacheCount", entries.len() as f64);
-        lru.update_gauge("BaseCacheCountLimitGauge", self.max_size as f64);
-        (entry, pin, true)
+        lru.update_gauge("BaseCacheCountLimitGauge", max_size as f64);
+        Ok((entry, pin, true))
     }
 
     /// Go `getOrCreateWorkflowExecutionInternal` (execution already validated).
@@ -709,20 +788,19 @@ impl EngineExecutionCache {
         force_clear: bool,
     ) -> HResult<(Arc<EngineExecutionContext>, ReleaseFunc)> {
         let key = (domain_id.to_string(), execution.workflow_id.clone(), execution.run_id.clone());
-        let (entry, pin, created) = self.entry(&key, domain_id, execution);
+        let (entry, pin, created) = self.entry(&key, domain_id, execution)?;
         if created {
             self.cache_scope(scope).inc_counter("CacheMissCounter");
         }
         let guard: OwnedMutexGuard<()> = pin.lock_owned().await;
-        let slot = Mutex::new(Some(guard));
         let context = entry.context.clone();
-        let release_context = context.clone();
+        let lease = ExecutionLease {
+            context: context.clone(),
+            guard: Mutex::new(Some(guard)),
+            force_clear,
+        };
         let release: ReleaseFunc = Arc::new(move |err: Option<&HistoryError>| {
-            if err.is_some() || force_clear {
-                release_context.clear();
-            }
-            // Dropping the guard unlocks the workflow.
-            drop(slot.lock().unwrap().take());
+            lease.release(err.is_some());
         });
         Ok((context, release))
     }

@@ -387,12 +387,16 @@ pub async fn run(bin_name: &'static str) -> anyhow::Result<()> {
         r = shutdown_signal() => r?,
         _ = service.wait_stopped() => {}
     }
+    tracing::info!("History shutdown: stopping service");
     service.stop().await;
+    tracing::info!("History shutdown: stopping task processor");
     queue_provider.stop().await;
+    tracing::info!("History shutdown: stopping membership");
     ownership_task.abort();
     feed.abort();
     replication.stop_fetchers();
     provider.stop().await.map_err(|e| anyhow::anyhow!("stopping History Ringpop membership: {e}"))?;
+    tracing::info!("History shutdown complete");
     Ok(())
 }
 

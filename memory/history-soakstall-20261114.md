@@ -1,14 +1,14 @@
 # History soak stall: findings (2026-11-14, branch history-soakstall)
 
-## Current result: result long-poll fixed; full soak acceptance remains red
+## Current result: acceptance soak and all three recovery lanes pass
 
-Branch `history-pollms-fix` implements the missing direct-engine history
-notification. Fresh CI: Clippy + 890 History tests pass. MySQL/gRPC and
-Cassandra/TChannel two-History mixed gates both report `GATE SUMMARY failed: []`.
-The 20-minute mysql soak confirms e2e p50=4101ms (Go baseline ~4100ms), but
-4794/4800 workflows complete: six restart-window child-completion stalls remain,
-plus first-host RSS growth fails the guard. See implementation evidence below.
-Do not claim all workflows complete or full soak acceptance.
+Branch `history-soak-tail` fixes canceled parent-update cache leases and ignored
+Go cache capacity/TTL. Run43558072143 passes4800/4800 workflows, p50=4111ms
+(Go~4100ms), unchanged RSS guards. MySQL and PostgreSQL restart gates each pass
+4500/4500 and `GATE SUMMARY failed: []`. PostgreSQL also needed healthy pool
+return notification; fresh workspace CI43576413232 passes including its strict
+regression. Cassandra1500s gate43577811696 passes4500/4500 and all52 checks. Details and historical
+failed runs follow; earlier pending notes below describe those checkpoints.
 
 ## Original result before the fix: NOT fixed; narrowed to result long-poll
 
@@ -134,3 +134,113 @@ both requested mixed gates, but cannot be described as a fully passing soak.
 Further restart child-completion/recovery and RSS work is needed; no checks were
 weakened, workflow failures suppressed, or retries added to hide these findings.
 All validation ran on GitHub Actions; no local Cargo, Go or Docker commands.
+
+## Follow-up implementation: history-soak-tail (2026-11-14)
+
+Base origin/master 05fb1e57c; merged origin/history-restartgate without merging
+anything to master. Diagnostic soak captures child histories on query failures
+(the earlier evidence only captured parent histories). Restart gate now uses
+release binaries, matching the soak and avoiding the known debug-build overload.
+
+RSS audit found a real Go parity gap: EngineExecutionCache hard-coded 10,000
+entries per shard and evicted all idle entries only at capacity. Go NewCache
+uses history.cacheMaxSize (default 512), history.cacheTTL (default one hour),
+pinned entries and LRU eviction. Rust has those configuration properties but
+ignored them. Follow-up wires both properties, evicts expired idle entries and
+the least recently accessed unpinned entry, and refuses insertion when every
+entry is pinned. No RSS acceptance threshold changed. Validation pending.
+
+Child close executor comparison: both CloseExecution and the separate
+RecordChildExecutionCompleted transfer task notify the parent; connection and
+shard errors propagate for retry, while only EntityNotExists/already-completed
+are ignored. Added retry regression covering both task types and unchanged
+parent/child identifiers across attempts. Exact restart stall cause remains
+under investigation; diagnostic run below has no Rust behavior changes.
+
+| run URL | head | scenario | result |
+|---|---|---|---|
+| https://github.com/auenkr/cadence-rust/actions/runs/43554242022 | 76e7cc97c | mysql 20m diagnostic soak, child history dumps | FAILURE: 4797/4800, p50 4124ms; both RSS guards pass |
+
+Fresh-target History Clippy/test run on 98a1e1b00 (cache implementation and child
+retry/reload regressions; later real-cache capacity/TTL test added in 521abb079):
+https://github.com/auenkr/cadence-rust/actions/runs/43555072334 — SUCCESS, 901 tests.
+The repository's automatic rust-check push workflow ran on the first pushes;
+it was disabled through gh to keep subsequent validation within the explicitly
+requested workflow set. No local Cargo/Go/Docker commands were executed.
+
+Compaction checkpoint: diagnostic run 43554242022 failed with 4797/4800 completed, p50 4124ms; both RSS guards passed. Fresh History CI 43555072334 succeeded (901 tests). Cancellation regression on 56a415667 is running in 43557514557; suspected abandoned cache lease retains uncommitted parent mutations. No claim of root cause confirmation yet.
+
+Cancellation safety audit: Go cache.makeReleaseFunc is invoked by deferred release,
+clearing state on an update error/panic before unlocking. Rust's release closure
+previously dropped its owned lock on cancellation without clearing state. A parent
+update removes the pending child before awaiting persistence; cancellation can
+therefore leave an uncommitted removal cached. The retry then returns
+EntityNotExists and processCloseExecution acknowledges the notification. Commit
+e2167b61a introduces a lease whose Drop clears abandoned state before unlock;
+explicit release remains idempotent. Deterministic pre-fix cancellation regression
+is pending in run 43557514557 (head 56a415667). This is a demonstrated code-path
+gap; attribution of the original live stalls awaits regression/runtime results.
+Diagnostic summaries and parent/child histories are retained in
+memory/evidence/history-soak-tail-20261114/diagnostic/.
+
+Pre-fix CI 43557514557 concluded FAILURE: 902 tests passed and only canceled_child_completion_is_retried_from_persisted_parent_state failed with EntityNotExists: Pending child execution not found. This confirms uncommitted cached child removal survives cancellation. Patched soak run: https://github.com/auenkr/cadence-rust/actions/runs/43558072143 (e2167b61a), pending.
+
+Patched fresh-target History validation: https://github.com/auenkr/cadence-rust/actions/runs/43558280598, head e2167b61ad242a1b20922f2d6d9473a326107912, SUCCESS: Clippy then 903 tests, including cancellation and real-cache capacity/TTL regressions.
+
+Fresh uncached workspace validation https://github.com/auenkr/cadence-rust/actions/runs/43559207202, head 6a885777a4cfea4764777a4ca0cf341d7c05588a (same Rust as e2167b61a), SUCCESS: workspace Clippy followed by tests. TChannel wiring/server/tchannel.rs handle_call wraps dispatch in timeout(remaining), establishing a production deadline-cancellation path for the regression.
+
+## Passing acceptance soak
+
+| run URL | head | scenario | conclusion |
+|---|---|---|---|
+| https://github.com/auenkr/cadence-rust/actions/runs/43557514557 | 56a415667 | pre-fix cancellation regression | expected FAILURE, only cancellation regression fails |
+| https://github.com/auenkr/cadence-rust/actions/runs/43558280598 | e2167b61a | clean History Clippy/tests | SUCCESS, 903 tests |
+| https://github.com/auenkr/cadence-rust/actions/runs/43559207202 | 6a885777a | clean workspace Clippy/tests | SUCCESS |
+| https://github.com/auenkr/cadence-rust/actions/runs/43558072143 | e2167b61a | mysql, two History,20min,4wf/s,restart t600s | SUCCESS, GATE SUMMARY failed: [] |
+
+Passing soak: 4800 started/completed, zero failures/inflight; E2E p50 4111ms,
+p95 4185ms,p99 4219ms (Go baseline ~4100ms p50). RSS first host 164.0->177.6MiB,
+peak185.5,32 samples; restarted host48.0->48.1MiB,10 samples. Both guards pass.
+The original RSS failure was real retained-cache growth (Rust ignored Go cache
+capacity/TTL), not a reason to relax its already lenient guard. Same unchanged
+workload now passes with bounded cache. Cancellation regression + transport
+deadline path + passing restart soak explain the parent notification loss;
+original logs alone do not identify which exact request future was canceled.
+Reproducible summary,steps,source/binary SHA files retained under
+memory/evidence/history-soak-tail-20261114/passing-soak/.
+
+Checkpoint: soak acceptance remains green; subsequent recovery work found a separate PostgreSQL healthy-connection-return wakeup bug, proven by native stacks and strict pre-fix regression43574757454. Fixed recovery and final workspace CI are running; see history-restartgate-20261114.md.
+
+## Fixed PostgreSQL recovery and final workspace result
+
+| run URL | head | lane | result |
+|---|---|---|---|
+| https://github.com/auenkr/cadence-rust/actions/runs/43575377044 |451a974eb|fresh workspace|FAILURE, unrelated 40ms Unleash metrics test split counters across flushes; Clippy passed|
+| https://github.com/auenkr/cadence-rust/actions/runs/43576413232 |df25f4ece|fresh workspace rerun, unchanged Rust|SUCCESS, Clippy then workspace tests, strict PostgreSQL test passes in0.03s|
+| https://github.com/auenkr/cadence-rust/actions/runs/43574115408 |1a952c6f7|postgres1500s recovery, healthy pool wakeup fix|SUCCESS,4500/4500,0failed,GATE SUMMARY failed: []|
+| https://github.com/auenkr/cadence-rust/actions/runs/43577811696 |df25f4ece|cassandra1500s recovery|running|
+
+PostgreSQL all52 assertions pass, including both graceful restarts (no deadline
+relaxation). p50=4108ms. This confirms the missing healthy-return wakeup caused
+the live process shutdown hang. Earlier isolated child activity timeout did not
+recur. Compact source/binary-SHA and gate evidence: restart-postgres-fixed/.
+
+## Final acceptance: all requested lanes pass
+
+| run URL | source head | lane | conclusion / acceptance |
+|---|---|---|---|
+| https://github.com/auenkr/cadence-rust/actions/runs/43558072143 |e2167b61ad242a1b20922f2d6d9473a326107912|mysql20min soak|SUCCESS;4800/4800;0failed;p50=4111ms;both unchanged RSS guards pass|
+| https://github.com/auenkr/cadence-rust/actions/runs/43561066779 |a79cb0741|mysql1500s recovery|SUCCESS;4500/4500;GATE SUMMARY failed: []|
+| https://github.com/auenkr/cadence-rust/actions/runs/43574115408 |1a952c6f7ea612f3aba9dacb4ecd9f6477246620|postgres1500s recovery|SUCCESS;4500/4500;p50=4108ms;GATE SUMMARY failed: []|
+| https://github.com/auenkr/cadence-rust/actions/runs/43577811696 |df25f4ece|cassandra1500s recovery|SUCCESS;4500/4500;p50=4078ms;GATE SUMMARY failed: []|
+| https://github.com/auenkr/cadence-rust/actions/runs/43576413232 |df25f4ece|fresh workspace Clippy then tests|SUCCESS;strict PostgreSQL regression0.03s|
+
+Cassandra all52 checks pass. History SHA256:
+`f45e6237d2d2f00dd33f4eea173bf0395f988ae10586a45bdc162b801b7d1e98`.
+All lanes retain source/binary identities, summaries, exit codes and assertions
+under memory/evidence/history-soak-tail-20261114/. Historical failures above
+remain for traceability. Final Rust source equals the passing workspace and
+Cassandra run source; later commits only update memory/evidence. The soak ran
+after child/cache fixes; subsequent changes fix shutdown notification and the
+PostgreSQL pool, with no soak workload/threshold changes. No local Cargo, Go or
+Docker commands were run. No merge to master or branch deletion performed.

@@ -1,0 +1,5 @@
+clippy-test	Test	2026-11-14T06:55:43.8201401Z test task::parallel_processor::tests::stop_drains_and_nacks_then_closed ... ok
+clippy-test	Test	2026-11-14T06:55:43.8307001Z test task::parallel_processor::tests::wrr_try_submit_full_and_closed ... ok
+clippy-test	Test	2026-11-14T06:55:45.8830405Z test result: ok. 903 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.50s
+clippy-test	Test	2026-11-14T06:55:45.8871338Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T06:55:48.4751268Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

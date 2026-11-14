@@ -1,0 +1,7 @@
+{
+  "failedSteps": [
+    "s2-graceful-rust-history-stopped",
+    "s2-graceful-rust-history-2-stopped"
+  ],
+  "stepCount": 52
+}
