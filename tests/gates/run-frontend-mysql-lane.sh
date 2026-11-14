@@ -57,18 +57,37 @@ docker exec "$CONTAINER" mysql -uroot -p"$PASSWORD" -h127.0.0.1 \
   -e 'CREATE DATABASE IF NOT EXISTS cadence; CREATE DATABASE IF NOT EXISTS cadence_visibility;' || exit 5
 KAFKA_ARGS=()
 if [[ "${CADENCE_GATE_KAFKA:-}" == "true" || "${CADENCE_GATE_KAFKA:-}" == "1" ]]; then
-  # Single-node KRaft broker, plaintext, advertised on the published host port (async workflow queue).
+  # Single-node KRaft broker. The authenticated lane exposes SASL/PLAIN externally
+  # while keeping the broker's internal listener plaintext for admin/topic setup.
   KAFKA_CONTAINER="cadence-rust-gate-kafka-$RUN_ID"
+  if [[ "${CADENCE_GATE_KAFKA_AUTH:-false}" == "true" ]]; then
+    KAFKA_LISTENERS="SASL_PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,INTERNAL://0.0.0.0:9094"
+    KAFKA_ADVERTISED="SASL_PLAINTEXT://127.0.0.1:${KAFKA_PORT},INTERNAL://localhost:9094"
+    KAFKA_PROTOCOLS="CONTROLLER:PLAINTEXT,SASL_PLAINTEXT:SASL_PLAINTEXT,INTERNAL:PLAINTEXT"
+  else
+    KAFKA_LISTENERS="PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,INTERNAL://0.0.0.0:9094"
+    KAFKA_ADVERTISED="PLAINTEXT://127.0.0.1:${KAFKA_PORT},INTERNAL://localhost:9094"
+    KAFKA_PROTOCOLS="CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT"
+  fi
+  KAFKA_AUTH_ARGS=()
+  if [[ "${CADENCE_GATE_KAFKA_AUTH:-false}" == "true" ]]; then
+    KAFKA_AUTH_ARGS+=(
+      --env KAFKA_SASL_ENABLED_MECHANISMS=PLAIN
+      --env KAFKA_LISTENER_NAME_SASL_PLAINTEXT_SASL_ENABLED_MECHANISMS=PLAIN
+      --env 'KAFKA_LISTENER_NAME_SASL_PLAINTEXT_PLAIN_SASL_JAAS_CONFIG=org.apache.kafka.common.security.plain.PlainLoginModule required username="cadence" password="cadence-password" user_cadence="cadence-password";'
+    )
+  fi
   docker run --detach --name "$KAFKA_CONTAINER" --label "cadence-rust-gate-run=$RUN_ID" \
     --memory 1g --memory-swap 1g --cpus 1 --pids-limit 2048 \
     --publish "127.0.0.1:${KAFKA_PORT}:9092" \
     --env KAFKA_NODE_ID=1 --env KAFKA_PROCESS_ROLES=broker,controller \
-    --env KAFKA_LISTENERS=PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,INTERNAL://0.0.0.0:9094 \
-    --env KAFKA_ADVERTISED_LISTENERS="PLAINTEXT://127.0.0.1:${KAFKA_PORT},INTERNAL://localhost:9094" \
+    --env KAFKA_LISTENERS="$KAFKA_LISTENERS" \
+    --env KAFKA_ADVERTISED_LISTENERS="$KAFKA_ADVERTISED" \
     --env KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER \
-    --env KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT \
+    --env KAFKA_LISTENER_SECURITY_PROTOCOL_MAP="$KAFKA_PROTOCOLS" \
     --env KAFKA_INTER_BROKER_LISTENER_NAME=INTERNAL \
     --env KAFKA_CONTROLLER_QUORUM_VOTERS=1@localhost:9093 \
+    "${KAFKA_AUTH_ARGS[@]}" \
     --env KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1 --env KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1 \
     --env KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1 --env KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=0 \
     --env KAFKA_AUTO_CREATE_TOPICS_ENABLE=false --env KAFKA_HEAP_OPTS="-Xms512m -Xmx512m" \
