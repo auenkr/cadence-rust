@@ -1,0 +1,41 @@
+# History mutable-state JSON parity (2026-11-14)
+
+Branch: `history-mutstate-json`
+
+## Changes
+
+- `EngineMutableState::ev_copy_to_persistence` now emits version histories with
+  Go `encoding/json` exported field names (`CurrentVersionHistoryIndex`,
+  `Histories`, `BranchToken`, `Items`, `EventID`, `Version`), preserving zero
+  values and encoding branch-token bytes as standard base64.
+- Added a Rust unit fixture for those version-history JSON bytes.
+- Removed `norm()` from `tests/gates/run-history-repl-gate.py`; the replication
+  gate now compares the version-history JSON object as returned.
+
+## CI evidence
+
+- Rust History CI (clippy + tests):
+  https://github.com/auenkr/cadence-rust/actions/runs/43585479278
+  Head `7e92c0e58b9d5d9017f25501b9b9a85e2ecc7f06`, conclusion `success`.
+- MySQL Go/Rust history replication gate, Rust History on cluster A:
+  https://github.com/auenkr/cadence-rust/actions/runs/43586192457
+  Head `7e92c0e58b9d5d9017f25501b9b9a85e2ecc7f06`, conclusion `failure`.
+  The event history checks passed. Raw version-history equality failed for six
+  cases because Go and Rust clusters have different branch UUIDs embedded in
+  their base64 `BranchToken` values. Gate output ended with:
+  `GATE SUMMARY failed: ['p1-A-completed-version-histories-equal', 'p1-B-parked-version-histories-equal', 'p1-A-child0-version-histories-equal', 'p2-B-continued-version-histories-equal', 'p2-C-new-on-A-version-histories-equal', 'p2-A-old-completed-still-equal-version-histories-equal']`.
+  The run artifact includes Rust History SHA256
+  `a2f3a97da68b3db918bd7ff2f25ee5d94ed2fef03b7c8f2dfed0ca6eec40245f`.
+
+## Remaining parity work
+
+The version-history subobject now has Go's JSON representation, but
+`ev_copy_to_persistence` still emits a reduced mutable-state view with camelCase
+top-level keys (`executionInfo`, `pendingActivities`, etc.). Go marshals the
+complete `persistence.WorkflowMutableState` with exported PascalCase field
+names, nil/zero fields, and the full nested persistence structs. Therefore the
+full `mutableStateInCache` / `mutableStateInDatabase` byte-shape goal is not yet
+complete. The cross-cluster raw gate also demonstrates that branch tokens are
+cluster-specific, so its direct equality condition cannot pass while comparing
+these two distinct persistence branches, even though token encoding is
+compatible.
