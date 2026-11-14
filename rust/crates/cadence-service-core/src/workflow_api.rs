@@ -105,10 +105,18 @@ impl AdminOutcome {
 /// installs a sink; both the Thrift and gRPC Admin dispatch call it after
 /// authorization.
 pub trait AdminMetrics: Send + Sync {
-    /// Emits `cadence_requests` for the method's scope.
-    fn admin_request(&self, method: &str);
+    /// Emits `cadence_requests` for the method's scope; `caller`/`transport` are
+    /// Go `InboundMetricsMiddleware` context tags (empty = unset).
+    fn admin_request(&self, method: &str, caller: &str, transport: &str);
     /// Emits latency plus the typed error counter.
-    fn admin_finish(&self, method: &str, elapsed: std::time::Duration, outcome: AdminOutcome);
+    fn admin_finish(
+        &self,
+        method: &str,
+        caller: &str,
+        transport: &str,
+        elapsed: std::time::Duration,
+        outcome: AdminOutcome,
+    );
 }
 
 /// Failure of a Go `WorkflowHandler` domain pre-check.

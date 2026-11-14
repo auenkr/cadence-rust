@@ -2731,13 +2731,18 @@ pub async fn dispatch_with_transport(
             }
         }
     }
+    let admin_caller = caller_headers
+        .get("rpc-caller")
+        .or_else(|| caller_headers.get("cn"))
+        .cloned()
+        .unwrap_or_default();
     let admin_started = if admin {
         state
             .workflow_api
             .as_ref()
             .and_then(|api| api.admin_metrics())
             .map(|m| {
-                m.admin_request(name);
+                m.admin_request(name, admin_caller.as_str(), transport);
                 std::time::Instant::now()
             })
     } else {
@@ -3004,7 +3009,7 @@ pub async fn dispatch_with_transport(
             Ok(_) => crate::workflow_api::AdminOutcome::Ok,
             Err(e) => crate::workflow_api::AdminOutcome::from_exception(e.exc_name),
         };
-        m.admin_finish(name, started.elapsed(), class);
+        m.admin_finish(name, admin_caller.as_str(), transport, started.elapsed(), class);
     }
     let def = find_method(method).ok_or_else(|| format!("unknown method {method}"))?;
     match outcome {
