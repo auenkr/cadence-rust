@@ -315,7 +315,7 @@ impl TypedMutableState {
         bypass_task_generation: bool,
         original_scheduled_timestamp: i64,
     ) -> Result<DecisionInfo> {
-        let op = "add-decision-task-scheduled-event";
+        let op = "add-decisiontask-scheduled-event";
         self.check_mutability()?;
         self.task_gen_env.normal_schedule_to_start_timeout_nanos = env.normal_schedule_to_start_timeout_nanos;
         self.task_gen_env.normal_schedule_to_start_max_attempts = env.normal_schedule_to_start_max_attempts;
@@ -443,7 +443,7 @@ impl TypedMutableState {
         task_list_name: &str,
         identity: &str,
     ) -> Result<(Option<HistoryEvent>, DecisionInfo)> {
-        let op = "add-decision-task-started-event";
+        let op = "add-decisiontask-started-event";
         self.check_mutability()?;
         let mut decision = match self.get_decision_info(schedule_event_id) {
             Some(d) if d.started_id == EMPTY_EVENT_ID => d,
@@ -558,6 +558,11 @@ impl TypedMutableState {
                 "it is not allowed resetting to a point that workflow has pending signals to send.".into(),
             ));
         }
+        if !self.semaphore_state.pending.is_empty() {
+            return Err(TypedMutableStateError::BadRequest(
+                "it is not allowed resetting to a point that workflow has pending semaphore holds.".into(),
+            ));
+        }
         Ok(())
     }
 
@@ -570,7 +575,7 @@ impl TypedMutableState {
         request: &RespondDecisionTaskCompletedRequest,
         max_reset_points: usize,
     ) -> Result<HistoryEvent> {
-        let op = "add-decision-task-completed-event";
+        let op = "add-decisiontask-completed-event";
         self.check_mutability()?;
         let decision = match self.get_decision_info(schedule_event_id) {
             Some(d) if d.started_id == started_event_id => d,
@@ -656,7 +661,7 @@ impl TypedMutableState {
         schedule_event_id: i64,
         started_event_id: i64,
     ) -> Result<HistoryEvent> {
-        let op = "add-decision-task-timed-out-event";
+        let op = "add-decisiontask-timedout-event";
         self.check_mutability()?;
         let dt = match self.get_decision_info(schedule_event_id) {
             Some(d) if d.started_id == started_event_id => d,
@@ -743,7 +748,7 @@ impl TypedMutableState {
         env: &DecisionEnv,
         schedule_event_id: i64,
     ) -> Result<Option<HistoryEvent>> {
-        let op = "add-decision-task-timed-out-event";
+        let op = "add-decisiontask-timedout-event";
         self.check_mutability()?;
         if self.execution_info.decision_schedule_id != schedule_event_id
             || self.execution_info.decision_started_id > 0
@@ -792,7 +797,7 @@ impl TypedMutableState {
         reason: &str,
         reset_request_id: &str,
     ) -> Result<HistoryEvent> {
-        let op = "add-decision-task-timed-out-event";
+        let op = "add-decisiontask-timedout-event";
         self.check_mutability()?;
         if self.execution_info.decision_schedule_id != schedule_event_id {
             return Err(self.create_internal_server_error(op));
@@ -832,7 +837,7 @@ impl TypedMutableState {
         fork_event_version: i64,
         reset_request_id: &str,
     ) -> Result<Option<HistoryEvent>> {
-        let op = "add-decision-task-failed-event";
+        let op = "add-decisiontask-failed-event";
         self.check_mutability()?;
         let attr = DecisionTaskFailedEventAttributes {
             scheduled_event_id: schedule_event_id,
@@ -944,7 +949,7 @@ impl TypedMutableState {
             use cadence_persistence::sqlblobs::Encoding;
             use cadence_thrift::ToThrift;
             let data = Encoding::ThriftRW
-                .encode(&points.to_thrift())
+                .encode_versioned(&points.to_thrift())
                 .map_err(|e| TypedMutableStateError::Internal(format!("encode auto reset points: {e}")))?;
             self.execution_info.auto_reset_points =
                 Some(cadence_persistence::history_contract::DataBlob { encoding: "thriftrw".to_string(), data });
@@ -979,6 +984,19 @@ mod decision_tests {
     }
 
     #[test]
+    fn check_resettable_rejects_pending_semaphore_holds() {
+        let mut ms = TypedMutableState::new();
+        assert!(ms.check_resettable().is_ok());
+        ms.semaphore_state.pending.insert(5, super::super::semaphore::SemaphoreInfo::default());
+        match ms.check_resettable() {
+            Err(TypedMutableStateError::BadRequest(m)) => {
+                assert_eq!(m, "it is not allowed resetting to a point that workflow has pending semaphore holds.");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
     fn binary_checksum_creates_reset_points_and_persists_blob() {
         let mut ms = TypedMutableState::new();
         ms.execution_info.run_id = "run".into();
@@ -1003,6 +1021,17 @@ mod decision_tests {
         assert_eq!(names, vec!["b", "c"]);
         let sa: Vec<String> = serde_json::from_slice(&ms.execution_info.search_attributes[BINARY_CHECKSUMS]).unwrap();
         assert_eq!(sa, vec!["b", "c"]);
+    }
+
+    #[test]
+    fn go_action_tag_error_messages() {
+        let mut ms = TypedMutableState::new();
+        ms.execution_info.state = WORKFLOW_STATE_RUNNING;
+        let e = env();
+        let err = ms.add_decision_task_started_event(&e, 99, "r", "tl", "id").unwrap_err();
+        assert!(err.to_string().contains("add-decisiontask-started-event operation failed"), "{err}");
+        let err = ms.add_decision_task_timed_out_event(&e, 99, 100).unwrap_err();
+        assert!(err.to_string().contains("add-decisiontask-timedout-event operation failed"), "{err}");
     }
 
     #[test]

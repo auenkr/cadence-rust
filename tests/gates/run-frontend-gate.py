@@ -32,6 +32,9 @@ ap.add_argument('--es-version', default='v7')
 ap.add_argument('--es-container', help='docker container of the ES/OpenSearch node; enables the restart-resilience steps')
 ap.add_argument('--s3-endpoint', help='http://host:port of MinIO; enables the S3 archival (s3store) steps')
 ap.add_argument('--s3-bucket', default='cadence-archival-gate')
+ap.add_argument('--s3-reader', help='path of the s3-reader Go helper (reads archives with the Go s3store archivers)')
+ap.add_argument('--rust-s3-archival-only', action='store_true',
+                help='after services start, run only the Rust History S3 archival end-to-end phase (needs --s3-endpoint and --rust-history-binary)')
 ap.add_argument('--gcs-endpoint', help='http://host:port of fake-gcs-server; enables the GCS archival (gstorage) steps')
 ap.add_argument('--gcs-bucket', default='cadence-archival-gate-gcs')
 ap.add_argument('--gcs-seed', help='path of the gcs-seed Go helper (prints Go gstorage history filenames)')
@@ -43,6 +46,8 @@ S3_KEY, S3_SECRET = 'cadencegate', 'cadencegate-secret'
 if args.s3_endpoint:
     # Go History/Worker and the Rust Frontend read AWS credentials from the environment.
     os.environ.update({'AWS_ACCESS_KEY_ID': S3_KEY, 'AWS_SECRET_ACCESS_KEY': S3_SECRET, 'AWS_REGION': 'us-east-1'})
+if args.rust_s3_archival_only and not (args.s3_endpoint and args.rust_history_binary):
+    ap.error('--rust-s3-archival-only needs --s3-endpoint and --rust-history-binary')
 if args.es_url and not args.kafka_broker:
     ap.error('--es-url requires --kafka-broker')
 if args.kafka_broker and not args.kafka_container:
@@ -321,6 +326,121 @@ try:
     if not (history_ready and h2 and matching_ready and fe_t and fe_g):
         raise SystemExit(1)
     time.sleep(20)  # ring convergence
+    if args.rust_s3_archival_only:
+        # ---- Rust History S3 archival end-to-end (MinIO): Rust History archives to s3store at close, Rust Frontend
+        # reads the archive (history after retention deletion, visibility), Go s3store archivers parse the blobs.
+        import hashlib, hmac, urllib.request, urllib.error, urllib.parse, datetime
+        def s3c(method, path, query='', body=b''):
+            u = urllib.parse.urlparse(args.s3_endpoint)
+            now = datetime.datetime.now(datetime.timezone.utc)
+            amz, day = now.strftime('%Y%m%dT%H%M%SZ'), now.strftime('%Y%m%d')
+            ph = hashlib.sha256(body).hexdigest()
+            canon_q = '&'.join(sorted(query.split('&'))) if query else ''
+            canon = f'{method}\n{urllib.parse.quote(path)}\n{canon_q}\nhost:{u.netloc}\nx-amz-content-sha256:{ph}\nx-amz-date:{amz}\n\nhost;x-amz-content-sha256;x-amz-date\n{ph}'
+            scope = f'{day}/us-east-1/s3/aws4_request'
+            sts = f'AWS4-HMAC-SHA256\n{amz}\n{scope}\n' + hashlib.sha256(canon.encode()).hexdigest()
+            k = ('AWS4' + S3_SECRET).encode()
+            for part in (day, 'us-east-1', 's3', 'aws4_request'):
+                k = hmac.new(k, part.encode(), hashlib.sha256).digest()
+            sig = hmac.new(k, sts.encode(), hashlib.sha256).hexdigest()
+            req = urllib.request.Request(args.s3_endpoint + path + ('?' + query if query else ''), data=body or None, method=method, headers={
+                'x-amz-date': amz, 'x-amz-content-sha256': ph,
+                'Authorization': f'AWS4-HMAC-SHA256 Credential={S3_KEY}/{scope}, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature={sig}'})
+            try:
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    return r.status, r.read().decode()
+            except urllib.error.HTTPError as e:
+                return e.code, e.read().decode()
+        bkt = args.s3_bucket
+        st, body = s3c('PUT', f'/{bkt}')
+        record('rs3-create-bucket', st == 200, f'{st} {body}')
+        rs_hist, rs_vis = f's3://{bkt}/rust-history', f's3://{bkt}/rust-visibility'
+        dom_r = 'rs3-gate-' + secrets.token_hex(3)
+        cli_r = lambda *a: [*cli_t, '--domain', dom_r, *a]
+        # retention 0 (system.minRetentionDays=0): the run is deleted shortly after close, so the history read below
+        # can only be served from the S3 archive.
+        run('rs3-register-domain', cli_r('domain', 'register', '--retention', '0', '--history_archival_status', 'enabled', '--history_uri', rs_hist,
+                                         '--visibility_archival_status', 'enabled', '--visibility_uri', rs_vis))
+        time.sleep(12)
+        d = subprocess.run(cli_r('domain', 'describe'), capture_output=True, text=True, timeout=60)
+        (work / 'rs3-describe-domain.log').write_text(d.stdout + d.stderr)
+        mm = re.search(r'UUID:\s*(\S+)', d.stdout)
+        record('rs3-describe-domain', d.returncode == 0 and rs_hist in d.stdout and rs_vis in d.stdout and mm is not None, d.stdout + d.stderr)
+        if mm:
+            dom_id = mm.group(1)
+            wtype, runs = 'Rs3GateType', {}
+            for i in range(3):
+                wid = f'rs3-wf-{secrets.token_hex(3)}'
+                r = subprocess.run(cli_r('workflow', 'start', '--tl', 'rs3-gate-tl', '--wt', wtype, '--wid', wid, '--et', '600', '--dt', '10'), capture_output=True, text=True, timeout=60)
+                rm = re.search(r'run Id:\s*(\S+)', r.stdout)
+                record(f'rs3-start-{i}', r.returncode == 0 and rm is not None, r.stdout + r.stderr)
+                if rm:
+                    runs[wid] = rm.group(1)
+                    run(f'rs3-terminate-{i}', cli_r('workflow', 'terminate', '--wid', wid, '--rid', rm.group(1), '--reason', 'rs3-gate'))
+            # 1) archived objects appear in MinIO (written by Rust History)
+            hist_keys, vis_keys = {}, []
+            for _ in range(36):
+                hist_keys = {}
+                for wid, rid in runs.items():
+                    pfx = urllib.parse.quote(f'rust-history/{dom_id}/history/{wid}/{rid}/', safe='')
+                    st, listing = s3c('GET', f'/{bkt}', f'list-type=2&prefix={pfx}')
+                    hist_keys[wid] = re.findall(r'<Key>([^<]+)</Key>', listing) if st == 200 else []
+                st, listing = s3c('GET', f'/{bkt}', 'list-type=2&prefix=rust-visibility%2F')
+                vis_keys = re.findall(r'<Key>([^<]+)</Key>', listing) if st == 200 else []
+                if runs and all(hist_keys.values()) and all(any(f'/workflowID/{w}/closeTimeout/' in k for k in vis_keys) for w in runs) \
+                        and len([k for k in vis_keys if '/workflowTypeName/' in k and '/closeTimeout/' in k]) >= len(runs):
+                    break
+                time.sleep(5)
+            (work / 'rs3-objects.log').write_text(json.dumps({'history': hist_keys, 'visibility': vis_keys}, indent=1))
+            for wid, keys in hist_keys.items():
+                for kx in keys:
+                    st, blob = s3c('GET', f'/{bkt}/{kx}')
+                    (work / f'rs3-blob-{wid}-{kx.rsplit("/", 1)[-1]}.json').write_text(blob)
+            record('rs3-rust-wrote-history-blobs', bool(runs) and all(hist_keys.values()), json.dumps(hist_keys)[:500])
+            # retention 0 races the close transfer task against the delete timer (same in Go): a run deleted before its
+            # CloseExecutionTask is processed gets no visibility archive. Require visibility for >= 2 of the runs.
+            vis_runs = {w: r_ for w, r_ in runs.items() if any(f'/workflowID/{w}/closeTimeout/' in k for k in vis_keys)}
+            record('rs3-rust-wrote-visibility-records', len(vis_runs) >= 2 and len(vis_keys) >= 4 * len(vis_runs), f'{sorted(vis_runs)}\n' + '\n'.join(vis_keys[:10]))
+            # 2) wait for retention deletion (describe fails once the run left persistence)
+            gone = {}
+            for wid, rid in runs.items():
+                for _ in range(40):
+                    r = subprocess.run(cli_r('workflow', 'describe', '--wid', wid, '--rid', rid), capture_output=True, text=True, timeout=60)
+                    if r.returncode != 0:
+                        gone[wid] = True
+                        break
+                    time.sleep(5)
+            record('rs3-retention-deleted-from-persistence', len(gone) == len(runs) > 0, str(gone))
+            # 3) Frontend GetWorkflowExecutionHistory served from the archive (tchannel + grpc)
+            for tag, cli in (('tchannel', cli_t), ('grpc', cli_g)):
+                for wid, rid in runs.items():
+                    out_f = work / f'rs3-history-{tag}-{wid}.json'
+                    r = subprocess.run([*cli, '--domain', dom_r, 'workflow', 'show', '--wid', wid, '--rid', rid, '--output_filename', str(out_f)], capture_output=True, text=True, timeout=60)
+                    exported = out_f.read_text() if out_f.exists() else ''
+                    record(f'rs3-frontend-archived-history-{tag}-{wid}', 'WorkflowExecutionStarted' in exported and 'WorkflowExecutionTerminated' in exported, exported[-500:] + r.stdout + r.stderr)
+            # 4) ListArchivedWorkflowExecutions through Frontend
+            for tag, cli in (('tchannel', cli_t), ('grpc', cli_g)):
+                found, out = False, ''
+                for _ in range(12):
+                    r = subprocess.run([*cli, '--domain', dom_r, 'workflow', 'listarchived', '--query', f"WorkflowTypeName = '{wtype}'", '--all'], capture_output=True, text=True, timeout=60)
+                    out = r.stdout + r.stderr
+                    if r.returncode == 0 and all(w in out for w in vis_runs):
+                        found = True
+                        break
+                    time.sleep(5)
+                (work / f'rs3-listarchived-{tag}.log').write_text(out)
+                record(f'rs3-frontend-list-archived-{tag}', found, out)
+            # 5) Go s3store archivers parse the Rust-written blobs
+            if args.s3_reader:
+                rd = os.path.abspath(args.s3_reader)
+                for wid, rid in runs.items():
+                    r = subprocess.run([rd, 'history', args.s3_endpoint, rs_hist, dom_id, wid, rid], capture_output=True, text=True, timeout=60)
+                    (work / f'rs3-go-reader-history-{wid}.log').write_text(r.stdout + r.stderr)
+                    record(f'rs3-go-reads-rust-history-{wid}', r.returncode == 0 and 'WorkflowExecutionStarted' in r.stdout and 'WorkflowExecutionTerminated' in r.stdout, r.stdout + r.stderr)
+                r = subprocess.run([rd, 'visibility', args.s3_endpoint, rs_vis, dom_id, f"WorkflowTypeName = '{wtype}'"], capture_output=True, text=True, timeout=60)
+                (work / 'rs3-go-reader-visibility.log').write_text(r.stdout + r.stderr)
+                record('rs3-go-reads-rust-visibility', r.returncode == 0 and all(w in r.stdout for w in vis_runs), r.stdout + r.stderr)
+        raise SystemExit(0)
     dom_t, dom_g = 'fe-gate-t-' + secrets.token_hex(3), 'fe-gate-g-' + secrets.token_hex(3)
     run('cli-register-domain-tchannel', [*cli_t, '--domain', dom_t, 'domain', 'register', '--retention', '1'])
     run('cli-register-domain-grpc', [*cli_g, '--domain', dom_g, 'domain', 'register', '--retention', '1'])
@@ -330,6 +450,7 @@ try:
         run('cli-register-domain-async', [*cli_t, '--domain', dom_a, 'domain', 'register', '--retention', '1'])
         run('cli-register-domain-noasync', [*cli_t, '--domain', dom_n, 'domain', 'register', '--retention', '1'])
         cfg = json.dumps({'Enabled': True, 'PredefinedQueueName': ASYNC_QUEUE})
+        time.sleep(2)  # Go UpdateAsyncWorkflowConfiguraton honours frontend.failoverCoolDown (1s in dev config)
         ok = run('cli-admin-async-config-update-grpc', [*cli_g, '--domain', dom_a, 'admin', 'async-wf-queue', 'update', '--json', cfg])
         if not ok:
             run('cli-admin-async-config-update-tchannel', [*cli_t, '--domain', dom_a, 'admin', 'async-wf-queue', 'update', '--json', cfg])
@@ -546,6 +667,26 @@ try:
             record('admin-probe-run', False, pr.stdout + pr.stderr)
     except Exception as e:
         record('admin-probe-run', False, repr(e))
+    # ---- History admin APIs through the Go CLI (only meaningful with Rust History)
+    if args.rust_history_binary:
+        try:
+            adm_wid = 'admin-gate-' + secrets.token_hex(3)
+            run('admin-gate-start-wf', [*cli_g, '--domain', dom_t, 'workflow', 'start', '--tl', 'admin-gate-tl', '--wt', 'AdminGate', '--wid', adm_wid, '--et', '600', '--dt', '10'])
+            pr = subprocess.run([sys.executable, str(Path(__file__).resolve().parent / 'history_admin_cli.py'), str(args.go_cli),
+                                 f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["FRONTEND_PORT"]}', dom_t, 'cluster0', adm_wid, str(work)],
+                                capture_output=True, text=True, timeout=900)
+            (work / 'history-admin-cli.log').write_text(pr.stdout + pr.stderr)
+            for line in pr.stdout.splitlines():
+                try:
+                    item = json.loads(line)
+                except ValueError:
+                    continue
+                record('history-admin-' + item['name'], item['ok'], item['detail'])
+            if not any(l.startswith('{') for l in pr.stdout.splitlines()):
+                record('history-admin-run', False, pr.stdout + pr.stderr)
+            time.sleep(5)
+        except Exception as e:
+            record('history-admin-run', False, repr(e))
     # ---- history scenarios phase: retry/cron timeout, strong idempotency, retention-0 archival, bad-binary auto-reset
     dom_sc = 'fe-gate-scen-' + secrets.token_hex(3)
     scen_hist_uri, scen_vis_uri = f'file://{work / "scen-history-archive"}', f'file://{work / "scen-visibility-archive"}'

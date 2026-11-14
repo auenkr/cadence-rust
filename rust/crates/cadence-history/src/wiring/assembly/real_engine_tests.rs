@@ -1331,3 +1331,118 @@ mod query_ports {
         assert!(resp.cancel_requested);
     }
 }
+
+// ---- history-txnsizelimit / respond parity part 2 tests
+
+fn token_attempt(run: &str, schedule_id: i64, attempt: i64) -> Vec<u8> {
+    JsonTaskTokenSerializer::serialize(&TaskToken {
+        domain_id: DOMAIN_ID.into(),
+        workflow_id: WF.into(),
+        run_id: run.into(),
+        schedule_id,
+        schedule_attempt: attempt,
+        ..Default::default()
+    })
+    .unwrap()
+}
+
+/// Go handler.go L574-602: TransactionSizeLimitError on the decision update terminates
+/// the workflow with TRANSACTION_SIZE_EXCEEDS_LIMIT and the call fails with BadRequest.
+#[tokio::test]
+async fn respond_decision_completed_transaction_size_limit_terminates_workflow() {
+    let h = Harness::new();
+    let run = start(&h).await;
+    decision_started(&h, &run, 2, "dec-req").await.unwrap();
+    h.txn_size_limit.store(2000, std::sync::atomic::Ordering::SeqCst);
+    let big = Decision {
+        decision_type: Some(DecisionType::CompleteWorkflowExecution),
+        complete_workflow_execution_decision_attributes: Some(CompleteWorkflowExecutionDecisionAttributes { result: vec![7u8; 8000] }),
+        ..Default::default()
+    };
+    let err = decision_completed(&h, &run, 2, vec![big]).await.unwrap_err();
+    assert!(err.to_string().contains("exceeds limit of 2000 bytes"), "{err}");
+    let info = h.execs.snapshot(WF, &run).unwrap().execution_info;
+    assert_eq!(info.close_status, WORKFLOW_CLOSE_STATUS_TERMINATED);
+}
+
+/// Go failDecisionHelper: attempts above DecisionRetryMaxAttempts terminate the workflow.
+#[tokio::test]
+async fn respond_decision_completed_attempts_exceed_limit_terminates_workflow() {
+    let h = Harness::build_with_config(
+        |_| {},
+        |c| c.decision_retry_max_attempts = std::sync::Arc::new(|_| 1),
+    );
+    let run = start(&h).await;
+    let bad = Decision {
+        decision_type: Some(DecisionType::ScheduleActivityTask),
+        schedule_activity_task_decision_attributes: Some(Default::default()),
+        ..Default::default()
+    };
+    for _ in 0..4 {
+        let info = h.execs.snapshot(WF, &run).unwrap().execution_info;
+        if info.close_status == WORKFLOW_CLOSE_STATUS_TERMINATED {
+            break;
+        }
+        decision_started(&h, &run, info.decision_schedule_id, "dec-req").await.unwrap();
+        h.engine
+            .respond_decision_task_completed(&HistoryRespondDecisionTaskCompletedRequest {
+                domain_uuid: DOMAIN_ID.into(),
+                complete_request: Some(RespondDecisionTaskCompletedRequest {
+                    task_token: token_attempt(&run, info.decision_schedule_id, info.decision_attempt),
+                    decisions: vec![bad.clone()],
+                    identity: IDENTITY.into(),
+                    ..Default::default()
+                }),
+            })
+            .await
+            .unwrap();
+    }
+    let info = h.execs.snapshot(WF, &run).unwrap().execution_info;
+    assert_eq!(info.close_status, WORKFLOW_CLOSE_STATUS_TERMINATED);
+}
+
+/// Go L624-627: a workflow closed by the decision returns an empty response.
+#[tokio::test]
+async fn respond_decision_completed_closing_workflow_returns_empty_response() {
+    let h = Harness::new();
+    let run = start(&h).await;
+    decision_started(&h, &run, 2, "dec-req").await.unwrap();
+    let resp = decision_completed(&h, &run, 2, vec![complete_decision()]).await.unwrap();
+    assert!(resp.started_response.is_none());
+    assert!(resp.activities_to_dispatch_locally.is_empty());
+}
+
+/// Go L645: the new decision returned from RespondDecisionTaskCompleted has sticky enabled.
+#[tokio::test]
+async fn respond_decision_completed_new_decision_has_sticky_enabled() {
+    let h = Harness::new();
+    let run = start(&h).await;
+    decision_started(&h, &run, 2, "dec-req").await.unwrap();
+    let resp = h
+        .engine
+        .respond_decision_task_completed(&HistoryRespondDecisionTaskCompletedRequest {
+            domain_uuid: DOMAIN_ID.into(),
+            complete_request: Some(RespondDecisionTaskCompletedRequest {
+                task_token: token(&run, 2),
+                decisions: vec![schedule_activity_decision("a1")],
+                identity: IDENTITY.into(),
+                force_create_new_decision_task: true,
+                return_new_decision_task: true,
+                ..Default::default()
+            }),
+        })
+        .await
+        .unwrap();
+    assert!(resp.started_response.expect("new decision").sticky_execution_enabled);
+}
+
+/// Go HandleDecisionTaskStarted: not-running workflow -> ErrNotExists "workflow execution already completed".
+#[tokio::test]
+async fn record_decision_started_on_closed_workflow_not_running_message() {
+    let h = Harness::new();
+    let run = start(&h).await;
+    decision_started(&h, &run, 2, "dec-req").await.unwrap();
+    decision_completed(&h, &run, 2, vec![complete_decision()]).await.unwrap();
+    let err = decision_started(&h, &run, 2, "dec-req-2").await.unwrap_err();
+    assert!(err.to_string().contains("workflow execution already completed"), "{err}");
+}

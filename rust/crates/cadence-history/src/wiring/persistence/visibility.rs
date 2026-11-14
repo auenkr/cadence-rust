@@ -37,9 +37,18 @@ pub struct VisibilityWriteRow {
     pub workflow_timeout_seconds: i64,
     /// Cassandra only: closed row retention seconds (`0` = Go default one day).
     pub retention_seconds: i64,
+    /// Advanced visibility only (Go request `TaskID`, used as the document version).
+    pub task_id: i64,
+    /// Advanced visibility only: the request's `ExecutionStatus` as passed (the SQL store
+    /// derives `execution_status` from the close status instead).
+    pub request_execution_status: i32,
+    pub cluster_attribute_scope: String,
+    pub cluster_attribute_name: String,
+    /// Advanced visibility only: custom search attributes (raw encoded values).
+    pub search_attributes: std::collections::BTreeMap<String, Vec<u8>>,
 }
 
-/// Visibility writes used by the transfer / timer executors (SQL or Cassandra store).
+/// Visibility writes used by the transfer / timer executors (SQL, Cassandra or ES/Kafka store).
 #[async_trait::async_trait]
 pub trait VisibilityWriter: Send + Sync {
     async fn record_started_async(&self, row: VisibilityWriteRow) -> Result<(), PersistenceError>;
@@ -47,6 +56,18 @@ pub trait VisibilityWriter: Send + Sync {
     fn record_uninitialized(&self) -> Result<(), PersistenceError>;
     fn upsert(&self) -> Result<(), PersistenceError>;
     async fn delete_async(&self, domain_id: String, run_id: String) -> Result<(), PersistenceError>;
+    /// Go `RecordWorkflowExecutionUninitialized` (row-carrying form used by the ES store).
+    async fn record_uninitialized_row(&self, _row: VisibilityWriteRow) -> Result<(), PersistenceError> {
+        self.record_uninitialized()
+    }
+    /// Go `UpsertWorkflowExecution`.
+    async fn upsert_row(&self, _row: VisibilityWriteRow) -> Result<(), PersistenceError> {
+        self.upsert()
+    }
+    /// Go `DeleteWorkflowExecution` (ES needs workflowID and the task id as document version).
+    async fn delete_row(&self, domain_id: String, _workflow_id: String, run_id: String, _task_id: i64) -> Result<(), PersistenceError> {
+        self.delete_async(domain_id, run_id).await
+    }
 }
 
 #[async_trait::async_trait]

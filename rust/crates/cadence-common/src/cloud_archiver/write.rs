@@ -232,10 +232,6 @@ pub fn go_history_batch(mut batch: Value) -> Value {
                         m.remove(f);
                     }
                 }
-                // Rust events carry `timestamp` in milliseconds; Go's JSON field is nanoseconds.
-                if let Some(ms) = m.get("timestamp").and_then(Value::as_i64) {
-                    m.insert("timestamp".into(), Value::from(ms.saturating_mul(1_000_000)));
-                }
                 // `WorkflowExecutionStartedEventAttributes.Attempt` is `json:"attempt,omitempty"`.
                 if let Some(a) = m
                     .get_mut("workflowExecutionStartedEventAttributes")
@@ -1340,9 +1336,4 @@ mod tests {
         assert_eq!(go_rfc3339_nano_utc(1_700_000_000_000_000_000), "2023-11-14T22:13:20Z");
     }
 
-    #[test]
-    fn go_history_batch_scales_timestamp_ms_to_ns() {
-        let out = go_history_batch(serde_json::json!({"events": [{"eventId": 1, "timestamp": 1_700_000_000_123_i64}]}));
-        assert_eq!(out["events"][0]["timestamp"], 1_700_000_000_123_000_000_i64);
-    }
 }

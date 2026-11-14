@@ -149,7 +149,7 @@ impl EngineMutableState {
             jitter_start_seconds: start.jitter_start_seconds,
             ..Default::default()
         };
-        let event = g.push_event(EventType::WorkflowExecutionStarted, now / 1_000_000, |e| {
+        let event = g.push_event(EventType::WorkflowExecutionStarted, now, |e| {
             e.workflow_execution_started_event_attributes = Some(attrs.clone());
         });
 
@@ -277,7 +277,7 @@ impl EngineMutableState {
                 return Err(HistoryError::internal("encounter continue as new iterator & first decision delay not 0"))
             }
         };
-        let start_ts = start_event.timestamp.unwrap_or(0) * 1_000_000;
+        let start_ts = start_event.timestamp.unwrap_or(0);
         let mut g = self.inner.lock().unwrap();
         g.gen_delayed_decision_timer(start_ts + backoff * NANOS, backoff_type, start_event.version);
         Ok(())
@@ -310,7 +310,8 @@ pub(super) async fn append_new_branch(
     }
     let last = ids.last().copied();
     let transaction_id = shard.generate_task_id().map_err(shard_err(shard.shard_id()))?;
-    let manager = SqlHistoryManager::new(core.history_v2.clone(), shard.shard_id());
+    let manager = SqlHistoryManager::new(core.history_v2.clone(), shard.shard_id())
+        .with_transaction_size_limit(core.transaction_size_limit.clone());
     let blob = manager
         .append_history_nodes(&txn.branch_token, &txn.events, transaction_id, true, info)
         .await

@@ -39,3 +39,6 @@ bytes = "1"
 tokio-stream = { version = "0.1", features = ["net"] }
 crc32fast = "1"
 crc32c = "0.6"
+rskafka = { version = "0.6", default-features = false, features = ["transport-tls"] }
+rustls-pemfile = "2"
+rustls-native-certs = "0.8"

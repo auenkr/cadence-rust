@@ -4633,6 +4633,7 @@ impl InMemoryExecutionStore {
                             signal_name: attrs.signal_name.clone(),
                             input: attrs.input.clone(),
                             control: attrs.control.clone(),
+                            child_workflow_only: attrs.child_workflow_only,
                         },
                     ),
                     ..Default::default()

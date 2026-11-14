@@ -81,6 +81,104 @@ pub struct Config {
     /// Go `headerForwardingRules`: inbound headers copied to outbound calls.
     #[serde(default, rename = "headerForwardingRules")]
     pub header_forwarding_rules: Vec<crate::header_forwarding::HeaderRule>,
+    /// Go `common/config.Config.Kafka` (`kafkaConfig.go`): clusters, topics and applications.
+    #[serde(default)]
+    pub kafka: KafkaConfig,
+}
+
+/// Go `config.KafkaConfig`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KafkaConfig {
+    #[serde(default)]
+    pub tls: KafkaTls,
+    #[serde(default)]
+    pub sasl: KafkaSasl,
+    #[serde(default)]
+    pub clusters: HashMap<String, KafkaClusterConfig>,
+    #[serde(default)]
+    pub topics: HashMap<String, KafkaTopicConfig>,
+    #[serde(default)]
+    pub applications: HashMap<String, KafkaTopicList>,
+    #[serde(default)]
+    pub version: String,
+}
+
+/// Go `config.TLS` (yaml keys as in `common/config/tls.go`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KafkaTls {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default, rename = "certFile")]
+    pub cert_file: String,
+    #[serde(default, rename = "keyFile")]
+    pub key_file: String,
+    #[serde(default, rename = "caFile")]
+    pub ca_file: String,
+    #[serde(default, rename = "caFiles")]
+    pub ca_files: Vec<String>,
+    #[serde(default, rename = "enableHostVerification")]
+    pub enable_host_verification: bool,
+    #[serde(default, rename = "requireClientAuth")]
+    pub require_client_auth: bool,
+    #[serde(default, rename = "serverName")]
+    pub server_name: String,
+}
+
+/// Go `config.SASL` (`common/config/sasl.go`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KafkaSasl {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub user: String,
+    #[serde(default)]
+    pub password: String,
+    /// plain, sha512 or sha256
+    #[serde(default)]
+    pub algorithm: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KafkaClusterConfig {
+    #[serde(default)]
+    pub brokers: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KafkaTopicConfig {
+    #[serde(default)]
+    pub cluster: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KafkaTopicList {
+    #[serde(default)]
+    pub topic: String,
+    #[serde(default, rename = "dlq-topic")]
+    pub dlq_topic: String,
+}
+
+impl KafkaConfig {
+    /// Go `KafkaConfig.GetTopicsForApplication`/`GetKafkaClusterForTopic`/
+    /// `GetBrokersForKafkaCluster` plus the `NewKafkaClient` ":9092" default port.
+    pub fn producer_target(&self, app: &str) -> Result<(String, Vec<String>), String> {
+        let topics = self.applications.get(app).ok_or_else(|| format!("Missing Topics Config for application {app}"))?;
+        let topic = &topics.topic;
+        let topic_cfg = self.topics.get(topic).ok_or_else(|| format!("Missing Topic Config for Topic {topic}"))?;
+        let cluster = self
+            .clusters
+            .get(&topic_cfg.cluster)
+            .ok_or_else(|| format!("Missing Kafka Cluster Config for Cluster {}", topic_cfg.cluster))?;
+        if cluster.brokers.is_empty() {
+            return Err(format!("Missing Kafka Brokers Config for Cluster {}", topic_cfg.cluster));
+        }
+        let brokers = cluster
+            .brokers
+            .iter()
+            .map(|b| if b.contains(':') { b.clone() } else { format!("{b}:9092") })
+            .collect();
+        Ok((topic.clone(), brokers))
+    }
 }
 
 /// Go `config.PublicClient`. Empty `hostPort` is filled from the current

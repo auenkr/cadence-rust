@@ -47,7 +47,7 @@ impl SemaphoreState {
         self.updates.remove(&id); self.deletes.insert(id); Ok(())
     }
     pub fn add_semaphore_acquire_initiated_event<S: SemaphoreExecution>(&mut self, execution: &mut S, decision_completed_event_id: i64, name: String, wait_timeout_seconds: i32) -> Result<(SemaphoreEvent, SemaphoreInfo), S::Error> {
-        const OP: &str = "SemaphoreAcquireInitiated";
+        const OP: &str = "add-semaphore-acquire-initiated-event";
         execution.check_mutability(OP)?;
         if self.get_semaphore_info_by_name(&name).is_some() { return Err(execution.caller_error(OP)); }
         let event = execution.add_semaphore_event(SemaphoreEventAttributes::AcquireInitiated { decision_completed_event_id, semaphore_name: name, wait_timeout_seconds });
@@ -55,21 +55,21 @@ impl SemaphoreState {
         Ok((event, info))
     }
     pub fn replicate_semaphore_acquire_initiated_event<S: SemaphoreExecution>(&mut self, execution: &S, event: &SemaphoreEvent) -> Result<SemaphoreInfo, S::Error> {
-        let SemaphoreEventAttributes::AcquireInitiated { semaphore_name, wait_timeout_seconds, .. } = &event.attributes else { return Err(execution.internal_error("SemaphoreAcquireInitiated")); };
+        let SemaphoreEventAttributes::AcquireInitiated { semaphore_name, wait_timeout_seconds, .. } = &event.attributes else { return Err(execution.internal_error("add-semaphore-acquire-initiated-event")); };
         let info = SemaphoreInfo { version: event.version, initiated_id: event.id, semaphore_name: semaphore_name.clone(),
             owner_id: format!("{}:{}:{}:{}", execution.workflow_id().len(), execution.workflow_id(), execution.run_id(), event.id),
             acquire_deadline_unix_nanos: event.timestamp_unix_nanos + i64::from(*wait_timeout_seconds) * 1_000_000_000, token_id: 0 };
         self.upsert_semaphore_info(info.clone()); Ok(info)
     }
     pub fn add_semaphore_acquired_event<S: SemaphoreExecution>(&mut self, execution: &mut S, initiated_event_id: i64, token_id: i32) -> Result<SemaphoreEvent, S::Error> {
-        const OP: &str = "SemaphoreAcquired";
+        const OP: &str = "add-semaphore-acquired-event";
         execution.check_mutability(OP)?;
         if self.get_semaphore_info(initiated_event_id).is_none_or(|info| info.token_id == token_id) { return Err(execution.internal_error(OP)); }
         let event = execution.add_semaphore_event(SemaphoreEventAttributes::Acquired { initiated_event_id, token_id });
         self.replicate_semaphore_acquired_event(execution, &event)?; Ok(event)
     }
     pub fn replicate_semaphore_acquired_event<S: SemaphoreExecution>(&mut self, execution: &S, event: &SemaphoreEvent) -> Result<(), S::Error> {
-        let SemaphoreEventAttributes::Acquired { initiated_event_id, token_id } = event.attributes else { return Err(execution.internal_error("SemaphoreAcquired")); };
+        let SemaphoreEventAttributes::Acquired { initiated_event_id, token_id } = event.attributes else { return Err(execution.internal_error("add-semaphore-acquired-event")); };
         let mut info = self.get_semaphore_info(initiated_event_id).cloned().ok_or_else(|| execution.missing_semaphore_info())?;
         info.version = event.version; info.token_id = token_id; self.upsert_semaphore_info(info); Ok(())
     }

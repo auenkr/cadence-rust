@@ -743,7 +743,9 @@ impl MatchingDomainCache {
                         break;
                     }
                     if let Some(cache) = weak_cache.upgrade() {
-                        let _ = cache.refresh_domains();
+                        if let Err(error) = cache.refresh_domains() {
+                            tracing::warn!(%error, "domain cache periodic refresh failed");
+                        }
                     } else {
                         break;
                     }
@@ -1105,6 +1107,16 @@ impl MatchingDomainCache {
             prepare();
         }
         *self.cache.write().expect("domain cache lock") = next;
+        for changed in &changed_entries {
+            tracing::info!(
+                domain = %changed.info.name,
+                notification_version = changed.notification_version,
+                failover_version = changed.failover_version,
+                active_cluster = %changed.replication.active_cluster_name,
+                metadata_version,
+                "domain cache entry updated"
+            );
+        }
         for changed in callbacks.changed.values() {
             changed(&changed_entries);
         }

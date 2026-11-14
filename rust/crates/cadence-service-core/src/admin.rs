@@ -1356,7 +1356,7 @@ pub fn domain_replication_messages_response(
                 cursor = row.id;
                 tasks.push(task);
             }
-            Err(error) => return Err(format!("failed to decode domain replication task: {error}")),
+            Err(error) => return Err(format!("failed to decode task: {error}")),
         }
     }
     // Go calls UpdateAckLevel on every request. An omitted field uses the
@@ -1473,7 +1473,7 @@ pub async fn read_dlq_messages(
                         return crate::handlers::error_response(
                             "InternalServiceError",
                             StatusCode::INTERNAL_SERVER_ERROR,
-                            format!("failed to decode domain DLQ task: {error}"),
+                            format!("failed to decode dlq task: {error}"),
                         )
                     }
                 }
@@ -1562,7 +1562,14 @@ pub(crate) fn decode_domain_dlq_page_token(token: &[u8]) -> Result<Option<i64>, 
         return Ok(None);
     }
     if token.len() != 8 {
-        return Err(format!("invalid next page token {token:?}"));
+        return Err(format!(
+            "invalid next page token [{}]",
+            token
+                .iter()
+                .map(|b| b.to_string())
+                .collect::<Vec<_>>()
+                .join(" ")
+        ));
     }
     Ok(Some(i64::from_le_bytes(
         token.try_into().expect("8-byte token"),
@@ -1637,21 +1644,18 @@ pub fn merge_domain_dlq_messages(
     let page_size = req.maximum_page_size.max(0) as usize;
     let rows =
         persistence.read_domain_replication_dlq(first_message_id, end_message_id, page_size)?;
-    let mut last_processed = ack_level;
+    // Go starts ackedMessageID at 0 and always range-deletes and updates the
+    // ack level, even when no message was merged (persistence ignores stale levels).
+    let mut last_processed = 0_i64;
     for row in &rows {
         let thrift =
             read_struct(&mut Reader::new(&row.payload)).map_err(|error| error.to_string())?;
         let task = cadence_api::types::ReplicationTask::from_thrift(&thrift)
             .map_err(|error| error.to_string())?;
-        if task.task_type != Some(cadence_api::enums::ReplicationTaskType::Domain) {
-            return Err(
-                "Encounter non domain replication task in domain replication queue.".into(),
-            );
-        }
-        let attributes = task
-            .domain_task_attributes
-            .as_ref()
-            .ok_or_else(|| "empty domain replication task".to_string())?;
+        // Go only checks GetDomainTaskAttributes() == nil.
+        let attributes = task.domain_task_attributes.as_ref().ok_or_else(|| {
+            "Encounter non domain replication task in domain replication queue.".to_string()
+        })?;
         let info = attributes
             .info
             .as_ref()
@@ -1675,12 +1679,10 @@ pub fn merge_domain_dlq_messages(
         last_processed = row.id;
     }
 
-    if last_processed > ack_level {
-        persistence.delete_domain_replication_dlq_range(ack_level, last_processed)?;
-        // Go treats acknowledgement metadata as best-effort after delete.
-        let _ = persistence
-            .update_domain_replication_dlq_ack_level("domainReplication".into(), last_processed);
-    }
+    persistence.delete_domain_replication_dlq_range(ack_level, last_processed)?;
+    // Go treats acknowledgement metadata as best-effort after delete.
+    let _ = persistence
+        .update_domain_replication_dlq_ack_level("domainReplication".into(), last_processed);
     let next_page_token = if rows.len() >= page_size {
         encode_domain_dlq_page_token(rows.last().map_or(first_message_id, |row| row.id))
     } else {
@@ -1754,7 +1756,7 @@ pub async fn respond_cross_cluster_tasks_completed(
     }
 }
 
-pub(crate) fn shard_count(state: &AppState) -> i32 {
+pub fn shard_count(state: &AppState) -> i32 {
     state.num_history_shards.max(1)
 }
 
@@ -1891,7 +1893,7 @@ pub async fn describe_shard_distribution(
 
 /// Resolve an Admin request without losing the configured TLS policy. Only an
 /// empty/uninstalled ring uses the static channel; resolver failures propagate.
-pub(crate) fn history_channel_for(
+pub fn history_channel_for(
     state: &AppState,
     shard: i32,
     explicit: Option<&str>,
@@ -2019,7 +2021,17 @@ pub async fn remove_task(
         cluster_name: req.cluster_name,
     };
     let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
-    match client.remove_task(history_admin_request(request)).await {
+    match shard_redirect(
+        &state,
+        req.shard_id,
+        &request,
+        |mut c, r| async move { c.remove_task(history_admin_request(r)).await },
+        client
+            .remove_task(history_admin_request(request.clone()))
+            .await,
+    )
+    .await
+    {
         Ok(_) => ok_json(cadence_api::admin::RemoveTaskResponse {}),
         Err(error) => error_response(
             "InternalServiceError",
@@ -2067,7 +2079,17 @@ pub async fn reset_queue(
         task_type: req.task_type.unwrap_or_default(),
     };
     let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
-    let response = match client.reset_queue(history_admin_request(request)).await {
+    let response = match shard_redirect(
+        &state,
+        req.shard_id,
+        &request,
+        |mut c, r| async move { c.reset_queue(history_admin_request(r)).await },
+        client
+            .reset_queue(history_admin_request(request.clone()))
+            .await,
+    )
+    .await
+    {
         Ok(response) => response.into_inner(),
         Err(error) => {
             return error_response(
@@ -2118,7 +2140,17 @@ pub async fn describe_queue(
         task_type: req.task_type.unwrap_or_default(),
     };
     let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
-    match client.describe_queue(history_admin_request(request)).await {
+    match shard_redirect(
+        &state,
+        req.shard_id,
+        &request,
+        |mut c, r| async move { c.describe_queue(history_admin_request(r)).await },
+        client
+            .describe_queue(history_admin_request(request.clone()))
+            .await,
+    )
+    .await
+    {
         Ok(response) => ok_json(cadence_api::admin::DescribeQueueResponse {
             processing_queue_states: response.into_inner().processing_queue_states,
         }),
@@ -2460,12 +2492,28 @@ pub async fn update_domain_isolation_groups(
     if req.domain.is_empty() {
         return bad_request(BadRequestError::new("Domain is not set on request."));
     }
-    match state
-        .domains
-        .update_domain_isolation_groups(&req.domain, req.isolation_groups)
-    {
+    match state.domain_manager.update_isolation_groups(
+        &req.domain,
+        req.isolation_groups,
+        &state.cluster_metadata,
+        &state.domain_policy(&req.domain),
+    ) {
         Ok(()) => ok_json(cadence_api::admin::UpdateDomainIsolationGroupsResponse {}),
-        Err(e) => entity_not_exists(e),
+        Err(cadence_persistence::FrontendDomainError::NotFound(e)) => entity_not_exists(e),
+        Err(cadence_persistence::FrontendDomainError::Busy(m)) => {
+            error_response("ServiceBusyError", StatusCode::SERVICE_UNAVAILABLE, m)
+        }
+        Err(cadence_persistence::FrontendDomainError::Invalid(m)) => {
+            bad_request(BadRequestError::new(m))
+        }
+        Err(e) => {
+            tracing::warn!(domain = %req.domain, error = %e, "UpdateDomainIsolationGroups failed");
+            error_response(
+                "InternalServiceError",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                e.to_string(),
+            )
+        }
     }
 }
 
@@ -2498,12 +2546,20 @@ pub async fn update_domain_async_workflow_configuration(
     if req.domain.is_empty() {
         return bad_request(BadRequestError::new("Domain is not set on request."));
     }
-    match state
-        .domain_manager
-        .update_async_workflow_config(&req.domain, req.configuration)
-    {
+    match state.domain_manager.update_async_workflow_config(
+        &req.domain,
+        req.configuration,
+        &state.cluster_metadata,
+        &state.domain_policy(&req.domain),
+    ) {
         Ok(()) => ok_json(cadence_api::admin::UpdateDomainAsyncWorkflowConfiguratonResponse {}),
         Err(cadence_persistence::FrontendDomainError::NotFound(e)) => entity_not_exists(e),
+        Err(cadence_persistence::FrontendDomainError::Busy(m)) => {
+            error_response("ServiceBusyError", StatusCode::SERVICE_UNAVAILABLE, m)
+        }
+        Err(cadence_persistence::FrontendDomainError::Invalid(m)) => {
+            bad_request(BadRequestError::new(m))
+        }
         Err(e) => error_response(
             "InternalServiceError",
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -2514,6 +2570,17 @@ pub async fn update_domain_async_workflow_configuration(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn domain_dlq_page_token_error_matches_go_format() {
+        assert_eq!(
+            super::decode_domain_dlq_page_token(&[1, 2, 3]).unwrap_err(),
+            "invalid next page token [1 2 3]"
+        );
+        assert_eq!(super::decode_domain_dlq_page_token(&[]).unwrap(), None);
+        let t = super::encode_domain_dlq_page_token(42);
+        assert_eq!(super::decode_domain_dlq_page_token(&t).unwrap(), Some(42));
+    }
+
     #[test]
     fn reapply_blob_decoding_follows_encoding_and_propagates_errors() {
         use cadence_api::enums::EncodingType;
@@ -3257,4 +3324,58 @@ mod dynamic_config_admin_tests {
             cadence_api::enums::IndexedValueType::Keyword.value()
         );
     }
+}
+
+/// Go client/history `executeWithRedirect`: on ShardOwnershipLost the call is
+/// retried once against the owner named in the error.
+#[allow(clippy::result_large_err)]
+pub(crate) async fn shard_redirect<Req: Clone, Resp, F, Fut>(
+    state: &AppState,
+    shard: i32,
+    request: &Req,
+    retry: F,
+    first: Result<tonic::Response<Resp>, tonic::Status>,
+) -> Result<tonic::Response<Resp>, tonic::Status>
+where
+    F: Fn(
+        cadence_proto::history::history_api_client::HistoryApiClient<tonic::transport::Channel>,
+        Req,
+    ) -> Fut,
+    Fut: std::future::Future<Output = Result<tonic::Response<Resp>, tonic::Status>>,
+{
+    let status = match first {
+        Ok(response) => return Ok(response),
+        Err(status) => status,
+    };
+    let message = status.message();
+    let Some((_, owner)) = message.split_once("is not owned by this host, owner: ") else {
+        return Err(status);
+    };
+    let owner = owner.trim().trim_end_matches('.').to_owned();
+    let mut candidates = Vec::new();
+    if let Ok(Some(channel)) = history_channel_for(state, shard, Some(&owner)) {
+        candidates.push(channel);
+    }
+    if let Some(channel) = state.history_admin_channel.clone() {
+        candidates.push(channel);
+    }
+    let mut last = status;
+    for channel in candidates {
+        match retry(
+            cadence_proto::history::history_api_client::HistoryApiClient::new(channel),
+            request.clone(),
+        )
+        .await
+        {
+            Ok(response) => return Ok(response),
+            Err(error) => {
+                let lost = error.message().contains("is not owned by this host");
+                last = error;
+                if !lost {
+                    break;
+                }
+            }
+        }
+    }
+    Err(last)
 }

@@ -11,7 +11,7 @@ use cadence_api::enums::{EventType, FailureCategory};
 use cadence_api::service_types::HistoryEvent;
 use cadence_api::tasks::*;
 use cadence_api::types::{FailureOptions, WorkflowExecution, WorkflowType};
-use cadence_persistence::history_reader::{read_history_branch, ReadHistoryBranchRequest};
+use cadence_persistence::history_reader::{read_history_branch, HistoryReadError, ReadHistoryBranchRequest};
 
 use crate::engine::deps::{
     ActivityInfo, HResult, HistoryError, EMPTY_EVENT_ID, WORKFLOW_CLOSE_STATUS_TERMINATED, WORKFLOW_STATE_COMPLETED,
@@ -93,12 +93,12 @@ impl Inner {
     pub(super) fn push_event(
         &mut self,
         ty: EventType,
-        now_ms: i64,
+        now_nanos: i64,
         fill: impl FnOnce(&mut HistoryEvent),
     ) -> HistoryEvent {
         let buffer = self.in_flight() && is_bufferable(ty);
         let mut ev = HistoryEvent {
-            timestamp: Some(now_ms),
+            timestamp: Some(now_nanos),
             event_type: Some(ty),
             version: self.current_version,
             task_id: EMPTY_EVENT_TASK_ID,
@@ -261,19 +261,16 @@ impl Inner {
         if a.started_id != TRANSIENT_EVENT_ID {
             return Ok(a.started_id);
         }
-        let started_ms = a.started_time_unix_nanos / 1_000_000;
+        let started_ns = a.started_time_unix_nanos;
         let (attempt, request_id, identity) = (a.attempt, a.request_id.clone(), a.started_identity.clone());
-        let reason = if a.retry_last_failure_reason.is_empty() { None } else { Some(a.retry_last_failure_reason.clone()) };
+        let reason = Some(a.retry_last_failure_reason.clone());
         let details = a.retry_last_failure_details.clone();
-        let options = if a.retry_last_failure_category != 0 || a.retry_last_retry_interval_seconds != 0 {
-            Some(FailureOptions {
-                failure_category: category_from_i32(a.retry_last_failure_category),
-                next_retry_interval_seconds: Some(a.retry_last_retry_interval_seconds),
-            })
-        } else {
-            None
-        };
-        let ev = self.push_event(EventType::ActivityTaskStarted, started_ms, |e| {
+        // Go always writes FailureOptions{FailureCategory: ptr, NextRetryIntervalSeconds}.
+        let options = Some(FailureOptions {
+            failure_category: category_from_i32(a.retry_last_failure_category),
+            next_retry_interval_seconds: Some(a.retry_last_retry_interval_seconds),
+        });
+        let ev = self.push_event(EventType::ActivityTaskStarted, started_ns, |e| {
             e.activity_task_started_event_attributes = Some(ActivityTaskStartedEventAttributes {
                 scheduled_event_id: schedule_id,
                 identity,
@@ -291,18 +288,14 @@ impl Inner {
     }
 }
 
+/// Persisted Go value (Standard=0, Poll=1, Fatal=2) -> API enum.
 fn category_from_i32(v: i32) -> Option<FailureCategory> {
-    match v {
-        0 => Some(FailureCategory::Poll),
-        1 => Some(FailureCategory::Standard),
-        2 => Some(FailureCategory::Fatal),
-        _ => None,
-    }
+    crate::execution::retry::failure_category_from_go_i32(v)
 }
 
 impl EngineMutableState {
     fn invalid_action(what: &str, next_event_id: i64) -> HistoryError {
-        HistoryError::internal(format!("invalid history action {what} (next event id {next_event_id})"))
+        HistoryError::internal(super::invalid_history_action_message(what, next_event_id))
     }
 
     /// Go `AddActivityTaskStartedEvent`.
@@ -326,13 +319,21 @@ impl EngineMutableState {
         } else {
             let attempt = a.attempt;
             let (rid, ident) = (request_id.to_string(), identity.to_string());
-            let ev = g.push_event(EventType::ActivityTaskStarted, now / 1_000_000, |e| {
+            let last_reason = Some(a.retry_last_failure_reason.clone());
+            let last_details = a.retry_last_failure_details.clone();
+            let last_options = Some(FailureOptions {
+                failure_category: category_from_i32(a.retry_last_failure_category),
+                next_retry_interval_seconds: Some(a.retry_last_retry_interval_seconds),
+            });
+            let ev = g.push_event(EventType::ActivityTaskStarted, now, |e| {
                 e.activity_task_started_event_attributes = Some(ActivityTaskStartedEventAttributes {
                     scheduled_event_id: schedule_id,
                     identity: ident,
                     request_id: rid,
                     attempt,
-                    ..Default::default()
+                    last_failure_reason: last_reason,
+                    last_failure_details: last_details,
+                    last_failure_options: last_options,
                 });
             });
             a.started_id = ev.event_id;
@@ -367,7 +368,7 @@ impl EngineMutableState {
         Self::check_activity_close(&g, schedule_id, started_id, "ActivityTaskCompleted")?;
         let started = g.add_transient_started(schedule_id)?;
         let (result, identity) = (request.result.clone(), request.identity.clone());
-        g.push_event(EventType::ActivityTaskCompleted, ms, |e| {
+        g.push_event(EventType::ActivityTaskCompleted, ms * 1_000_000, |e| {
             e.activity_task_completed_event_attributes = Some(ActivityTaskCompletedEventAttributes {
                 result,
                 scheduled_event_id: schedule_id,
@@ -390,7 +391,7 @@ impl EngineMutableState {
         Self::check_activity_close(&g, schedule_id, started_id, "ActivityTaskFailed")?;
         let started = g.add_transient_started(schedule_id)?;
         let r = request.clone();
-        g.push_event(EventType::ActivityTaskFailed, ms, |e| {
+        g.push_event(EventType::ActivityTaskFailed, ms * 1_000_000, |e| {
             e.activity_task_failed_event_attributes = Some(ActivityTaskFailedEventAttributes {
                 reason: r.reason,
                 details: r.details,
@@ -420,7 +421,7 @@ impl EngineMutableState {
         }
         let started = g.add_transient_started(schedule_id)?;
         let (details, identity) = (details.to_vec(), identity.to_string());
-        g.push_event(EventType::ActivityTaskCanceled, ms, |e| {
+        g.push_event(EventType::ActivityTaskCanceled, ms * 1_000_000, |e| {
             e.activity_task_canceled_event_attributes = Some(ActivityTaskCanceledEventAttributes {
                 details,
                 latest_cancel_requested_event_id: cancel_request_id,
@@ -488,7 +489,7 @@ impl EngineMutableState {
         a.retry_last_failure_reason = reason.to_string();
         a.retry_last_worker_identity = a.started_identity.clone();
         a.retry_last_failure_details = details.to_vec();
-        a.retry_last_failure_category = category.map(|c| c as i32).unwrap_or(0);
+        a.retry_last_failure_category = crate::execution::retry::failure_category_to_go_i32(category);
         a.retry_last_retry_interval_seconds = options.and_then(|o| o.next_retry_interval_seconds).unwrap_or(0);
         let (version, attempt) = (a.version, a.attempt as i64);
         g.pc_acts.insert(info.schedule_id, a);
@@ -503,7 +504,7 @@ impl EngineMutableState {
         let ms = self.now_millis();
         let mut g = self.inner.lock().unwrap();
         let (n, i, id, r) = (name.to_string(), input.to_vec(), identity.to_string(), request_id.to_string());
-        g.push_event(EventType::WorkflowExecutionSignaled, ms, |e| {
+        g.push_event(EventType::WorkflowExecutionSignaled, ms * 1_000_000, |e| {
             e.workflow_execution_signaled_event_attributes =
                 Some(cadence_api::service_types::WorkflowExecutionSignaledEventAttributes {
                     signal_name: n,
@@ -532,7 +533,7 @@ impl EngineMutableState {
         let (cause, ext_id, ext_exec) =
             (cause.to_string(), request.external_initiated_event_id, request.external_workflow_execution.clone());
         let (identity, request_id) = (cancel.identity.clone(), cancel.request_id.clone());
-        g.push_event(EventType::WorkflowExecutionCancelRequested, ms, |e| {
+        g.push_event(EventType::WorkflowExecutionCancelRequested, ms * 1_000_000, |e| {
             e.workflow_execution_cancel_requested_event_attributes =
                 Some(cadence_api::service_types::WorkflowExecutionCancelRequestedEventAttributes {
                     cause,
@@ -556,7 +557,7 @@ impl EngineMutableState {
             return Err(Self::invalid_action("WorkflowExecutionTerminated", g.next_event_id));
         }
         let (reason, details, identity) = (reason.to_string(), details.to_vec(), identity.to_string());
-        let ev = g.push_event(EventType::WorkflowExecutionTerminated, ms, |e| {
+        let ev = g.push_event(EventType::WorkflowExecutionTerminated, ms * 1_000_000, |e| {
             e.workflow_execution_terminated_event_attributes =
                 Some(cadence_api::service_types::WorkflowExecutionTerminatedEventAttributes { reason, details, identity });
         });
@@ -591,7 +592,7 @@ impl EngineMutableState {
         let (domain, wt, started) = self.child_info(&g, initiated_id, "ChildWorkflowExecutionCompleted")?;
         let result = attrs.map(|a| a.result.clone()).unwrap_or_default();
         let exec = execution.clone();
-        g.push_event(EventType::ChildWorkflowExecutionCompleted, ms, |e| {
+        g.push_event(EventType::ChildWorkflowExecutionCompleted, ms * 1_000_000, |e| {
             e.child_workflow_execution_completed_event_attributes = Some(ChildWorkflowExecutionCompletedEventAttributes {
                 result,
                 domain,
@@ -615,7 +616,7 @@ impl EngineMutableState {
         let (domain, wt, started) = self.child_info(&g, initiated_id, "ChildWorkflowExecutionFailed")?;
         let (reason, details) = attrs.map(|a| (a.reason.clone(), a.details.clone())).unwrap_or_default();
         let exec = execution.clone();
-        g.push_event(EventType::ChildWorkflowExecutionFailed, ms, |e| {
+        g.push_event(EventType::ChildWorkflowExecutionFailed, ms * 1_000_000, |e| {
             e.child_workflow_execution_failed_event_attributes = Some(ChildWorkflowExecutionFailedEventAttributes {
                 reason,
                 details,
@@ -640,7 +641,7 @@ impl EngineMutableState {
         let (domain, wt, started) = self.child_info(&g, initiated_id, "ChildWorkflowExecutionCanceled")?;
         let details = attrs.map(|a| a.details.clone()).unwrap_or_default();
         let exec = execution.clone();
-        g.push_event(EventType::ChildWorkflowExecutionCanceled, ms, |e| {
+        g.push_event(EventType::ChildWorkflowExecutionCanceled, ms * 1_000_000, |e| {
             e.child_workflow_execution_canceled_event_attributes = Some(ChildWorkflowExecutionCanceledEventAttributes {
                 details,
                 domain,
@@ -663,7 +664,7 @@ impl EngineMutableState {
         let mut g = self.inner.lock().unwrap();
         let (domain, wt, started) = self.child_info(&g, initiated_id, "ChildWorkflowExecutionTerminated")?;
         let exec = execution.clone();
-        g.push_event(EventType::ChildWorkflowExecutionTerminated, ms, |e| {
+        g.push_event(EventType::ChildWorkflowExecutionTerminated, ms * 1_000_000, |e| {
             e.child_workflow_execution_terminated_event_attributes = Some(ChildWorkflowExecutionTerminatedEventAttributes {
                 domain,
                 workflow_execution: Some(exec),
@@ -686,7 +687,7 @@ impl EngineMutableState {
         let (domain, wt, started) = self.child_info(&g, initiated_id, "ChildWorkflowExecutionTimedOut")?;
         let timeout_type = attrs.and_then(|a| a.timeout_type);
         let exec = execution.clone();
-        g.push_event(EventType::ChildWorkflowExecutionTimedOut, ms, |e| {
+        g.push_event(EventType::ChildWorkflowExecutionTimedOut, ms * 1_000_000, |e| {
             e.child_workflow_execution_timed_out_event_attributes = Some(ChildWorkflowExecutionTimedOutEventAttributes {
                 timeout_type,
                 domain,
@@ -711,7 +712,8 @@ impl EngineMutableState {
             .clone()
             .ok_or_else(|| HistoryError::internal("history node store is not configured on the mutable state"))?;
         let shard_id = self.params.shard_id;
-        tokio::task::spawn_blocking(move || -> Result<Vec<HistoryEvent>, String> {
+        let ctx = format!("shard={shard_id} range=[{min},{max}) branch_len={}", branch.len());
+        tokio::task::spawn_blocking(move || -> Result<Vec<HistoryEvent>, HistoryReadError> {
             let mut out = Vec::new();
             let mut token = Vec::new();
             loop {
@@ -725,8 +727,7 @@ impl EngineMutableState {
                         next_page_token: token.clone(),
                         shard_id,
                     },
-                )
-                .map_err(|e| format!("{e:?}"))?;
+                )?;
                 for b in resp.batches {
                     out.extend(b);
                 }
@@ -739,7 +740,11 @@ impl EngineMutableState {
         })
         .await
         .map_err(|e| HistoryError::internal(format!("history read task: {e}")))?
-        .map_err(|e| HistoryError::internal(format!("read history branch: {e}")))
+        .map_err(|e| match e {
+            // Go keeps EntityNotExists typed so the task processor drops the task instead of retrying forever.
+            HistoryReadError::EntityNotExists(m) => HistoryError::entity_not_exists(format!("read history branch ({ctx}): {m}")),
+            e => HistoryError::internal(format!("read history branch ({ctx}): {e}")),
+        })
     }
 
     /// Go `GetStartEvent`.

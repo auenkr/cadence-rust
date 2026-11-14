@@ -8,12 +8,19 @@ on:
       duration_minutes:
         description: Soak duration in minutes (Frontend restarts at the halfway point)
         default: "70"
+      go_debug:
+        description: Set to 1 for Go debug logging
+        default: ''
+      lanes:
+        description: 'JSON list of lanes: go-baseline, rust, rust-fe (Rust FE + Go MT), rust-mt (Go FE + Rust MT)'
+        default: '["go-baseline","rust"]'
 concurrency:
   group: frontend-soak-${{ github.ref }}
   cancel-in-progress: true
 env:
   SOAK_RATE: ${{ inputs.rate || '10' }}
   SOAK_MINUTES: ${{ inputs.duration_minutes || '70' }}
+  SOAK_GO_DEBUG: ${{ inputs.go_debug }}
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -53,7 +60,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode: [go-baseline, rust]
+        mode: ${{ fromJSON(inputs.lanes || '["go-baseline","rust"]') }}
     name: ${{ matrix.mode }}
     steps:
       - uses: actions/checkout@v4
@@ -66,7 +73,7 @@ jobs:
       - name: Soak
         run: |
           chmod +x bin/*
-          M=${{ matrix.mode == 'rust' && 'rust' || 'go' }}
+          M=${{ matrix.mode == 'go-baseline' && 'go' || matrix.mode }}
           export SOAK_SECONDS=$((SOAK_MINUTES * 60))
           export SOAK_RESTART_AT=$((SOAK_SECONDS / 2))
           mkdir -p res
@@ -80,8 +87,10 @@ jobs:
           mkdir -p res/up/logs; tail -n 300 res/gate.log > res/up/gate-tail.log
           python3 tests/gates/soak-analyze.py run --dir res/lane/run --label "${{ matrix.mode }}" \
             --restart-at "$SOAK_RESTART_AT" --out res/analysis || true
-          cp res/analysis/* res/up/ 2>/dev/null; cp res/lane/run/{steps.json,summary.json,soak-driver.log,rust-binary.sha256} res/up/ 2>/dev/null || true
+          cp res/analysis/* res/up/ 2>/dev/null; cp res/lane/run/{steps.json,soak-driver.log,rust-binary.sha256} res/up/ 2>/dev/null || true
+          cp res/lane/run/summary.json res/up/gate-summary.json 2>/dev/null || true
           cp bin/SHA256SUMS bin/commit.txt res/up/
+          mkdir -p res/up/full; for f in res/lane/run/{rust-matching,rust-frontend,go-frontend,go-matching,go-history-worker}.log; do [ -f "$f" ] && gzip -c "$f" > "res/up/full/$(basename "$f").gz"; done
           for f in res/lane/run/*.log; do [ -f "$f" ] && tail -n 300 "$f" > "res/up/logs/$(basename "$f")"; done
           test -f res/analysis/summary.json
       - uses: actions/upload-artifact@v4
@@ -102,7 +111,11 @@ jobs:
           pattern: soak-*
           path: art
       - run: |
-          python3 tests/gates/soak-analyze.py compare --go art/soak-go-baseline --rust art/soak-rust --out verdict.md | tee -a "$GITHUB_STEP_SUMMARY"
+          for L in rust rust-fe rust-mt; do
+            [ -d art/soak-$L ] || continue
+            python3 tests/gates/soak-analyze.py compare --go art/soak-go-baseline --rust art/soak-$L --out verdict-$L.md | tee -a "$GITHUB_STEP_SUMMARY"
+          done
+          cat verdict-*.md > verdict.md
       - uses: actions/upload-artifact@v4
         if: always()
         with:

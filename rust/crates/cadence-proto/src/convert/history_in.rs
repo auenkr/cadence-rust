@@ -362,7 +362,7 @@ fn signal_external_workflow_execution_initiated_event_attributes(v: p::SignalExt
         signal_name: v.signal_name,
         input: data(v.input),
         control: v.control,
-        ..Default::default()
+        child_workflow_only: v.child_workflow_only,
     })
 }
 fn signal_external_workflow_execution_failed_event_attributes(v: p::SignalExternalWorkflowExecutionFailedEventAttributes) -> Result<tasks::SignalExternalWorkflowExecutionFailedEventAttributes, Status> {

@@ -61,6 +61,18 @@ check('reapply-events-unknown-workflow', lambda **k: stub.ReapplyEvents(
     rq(domain=domain, workflow_execution=exe(workflow_id='no-such-wf-probe'), events=blob), **k),
       'INTERNAL', 'DeserializeBatchEvents')  # Go History deserializes the batch as ThriftRW before the workflow lookup
 
+rti = importlib.import_module('uber.cadence.admin.v1.replication_pb2').ReplicationTaskInfo
+dq = svc.GetDLQReplicationMessagesRequest
+check('get-dlq-replication-messages-empty', lambda **k: stub.GetDLQReplicationMessages(dq(), **k),
+      'INVALID_ARGUMENT', 'Replication task info is not set.')
+# Go hydrator returns nil task (no error) when the workflow does not exist
+check('get-dlq-replication-messages-unknown-workflow', lambda **k: stub.GetDLQReplicationMessages(
+    dq(task_infos=[rti(domain_id='22222222-2222-2222-2222-222222222222', workflow_execution=exe(workflow_id='w', run_id='11111111-1111-1111-1111-111111111111'),
+                       task_type=0, task_id=1, version=1, first_event_id=1, next_event_id=2)]), **k), 'OK')
+check('get-dlq-replication-messages-bad-type', lambda **k: stub.GetDLQReplicationMessages(
+    dq(task_infos=[rti(domain_id='d', workflow_execution=exe(workflow_id='w', run_id='r'), task_type=9)]), **k),
+      'INTERNAL', 'unsupported task type')
+
 for r in results:
     print(json.dumps(r))
 sys.exit(0 if all(r['ok'] for r in results) else 1)

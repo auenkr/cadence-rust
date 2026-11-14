@@ -106,6 +106,15 @@ fn event_reapplied_id(run_id: &str, event_id: i64, version: i64) -> String {
 }
 
 impl OwnedNdcMutableState {
+    fn decision_env(&self) -> crate::execution::mutable_state_methods_decision::DecisionEnv {
+        crate::execution::mutable_state_methods_decision::DecisionEnv {
+            now_nanos: self.now_nanos,
+            normal_schedule_to_start_timeout_nanos: self.task_gen_env.normal_schedule_to_start_timeout_nanos,
+            normal_schedule_to_start_max_attempts: self.task_gen_env.normal_schedule_to_start_max_attempts,
+            ..Default::default()
+        }
+    }
+
     /// Go `newMutableStateBuilder`: created/running state, first event ID 1,
     /// empty version sentinels, and a zero `nextEventIDInDB` CAS condition.
     pub fn new(
@@ -379,6 +388,57 @@ impl NdcMutableState for OwnedNdcMutableState {
 
     fn update_current_version(&mut self, version: i64, force: bool) -> NdcResult<()> {
         self.typed.update_current_version(version, force).map_err(|e| NdcError::internal(e.to_string()))
+    }
+
+    /// Go `workflowImpl.failDecision`: `FailDecision(.., FailoverCloseDecision)` for the in-flight
+    /// decision (no-op without one), which also flushes buffered events.
+    fn fail_in_flight_decision_for_failover(&mut self) -> NdcResult<()> {
+        let Some(decision) = self.typed.get_in_flight_decision() else { return Ok(()) };
+        let env = self.decision_env();
+        self.typed
+            .add_decision_task_failed_event(
+                &env,
+                decision.schedule_id,
+                decision.started_id,
+                cadence_api::enums::DecisionTaskFailedCause::FailoverCloseDecision,
+                Vec::new(),
+                crate::execution::workflow::IDENTITY_HISTORY_SERVICE,
+                "",
+                "",
+                "",
+                "",
+                0,
+                "",
+            )
+            .map_err(|e| NdcError::internal(e.to_string()))?;
+        self.typed.flush_buffered_events().map_err(|e| NdcError::internal(e.to_string()))
+    }
+
+    /// Go `execution.ScheduleDecision`: no-op when a decision is pending (guard), else
+    /// `AddDecisionTaskScheduledEvent(false)` mapped to "Failed to add decision scheduled event.".
+    fn schedule_decision(&mut self) -> NdcResult<()> {
+        if self.typed.has_pending_decision() {
+            return Ok(());
+        }
+        let env = self.decision_env();
+        self.typed
+            .add_decision_task_scheduled_event(&env, false)
+            .map(|_| ())
+            .map_err(|_| NdcError::internal("Failed to add decision scheduled event."))
+    }
+
+    /// Go `workflowImpl.terminateWorkflow` tail: `AddWorkflowExecutionTerminatedEvent`.
+    fn terminate_workflow_execution(
+        &mut self,
+        batch_first_event_id: i64,
+        reason: &str,
+        details: Vec<u8>,
+        identity: &str,
+    ) -> NdcResult<()> {
+        self.typed
+            .add_workflow_execution_terminated_event(self.now_nanos, batch_first_event_id, reason, details, identity)
+            .map(|_| ())
+            .map_err(|e| NdcError::internal(e.to_string()))
     }
 
     fn close_transaction_as_snapshot(&mut self, now_nanos: i64, policy: TransactionPolicy) -> NdcResult<(WorkflowSnapshot, Vec<WorkflowEvents>)> {

@@ -226,7 +226,7 @@ impl EngineMutableState {
 
         let version_histories = match &g.version_histories {
             Some(vh) => {
-                Some(blob(enc(&crate::wiring::server::thrift_types_g2::version_histories_to_thrift(vh))?))
+                Some(blob(Encoding::ThriftRW.encode_versioned(&crate::wiring::server::thrift_types_g2::version_histories_to_thrift(vh)).map_err(|e| HistoryError::internal(format!("encode version histories: {e}")))?))
             }
             None => self.snapshot.version_histories.clone(),
         };
@@ -331,6 +331,10 @@ impl EngineMutableState {
 
     /// Go `canReplicateEvents`: multi-cluster (global, >1 cluster) domain and
     /// `EnableReplicationTaskGeneration(domainID, workflowID)`.
+    pub(super) fn can_replicate_events_pub(&self, workflow_id: &str) -> bool {
+        self.can_replicate_events(workflow_id)
+    }
+
     fn can_replicate_events(&self, workflow_id: &str) -> bool {
         let Some(policy) = &self.params.close_policy else { return false };
         self.domain.is_global_domain
@@ -585,6 +589,17 @@ mod tests {
         assert_eq!(h.next_event_id, c.events.last().unwrap().event_id + 1);
         let sa = &c.replication[1];
         assert_eq!((sa.task_type, sa.scheduled_id, sa.version), (REPLICATION_TASK_TYPE_SYNC_ACTIVITY, 9, 7));
+    }
+
+    #[test]
+    fn double_schedule_errors_so_callers_must_guard_with_has_pending_decision() {
+        use crate::engine::deps_ms::MutableState as _;
+        let s = global_state(false, false);
+        assert!(!s.has_pending_decision());
+        s.add_decision_task_scheduled(false).unwrap();
+        assert!(s.has_pending_decision());
+        // The timer executor's schedule_decision guards on this (Go ScheduleDecision).
+        assert!(s.add_decision_task_scheduled(false).is_err());
     }
 
     #[test]

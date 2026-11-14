@@ -1415,7 +1415,20 @@ async fn admin_cluster_config_and_workflow_maintenance() {
 
 #[tokio::test]
 async fn admin_isolation_and_async_config_flow() {
-    let app = router(AppState::default());
+    // Go enforces the failover cool-down on these admin updates, so disable it.
+    let state = AppState::default();
+    state.admin.dynamic_config.lock().unwrap().update(
+        false,
+        "frontend.failoverCoolDown",
+        vec![cadence_api::admin::DynamicConfigValue {
+            value: Some(cadence_api::types::DataBlob {
+                encoding_type: Some(cadence_api::enums::EncodingType::JSON),
+                data: br#""0s""#.to_vec(),
+            }),
+            filters: vec![],
+        }],
+    );
+    let app = router(state);
     setup_domain(app.clone()).await;
 
     // Global isolation groups round-trip.

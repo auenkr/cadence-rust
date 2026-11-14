@@ -275,7 +275,8 @@ impl ResetHistory for EngineResetHistory {
         cleanup_info: &str,
         _domain_name: &str,
     ) -> Result<Vec<u8>, ResetError> {
-        let manager = SqlHistoryManager::new(self.core.history_v2.clone(), self.core.shard.shard_id());
+        let manager = SqlHistoryManager::new(self.core.history_v2.clone(), self.core.shard.shard_id())
+            .with_transaction_size_limit(self.core.transaction_size_limit.clone());
         block_on(manager.fork_history_branch(token, node_id, cleanup_info)).map_err(typed_err)
     }
 }
@@ -318,7 +319,8 @@ impl EngineWorkflowResetter {
         let history = EngineResetHistory { core: core.clone(), cache: self.cache.clone() };
 
         // replayResetWorkflow: lazily fork the reset branch, then rebuild.
-        let manager = SqlHistoryManager::new(core.history_v2.clone(), core.shard.shard_id());
+        let manager = SqlHistoryManager::new(core.history_v2.clone(), core.shard.shard_id())
+            .with_transaction_size_limit(core.transaction_size_limit.clone());
         let cleanup_info = format!("{}:{}:{}", request.domain_id, request.workflow_id, request.reset_run_id);
         let fork = || -> Result<Vec<u8>, NdcError> {
             block_on(manager.fork_history_branch(
@@ -412,7 +414,8 @@ impl EngineWorkflowResetter {
             event.task_id = *id;
         }
         let transaction_id = shard.generate_task_id().map_err(shard_err(shard.shard_id()))?;
-        let manager = SqlHistoryManager::new(core.history_v2.clone(), shard.shard_id());
+        let manager = SqlHistoryManager::new(core.history_v2.clone(), shard.shard_id())
+            .with_transaction_size_limit(core.transaction_size_limit.clone());
         let blob = manager
             .append_history_nodes(&prepared.branch_token, &prepared.events, transaction_id, false, "")
             .await

@@ -81,7 +81,7 @@ impl EngineMutableState {
         };
         let domain = domain.to_string();
         let started_exec = exec.clone();
-        let event = g.push_event(EventType::ChildWorkflowExecutionStarted, ms, |e| {
+        let event = g.push_event(EventType::ChildWorkflowExecutionStarted, ms * 1_000_000, |e| {
             e.child_workflow_execution_started_event_attributes = Some(ChildWorkflowExecutionStartedEventAttributes {
                 domain,
                 initiated_event_id: initiated_id,
@@ -111,7 +111,7 @@ impl EngineMutableState {
             Some(ci) if ci.started_id == EMPTY_EVENT_ID => {}
             _ => return Err(invalid("StartChildWorkflowExecutionFailed", g.next_event_id)),
         }
-        g.push_event(EventType::StartChildWorkflowExecutionFailed, ms, |e| {
+        g.push_event(EventType::StartChildWorkflowExecutionFailed, ms * 1_000_000, |e| {
             e.start_child_workflow_execution_failed_event_attributes =
                 Some(StartChildWorkflowExecutionFailedEventAttributes {
                     domain: initiated.domain.clone(),
@@ -140,7 +140,7 @@ impl EngineMutableState {
             return Err(invalid("ExternalWorkflowExecutionCancelRequested", g.next_event_id));
         }
         let (d, exec) = (domain.to_string(), execution(workflow_id, run_id));
-        g.push_event(EventType::ExternalWorkflowExecutionCancelRequested, ms, |e| {
+        g.push_event(EventType::ExternalWorkflowExecutionCancelRequested, ms * 1_000_000, |e| {
             e.external_workflow_execution_cancel_requested_event_attributes =
                 Some(ExternalWorkflowExecutionCancelRequestedEventAttributes {
                     initiated_event_id: initiated_id,
@@ -170,7 +170,7 @@ impl EngineMutableState {
             return Err(invalid("ExternalWorkflowExecutionSignaled", g.next_event_id));
         }
         let (d, exec, c) = (domain.to_string(), execution(workflow_id, run_id), control.to_vec());
-        g.push_event(EventType::ExternalWorkflowExecutionSignaled, ms, |e| {
+        g.push_event(EventType::ExternalWorkflowExecutionSignaled, ms * 1_000_000, |e| {
             e.external_workflow_execution_signaled_event_attributes =
                 Some(ExternalWorkflowExecutionSignaledEventAttributes {
                     initiated_event_id: initiated_id,
@@ -201,7 +201,7 @@ impl EngineMutableState {
             return Err(invalid("RequestCancelExternalWorkflowExecutionFailed", g.next_event_id));
         }
         let (d, exec) = (domain.to_string(), execution(workflow_id, run_id));
-        g.push_event(EventType::RequestCancelExternalWorkflowExecutionFailed, ms, |e| {
+        g.push_event(EventType::RequestCancelExternalWorkflowExecutionFailed, ms * 1_000_000, |e| {
             e.request_cancel_external_workflow_execution_failed_event_attributes =
                 Some(RequestCancelExternalWorkflowExecutionFailedEventAttributes {
                     cause: Some(CancelExternalWorkflowExecutionFailedCause::UnknownExternalWorkflowExecution),
@@ -235,7 +235,7 @@ impl EngineMutableState {
             return Err(invalid("SignalExternalWorkflowExecutionFailed", g.next_event_id));
         }
         let (d, exec, c) = (domain.to_string(), execution(workflow_id, run_id), control.to_vec());
-        g.push_event(EventType::SignalExternalWorkflowExecutionFailed, ms, |e| {
+        g.push_event(EventType::SignalExternalWorkflowExecutionFailed, ms * 1_000_000, |e| {
             e.signal_external_workflow_execution_failed_event_attributes =
                 Some(SignalExternalWorkflowExecutionFailedEventAttributes {
                     cause: Some(SignalExternalWorkflowExecutionFailedCause::UnknownExternalWorkflowExecution),

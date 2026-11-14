@@ -98,7 +98,7 @@ impl TypedMutableState {
         run_id: &str,
         control: &[u8],
     ) -> Result<HistoryEvent> {
-        let op = "add-external-workflow-signaled-event";
+        let op = "add-externalworkflow-signal-requested-event";
         self.check_mutability()?;
         if self.get_signal_info(initiated_id).is_none() {
             return Err(self.create_internal_server_error(op));
@@ -141,10 +141,10 @@ impl TypedMutableState {
         domain: &str,
         workflow_id: &str,
         run_id: &str,
-        _control: &[u8],
+        control: &[u8],
         cause: SignalExternalWorkflowExecutionFailedCause,
     ) -> Result<HistoryEvent> {
-        let op = "add-signal-external-workflow-failed-event";
+        let op = "add-externalworkflow-signal-failed-event";
         self.check_mutability()?;
         if self.get_signal_info(initiated_id).is_none() {
             return Err(self.create_internal_server_error(op));
@@ -163,7 +163,7 @@ impl TypedMutableState {
                             run_id: run_id.to_string(),
                         }),
                         initiated_event_id: initiated_id,
-                        ..Default::default()
+                        control: control.to_vec(),
                     });
             },
         )?;
@@ -200,6 +200,7 @@ impl TypedMutableState {
                         signal_name: request.signal_name.clone(),
                         input: request.input.clone(),
                         control: request.control.clone(),
+                        child_workflow_only: request.child_workflow_only,
                     });
             },
         )?;
@@ -232,7 +233,6 @@ impl TypedMutableState {
             control: a.control.clone(),
         };
         self.update_signal(si.clone());
-        // GAP: Rust attributes lack Go ChildWorkflowOnly, so child_only is false.
         self.run_task_generator(0, |g| g.generate_signal_external_tasks(event))?;
         Ok(si)
     }
@@ -258,6 +258,29 @@ mod insert_request_tests {
             }),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn signal_failed_event_keeps_control() {
+        let mut s = TypedMutableState::new();
+        s.execution_info.state = 1; // running
+        s.update_signal(SignalInfo { initiated_id: 9, ..Default::default() });
+        let failed = s
+            .add_signal_external_workflow_execution_failed_event(
+                1, 4, 9, "d", "w", "r", b"ctl",
+                SignalExternalWorkflowExecutionFailedCause::UnknownExternalWorkflowExecution,
+            )
+            .unwrap();
+        assert_eq!(failed.signal_external_workflow_execution_failed_event_attributes.unwrap().control, b"ctl".to_vec());
+    }
+
+    #[test]
+    fn signal_initiated_attributes_roundtrip_child_workflow_only() {
+        let a = SignalExternalWorkflowExecutionInitiatedEventAttributes { child_workflow_only: true, ..Default::default() };
+        let json = serde_json::to_string(&a).unwrap();
+        assert!(json.contains("childWorkflowOnly"));
+        let back: SignalExternalWorkflowExecutionInitiatedEventAttributes = serde_json::from_str(&json).unwrap();
+        assert!(back.child_workflow_only);
     }
 
     #[test]

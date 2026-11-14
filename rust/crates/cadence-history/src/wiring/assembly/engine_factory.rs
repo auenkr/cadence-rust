@@ -109,6 +109,7 @@ pub fn build_core(env: &Arc<HistoryEnv>, shard: &Arc<ShardContext>) -> (Arc<Engi
         cluster_metadata: env.cluster.clone() as Arc<dyn crate::engine::deps::ClusterMetadata>,
         enable_replication_task_generation: env.config.enable_replication_task_generation.clone(),
         strong_idempotency_sanity_check: env.config.enable_strong_idempotency_sanity_check.clone(),
+        transaction_size_limit: env.config.transaction_size_limit.clone(),
         advanced_visibility_writing: {
             // Go `AdvancedVisibilityWritingMode() != "off"`: advanced store configured and written to.
             let cfg = env.config.clone();
@@ -164,6 +165,9 @@ pub fn build_core(env: &Arc<HistoryEnv>, shard: &Arc<ShardContext>) -> (Arc<Engi
                     p.checksum_verify_probability = (cfg.mutable_state_checksum_verify_probability)(&name);
                     p.checksum_invalidate_before_secs = (cfg.mutable_state_checksum_invalidate_before)() as i64;
                     p.enable_corruption_auto_repair = (cfg.enable_corruption_auto_repair)(&name);
+                    p.corruption_repair_timeout = (cfg.corruption_repair_timeout)(&name);
+                    p.require_checksum_match_after_rebuild_repair =
+                        (cfg.require_checksum_match_after_rebuild_repair)(&name);
                     p.deletion_jitter_range = (cfg.workflow_deletion_jitter_range)(&name);
                 }
                 p

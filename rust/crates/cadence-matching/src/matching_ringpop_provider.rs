@@ -239,7 +239,10 @@ impl cadence_service_core::admin::ClusterMembership for RingpopClusterMembership
             .snapshot()
             .members
             .iter()
-            .find(|member| member.address == address)
+            .find(|member| {
+                member.address == address
+                    || member.tchannel_address().as_deref() == Some(address)
+            })
             .and_then(|member| member.matching_host("cadence-history")))
     }
     fn history_owner(

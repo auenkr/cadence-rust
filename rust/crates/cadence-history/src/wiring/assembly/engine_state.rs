@@ -81,6 +81,10 @@ pub struct StateParams {
     pub checksum_invalidate_before_secs: i64,
     /// `config.EnableCorruptionAutoRepair(domain)`.
     pub enable_corruption_auto_repair: bool,
+    /// `config.CorruptionRepairTimeout(domain)`.
+    pub corruption_repair_timeout: std::time::Duration,
+    /// `config.RequireChecksumMatchAfterRebuildRepair(domain)`.
+    pub require_checksum_match_after_rebuild_repair: bool,
     /// Emits `DataInconsistentCounter` (Go `logDataInconsistency`).
     pub data_inconsistency: crate::execution::mutable_state_builder::DataInconsistencyHook,
 }
@@ -101,6 +105,8 @@ impl Default for StateParams {
             checksum_verify_probability: 0,
             checksum_invalidate_before_secs: 0,
             enable_corruption_auto_repair: false,
+            corruption_repair_timeout: std::time::Duration::from_secs(30),
+            require_checksum_match_after_rebuild_repair: true,
             data_inconsistency: Default::default(),
         }
     }

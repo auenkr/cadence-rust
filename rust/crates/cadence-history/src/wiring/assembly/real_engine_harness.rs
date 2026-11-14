@@ -481,6 +481,8 @@ pub struct Harness {
     pub domain_status: Arc<AtomicI32>,
     /// Active-active cluster attributes served by the test domain cache (empty == plain local domain).
     pub domain_active_clusters: ActiveClusters,
+    /// `system.transactionSizeLimit` served to the engine (bytes).
+    pub txn_size_limit: Arc<AtomicI64>,
 }
 
 impl Default for Harness {
@@ -496,6 +498,11 @@ impl Harness {
 
     /// Builds the harness, letting the caller override engine collaborators (matching client, config, ...).
     pub fn build(configure: impl FnOnce(&mut HistoryEngine)) -> Self {
+        Self::build_with_config(configure, |_| {})
+    }
+
+    /// Like [`Harness::build`] but also lets the caller override the history `Config`.
+    pub fn build_with_config(configure: impl FnOnce(&mut HistoryEngine), configure_config: impl FnOnce(&mut Config)) -> Self {
         let execs = Arc::new(MemExecutions::default());
         let history = Arc::new(MemHistory::default());
         let clock = Arc::new(TestClock(AtomicI64::new(1_700_000_000_000_000_000)));
@@ -512,7 +519,11 @@ impl Harness {
             Arc::new(|_| {}),
         )
         .unwrap_or_else(|_| panic!("shard"));
-        let config = Arc::new(Config::new_for_test());
+        let mut config = Config::new_for_test();
+        configure_config(&mut config);
+        let config = Arc::new(config);
+        let txn_size_limit = Arc::new(AtomicI64::new(14 * 1024 * 1024));
+        let limit = txn_size_limit.clone();
         let domain_status = Arc::new(AtomicI32::new(0));
         let domain_active_clusters = Arc::new(Mutex::new(Vec::new()));
         let domains: Arc<dyn DomainCache> = Arc::new(TestDomains(domain_status.clone(), domain_active_clusters.clone()));
@@ -525,6 +536,7 @@ impl Harness {
             enable_replication_task_generation: Arc::new(|_, _| true),
             strong_idempotency_sanity_check: Arc::new(|_| false),
             advanced_visibility_writing: Arc::new(|| false),
+            transaction_size_limit: Arc::new(move || limit.load(Ordering::SeqCst)),
             active_cluster_manager: Arc::new(ActiveHere),
             remote_admin_clients: Arc::new(crate::wiring::resources::replication_clients::RemoteAdminClients::new(Default::default(), "test")),
             shard,
@@ -555,7 +567,7 @@ impl Harness {
         configure(&mut engine);
         let engine = Arc::new(engine);
         let _ = core.engine_slot.set(Arc::downgrade(&engine));
-        Self { engine, execs, history, clock, cache, domain_status, domain_active_clusters }
+        Self { engine, execs, history, clock, cache, domain_status, domain_active_clusters, txn_size_limit }
     }
 }
 

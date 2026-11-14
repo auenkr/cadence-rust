@@ -8,7 +8,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use cadence_api::enums::{DecisionType, EventType};
+use cadence_api::enums::{DecisionType, EventType, ParentClosePolicy};
 use cadence_api::service_types::HistoryEvent;
 use cadence_api::tasks::*;
 use cadence_persistence::history_contract as pc;
@@ -36,6 +36,16 @@ impl LocalDispatch for ActivityLocalDispatchInfo {
         self.scheduled_timestamp = Some(scheduled);
         self.scheduled_timestamp_of_this_attempt = Some(scheduled_this_attempt);
         self.started_timestamp = Some(started);
+    }
+}
+
+/// Go `HistoryBuilder.AddStartChildWorkflowExecutionInitiatedEvent`: an empty
+/// decision domain falls back to the (parent) execution's domain name.
+fn child_event_domain(domain: String, parent_domain_name: &str) -> String {
+    if domain.is_empty() {
+        parent_domain_name.to_string()
+    } else {
+        domain
     }
 }
 
@@ -139,12 +149,9 @@ impl EngineOps<'_> {
         let params = self.state.params.clone();
         let mut g = self.state.inner.lock().unwrap();
         if !g.exec.is_running() {
-            return Err(internal(format!(
-                "invalid history action {what} (next event id {})",
-                g.next_event_id
-            )));
+            return Err(internal(super::invalid_history_action_message(what, g.next_event_id)));
         }
-        let ev = g.push_event(ty, ms, fill);
+        let ev = g.push_event(ty, ms * 1_000_000, fill);
         g.exec.state = WORKFLOW_STATE_COMPLETED;
         g.exec.close_status = status;
         g.pc_exec.state = WORKFLOW_STATE_COMPLETED;
@@ -253,7 +260,8 @@ impl Operations for EngineOps<'_> {
             return Err(bad(format!("activity id {} is already pending", a.activity_id)));
         }
         if limit_enabled && g.pc_acts.len() as i64 >= limit {
-            return Err(internal("Too many pending activities."));
+            // Go execution.ErrTooManyPendingActivities (no trailing dot; task_handler compares the text).
+            return Err(internal(crate::decision::ERR_TOO_MANY_PENDING_ACTIVITIES));
         }
         let ev_attrs = ActivityTaskScheduledEventAttributes {
             activity_id: a.activity_id.clone(),
@@ -269,7 +277,7 @@ impl Operations for EngineOps<'_> {
             retry_policy: a.retry_policy.clone(),
             header: a.header.clone(),
         };
-        let ev = g.push_event(EventType::ActivityTaskScheduled, ms, |e| {
+        let ev = g.push_event(EventType::ActivityTaskScheduled, ms * 1_000_000, |e| {
             e.activity_task_scheduled_event_attributes = Some(ev_attrs);
         });
         let sid = ev.event_id;
@@ -292,6 +300,7 @@ impl Operations for EngineOps<'_> {
             heartbeat_timeout_seconds: a.heartbeat_timeout_seconds.unwrap_or(0),
             cancel_request_id: EMPTY_EVENT_ID,
             task_list: a.task_list.as_ref().map(|t| t.name.clone()).unwrap_or_default(),
+            task_list_kind: a.task_list.as_ref().and_then(|t| t.kind).map(|k| k as i32).unwrap_or(0),
             ..Default::default()
         };
         if let Some(p) = a.retry_policy.as_ref() {
@@ -368,7 +377,7 @@ impl Operations for EngineOps<'_> {
             return Err(bad(format!("activity {id} cancellation already requested")));
         }
         let activity_id = id.to_string();
-        let ev = g.push_event(EventType::ActivityTaskCancelRequested, ms, |e| {
+        let ev = g.push_event(EventType::ActivityTaskCancelRequested, ms * 1_000_000, |e| {
             e.activity_task_cancel_requested_event_attributes = Some(ActivityTaskCancelRequestedEventAttributes {
                 activity_id,
                 decision_task_completed_event_id: completed_id,
@@ -399,7 +408,7 @@ impl Operations for EngineOps<'_> {
         let ms = self.state.now_millis();
         let (activity_id, cause) = (id.to_string(), cause.to_string());
         let mut g = self.state.inner.lock().unwrap();
-        g.push_event(EventType::RequestCancelActivityTaskFailed, ms, |e| {
+        g.push_event(EventType::RequestCancelActivityTaskFailed, ms * 1_000_000, |e| {
             e.request_cancel_activity_task_failed_event_attributes = Some(RequestCancelActivityTaskFailedEventAttributes {
                 activity_id,
                 cause,
@@ -421,7 +430,7 @@ impl Operations for EngineOps<'_> {
         }
         let fire = a.start_to_fire_timeout_seconds;
         let timer_id = a.timer_id.clone();
-        let ev = g.push_event(EventType::TimerStarted, ms, |e| {
+        let ev = g.push_event(EventType::TimerStarted, ms * 1_000_000, |e| {
             e.timer_started_event_attributes = Some(TimerStartedEventAttributes {
                 timer_id,
                 start_to_fire_timeout_seconds: fire,
@@ -462,7 +471,7 @@ impl Operations for EngineOps<'_> {
             }
         };
         let timer_id = a.timer_id.clone();
-        g.push_event(EventType::TimerCanceled, ms, |e| {
+        g.push_event(EventType::TimerCanceled, ms * 1_000_000, |e| {
             e.timer_canceled_event_attributes = Some(TimerCanceledEventAttributes {
                 timer_id,
                 started_event_id: started_id,
@@ -484,7 +493,7 @@ impl Operations for EngineOps<'_> {
         let ms = self.state.now_millis();
         let identity = identity.to_string();
         let mut g = self.state.inner.lock().unwrap();
-        g.push_event(EventType::CancelTimerFailed, ms, |e| {
+        g.push_event(EventType::CancelTimerFailed, ms * 1_000_000, |e| {
             e.cancel_timer_failed_event_attributes = Some(CancelTimerFailedEventAttributes {
                 timer_id,
                 cause: "TIMER_ID_UNKNOWN".to_string(),
@@ -626,7 +635,7 @@ impl Operations for EngineOps<'_> {
             .ok_or_else(|| bad("RecordMarkerDecisionAttributes is not set on decision."))?;
         let ms = self.state.now_millis();
         let mut g = self.state.inner.lock().unwrap();
-        g.push_event(EventType::MarkerRecorded, ms, |e| {
+        g.push_event(EventType::MarkerRecorded, ms * 1_000_000, |e| {
             e.marker_recorded_event_attributes = Some(MarkerRecordedEventAttributes {
                 marker_name: a.marker_name,
                 details: a.details,
@@ -646,7 +655,7 @@ impl Operations for EngineOps<'_> {
         let ms = self.state.now_millis();
         let mut g = self.state.inner.lock().unwrap();
         let attrs = a.clone();
-        let ev = g.push_event(EventType::RequestCancelExternalWorkflowExecutionInitiated, ms, |e| {
+        let ev = g.push_event(EventType::RequestCancelExternalWorkflowExecutionInitiated, ms * 1_000_000, |e| {
             e.request_cancel_external_workflow_execution_initiated_event_attributes =
                 Some(RequestCancelExternalWorkflowExecutionInitiatedEventAttributes {
                     decision_task_completed_event_id: completed_id,
@@ -683,7 +692,7 @@ impl Operations for EngineOps<'_> {
         let ms = self.state.now_millis();
         let mut g = self.state.inner.lock().unwrap();
         let attrs = a.clone();
-        let ev = g.push_event(EventType::SignalExternalWorkflowExecutionInitiated, ms, |e| {
+        let ev = g.push_event(EventType::SignalExternalWorkflowExecutionInitiated, ms * 1_000_000, |e| {
             e.signal_external_workflow_execution_initiated_event_attributes =
                 Some(SignalExternalWorkflowExecutionInitiatedEventAttributes {
                     decision_task_completed_event_id: completed_id,
@@ -692,6 +701,7 @@ impl Operations for EngineOps<'_> {
                     signal_name: attrs.signal_name,
                     input: attrs.input,
                     control: attrs.control,
+                    child_workflow_only: attrs.child_workflow_only,
                 });
         });
         let batch_id = g.hist.iter().find(|e| e.event_id > 0).map(|e| e.event_id).unwrap_or(completed_id);
@@ -717,20 +727,22 @@ impl Operations for EngineOps<'_> {
             .clone()
             .ok_or_else(|| bad("StartChildWorkflowExecutionDecisionAttributes is not set on decision."))?;
         let target_domain_id = self.target_domain_id(&a.domain)?;
+        let parent_domain_name = self.domain_name.clone();
         let ms = self.state.now_millis();
         let mut g = self.state.inner.lock().unwrap();
         let attrs = a.clone();
-        let ev = g.push_event(EventType::StartChildWorkflowExecutionInitiated, ms, |e| {
+        let ev = g.push_event(EventType::StartChildWorkflowExecutionInitiated, ms * 1_000_000, |e| {
             e.start_child_workflow_execution_initiated_event_attributes =
                 Some(StartChildWorkflowExecutionInitiatedEventAttributes {
-                    domain: attrs.domain,
+                    domain: child_event_domain(attrs.domain, &parent_domain_name),
                     workflow_id: attrs.workflow_id,
                     workflow_type: attrs.workflow_type,
                     task_list: attrs.task_list,
                     input: attrs.input,
                     execution_start_to_close_timeout_seconds: attrs.execution_start_to_close_timeout_seconds,
                     task_start_to_close_timeout_seconds: attrs.task_start_to_close_timeout_seconds,
-                    parent_close_policy: attrs.parent_close_policy,
+                    // Go: `attributes.GetParentClosePolicy().Ptr()` (unset -> ABANDON).
+                    parent_close_policy: Some(attrs.parent_close_policy.unwrap_or(ParentClosePolicy::Abandon)),
                     control: attrs.control,
                     decision_task_completed_event_id: completed_id,
                     workflow_id_reuse_policy: attrs.workflow_id_reuse_policy,
@@ -746,7 +758,7 @@ impl Operations for EngineOps<'_> {
         let blob = {
             use cadence_thrift::ToThrift;
             cadence_persistence::sqlblobs::Encoding::ThriftRW
-                .encode(&ev.to_thrift())
+                .encode_versioned(&ev.to_thrift())
                 .map_err(|e| internal(format!("encode child initiated event: {e}")))?
         };
         let batch_id = g.hist.iter().find(|e| e.event_id > 0).map(|e| e.event_id).unwrap_or(completed_id);
@@ -790,7 +802,7 @@ impl Operations for EngineOps<'_> {
         let fields = a.search_attributes.as_ref().and_then(|s| s.indexed_fields.clone()).unwrap_or_default();
         let ms = self.state.now_millis();
         let mut g = self.state.inner.lock().unwrap();
-        g.push_event(EventType::UpsertWorkflowSearchAttributes, ms, |e| {
+        g.push_event(EventType::UpsertWorkflowSearchAttributes, ms * 1_000_000, |e| {
             e.upsert_workflow_search_attributes_event_attributes = Some(UpsertWorkflowSearchAttributesEventAttributes {
                 decision_task_completed_event_id: completed_id,
                 search_attributes: a.search_attributes,
@@ -1175,6 +1187,29 @@ mod tests {
     }
 
     #[test]
+    fn too_many_pending_activities_fails_workflow_with_go_reason() {
+        let s = state();
+        let mut config = Config::new_for_test();
+        config.pending_activity_validation_enabled = Arc::new(|| true);
+        config.pending_activities_count_limit_error = Arc::new(|_| 0);
+        let ops = EngineOps {
+            state: &s,
+            config: Arc::new(config),
+            domains: Arc::new(Domains),
+            domain_name: "test-domain".into(),
+            identity: "id".into(),
+            completed_id: 4,
+            semaphore_lookups: Default::default(),
+        };
+        let mut h = TaskHandler::new(ops, "id".into(), 4);
+        let mut d = schedule_activity_decision(false);
+        h.handle_decisions(b"", &mut d).unwrap();
+        assert!(!h.fail_decision);
+        assert_eq!(event_types(&s), vec![EventType::WorkflowExecutionFailed]);
+        assert_eq!(crate::decision::ERR_TOO_MANY_PENDING_ACTIVITIES, "Too many pending activities");
+    }
+
+    #[test]
     fn local_dispatch_starts_activity_and_skips_transfer_task() {
         let s = state();
         let mut h = handler(&s);
@@ -1224,6 +1259,12 @@ mod tests {
         assert_eq!(g.exec.client_library_version, "1.2.3");
         assert_eq!(g.exec.client_feature_version, "1.5.0");
         assert_eq!(g.exec.client_impl, "uber-go");
+    }
+
+    #[test]
+    fn child_initiated_event_domain_falls_back_to_parent_domain() {
+        assert_eq!(super::child_event_domain(String::new(), "parent"), "parent");
+        assert_eq!(super::child_event_domain("other".into(), "parent"), "other");
     }
 
     #[test]

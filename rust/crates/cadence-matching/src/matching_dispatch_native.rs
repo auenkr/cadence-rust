@@ -84,9 +84,26 @@ pub trait NativePollObserver: Send + Sync {
 /// Shared Go-compatible poller history with byte-exact identities and groups.
 pub type NativePollerManager = Mutex<cadence_common::poller_bytes::Manager>;
 
+/// Marks that a poll's delivery worker has taken a task (Go getTask returns a
+/// task or a query, never both): a claimed poll must not also accept a query.
+#[derive(Default)]
+pub struct PollClaim {
+    pub flag: AtomicBool,
+    pub notify: Notify,
+}
+impl PollClaim {
+    pub fn is_set(&self) -> bool {
+        self.flag.load(Ordering::SeqCst)
+    }
+    pub fn set(&self, value: bool) {
+        self.flag.store(value, Ordering::SeqCst);
+        self.notify.notify_waiters();
+    }
+}
 /// Observation of one getTask wait. EndPoll precedes History's start RPC.
 #[derive(Clone)]
 pub struct NativePollLifecycle {
+    pub claim: Option<Arc<PollClaim>>,
     pub manager: Arc<NativePollerManager>,
     pub id: GoString,
     pub cancel: Option<Arc<Notify>>,
@@ -1117,10 +1134,17 @@ impl NativeTaskDispatcher {
         let blocked_poller = lifecycle
             .as_ref()
             .map(|poll| (poll.manager.clone(), poll.id.clone()));
+        // Go CancelOutstandingPoll cancels only the GetTask wait (pollerCtx); a
+        // task already taken still runs RecordDecisionTaskStarted on the request
+        // context and is returned. Handle cancel here, where the claim is known.
+        let cancel = lifecycle.as_ref().and_then(|l| l.cancel.clone());
         let worker = self.clone();
         let deadline = tokio::time::Instant::now() + expiration;
         let poll_started = tokio::time::Instant::now();
-        let claimed = Arc::new(AtomicBool::new(false));
+        let claimed = lifecycle
+            .as_ref()
+            .and_then(|l| l.claim.clone())
+            .unwrap_or_default();
         let worker_claimed = claimed.clone();
         tokio::spawn(async move {
             worker
@@ -1138,11 +1162,24 @@ impl NativeTaskDispatcher {
         let response = {
             let response = tokio::time::timeout(expiration, &mut receiver);
             tokio::pin!(response);
+            let cancelled = async {
+                match &cancel {
+                    Some(cancel) => loop {
+                        cancel.notified().await;
+                        if !claimed.is_set() {
+                            break;
+                        }
+                    },
+                    None => std::future::pending().await,
+                }
+            };
+            tokio::pin!(cancelled);
             tokio::select! {
                 biased;
                 response = &mut response => response,
+                _ = &mut cancelled => return Ok(R::default()),
                 _ = &mut released => {
-                    if blocked_poller.as_ref().is_some_and(|(manager, id)| manager.lock().expect("poller history lock").contains_poll(id.as_bytes())) {
+                    if !claimed.is_set() && blocked_poller.as_ref().is_some_and(|(manager, id)| manager.lock().expect("poller history lock").contains_poll(id.as_bytes())) {
                         return Ok(R::default());
                     }
                     response.await
@@ -1150,7 +1187,7 @@ impl NativeTaskDispatcher {
             }
         };
         let response = match response {
-            Err(_) if claimed.load(Ordering::SeqCst) => {
+            Err(_) if claimed.is_set() => {
                 tokio::time::timeout_at(caller_deadline, &mut receiver).await
             }
             response => response,
@@ -1176,7 +1213,7 @@ impl NativeTaskDispatcher {
         lifecycle: Option<NativePollLifecycle>,
         deadline: tokio::time::Instant,
         poll_started: tokio::time::Instant,
-        claimed: Option<Arc<AtomicBool>>,
+        claimed: Option<Arc<PollClaim>>,
     ) where
         Q: NativeForwardPollRequest<R>,
         R: Default + Send,
@@ -1215,7 +1252,7 @@ impl NativeTaskDispatcher {
         lifecycle: Option<NativePollLifecycle>,
         deadline: tokio::time::Instant,
         poll_started: tokio::time::Instant,
-        claimed: Option<Arc<AtomicBool>>,
+        claimed: Option<Arc<PollClaim>>,
     ) where
         Q: NativeForwardPollRequest<R>,
         R: Default + Send,
@@ -1238,7 +1275,7 @@ impl NativeTaskDispatcher {
                     liveness.mark_alive(now());
                 }
                 if let Some(claimed) = claimed.as_ref() {
-                    claimed.store(false, Ordering::SeqCst);
+                    claimed.set(false);
                 }
                 waiting = lifecycle.as_ref().map(NativePollLifecycle::begin);
                 waiting_started = true;
@@ -1365,7 +1402,7 @@ impl NativeTaskDispatcher {
                 continue;
             };
             if let Some(claimed) = claimed.as_ref() {
-                claimed.store(true, Ordering::SeqCst);
+                claimed.set(true);
             }
             if let Some(observer) = lifecycle.as_ref().and_then(|l| l.observer.as_ref()) {
                 let poll_forwarded = lifecycle.as_ref().is_some_and(|l| l.forwarded);
@@ -1405,6 +1442,7 @@ impl NativeTaskDispatcher {
                 tokio::select! {
                     biased;
                     _ = &mut closed => {
+                        eprintln!("NATIVE-TRACE poll receiver dropped during start; requeueing task");
                         self.finish_delivery(task, Err(Status::cancelled("Poll cancelled during start."))).await;
                         return;
                     },
@@ -1653,6 +1691,7 @@ mod tests {
     async fn native_poll_lifecycle_registers_and_releases_raw_poller_id() {
         let manager = Arc::new(NativePollerManager::default());
         let lifecycle = NativePollLifecycle {
+            claim: None,
             manager: manager.clone(),
             id: gs(b"p\xff"),
             cancel: None,

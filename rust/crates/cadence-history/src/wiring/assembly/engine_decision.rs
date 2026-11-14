@@ -54,8 +54,29 @@ pub struct DecisionSnapshot {
     pub task_list: String,
 }
 
+/// Go workflow.ErrDeserializingToken (workflow/errors.go:43).
+fn err_deserializing_token() -> HistoryError {
+    HistoryError::bad_request("error deserializing task token")
+}
+
+/// Go workflow.ErrAlreadyCompleted (workflow/errors.go:39): WorkflowExecutionAlreadyCompletedError.
+fn already_completed_err() -> HistoryError {
+    WorkflowExecutionAlreadyCompletedError { message: "workflow execution already completed".into() }.into()
+}
+
+#[cfg(test)]
+mod respond_parity_tests {
+    use super::*;
+
+    #[test]
+    fn go_error_messages_and_types() {
+        assert_eq!(err_deserializing_token().to_string(), HistoryError::bad_request("error deserializing task token").to_string());
+        assert!(already_completed_err().is_workflow_already_completed());
+    }
+}
+
 fn invalid_action(what: &str, next_event_id: i64) -> HistoryError {
-    HistoryError::internal(format!("invalid history action {what} (next event id {next_event_id})"))
+    HistoryError::internal(super::invalid_history_action_message(what, next_event_id))
 }
 
 impl Inner {
@@ -122,7 +143,7 @@ impl EngineMutableState {
         let mut schedule_id = g.next_event_id;
         if attempt == 0 {
             let tl = task_list.clone();
-            let ev = g.push_event(EventType::DecisionTaskScheduled, now / 1_000_000, |e| {
+            let ev = g.push_event(EventType::DecisionTaskScheduled, now, |e| {
                 e.decision_task_scheduled_event_attributes = Some(DecisionTaskScheduledEventAttributes {
                     task_list: Some(TaskList { name: tl, ..Default::default() }),
                     start_to_close_timeout_seconds: Some((timeout_nanos / 1_000_000_000) as i32),
@@ -183,7 +204,7 @@ impl EngineMutableState {
                 // New events arrived after the transient decision was scheduled.
                 let timeout = g.pc_exec.decision_timeout_nanos;
                 let tl = task_list.to_string();
-                let ev = g.push_event(EventType::DecisionTaskScheduled, now / 1_000_000, |e| {
+                let ev = g.push_event(EventType::DecisionTaskScheduled, now, |e| {
                     e.decision_task_scheduled_event_attributes = Some(DecisionTaskScheduledEventAttributes {
                         task_list: Some(TaskList { name: tl, ..Default::default() }),
                         start_to_close_timeout_seconds: Some((timeout / 1_000_000_000) as i32),
@@ -195,7 +216,7 @@ impl EngineMutableState {
             }
             if attempt == 0 {
                 let (rid, ident) = (request_id.to_string(), identity.to_string());
-                let ev = g.push_event(EventType::DecisionTaskStarted, now / 1_000_000, |e| {
+                let ev = g.push_event(EventType::DecisionTaskStarted, now, |e| {
                     e.decision_task_started_event_attributes = Some(DecisionTaskStartedEventAttributes {
                         scheduled_event_id: sid,
                         identity: ident,
@@ -286,9 +307,9 @@ impl EngineMutableState {
             let timeout = g.pc_exec.decision_timeout_nanos;
             let task_list =
                 if g.exec.sticky_task_list.is_empty() { g.exec.task_list.clone() } else { g.exec.sticky_task_list.clone() };
-            let scheduled_ms = g.pc_exec.decision_scheduled_time_unix_nanos / 1_000_000;
-            let started_ms = g.pc_exec.decision_started_time_unix_nanos / 1_000_000;
-            let ev = g.push_event(EventType::DecisionTaskScheduled, scheduled_ms, |e| {
+            let scheduled_ns = g.pc_exec.decision_scheduled_time_unix_nanos;
+            let started_ns = g.pc_exec.decision_started_time_unix_nanos;
+            let ev = g.push_event(EventType::DecisionTaskScheduled, scheduled_ns, |e| {
                 e.decision_task_scheduled_event_attributes = Some(DecisionTaskScheduledEventAttributes {
                     task_list: Some(TaskList { name: task_list, ..Default::default() }),
                     start_to_close_timeout_seconds: Some((timeout / 1_000_000_000) as i32),
@@ -298,7 +319,7 @@ impl EngineMutableState {
             sid = ev.event_id;
             let request_id = g.pc_exec.decision_request_id.clone();
             let ident = identity.to_string();
-            let ev = g.push_event(EventType::DecisionTaskStarted, started_ms, |e| {
+            let ev = g.push_event(EventType::DecisionTaskStarted, started_ns, |e| {
                 e.decision_task_started_event_attributes = Some(DecisionTaskStartedEventAttributes {
                     scheduled_event_id: sid,
                     identity: ident,
@@ -308,7 +329,7 @@ impl EngineMutableState {
             stid = ev.event_id;
         }
         let (ctx, ident, checksum) = (execution_context.to_vec(), identity.to_string(), binary_checksum.to_string());
-        let completed = g.push_event(EventType::DecisionTaskCompleted, ms, |e| {
+        let completed = g.push_event(EventType::DecisionTaskCompleted, ms * 1_000_000, |e| {
             e.decision_task_completed_event_attributes = Some(DecisionTaskCompletedEventAttributes {
                 execution_context: ctx,
                 scheduled_event_id: sid,
@@ -361,7 +382,7 @@ impl EngineMutableState {
         // Only record the event when the decision is not a transient retry.
         if g.pc_exec.decision_attempt == 0 {
             let (details, identity, checksum) = (details.to_vec(), identity.to_string(), binary_checksum.to_string());
-            g.push_event(EventType::DecisionTaskFailed, now / 1_000_000, |e| {
+            g.push_event(EventType::DecisionTaskFailed, now, |e| {
                 e.decision_task_failed_event_attributes = Some(DecisionTaskFailedEventAttributes {
                     scheduled_event_id: schedule_id,
                     started_event_id: started_id,
@@ -385,7 +406,7 @@ impl EngineMutableState {
             return Err(invalid_action("DecisionTaskTimedOut (schedule to start)", g.next_event_id));
         }
         if g.pc_exec.decision_attempt == 0 {
-            g.push_event(EventType::DecisionTaskTimedOut, now / 1_000_000, |e| {
+            g.push_event(EventType::DecisionTaskTimedOut, now, |e| {
                 e.decision_task_timed_out_event_attributes = Some(DecisionTaskTimedOutEventAttributes {
                     scheduled_event_id: schedule_id,
                     started_event_id: 0,
@@ -421,7 +442,7 @@ impl EngineMutableState {
             // Transient decision: the events are not in the history yet.
             let scheduled = HistoryEvent {
                 event_id: d.schedule_id,
-                timestamp: Some(d.scheduled_nanos / 1_000_000),
+                timestamp: Some(d.scheduled_nanos),
                 event_type: Some(EventType::DecisionTaskScheduled),
                 version: d.version,
                 decision_task_scheduled_event_attributes: Some(DecisionTaskScheduledEventAttributes {
@@ -433,7 +454,7 @@ impl EngineMutableState {
             };
             let started = HistoryEvent {
                 event_id: d.schedule_id + 1,
-                timestamp: Some(d.started_nanos / 1_000_000),
+                timestamp: Some(d.started_nanos),
                 event_type: Some(EventType::DecisionTaskStarted),
                 version: d.version,
                 decision_task_started_event_attributes: Some(DecisionTaskStartedEventAttributes {
@@ -490,6 +511,31 @@ fn failed_cause(name: &str) -> Option<DecisionTaskFailedCause> {
         "BAD_ACQUIRE_SEMAPHORE_ATTRIBUTES" => C::BadAcquireSemaphoreAttributes,
         _ => return None,
     })
+}
+
+/// Go `common.FailureReasonTransactionSizeExceedsLimit`.
+const TRANSACTION_SIZE_EXCEEDS_LIMIT: &str = "TRANSACTION_SIZE_EXCEEDS_LIMIT";
+
+/// Go `failDecisionHelper` message (`%v` of cause and details bytes).
+fn decision_attempts_exceeded_message(cause: Option<&str>, details: &[u8]) -> String {
+    format!(
+        "Decision attempt exceeds limit. Last decision failure cause and details: {} - [{}]",
+        cause.unwrap_or_default(),
+        details.iter().map(u8::to_string).collect::<Vec<_>>().join(" ")
+    )
+}
+
+#[cfg(test)]
+mod respond_parity2_tests {
+    use super::*;
+
+    #[test]
+    fn attempts_exceeded_message_matches_go_format() {
+        assert_eq!(
+            decision_attempts_exceeded_message(Some("BAD_BINARY"), b"ab"),
+            "Decision attempt exceeds limit. Last decision failure cause and details: BAD_BINARY - [97 98]"
+        );
+    }
 }
 
 fn history_error(e: OperationError) -> HistoryError {
@@ -590,7 +636,7 @@ impl EngineDecisionHandler {
         for attempt in 0..CONDITIONAL_RETRY_COUNT {
             let mut state = context.load_state().await?;
             if !state.is_workflow_execution_running() {
-                return Err(HistoryError::entity_not_exists("workflow execution already completed"));
+                return Err(already_completed_err());
             }
             let decision = state.decision_info(token_schedule_id);
             if decision.is_none() && token_schedule_id >= state.get_next_event_id() {
@@ -702,6 +748,18 @@ impl EngineDecisionHandler {
                         &req.binary_checksum,
                     )?;
                     has_unhandled = true;
+                    // Go failDecisionHelper: DecisionRetryMaxAttempts exceeded terminates.
+                    let max_attempts = (self.config.decision_retry_max_attempts)(&domain_name);
+                    let attempt_now = state.inner.lock().unwrap().pc_exec.decision_attempt;
+                    if max_attempts > 0 && attempt_now > max_attempts {
+                        let message = decision_attempts_exceeded_message(cause, details.as_bytes());
+                        state.terminate_workflow(
+                            state.get_next_event_id(),
+                            "DECISION_ATTEMPTS_EXCEEDS_LIMIT",
+                            message.as_bytes(),
+                            "history-service",
+                        )?;
+                    }
                 }
             }
             let running = state.is_workflow_execution_running();
@@ -734,6 +792,21 @@ impl EngineDecisionHandler {
                         context.clear();
                     }
                     continue;
+                }
+                Err(HistoryError::TransactionSizeLimit(message)) => {
+                    // Go handler.go L574-602: reload (the failed update cleared the
+                    // state), terminate the workflow, persist, then return the error
+                    // (the history handler maps it to BadRequestError).
+                    context.clear();
+                    let state = context.load_state().await?;
+                    state.terminate_workflow(
+                        state.get_next_event_id(),
+                        TRANSACTION_SIZE_EXCEEDS_LIMIT,
+                        message.as_bytes(),
+                        "history-service",
+                    )?;
+                    context.update_as_active(self.core.clock.now()).await?;
+                    return Err(HistoryError::bad_request(message));
                 }
                 Err(e) => return Err(e),
                 Ok(()) => {}
@@ -776,6 +849,10 @@ impl EngineDecisionHandler {
             if timed_out {
                 return Err(HistoryError::entity_not_exists("decision heartbeat timeout"));
             }
+            if !state.is_workflow_execution_running() {
+                // Go: closed workflow, nothing to dispatch.
+                return Ok(HistoryRespondDecisionTaskCompletedResponse::default());
+            }
             let mut resp = HistoryRespondDecisionTaskCompletedResponse {
                 activities_to_dispatch_locally: local_dispatch
                     .into_iter()
@@ -784,7 +861,10 @@ impl EngineDecisionHandler {
                 ..Default::default()
             };
             if let Some(started) = started {
-                resp.started_response = Some(state.record_started_response(&started, &req.identity));
+                let mut sr = state.record_started_response(&started, &req.identity);
+                // Go: sticky is always enabled for a new decision from RespondDecisionTaskCompleted.
+                sr.sticky_execution_enabled = true;
+                resp.started_response = Some(sr);
             }
             return Ok(resp);
         }
@@ -864,7 +944,7 @@ impl DecisionHandler for EngineDecisionHandler {
         let task_list = poll.task_list.as_ref().map(|t| t.name.clone()).unwrap_or_default();
         self.update(&request.domain_uuid, &execution, |state| {
             if !state.is_workflow_execution_running() {
-                return Err(HistoryError::entity_not_exists("Workflow execution already completed."));
+                return Err(HistoryError::entity_not_exists("workflow execution already completed"));
             }
             let schedule_id = request.schedule_id;
             let decision = state.decision_info(schedule_id);
@@ -895,7 +975,7 @@ impl DecisionHandler for EngineDecisionHandler {
             .clone()
             .ok_or_else(|| HistoryError::bad_request("Missing complete request."))?;
         let token = JsonTaskTokenSerializer::deserialize(&req.task_token)
-            .map_err(|_| HistoryError::bad_request("Error deserializing task token."))?;
+            .map_err(|_| err_deserializing_token())?;
         let execution = WorkflowExecution { workflow_id: token.workflow_id.clone(), run_id: token.run_id.clone() };
         self.ensure_active_domain(&request.domain_uuid, &execution.workflow_id, &execution.run_id).await?;
         let (context, release) = self.cache.get_or_create(&request.domain_uuid, &execution).await?;
@@ -910,12 +990,12 @@ impl DecisionHandler for EngineDecisionHandler {
             .clone()
             .ok_or_else(|| HistoryError::bad_request("Missing failed request."))?;
         let token = JsonTaskTokenSerializer::deserialize(&failed.task_token)
-            .map_err(|_| HistoryError::bad_request("Error deserializing task token."))?;
+            .map_err(|_| err_deserializing_token())?;
         let execution = WorkflowExecution { workflow_id: token.workflow_id.clone(), run_id: token.run_id.clone() };
         self.ensure_active_domain(&request.domain_uuid, &execution.workflow_id, &execution.run_id).await?;
         self.update(&request.domain_uuid, &execution, |state| {
             if !state.is_workflow_execution_running() {
-                return Err(WorkflowExecutionAlreadyCompletedError { message: "Workflow execution already completed.".into() }.into());
+                return Err(already_completed_err());
             }
             let d = state
                 .decision_info(token.schedule_id)
@@ -997,7 +1077,7 @@ impl super::engine_state::Inner {
         });
         let points = cadence_api::types::ResetPoints { points: curr };
         let data = Encoding::ThriftRW
-            .encode(&points.to_thrift())
+            .encode_versioned(&points.to_thrift())
             .map_err(|e| HistoryError::internal(format!("encode auto reset points: {e}")))?;
         self.pc_exec.auto_reset_points =
             Some(cadence_persistence::history_contract::DataBlob { encoding: "thriftrw".to_string(), data });
