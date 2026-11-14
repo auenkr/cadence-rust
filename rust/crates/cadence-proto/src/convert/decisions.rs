@@ -124,9 +124,6 @@ fn continue_as_new_workflow_execution_decision_attributes(
 fn start_child_workflow_execution_decision_attributes(
     v: p::StartChildWorkflowExecutionDecisionAttributes,
 ) -> Result<tasks::StartChildWorkflowExecutionDecisionAttributes, Status> {
-    if v.active_cluster_selection_policy.is_some() {
-        return Err(Status::unimplemented("StartChildWorkflowExecutionDecisionAttributes.active_cluster_selection_policy has not been ported."));
-    }
     Ok(tasks::StartChildWorkflowExecutionDecisionAttributes {
         domain: v.domain,
         workflow_id: v.workflow_id,
@@ -158,6 +155,7 @@ fn start_child_workflow_execution_decision_attributes(
         }),
         cron_schedule: v.cron_schedule,
         cron_overlap_policy: enum_in(v.cron_overlap_policy, e::CronOverlapPolicy::from_i32)?,
+        active_cluster_selection_policy: v.active_cluster_selection_policy.map(selection_policy_in),
     })
 }
 fn signal_external_workflow_execution_decision_attributes(

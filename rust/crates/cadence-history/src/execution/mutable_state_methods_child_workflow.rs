@@ -84,6 +84,7 @@ impl TypedMutableState {
                         cron_schedule: attributes.cron_schedule.clone(),
                         memo: attributes.memo.clone(),
                         search_attributes: attributes.search_attributes.clone(),
+                        active_cluster_selection_policy: attributes.active_cluster_selection_policy.clone(),
                         ..Default::default()
                     });
             },
@@ -432,5 +433,25 @@ mod child_initiated_parity_tests {
         let a = event.start_child_workflow_execution_initiated_event_attributes.unwrap();
         assert_eq!(a.parent_close_policy, Some(cadence_api::enums::ParentClosePolicy::Abandon));
         assert_eq!(a.domain, "parent");
+    }
+
+    #[test]
+    fn initiated_event_carries_active_cluster_selection_policy() {
+        let policy = cadence_api::types::ActiveClusterSelectionPolicy {
+            cluster_attribute: Some(cadence_api::types::ClusterAttribute { scope: "s".into(), name: "n".into() }),
+        };
+        let mut s = TypedMutableState::new();
+        s.execution_info.state = 1;
+        s.execution_info.decision_started_id = 3;
+        s.task_gen_env.domains = Some(std::sync::Arc::new(Domains));
+        let attrs = StartChildWorkflowExecutionDecisionAttributes {
+            active_cluster_selection_policy: Some(policy.clone()),
+            ..Default::default()
+        };
+        let (event, _) = s
+            .add_start_child_workflow_execution_initiated_event(1, 4, "req", &attrs, "parent", "cid")
+            .unwrap();
+        let a = event.start_child_workflow_execution_initiated_event_attributes.unwrap();
+        assert_eq!(a.active_cluster_selection_policy, Some(policy));
     }
 }

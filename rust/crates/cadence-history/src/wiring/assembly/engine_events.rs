@@ -554,7 +554,7 @@ impl EngineMutableState {
         let params = self.params.clone();
         let mut g = self.inner.lock().unwrap();
         if !g.exec.is_running() {
-            return Err(Self::invalid_action("WorkflowExecutionTerminated", g.next_event_id));
+            return Err(HistoryError::internal(crate::execution::mutable_state_methods_common::ERR_WORKFLOW_FINISHED));
         }
         let (reason, details, identity) = (reason.to_string(), details.to_vec(), identity.to_string());
         let ev = g.push_event(EventType::WorkflowExecutionTerminated, ms * 1_000_000, |e| {

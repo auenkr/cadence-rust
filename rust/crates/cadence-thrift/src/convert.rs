@@ -5068,6 +5068,7 @@ impl FromThrift for StartChildWorkflowExecutionDecisionAttributes {
             search_attributes: s.opt_struct(150)?,
             cron_schedule: s.req_string(120, "")?,
             cron_overlap_policy: s.opt_enum(160)?,
+            active_cluster_selection_policy: s.opt_struct(170)?,
         })
     }
 }
@@ -5091,6 +5092,7 @@ impl ToThrift for StartChildWorkflowExecutionDecisionAttributes {
         f.ostruct(140, self.memo.as_ref());
         f.ostruct(150, self.search_attributes.as_ref());
         f.oenum(160, self.cron_overlap_policy);
+        f.ostruct(170, self.active_cluster_selection_policy.as_ref());
         f.finish()
     }
 }
@@ -6021,6 +6023,7 @@ impl FromThrift for StartChildWorkflowExecutionInitiatedEventAttributes {
             jitter_start_seconds: s.opt_i32(180)?,
             first_run_at_timestamp: s.opt_i64(190)?,
             cron_overlap_policy: s.opt_enum(200)?,
+            active_cluster_selection_policy: s.opt_struct(210)?,
         })
     }
 }
@@ -6051,6 +6054,7 @@ impl ToThrift for StartChildWorkflowExecutionInitiatedEventAttributes {
         f.oi32(180, self.jitter_start_seconds);
         f.oi64(190, self.first_run_at_timestamp);
         f.oenum(200, self.cron_overlap_policy);
+        f.ostruct(210, self.active_cluster_selection_policy.as_ref());
         f.finish()
     }
 }
@@ -6985,6 +6989,19 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(round_trip(&info), info);
+        let child_policy = ActiveClusterSelectionPolicy {
+            cluster_attribute: Some(ClusterAttribute { scope: "s".into(), name: "n".into() }),
+        };
+        let child_decision = StartChildWorkflowExecutionDecisionAttributes {
+            active_cluster_selection_policy: Some(child_policy.clone()),
+            ..Default::default()
+        };
+        assert_eq!(round_trip(&child_decision), child_decision);
+        let child_initiated = StartChildWorkflowExecutionInitiatedEventAttributes {
+            active_cluster_selection_policy: Some(child_policy),
+            ..Default::default()
+        };
+        assert_eq!(round_trip(&child_initiated), child_initiated);
     }
 
     #[test]

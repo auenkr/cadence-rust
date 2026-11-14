@@ -278,7 +278,7 @@ impl TypedMutableState {
             &execution.run_id,
             &request_id,
             &event,
-            true,
+            false,
         )?;
         Ok(event)
     }
@@ -442,5 +442,36 @@ impl TypedMutableState {
             self.run_task_generator(0, |g| g.generate_delayed_decision_tasks(start_event))?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod started_parity_tests {
+    use super::*;
+    use crate::execution::mutable_state_builder::TypedMutableStateError;
+    use crate::execution::mutable_state_task_generator::{TaskGeneratorDomains, TaskKind};
+
+    struct Domains;
+    impl TaskGeneratorDomains for Domains {
+        fn domain_id_by_name(&self, name: &str) -> std::result::Result<String, TypedMutableStateError> { Ok(format!("id-{name}")) }
+        fn retention_days(&self, _: &str, _: &str) -> std::result::Result<Option<i32>, TypedMutableStateError> { Ok(Some(3)) }
+        fn is_global_domain(&self, _: &str) -> std::result::Result<bool, TypedMutableStateError> { Ok(false) }
+    }
+
+    /// Go `AddWorkflowExecutionStartedEvent` passes generateDelayedDecisionTasks=false; the
+    /// backoff timer is created later by `AddFirstDecisionTaskScheduled`.
+    #[test]
+    fn add_started_event_does_not_generate_delayed_decision_tasks() {
+        let mut s = TypedMutableState::new();
+        s.task_gen_env.domains = Some(std::sync::Arc::new(Domains));
+        let mut env = StartedEnv { now_nanos: 1_000, domain_id: "d".into(), domain_name: "dn".into(), ..Default::default() };
+        let req = HistoryStartWorkflowExecutionRequest {
+            start_request: Some(StartWorkflowExecutionRequest { request_id: "r".into(), ..Default::default() }),
+            first_decision_task_backoff_seconds: Some(5),
+            ..Default::default()
+        };
+        let exec = WorkflowExecution { workflow_id: "w".into(), run_id: "run".into() };
+        s.add_workflow_execution_started_event(&mut env, &exec, &req).unwrap();
+        assert!(!s.timer_tasks.iter().any(|t| matches!(t.kind, TaskKind::WorkflowBackoff { .. })));
     }
 }

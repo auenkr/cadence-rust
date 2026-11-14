@@ -66,3 +66,28 @@ Evidence (head 82723f8f01d00661c4be90105aa0f6d5c1312d5b):
 - rust-ci cadence-history: https://github.com/auenkr/cadence-rust/actions/runs/43541365304 success
 - gate mysql/grpc two_history: https://github.com/auenkr/cadence-rust/actions/runs/43542229604 success, GATE SUMMARY failed: []
 - gate cassandra/tchannel two_history: https://github.com/auenkr/cadence-rust/actions/runs/43542232719 success, GATE SUMMARY failed: []
+
+## Part 4 (branch history-msbparity4)
+
+Compared Go vs Rust line by line: mutable_state_builder_methods_started.go (all 3 fns), mutable_state_builder_methods_timedout.go,
+mutable_state_util.go (FailDecision/ScheduleDecision/FindAutoResetPoint/GetChildExecutionDomain{Name,ID}/trimBinaryChecksums),
+checkMutability/ErrWorkflowFinished in mutable_state_builder.go. Util, timedout, ReplicateWorkflowExecutionStartedEvent field mapping: no gap.
+
+Fixed (unit test noted):
+1. `active_cluster_selection_policy` on StartChildWorkflowExecutionDecisionAttributes (thrift 170, proto field 17) and
+   ...InitiatedEventAttributes (thrift 210, proto field 22): API structs, thrift from/to, proto in/out (decision, history, cross-cluster),
+   typed + production history paths, history builder. Removed two `unimplemented` rejections in proto. Tests: thrift round trip
+   (`convert.rs`), `initiated_event_carries_active_cluster_selection_policy`.
+2. Typed `AddWorkflowExecutionStartedEvent` passed generateDelayedDecisionTasks=true; Go passes false (backoff timer is made by
+   AddFirstDecisionTaskScheduled). Test `add_started_event_does_not_generate_delayed_decision_tasks`.
+3. Production close/terminate/continue-as-new/timeout on a finished workflow returned `<tag> operation failed`; Go checkMutability returns
+   ErrWorkflowFinished "invalid mutable state action: mutation after finish" (engine_continue/timer/events/decision_ops). No dedicated unit test
+   (engine state not constructible cheaply); covered by gates.
+
+Remaining gaps / not re-read: mutable_state_builder.go core beyond checkMutability (StartTransaction/CloseTransactionAs*, version histories, sticky,
+pending-info maps, ~2400 lines). Typed `AddWorkflowExecutionStartedEvent` does not write events cache (perf only).
+
+Evidence (head 3508b67a42a72835554431e20bf5b8fde34cd4f3):
+- rust-ci cadence-history https://github.com/auenkr/cadence-rust/actions/runs/43544749418 success; cadence-proto .../43544752718 success
+- gate mysql/grpc two_history .../43545549870 success, GATE SUMMARY failed: []
+- gate cassandra/tchannel two_history .../43545557499 success, GATE SUMMARY failed: []
