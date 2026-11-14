@@ -1,0 +1,26 @@
+clippy-test	Test	2026-11-14T12:54:54.1511782Z test grpc::p1_handler_tests::by_id_operations_reach_history_hook_without_local_activity ... ok
+clippy-test	Test	2026-11-14T12:54:54.1513652Z test grpc::p1_handler_tests::release_semaphore_decision_reaches_completion_hook_and_roundtrips_codecs ... ok
+clippy-test	Test	2026-11-14T12:54:54.1515162Z test grpc::p1_handler_tests::async_starts_publish_through_original_hook_with_context_and_errors ... ok
+clippy-test	Test	2026-11-14T12:54:54.1527384Z test grpc_admin::domain_dlq_handler_tests::domain_dlq_grpc_and_thrift_use_persistence_and_propagate_merge_errors ... ok
+clippy-test	Test	2026-11-14T12:55:33.2042464Z test result: ok. 1001 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 39.05s
+clippy-test	Test	2026-11-14T12:55:33.2099064Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T12:55:35.1805956Z test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.97s
+clippy-test	Test	2026-11-14T12:55:35.1865984Z test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T12:55:35.2115838Z test result: ok. 11 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.02s
+clippy-test	Test	2026-11-14T12:55:35.2455966Z test result: ok. 18 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.03s
+clippy-test	Test	2026-11-14T12:56:05.2623888Z test result: ok. 16 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 30.01s
+clippy-test	Test	2026-11-14T12:56:05.3191170Z test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+clippy-test	Test	2026-11-14T12:56:07.3347500Z test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.01s
+clippy-test	Test	2026-11-14T12:56:09.5513002Z test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.21s
+clippy-test	Test	2026-11-14T12:56:09.5544751Z test result: ok. 2 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T12:56:09.5845769Z test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+clippy-test	Test	2026-11-14T12:56:09.5869430Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T12:56:09.5883629Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T12:56:09.7352849Z test result: ok. 9 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.14s
+clippy-test	Test	2026-11-14T12:56:09.7389672Z test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T12:56:09.9049049Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+clippy-test	Test	2026-11-14T12:56:09.9118455Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T12:56:10.2732935Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.36s
+clippy-test	Test	2026-11-14T12:56:10.2763425Z test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T12:56:10.3981735Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+clippy-test	Test	2026-11-14T12:56:11.5205598Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

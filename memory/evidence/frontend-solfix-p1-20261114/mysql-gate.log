@@ -1,0 +1,573 @@
+ 12:51:00 up 4 min,  0 users,  load average: 2.32, 1.49, 0.66
+               total        used        free      shared  buff/cache   available
+Mem:            15Gi       1.3Gi       4.6Gi        50Mi        10Gi        14Gi
+Swap:          3.0Gi          0B       3.0Gi
+Unable to find image 'mysql:8.0.36' locally
+8.0.36: Pulling from library/mysql
+bd37f6d99203: Pulling fs layer
+d2433cba0951: Pulling fs layer
+5196e1e87d8f: Pulling fs layer
+13702d9fe3c3: Pulling fs layer
+6586d096303c: Pulling fs layer
+7e1bc321f421: Pulling fs layer
+c38d8660e1fa: Pulling fs layer
+bddd54b9c549: Pulling fs layer
+cf55ff1c80af: Pulling fs layer
+83bcc87284a1: Pulling fs layer
+4eaae1e844ac: Pulling fs layer
+4eaae1e844ac: Download complete
+c38d8660e1fa: Download complete
+d2433cba0951: Download complete
+13702d9fe3c3: Download complete
+7e1bc321f421: Download complete
+6586d096303c: Download complete
+cf55ff1c80af: Download complete
+83bcc87284a1: Download complete
+3fb5bbaea6ae: Download complete
+2c945633a533: Download complete
+bd37f6d99203: Download complete
+5196e1e87d8f: Download complete
+bddd54b9c549: Download complete
+d2433cba0951: Pull complete
+13702d9fe3c3: Pull complete
+bd37f6d99203: Pull complete
+83bcc87284a1: Pull complete
+c38d8660e1fa: Pull complete
+7e1bc321f421: Pull complete
+bddd54b9c549: Pull complete
+4eaae1e844ac: Pull complete
+5196e1e87d8f: Pull complete
+6586d096303c: Pull complete
+cf55ff1c80af: Pull complete
+Digest: sha256:a532724022429812ec797c285c1b540a644c15e248579c6bfdf12a8fbaab4964
+Status: Downloaded newer image for mysql:8.0.36
+mysql: [Warning] Using a password on the command line interface can be insecure.
+Unable to find image 'apache/kafka:3.8.0' locally
+3.8.0: Pulling from apache/kafka
+e9e1a86a14df: Pulling fs layer
+1673c1a2cfa7: Pulling fs layer
+e2d8f56b95eb: Pulling fs layer
+0b502c76566e: Pulling fs layer
+c4c98316ca78: Pulling fs layer
+c23d170f77ed: Pulling fs layer
+a39822f482a5: Pulling fs layer
+c6a83fedfae6: Pulling fs layer
+a42500819bdc: Pulling fs layer
+634d60101085: Pulling fs layer
+e9e1a86a14df: Download complete
+1673c1a2cfa7: Download complete
+a39822f482a5: Download complete
+a42500819bdc: Download complete
+c23d170f77ed: Download complete
+c6a83fedfae6: Download complete
+e2d8f56b95eb: Download complete
+0b502c76566e: Download complete
+cd1abd17dbe2: Download complete
+c6a83fedfae6: Pull complete
+c4c98316ca78: Download complete
+634d60101085: Download complete
+0b502c76566e: Pull complete
+c4c98316ca78: Pull complete
+1673c1a2cfa7: Pull complete
+a42500819bdc: Pull complete
+634d60101085: Pull complete
+e9e1a86a14df: Pull complete
+e9e1a86a14df: Pull complete
+a39822f482a5: Pull complete
+c23d170f77ed: Pull complete
+e2d8f56b95eb: Pull complete
+Digest: sha256:c89f315cff967322c5d2021434b32271393cb193aa7ec1d43e97341924e57069
+Status: Downloaded newer image for apache/kafka:3.8.0
+GATE ok   go-history-listening 
+GATE ok   go-history-worker-listening 
+GATE ok   rust-matching-listening 
+GATE ok   rust-frontend-tchannel-listening 
+GATE ok   rust-frontend-grpc-listening 
+GATE ok   cli-register-domain-tchannel 
+GATE ok   cli-register-domain-grpc 
+GATE ok   cli-register-domain-async 
+GATE ok   cli-register-domain-noasync 
+GATE ok   cli-admin-async-config-update-grpc 
+GATE ok   cli-admin-async-config-get 
+GATE ok   cli-describe-domain-tchannel 
+GATE ok   cli-describe-domain-grpc 
+GATE ok   go-history-worker-alive-before-sdk 
+GATE ok   rust-matching-alive-before-sdk 
+GATE ok   rust-frontend-alive-before-sdk 
+GATE ok   rust-frontend-killed 
+GATE ok   rust-frontend-restarted-listening 
+GATE ok   sdk-describe-domain 
+GATE ok   sdk-worker-start 
+GATE ok   sdk-start-echo 
+GATE ok   sdk-complete-echo 
+GATE ok   sdk-describe-closed 
+GATE ok   sdk-workflow-id-250-chars-accepted 
+GATE ok   sdk-workflow-id-1001-chars-rejected 
+GATE ok   sdk-start-child 
+GATE ok   sdk-complete-child 
+GATE ok   sdk-describe-task-list 
+GATE ok   sdk-list-task-list-partitions 
+GATE ok   sdk-get-task-lists-by-domain 
+GATE ok   sdk-start-cancel 
+GATE ok   sdk-refresh-workflow-tasks 
+GATE ok   sdk-reset-sticky-task-list 
+GATE ok   sdk-cancel-workflow-execution 
+GATE ok   sdk-start-terminate 
+GATE ok   sdk-terminate-workflow-execution 
+GATE ok   sdk-sched-create-grpc 
+GATE ok   sdk-sched-backfill-grpc 
+GATE ok   sdk-sched-backfill-completed 
+GATE ok   sdk-sched-describe-after-backfill-grpc 
+GATE ok   sdk-sched-update-grpc 
+GATE ok   sdk-sched-pause-grpc 
+GATE ok   sdk-sched-unpause-grpc 
+GATE ok   sdk-sched-list-grpc 
+GATE ok   sdk-sched-delete-grpc 
+GATE ok   sdk-start-signal-query 
+GATE ok   sdk-signal 
+GATE ok   sdk-query 
+GATE ok   sdk-describe-open 
+GATE ok   sdk-list-open 
+GATE ok   sdk-restart-handshake 
+GATE ok   sdk-signal-after-restart 
+GATE ok   sdk-signal-done 
+GATE ok   sdk-complete-after-restart 
+GATE ok   sdk-list-closed 
+GATE ok   sdk-api-get-cluster-info 
+GATE ok   sdk-api-get-search-attributes 
+GATE ok   sdk-api-register-6 
+GATE ok   sdk-api-register-b 
+GATE ok   sdk-api-list-domains 
+GATE ok   sdk-api-delete-domain-not-deprecated 
+GATE ok   sdk-api-deprecate-domain 
+GATE ok   sdk-api-delete-domain-deprecated 
+GATE ok   sdk-api-delete-domain-with-executions 
+GATE ok   sdk-api-delete-domain-missing 
+GATE ok   sdk-api-failover-domain-empty-rejected 
+GATE ok   sdk-api-failover-domain 
+GATE ok   sdk-api-list-failover-history-no-domain-id 
+GATE ok   sdk-api-list-failover-history 
+GATE ok   sdk-api-signal-with-start 
+GATE ok   sdk-api-signal-with-start-identity-not-validated 
+GATE ok   sdk-api-manual-start 
+GATE ok   sdk-api-respond-decision-task-failed-identity-too-long 
+GATE ok   sdk-api-respond-decision-task-failed 
+GATE ok   sdk-api-poll-decision-after-failure 
+GATE ok   sdk-api-respond-decision-schedule-activities 
+GATE ok   sdk-api-poll-activities 
+GATE ok   sdk-api-record-activity-heartbeat 
+GATE ok   sdk-api-record-activity-heartbeat-identity-too-long 
+GATE ok   sdk-api-respond-activity-failed-identity-too-long 
+GATE ok   sdk-api-respond-activity-failed 
+GATE ok   sdk-api-record-activity-heartbeat-by-id 
+GATE ok   sdk-api-respond-activity-completed-by-id-identity-too-long 
+GATE ok   sdk-api-respond-activity-completed-by-id 
+GATE ok   sdk-api-respond-activity-failed-by-id 
+GATE ok   sdk-api-respond-activity-canceled 
+GATE ok   sdk-api-respond-activity-canceled-by-id 
+GATE ok   sdk-api-history-raw-supported-client 
+GATE ok   sdk-api-history-raw-unsupported-client 
+GATE ok   sdk-api-reset-workflow-execution 
+GATE ok   sdk-api-reset-invalid-event-rejected 
+GATE ok   sdk-api-restart-workflow-execution 
+GATE ok   sdk-api-diagnose-workflow-execution 
+GATE ok   sdk-api-diagnose-missing-run-id-rejected 
+GATE ok   sdk-api-admin-cluster-describe-tchannel 
+GATE ok   sdk-api-admin-workflow-describe-tchannel 
+GATE ok   sdk-api-admin-workflow-refresh-tasks-tchannel 
+GATE ok   sdk-api-admin-history-host-describe-tchannel 
+GATE ok   sdk-api-admin-isolation-groups-get-global-tchannel 
+GATE ok   sdk-api-admin-isolation-groups-get-domain-tchannel 
+GATE ok   sdk-api-admin-tasklist-list-tchannel 
+GATE ok   sdk-api-admin-shard-list-tchannel 
+GATE ok   sdk-api-admin-shard-list-page-tchannel 
+GATE ok   sdk-api-admin-dlq-count-history-tchannel 
+GATE ok   sdk-api-admin-dlq-count-domain-tchannel 
+GATE ok   sdk-api-admin-dlq-read-domain-tchannel 
+GATE ok   sdk-api-admin-dlq-read-history-tchannel 
+GATE ok   sdk-api-admin-dlq-purge-domain-tchannel 
+GATE ok   sdk-api-admin-dlq-purge-history-tchannel 
+GATE ok   sdk-api-admin-dlq-merge-domain-tchannel 
+GATE ok   sdk-api-admin-dlq-merge-history-tchannel 
+GATE ok   sdk-api-admin-queue-describe-transfer-tchannel 
+GATE ok   sdk-api-admin-queue-describe-timer-tchannel 
+GATE ok   sdk-api-admin-queue-describe-no-cluster-rejected-tchannel 
+GATE ok   sdk-api-admin-workflow-fix-corruption-tchannel 
+GATE ok   sdk-api-admin-workflow-delete-remote-tchannel 
+GATE ok   sdk-api-admin-dynconfig-operational-list-tchannel 
+GATE ok   sdk-api-admin-dynconfig-operational-get-tchannel 
+GATE ok   sdk-api-admin-dynconfig-operational-list-values-tchannel 
+GATE ok   sdk-api-admin-cluster-describe-grpc 
+GATE ok   sdk-api-admin-workflow-describe-grpc 
+GATE ok   sdk-api-admin-workflow-refresh-tasks-grpc 
+GATE ok   sdk-api-admin-history-host-describe-grpc 
+GATE ok   sdk-api-admin-isolation-groups-get-global-grpc 
+GATE ok   sdk-api-admin-isolation-groups-get-domain-grpc 
+GATE ok   sdk-api-admin-tasklist-list-grpc 
+GATE ok   sdk-api-admin-shard-list-grpc 
+GATE ok   sdk-api-admin-shard-list-page-grpc 
+GATE ok   sdk-api-admin-dlq-count-history-grpc 
+GATE ok   sdk-api-admin-dlq-count-domain-grpc 
+GATE ok   sdk-api-admin-dlq-read-domain-grpc 
+GATE ok   sdk-api-admin-dlq-read-history-grpc 
+GATE ok   sdk-api-admin-dlq-purge-domain-grpc 
+GATE ok   sdk-api-admin-dlq-purge-history-grpc 
+GATE ok   sdk-api-admin-dlq-merge-domain-grpc 
+GATE ok   sdk-api-admin-dlq-merge-history-grpc 
+GATE ok   sdk-api-admin-queue-describe-transfer-grpc 
+GATE ok   sdk-api-admin-queue-describe-timer-grpc 
+GATE ok   sdk-api-admin-queue-describe-no-cluster-rejected-grpc 
+GATE ok   sdk-api-admin-workflow-fix-corruption-grpc 
+GATE ok   sdk-api-admin-workflow-delete-remote-grpc 
+GATE ok   sdk-api-admin-dynconfig-operational-list-grpc 
+GATE ok   sdk-api-admin-dynconfig-operational-get-grpc 
+GATE ok   sdk-api-admin-dynconfig-operational-list-values-grpc 
+SDK LOG TAIL
+STEP api-admin-dlq-read-history-tchannel ok
+STEP api-admin-dlq-purge-domain-tchannel ok
+STEP api-admin-dlq-purge-history-tchannel ok
+STEP api-admin-dlq-merge-domain-tchannel ok
+STEP api-admin-dlq-merge-history-tchannel ok
+STEP api-admin-queue-describe-transfer-tchannel ok
+STEP api-admin-queue-describe-timer-tchannel ok
+STEP api-admin-queue-describe-no-cluster-rejected-tchannel ok
+STEP api-admin-workflow-fix-corruption-tchannel ok
+STEP api-admin-workflow-delete-remote-tchannel ok
+STEP api-admin-dynconfig-operational-list-tchannel ok
+STEP api-admin-dynconfig-operational-get-tchannel ok
+STEP api-admin-dynconfig-operational-list-values-tchannel ok
+STEP api-admin-cluster-describe-grpc ok
+STEP api-admin-workflow-describe-grpc ok
+STEP api-admin-workflow-refresh-tasks-grpc ok
+STEP api-admin-history-host-describe-grpc ok
+STEP api-admin-isolation-groups-get-global-grpc ok
+STEP api-admin-isolation-groups-get-domain-grpc ok
+STEP api-admin-tasklist-list-grpc ok
+STEP api-admin-shard-list-grpc ok
+STEP api-admin-shard-list-page-grpc ok
+STEP api-admin-dlq-count-history-grpc ok
+STEP api-admin-dlq-count-domain-grpc ok
+STEP api-admin-dlq-read-domain-grpc ok
+STEP api-admin-dlq-read-history-grpc ok
+STEP api-admin-dlq-purge-domain-grpc ok
+STEP api-admin-dlq-purge-history-grpc ok
+STEP api-admin-dlq-merge-domain-grpc ok
+STEP api-admin-dlq-merge-history-grpc ok
+STEP api-admin-queue-describe-transfer-grpc ok
+STEP api-admin-queue-describe-timer-grpc ok
+STEP api-admin-queue-describe-no-cluster-rejected-grpc ok
+STEP api-admin-workflow-fix-corruption-grpc ok
+STEP api-admin-workflow-delete-remote-grpc ok
+STEP api-admin-dynconfig-operational-list-grpc ok
+STEP api-admin-dynconfig-operational-get-grpc ok
+STEP api-admin-dynconfig-operational-list-values-grpc ok
+RESULT failures=0
+{"level":"info","ts":"2026-11-14T12:53:04.952Z","caller":"internal/internal_worker.go:1010","msg":"Stopped Worker","Domain":"fe-gate-t-bc8b22","TaskList":"fe-gate-0f60c634-fb2b-4ed6-b653-883f3c58b66b","WorkerID":"11359@runnervmccnms@fe-gate-0f60c634-fb2b-4ed6-b653-883f3c58b66b@e9ac6180-7010-4b69-a28b-d0cc3f6bf28a"}
+GATE ok   sdk-driver-exit 
+GATE ok   go-history-worker-alive-after-sdk 
+GATE ok   rust-matching-alive-after-sdk 
+GATE ok   rust-frontend-alive-after-sdk 
+GATE ok   metrics-probe-start 
+GATE ok   metrics-requests-start 
+GATE ok   metrics-requests-poll-decision 
+GATE ok   metrics-latency-start 
+GATE ok   metrics-latency-ns-start 
+GATE ok   kafka-broker-stopped 
+GATE ok   kafka-broker-restarted 
+GATE ok   async-rust-frontend-killed 
+GATE ok   async-rust-frontend-restarted-listening 
+GATE ok   sdk-async-worker-start 
+GATE ok   sdk-async-start-accepted 
+GATE ok   sdk-async-start-executes 
+GATE ok   sdk-async-signal-with-start-accepted 
+GATE ok   sdk-async-signal-with-start-signal-delivered 
+GATE ok   sdk-async-signal-with-start-done-signal 
+GATE ok   sdk-async-signal-with-start-executes 
+GATE ok   sdk-async-invalid-workflow-bad-request 
+GATE ok   sdk-async-disabled-domain-bad-request 
+GATE ok   sdk-broker-down-handshake 
+GATE ok   sdk-async-broker-down-returns-error 
+GATE ok   sdk-broker-up-handshake 
+GATE ok   sdk-async-start-after-broker-restart-accepted 
+GATE ok   sdk-async-start-after-broker-restart-executes 
+GATE ok   sdk-async-failed-start-not-executed 
+GATE ok   sdk-frontend-restart-handshake 
+GATE ok   sdk-async-frontend-restart-no-lost-messages 
+ASYNC SDK LOG TAIL
+{"level":"info","ts":"2026-11-14T12:53:05.850Z","caller":"internal/internal_worker.go:182","msg":"No logger configured for cadence worker. Created default one."}
+{"level":"info","ts":"2026-11-14T12:53:05.851Z","caller":"internal/internal_worker.go:186","msg":"No metrics scope configured for cadence worker. Use NoopScope as default."}
+{"level":"info","ts":"2026-11-14T12:53:05.905Z","caller":"internal/internal_worker.go:858","msg":"Started Workflow Worker","Domain":"fe-gate-async-e713f2","TaskList":"fe-gate-async-618bfd27-d713-4631-94da-1790d4583376","WorkerID":"11920@runnervmccnms@fe-gate-async-618bfd27-d713-4631-94da-1790d4583376@bc13268d-5c06-4b32-936c-6483fd293c4d"}
+{"level":"info","ts":"2026-11-14T12:53:05.908Z","caller":"internal/internal_worker.go:883","msg":"Started Activity Worker","Domain":"fe-gate-async-e713f2","TaskList":"fe-gate-async-618bfd27-d713-4631-94da-1790d4583376","WorkerID":"11920@runnervmccnms@fe-gate-async-618bfd27-d713-4631-94da-1790d4583376@bc13268d-5c06-4b32-936c-6483fd293c4d"}
+STEP async-worker-start ok
+STEP async-start-accepted ok
+STEP async-start-executes ok
+STEP async-signal-with-start-accepted ok
+STEP async-signal-with-start-signal-delivered ok
+STEP async-signal-with-start-done-signal ok
+STEP async-signal-with-start-executes ok
+STEP async-invalid-workflow-bad-request ok
+STEP async-disabled-domain-bad-request ok
+STEP broker-down-handshake ok
+STEP async-broker-down-returns-error ok
+STEP broker-up-handshake ok
+STEP async-start-after-broker-restart-accepted ok
+STEP async-start-after-broker-restart-executes ok
+STEP async-failed-start-not-executed ok
+STEP frontend-restart-handshake ok
+STEP async-frontend-restart-no-lost-messages ok
+INFO async frontend restart: 40/40 accepted before retry
+RESULT failures=0
+{"level":"info","ts":"2026-11-14T12:55:41.276Z","caller":"internal/internal_worker.go:1010","msg":"Stopped Worker","Domain":"fe-gate-async-e713f2","TaskList":"fe-gate-async-618bfd27-d713-4631-94da-1790d4583376","WorkerID":"11920@runnervmccnms@fe-gate-async-618bfd27-d713-4631-94da-1790d4583376@bc13268d-5c06-4b32-936c-6483fd293c4d"}
+GATE ok   sdk-async-driver-exit 
+GATE ok   go-history-worker-alive-after-async-sdk 
+GATE ok   rust-matching-alive-after-async-sdk 
+GATE ok   rust-frontend-alive-after-async-sdk 
+GATE ok   cli-list-workflows-grpc 
+GATE ok   cli-list-workflows-tchannel 
+GATE ok   admin-probe-get-cross-cluster-tasks-empty-cluster 
+GATE ok   admin-probe-get-cross-cluster-tasks-deprecated 
+GATE ok   admin-probe-reapply-events-no-domain 
+GATE ok   admin-probe-reapply-events-no-execution 
+GATE ok   admin-probe-reapply-events-no-workflow-id 
+GATE ok   admin-probe-reapply-events-unknown-domain 
+GATE ok   admin-probe-reapply-events-unknown-workflow 
+GATE ok   admin-probe-get-dlq-replication-messages-empty 
+GATE ok   admin-probe-get-dlq-replication-messages-unknown-workflow 
+GATE ok   admin-probe-get-dlq-replication-messages-bad-type 
+GATE ok   scen-register-archival-domain 
+GATE ok   sdk-scen-retry-start 
+GATE ok   sdk-scen-retry-timeout-next-attempt 
+GATE ok   sdk-scen-retry-first-run-continued-as-new 
+GATE ok   sdk-scen-retry-exhausted-timed-out 
+GATE ok   sdk-scen-cron-start 
+GATE ok   sdk-scen-cron-timeout-next-run 
+GATE ok   sdk-scen-cron-first-run-continued-as-new 
+GATE ok   sdk-scen-cron-terminate 
+GATE ok   sdk-scen-idem-worker-start 
+GATE ok   sdk-scen-idem-start 
+GATE ok   sdk-scen-idem-start-completes 
+GATE ok   sdk-scen-idem-start-request-id-dedup-after-close 
+GATE ok   sdk-scen-idem-start-new-request-id-new-run 
+GATE ok   sdk-scen-idem-signal-wf-start 
+GATE ok   sdk-scen-idem-signal-calls-ok 
+GATE ok   sdk-scen-idem-signal-request-id-dedup 
+GATE ok   sdk-scen-archival-worker-start 
+GATE ok   sdk-scen-archival-start 
+GATE ok   sdk-scen-archival-history-file-written 
+GATE ok   sdk-scen-archival-history-deleted-after-retention 
+GATE ok   sdk-scen-archival-get-history-falls-back-to-archive 
+GATE ok   sdk-scen-autoreset-worker-start 
+GATE ok   sdk-scen-autoreset-start 
+GATE ok   sdk-scen-autoreset-first-decision-completed 
+GATE ok   sdk-scen-autoreset-mark-binary-bad 
+GATE ok   sdk-scen-autoreset-signal 
+GATE ok   sdk-scen-autoreset-new-run-started 
+GATE ok   sdk-scen-autoreset-original-run-terminated 
+GATE ok   sdk-scen-autoreset-new-run-links-original 
+GATE ok   sdk-scen-pcp-worker-start 
+GATE ok   sdk-scen-pcp-start-parent 
+GATE ok   sdk-scen-pcp-child-terminate 
+GATE ok   sdk-scen-pcp-child-request-cancel 
+GATE ok   sdk-scen-pcp-child-abandon-still-running 
+SCEN SDK LOG TAIL
+STEP scen-archival-history-deleted-after-retention ok
+STEP scen-archival-get-history-falls-back-to-archive ok
+{"level":"info","ts":"2026-11-14T12:56:16.747Z","caller":"internal/internal_worker.go:1010","msg":"Stopped Worker","Domain":"fe-gate-scen-e0cdb2","TaskList":"fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-arch","WorkerID":"13064@runnervmccnms@fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-arch@1a7e642a-14ce-4b9f-b438-3419e5d833d3"}
+{"level":"info","ts":"2026-11-14T12:56:16.748Z","caller":"internal/internal_worker.go:182","msg":"No logger configured for cadence worker. Created default one."}
+{"level":"info","ts":"2026-11-14T12:56:16.748Z","caller":"internal/internal_worker.go:186","msg":"No metrics scope configured for cadence worker. Use NoopScope as default."}
+{"level":"info","ts":"2026-11-14T12:56:16.748Z","caller":"internal/internal_worker.go:858","msg":"Started Workflow Worker","Domain":"fe-gate-t-bc8b22","TaskList":"fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin","WorkerID":"13064@runnervmccnms@fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin@a4906ac6-627d-432d-a0f7-978c2316b57c"}
+{"level":"info","ts":"2026-11-14T12:56:16.748Z","caller":"internal/internal_worker.go:862","msg":"Worker has no activities registered, so activity worker will not be started.","Domain":"fe-gate-t-bc8b22","TaskList":"fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin","WorkerID":"13064@runnervmccnms@fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin@a4906ac6-627d-432d-a0f7-978c2316b57c"}
+STEP scen-autoreset-worker-start ok
+STEP scen-autoreset-start ok
+STEP scen-autoreset-first-decision-completed ok
+STEP scen-autoreset-mark-binary-bad ok
+STEP scen-autoreset-signal ok
+{"level":"error","ts":"2026-11-14T12:56:33.910Z","caller":"internal/internal_worker_base.go:342","msg":"Worker received non-retriable error from PollTask; continue polling.","Domain":"fe-gate-t-bc8b22","TaskList":"fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin","WorkerID":"13064@runnervmccnms@fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin@a4906ac6-627d-432d-a0f7-978c2316b57c","WorkerType":"DecisionWorker","error":"BadRequestError{Message: binary gate-bad-binary-ce478c61 already marked as bad deployment}","stacktrace":"go.uber.org/cadence/internal.(*baseWorker).pollTask\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_worker_base.go:342\ngo.uber.org/cadence/internal.(*baseWorker).runPoller\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_worker_base.go:288"}
+{"level":"error","ts":"2026-11-14T12:56:33.931Z","caller":"internal/internal_worker_base.go:342","msg":"Worker received non-retriable error from PollTask; continue polling.","Domain":"fe-gate-t-bc8b22","TaskList":"fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin","WorkerID":"13064@runnervmccnms@fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin@a4906ac6-627d-432d-a0f7-978c2316b57c","WorkerType":"DecisionWorker","error":"BadRequestError{Message: binary gate-bad-binary-ce478c61 already marked as bad deployment}","stacktrace":"go.uber.org/cadence/internal.(*baseWorker).pollTask\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_worker_base.go:342\ngo.uber.org/cadence/internal.(*baseWorker).runPoller\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_worker_base.go:288"}
+{"level":"error","ts":"2026-11-14T12:56:33.968Z","caller":"internal/internal_worker_base.go:342","msg":"Worker received non-retriable error from PollTask; continue polling.","Domain":"fe-gate-t-bc8b22","TaskList":"fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin","WorkerID":"13064@runnervmccnms@fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin@a4906ac6-627d-432d-a0f7-978c2316b57c","WorkerType":"DecisionWorker","error":"BadRequestError{Message: binary gate-bad-binary-ce478c61 already marked as bad deployment}","stacktrace":"go.uber.org/cadence/internal.(*baseWorker).pollTask\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_worker_base.go:342\ngo.uber.org/cadence/internal.(*baseWorker).runPoller\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_worker_base.go:288"}
+{"level":"error","ts":"2026-11-14T12:56:34.037Z","caller":"internal/internal_worker_base.go:342","msg":"Worker received non-retriable error from PollTask; continue polling.","Domain":"fe-gate-t-bc8b22","TaskList":"fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin","WorkerID":"13064@runnervmccnms@fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin@a4906ac6-627d-432d-a0f7-978c2316b57c","WorkerType":"DecisionWorker","error":"BadRequestError{Message: binary gate-bad-binary-ce478c61 already marked as bad deployment}","stacktrace":"go.uber.org/cadence/internal.(*baseWorker).pollTask\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_worker_base.go:342\ngo.uber.org/cadence/internal.(*baseWorker).runPoller\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_worker_base.go:288"}
+{"level":"error","ts":"2026-11-14T12:56:34.190Z","caller":"internal/internal_worker_base.go:342","msg":"Worker received non-retriable error from PollTask; continue polling.","Domain":"fe-gate-t-bc8b22","TaskList":"fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin","WorkerID":"13064@runnervmccnms@fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin@a4906ac6-627d-432d-a0f7-978c2316b57c","WorkerType":"DecisionWorker","error":"BadRequestError{Message: binary gate-bad-binary-ce478c61 already marked as bad deployment}","stacktrace":"go.uber.org/cadence/internal.(*baseWorker).pollTask\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_worker_base.go:342\ngo.uber.org/cadence/internal.(*baseWorker).runPoller\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_worker_base.go:288"}
+{"level":"error","ts":"2026-11-14T12:56:34.204Z","caller":"internal/internal_worker_base.go:342","msg":"Worker received non-retriable error from PollTask; continue polling.","Domain":"fe-gate-t-bc8b22","TaskList":"fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin","WorkerID":"13064@runnervmccnms@fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin@a4906ac6-627d-432d-a0f7-978c2316b57c","WorkerType":"DecisionWorker","error":"BadRequestError{Message: binary gate-bad-binary-ce478c61 already marked as bad deployment}","stacktrace":"go.uber.org/cadence/internal.(*baseWorker).pollTask\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_worker_base.go:342\ngo.uber.org/cadence/internal.(*baseWorker).runPoller\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_worker_base.go:288"}
+{"level":"error","ts":"2026-11-14T12:56:34.221Z","caller":"internal/internal_worker_base.go:342","msg":"Worker received non-retriable error from PollTask; continue polling.","Domain":"fe-gate-t-bc8b22","TaskList":"fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin","WorkerID":"13064@runnervmccnms@fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin@a4906ac6-627d-432d-a0f7-978c2316b57c","WorkerType":"DecisionWorker","error":"BadRequestError{Message: binary gate-bad-binary-ce478c61 already marked as bad deployment}","stacktrace":"go.uber.org/cadence/internal.(*baseWorker).pollTask\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_worker_base.go:342\ngo.uber.org/cadence/internal.(*baseWorker).runPoller\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_worker_base.go:288"}
+{"level":"error","ts":"2026-11-14T12:56:34.257Z","caller":"internal/internal_worker_base.go:342","msg":"Worker received non-retriable error from PollTask; continue polling.","Domain":"fe-gate-t-bc8b22","TaskList":"fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin","WorkerID":"13064@runnervmccnms@fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin@a4906ac6-627d-432d-a0f7-978c2316b57c","WorkerType":"DecisionWorker","error":"BadRequestError{Message: binary gate-bad-binary-ce478c61 already marked as bad deployment}","stacktrace":"go.uber.org/cadence/internal.(*baseWorker).pollTask\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_worker_base.go:342\ngo.uber.org/cadence/internal.(*baseWorker).runPoller\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_worker_base.go:288"}
+{"level":"error","ts":"2026-11-14T12:56:34.336Z","caller":"internal/internal_worker_base.go:342","msg":"Worker received non-retriable error from PollTask; continue polling.","Domain":"fe-gate-t-bc8b22","TaskList":"fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin","WorkerID":"13064@runnervmccnms@fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin@a4906ac6-627d-432d-a0f7-978c2316b57c","WorkerType":"DecisionWorker","error":"BadRequestError{Message: binary gate-bad-binary-ce478c61 already marked as bad deployment}","stacktrace":"go.uber.org/cadence/internal.(*baseWorker).pollTask\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_worker_base.go:342\ngo.uber.org/cadence/internal.(*baseWorker).runPoller\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_worker_base.go:288"}
+{"level":"error","ts":"2026-11-14T12:56:34.478Z","caller":"internal/internal_worker_base.go:342","msg":"Worker received non-retriable error from PollTask; continue polling.","Domain":"fe-gate-t-bc8b22","TaskList":"fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin","WorkerID":"13064@runnervmccnms@fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin@a4906ac6-627d-432d-a0f7-978c2316b57c","WorkerType":"DecisionWorker","error":"BadRequestError{Message: binary gate-bad-binary-ce478c61 already marked as bad deployment}","stacktrace":"go.uber.org/cadence/internal.(*baseWorker).pollTask\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_worker_base.go:342\ngo.uber.org/cadence/internal.(*baseWorker).runPoller\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_worker_base.go:288"}
+{"level":"error","ts":"2026-11-14T12:56:34.486Z","caller":"internal/internal_worker_base.go:342","msg":"Worker received non-retriable error from PollTask; continue polling.","Domain":"fe-gate-t-bc8b22","TaskList":"fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin","WorkerID":"13064@runnervmccnms@fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin@a4906ac6-627d-432d-a0f7-978c2316b57c","WorkerType":"DecisionWorker","error":"BadRequestError{Message: binary gate-bad-binary-ce478c61 already marked as bad deployment}","stacktrace":"go.uber.org/cadence/internal.(*baseWorker).pollTask\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_worker_base.go:342\ngo.uber.org/cadence/internal.(*baseWorker).runPoller\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_worker_base.go:288"}
+{"level":"error","ts":"2026-11-14T12:56:34.741Z","caller":"internal/internal_worker_base.go:342","msg":"Worker received non-retriable error from PollTask; continue polling.","Domain":"fe-gate-t-bc8b22","TaskList":"fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin","WorkerID":"13064@runnervmccnms@fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin@a4906ac6-627d-432d-a0f7-978c2316b57c","WorkerType":"DecisionWorker","error":"BadRequestError{Message: binary gate-bad-binary-ce478c61 already marked as bad deployment}","stacktrace":"go.uber.org/cadence/internal.(*baseWorker).pollTask\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_worker_base.go:342\ngo.uber.org/cadence/internal.(*baseWorker).runPoller\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_worker_base.go:288"}
+{"level":"error","ts":"2026-11-14T12:56:35.046Z","caller":"internal/internal_worker_base.go:342","msg":"Worker received non-retriable error from PollTask; continue polling.","Domain":"fe-gate-t-bc8b22","TaskList":"fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin","WorkerID":"13064@runnervmccnms@fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin@a4906ac6-627d-432d-a0f7-978c2316b57c","WorkerType":"DecisionWorker","error":"BadRequestError{Message: binary gate-bad-binary-ce478c61 already marked as bad deployment}","stacktrace":"go.uber.org/cadence/internal.(*baseWorker).pollTask\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_worker_base.go:342\ngo.uber.org/cadence/internal.(*baseWorker).runPoller\n\t/home/runner/go/pkg/mod/go.uber.org/cadence@v1.4.0-rc.3/internal/internal_worker_base.go:288"}
+STEP scen-autoreset-new-run-started ok
+STEP scen-autoreset-original-run-terminated ok
+STEP scen-autoreset-new-run-links-original ok
+{"level":"info","ts":"2026-11-14T12:56:35.855Z","caller":"internal/internal_worker.go:1010","msg":"Stopped Worker","Domain":"fe-gate-t-bc8b22","TaskList":"fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin","WorkerID":"13064@runnervmccnms@fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-badbin@a4906ac6-627d-432d-a0f7-978c2316b57c"}
+{"level":"info","ts":"2026-11-14T12:56:35.855Z","caller":"internal/internal_worker.go:182","msg":"No logger configured for cadence worker. Created default one."}
+{"level":"info","ts":"2026-11-14T12:56:35.855Z","caller":"internal/internal_worker.go:186","msg":"No metrics scope configured for cadence worker. Use NoopScope as default."}
+{"level":"info","ts":"2026-11-14T12:56:35.855Z","caller":"internal/internal_worker.go:858","msg":"Started Workflow Worker","Domain":"fe-gate-t-bc8b22","TaskList":"fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-pcp","WorkerID":"13064@runnervmccnms@fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-pcp@4f41bfcc-bb37-4a05-b930-19eeed5da3b1"}
+{"level":"info","ts":"2026-11-14T12:56:35.855Z","caller":"internal/internal_worker.go:862","msg":"Worker has no activities registered, so activity worker will not be started.","Domain":"fe-gate-t-bc8b22","TaskList":"fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-pcp","WorkerID":"13064@runnervmccnms@fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-pcp@4f41bfcc-bb37-4a05-b930-19eeed5da3b1"}
+STEP scen-pcp-worker-start ok
+STEP scen-pcp-start-parent ok
+STEP scen-pcp-child-terminate ok
+STEP scen-pcp-child-request-cancel ok
+STEP scen-pcp-child-abandon-still-running ok
+{"level":"info","ts":"2026-11-14T12:56:37.894Z","caller":"internal/internal_worker.go:1010","msg":"Stopped Worker","Domain":"fe-gate-t-bc8b22","TaskList":"fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-pcp","WorkerID":"13064@runnervmccnms@fe-gate-scen-71a14314-b54a-4da5-837a-e266a1129800-pcp@4f41bfcc-bb37-4a05-b930-19eeed5da3b1"}
+SCEN done failures=0
+GATE ok   sdk-scen-driver-exit 
+GATE ok   go-history-worker-alive-after-scen-sdk 
+GATE ok   rust-matching-alive-after-scen-sdk 
+GATE ok   rust-frontend-alive-after-scen-sdk 
+GATE ok   archival-register-domain 
+GATE ok   archival-describe-domain 
+GATE ok   archival-describe-domain-grpc 
+GATE ok   archival-start-0 
+GATE ok   archival-terminate-0 
+GATE ok   archival-start-1 
+GATE ok   archival-terminate-1 
+GATE ok   archival-list-archived-visibility 
+GATE ok   archival-list-archived-paged 
+GATE ok   archival-go-visibility-wrote-archive 
+GATE ok   archival-update-uri-rejected 
+GATE ok   archival-update-disable-history 
+GATE ok   archival-describe-after-disable 
+GATE ok   archival-register-disabled-domain 
+GATE ok   archival-list-archived-domain-not-configured 
+GATE ok   dynconfig-restart-with-configstore 
+GATE ok   dyncfg-update 
+GATE ok   dyncfg-get 
+GATE ok   dyncfg-list 
+GATE ok   dyncfg-db-row-written 
+GATE ok   dyncfg-restore 
+GATE ok   dyncfg-get-after-restore 
+GATE ok   dyncfg-list-after-restore 
+GATE ok   dyncfg-db-version-advanced 
+GATE ok   dyncfg-update-again 
+GATE ok   dyncfg-seeded-go-row 
+GATE ok   dynconfig-restart-persistence 
+GATE ok   dyncfg-get-after-restart 
+GATE ok   dyncfg-update-after-seed 
+GATE ok   dyncfg-get-after-seed-update 
+GATE ok   dyncfg-db-version-after-seed 
+GATE ok   dyncfg-add-search-attr 
+GATE ok   dyncfg-add-search-attr-persisted 
+GATE ok   dynconfig-restart-search-attr 
+GATE ok   dyncfg-list-search-attr-after-restart 
+GATE ok   dynconfig-restart-filebased 
+GATE ok   cli-describe-domain-grpc-ipv6 
+GATE ok   oauth-frontend-listening 
+GATE ok   oauth-tchannel-no-token-denied 
+GATE ok   oauth-tchannel-garbage-token-denied 
+GATE ok   oauth-tchannel-expired-token-denied 
+GATE ok   oauth-tchannel-wrong-key-denied 
+GATE ok   oauth-tchannel-admin-token-allowed 
+GATE ok   oauth-grpc-no-token-denied 
+GATE ok   oauth-grpc-garbage-token-denied 
+GATE ok   oauth-grpc-expired-token-denied 
+GATE ok   oauth-grpc-wrong-key-denied 
+GATE ok   oauth-grpc-admin-token-allowed 
+GATE ok   oauth-domain-update-groups 
+GATE ok   oauth-tchannel-reader-describe-allowed 
+GATE ok   oauth-tchannel-reader-write-denied 
+GATE ok   oauth-grpc-reader-describe-allowed 
+GATE ok   oauth-grpc-reader-write-denied 
+GATE ok   oauth-tchannel-admin-api-no-token-denied 
+GATE ok   oauth-tchannel-admin-api-expired-denied 
+GATE ok   oauth-tchannel-admin-api-non-admin-denied 
+GATE ok   oauth-tchannel-admin-api-admin-allowed 
+GATE ok   oauth-grpc-admin-api-no-token-denied 
+GATE ok   oauth-grpc-admin-api-expired-denied 
+GATE ok   oauth-grpc-admin-api-non-admin-denied 
+GATE ok   oauth-grpc-admin-api-admin-allowed 
+GATE ok   ratelimit-http-config-generated 
+GATE ok   ratelimit-http-restart 
+GATE ok   rpc-http-allowed-procedure 
+GATE ok   rpc-http-disallowed-procedure-rejected 
+GATE ok   ratelimit-frontend-rps-service-busy 
+GATE ok   global-ratelimiter-global-serves-requests 
+GATE ok   global-ratelimiter-global-enforces-service-busy 
+GATE ok   global-ratelimiter-local-shadow-global-serves-requests 
+GATE ok   global-ratelimiter-local-shadow-global-enforces-service-busy 
+GATE ok   global-ratelimiter-global-shadow-local-serves-requests 
+GATE ok   global-ratelimiter-global-shadow-local-enforces-service-busy 
+GATE ok   admin-queue-reset-timer-tchannel 
+GATE ok   admin-shard-remove-task-tchannel 
+GATE ok   admin-shard-close-tchannel 
+GATE ok   admin-queue-reset-timer-grpc 
+GATE ok   admin-shard-remove-task-grpc 
+GATE ok   admin-shard-close-grpc 
+--- go-history-worker.log tail
+{"level":"info","ts":"2026-11-14T12:58:19.837Z","msg":"Virtual queue state changed","service":"cadence-history","service":"cadence-history","shard-id":0,"address":"127.0.0.1:12514","component":"transfer-queue-processor-v2","virtual-queue-id":0,"lifecycle":"Started","logging-call-at":"virtual_queue.go:150"}
+{"level":"info","ts":"2026-11-14T12:58:19.840Z","msg":"Marker notifier state changed","service":"cadence-history","service":"cadence-history","shard-id":0,"address":"127.0.0.1:12514","component":"failover-marker-notifier","lifecycle":"Started","logging-call-at":"marker_notifier.go:85"}
+{"level":"info","ts":"2026-11-14T12:58:19.840Z","msg":"History engine state changed","service":"cadence-history","service":"cadence-history","shard-id":0,"address":"127.0.0.1:12514","component":"history-engine","lifecycle":"Started","logging-call-at":"history_engine.go:352"}
+{"level":"info","ts":"2026-11-14T12:58:19.840Z","msg":"Shard engine state changed","service":"cadence-history","service":"cadence-history","shard-id":0,"address":"127.0.0.1:12514","lifecycle":"Started","component":"shard-engine","logging-call-at":"controller.go:527"}
+{"level":"info","ts":"2026-11-14T12:58:19.885Z","msg":"removeEngineForShard called","service":"cadence-history","service":"cadence-history","component":"shard-controller","address":"127.0.0.1:12514","shard-id":0,"logging-call-at":"controller.go:265"}
+{"level":"info","ts":"2026-11-14T12:58:19.885Z","msg":"Shard item state changed","service":"cadence-history","service":"cadence-history","shard-id":0,"address":"127.0.0.1:12514","lifecycle":"Stopped","component":"shard-item","number":3,"logging-call-at":"controller.go:392"}
+{"level":"info","ts":"2026-11-14T12:58:19.885Z","msg":"Shard item stopEngine called","service":"cadence-history","service":"cadence-history","shard-id":0,"address":"127.0.0.1:12514","component":"shard-engine","status":1,"logging-call-at":"controller.go:543"}
+{"level":"info","ts":"2026-11-14T12:58:19.885Z","msg":"Shard engine state changed","service":"cadence-history","service":"cadence-history","shard-id":0,"address":"127.0.0.1:12514","lifecycle":"Stopping","component":"shard-engine","logging-call-at":"controller.go:549"}
+{"level":"info","ts":"2026-11-14T12:58:19.885Z","msg":"History engine state changed","service":"cadence-history","service":"cadence-history","shard-id":0,"address":"127.0.0.1:12514","component":"history-engine","lifecycle":"Stopping","logging-call-at":"history_engine.go:356"}
+{"level":"info","ts":"2026-11-14T12:58:19.885Z","msg":"History queue state changed","service":"cadence-history","service":"cadence-history","shard-id":0,"address":"127.0.0.1:12514","component":"timer-queue-processor-v2","lifecycle":"Stopping","logging-call-at":"queue_scheduled.go:127"}
+{"level":"info","ts":"2026-11-14T12:58:19.885Z","msg":"Virtual queue state changed","service":"cadence-history","service":"cadence-history","shard-id":0,"address":"127.0.0.1:12514","component":"timer-queue-processor-v2","virtual-queue-id":0,"lifecycle":"Stopped","logging-call-at":"virtual_queue.go:171"}
+{"level":"info","ts":"2026-11-14T12:58:19.885Z","msg":"Task rescheduler stopped.","service":"cadence-history","service":"cadence-history","shard-id":0,"address":"127.0.0.1:12514","component":"timer-queue-processor-v2","lifecycle":"Stopped","logging-call-at":"rescheduler.go:98"}
+{"level":"info","ts":"2026-11-14T12:58:19.885Z","msg":"History queue state changed","service":"cadence-history","service":"cadence-history","shard-id":0,"address":"127.0.0.1:12514","component":"timer-queue-processor-v2","lifecycle":"Stopped","logging-call-at":"queue_scheduled.go:134"}
+{"level":"info","ts":"2026-11-14T12:58:19.885Z","msg":"Cached Queue Reader state changed","service":"cadence-history","service":"cadence-history","shard-id":0,"address":"127.0.0.1:12514","component":"cached-scheduled-queue-reader","lifecycle":"Stopping","logging-call-at":"queue_reader_cached_scheduled.go:185"}
+{"level":"info","ts":"2026-11-14T12:58:19.885Z","msg":"Cached Queue Reader state changed","service":"cadence-history","service":"cadence-history","shard-id":0,"address":"127.0.0.1:12514","component":"cached-scheduled-queue-reader","lifecycle":"Stopped","logging-call-at":"queue_reader_cached_scheduled.go:188"}
+{"level":"info","ts":"2026-11-14T12:58:19.885Z","msg":"History queue state changed","service":"cadence-history","service":"cadence-history","shard-id":0,"address":"127.0.0.1:12514","component":"transfer-queue-processor-v2","lifecycle":"Stopping","logging-call-at":"queue_immediate.go:124"}
+{"level":"info","ts":"2026-11-14T12:58:19.885Z","msg":"Virtual queue state changed","service":"cadence-history","service":"cadence-history","shard-id":0,"address":"127.0.0.1:12514","component":"transfer-queue-processor-v2","virtual-queue-id":0,"lifecycle":"Stopped","logging-call-at":"virtual_queue.go:171"}
+{"level":"info","ts":"2026-11-14T12:58:19.885Z","msg":"Task rescheduler stopped.","service":"cadence-history","service":"cadence-history","shard-id":0,"address":"127.0.0.1:12514","component":"transfer-queue-processor-v2","lifecycle":"Stopped","logging-call-at":"rescheduler.go:98"}
+{"level":"info","ts":"2026-11-14T12:58:19.885Z","msg":"History queue state changed","service":"cadence-history","service":"cadence-history","shard-id":0,"address":"127.0.0.1:12514","component":"transfer-queue-processor-v2","lifecycle":"Stopped","logging-call-at":"queue_immediate.go:131"}
+{"level":"info","ts":"2026-11-14T12:58:19.885Z","msg":"Immediate Cached Queue Reader state changed","service":"cadence-history","service":"cadence-history","shard-id":0,"address":"127.0.0.1:12514","component":"cached-immediate-queue-reader","lifecycle":"Stopped","logging-call-at":"queue_reader_cached_immediate.go:101"}
+{"level":"info","ts":"2026-11-14T12:58:19.885Z","msg":"ReplicationMetricsEmitter shutting down.","service":"cadence-history","service":"cadence-history","shard-id":0,"address":"127.0.0.1:12514","cluster-name":"cluster0","shard-id":0,"logging-call-at":"metrics_emitter.go:123"}
+{"level":"info","ts":"2026-11-14T12:58:19.885Z","msg":"Marker notifier state changed","service":"cadence-history","service":"cadence-history","shard-id":0,"address":"127.0.0.1:12514","component":"failover-marker-notifier","lifecycle":"Stopped","logging-call-at":"marker_notifier.go:98"}
+{"level":"info","ts":"2026-11-14T12:58:19.885Z","msg":"History engine state changed","service":"cadence-history","service":"cadence-history","shard-id":0,"address":"127.0.0.1:12514","component":"history-engine","lifecycle":"Stopped","logging-call-at":"history_engine.go:382"}
+{"level":"info","ts":"2026-11-14T12:58:19.885Z","msg":"Shard engine state changed","service":"cadence-history","service":"cadence-history","shard-id":0,"address":"127.0.0.1:12514","lifecycle":"Stopped","component":"shard-engine","logging-call-at":"controller.go:552"}
+{"level":"info","ts":"2026-11-14T12:58:19.885Z","msg":"removeEngineForShard completed","service":"cadence-history","service":"cadence-history","component":"shard-controller","address":"127.0.0.1:12514","shard-id":0,"logging-call-at":"controller.go:283"}
+--- rust-matching.log tail
+TCHAN-TRACE MatchingService::PollForDecisionTask Struct { fields: [(1, Struct(Struct { fields: [(10, Bytes([48, 49, 97, 49, 100, 97, 49, 100, 45, 54, 55, 99, 48, 45, 55, 49, 48, 98, 45, 56, 50, 54, 53, 45, 99, 52, 102, 50, 48, 101, 54, 100, 98, 102, 55, 56])), (15, Bytes([54, 53, 97, 50, 102, 100, 98, 98, 45, 102, 97, 57, 48, 45, 52, 50, 56, 55, 45, 97, 48, 55, 55, 45, 102, 97, 51, 101, 97, 100, 100, 102, 102, 48, 50, 51])), (20, Struct(Struct { fields: [(10, Bytes([102, 101, 45, 103, 97, 116, 101, 45, 97, 115, 121, 110, 99, 45, 101, 55, 49, 51, 102, 50])), (20, Struct(Struct { fields: [(10, Bytes([99, 97, 100, 101, 110, 99, 101, 45, 115, 99, 104, 101, 100, 117, 108, 101, 114])), (20, I32(0))] })), (30, Bytes([49, 49, 49, 52, 50, 64, 114, 117, 110, 110, 101, 114, 118, 109, 99, 99, 110, 109, 115, 64, 99, 97, 100, 101, 110, 99, 101, 45, 115, 99, 104, 101, 100, 117, 108, 101, 114, 64, 99, 50, 55, 100, 51, 102, 48, 100, 45, 101, 55, 54, 100, 45, 52, 54, 99, 99, 45, 97, 51, 98, 52, 45, 57, 49, 53, 99, 53, 53, 101, 52, 57, 100, 51, 52])), (40, Bytes([56, 56, 48, 56, 51, 48, 102, 100, 97, 100, 49, 101, 101, 51, 99, 49, 98, 49, 55, 56, 53, 50, 49, 97, 101, 57, 102, 50, 55, 55, 53, 100]))] }))] }))] }
+POLL-TRACE decision active=true list=GoString([99, 97, 100, 101, 110, 99, 101, 45, 115, 99, 104, 101, 100, 117, 108, 101, 114])
+TCHAN-TRACE MatchingService::PollForActivityTask Struct { fields: [(1, Struct(Struct { fields: [(10, Bytes([48, 49, 97, 49, 100, 97, 50, 49, 45, 57, 98, 56, 49, 45, 55, 48, 48, 99, 45, 98, 56, 52, 98, 45, 50, 55, 52, 48, 52, 50, 57, 55, 52, 98, 52, 97])), (15, Bytes([53, 57, 49, 102, 101, 98, 51, 53, 45, 55, 100, 56, 99, 45, 52, 48, 99, 97, 45, 98, 49, 55, 52, 45, 57, 100, 52, 97, 97, 102, 50, 50, 52, 55, 101, 102])), (20, Struct(Struct { fields: [(10, Bytes([102, 101, 45, 103, 97, 116, 101, 45, 97, 114, 99, 104, 45, 53, 56, 48, 102, 99, 101])), (20, Struct(Struct { fields: [(10, Bytes([99, 97, 100, 101, 110, 99, 101, 45, 115, 99, 104, 101, 100, 117, 108, 101, 114])), (20, I32(0))] })), (30, Bytes([49, 49, 49, 52, 50, 64, 114, 117, 110, 110, 101, 114, 118, 109, 99, 99, 110, 109, 115, 64, 99, 97, 100, 101, 110, 99, 101, 45, 115, 99, 104, 101, 100, 117, 108, 101, 114, 64, 100, 50, 51, 54, 102, 101, 55, 97, 45, 50, 57, 51, 101, 45, 52, 100, 98, 56, 45, 57, 57, 49, 101, 45, 56, 97, 50, 48, 55, 101, 49, 49, 102, 57, 52, 54])), (40, Struct(Struct { fields: [(10, F64(100000.0))] }))] }))] }))] }
+TCHAN-TRACE MatchingService::PollForDecisionTask Struct { fields: [(1, Struct(Struct { fields: [(10, Bytes([55, 99, 57, 101, 48, 54, 51, 99, 45, 98, 51, 52, 97, 45, 52, 100, 101, 53, 45, 57, 100, 98, 55, 45, 56, 57, 51, 49, 54, 52, 100, 54, 98, 51, 53, 102])), (15, Bytes([54, 50, 102, 49, 56, 51, 56, 98, 45, 98, 99, 54, 99, 45, 52, 51, 55, 100, 45, 56, 55, 49, 100, 45, 98, 50, 56, 51, 52, 101, 56, 57, 55, 99, 101, 101])), (20, Struct(Struct { fields: [(10, Bytes([100, 101, 102, 97, 117, 108, 116])), (20, Struct(Struct { fields: [(10, Bytes([99, 97, 100, 101, 110, 99, 101, 45, 115, 99, 104, 101, 100, 117, 108, 101, 114])), (20, I32(0))] })), (30, Bytes([49, 49, 49, 52, 50, 64, 114, 117, 110, 110, 101, 114, 118, 109, 99, 99, 110, 109, 115, 64, 99, 97, 100, 101, 110, 99, 101, 45, 115, 99, 104, 101, 100, 117, 108, 101, 114, 64, 102, 98, 97, 53, 101, 49, 102, 101, 45, 97, 102, 98, 54, 45, 52, 55, 51, 49, 45, 98, 100, 99, 97, 45, 100, 98, 97, 102, 102, 49, 99, 56, 51, 57, 57, 99])), (40, Bytes([56, 56, 48, 56, 51, 48, 102, 100, 97, 100, 49, 101, 101, 51, 99, 49, 98, 49, 55, 56, 53, 50, 49, 97, 101, 57, 102, 50, 55, 55, 53, 100]))] }))] }))] }
+POLL-TRACE decision active=true list=GoString([99, 97, 100, 101, 110, 99, 101, 45, 115, 99, 104, 101, 100, 117, 108, 101, 114])
+TCHAN-TRACE MatchingService::PollForDecisionTask Struct { fields: [(1, Struct(Struct { fields: [(10, Bytes([51, 50, 48, 52, 57, 98, 54, 56, 45, 55, 56, 55, 50, 45, 52, 48, 57, 52, 45, 56, 101, 54, 51, 45, 100, 48, 100, 100, 53, 57, 56, 57, 54, 97, 56, 51])), (15, Bytes([48, 50, 55, 53, 55, 49, 49, 50, 45, 101, 100, 101, 101, 45, 52, 102, 51, 52, 45, 97, 98, 57, 51, 45, 97, 55, 52, 48, 100, 48, 98, 56, 48, 49, 57, 48])), (20, Struct(Struct { fields: [(10, Bytes([99, 97, 100, 101, 110, 99, 101, 45, 115, 121, 115, 116, 101, 109])), (20, Struct(Struct { fields: [(10, Bytes([99, 104, 101, 99, 107, 45, 100, 97, 116, 97, 45, 99, 111, 114, 114, 117, 112, 116, 105, 111, 110, 45, 119, 111, 114, 107, 102, 108, 111, 119, 45, 116, 108])), (20, I32(0))] })), (30, Bytes([49, 49, 49, 52, 50, 64, 114, 117, 110, 110, 101, 114, 118, 109, 99, 99, 110, 109, 115, 64, 99, 104, 101, 99, 107, 45, 100, 97, 116, 97, 45, 99, 111, 114, 114, 117, 112, 116, 105, 111, 110, 45, 119, 111, 114, 107, 102, 108, 111, 119, 45, 116, 108, 64, 100, 48, 101, 57, 54, 54, 98, 99, 45, 48, 54, 49, 57, 45, 52, 56, 98, 97, 45, 98, 100, 50, 101, 45, 50, 50, 55, 101, 100, 55, 57, 55, 100, 52, 55, 52])), (40, Bytes([56, 56, 48, 56, 51, 48, 102, 100, 97, 100, 49, 101, 101, 51, 99, 49, 98, 49, 55, 56, 53, 50, 49, 97, 101, 57, 102, 50, 55, 55, 53, 100]))] }))] }))] }
+POLL-TRACE decision active=true list=GoString([99, 104, 101, 99, 107, 45, 100, 97, 116, 97, 45, 99, 111, 114, 114, 117, 112, 116, 105, 111, 110, 45, 119, 111, 114, 107, 102, 108, 111, 119, 45, 116, 108])
+TCHAN-TRACE MatchingService::PollForDecisionTask Struct { fields: [(1, Struct(Struct { fields: [(10, Bytes([51, 50, 48, 52, 57, 98, 54, 56, 45, 55, 56, 55, 50, 45, 52, 48, 57, 52, 45, 56, 101, 54, 51, 45, 100, 48, 100, 100, 53, 57, 56, 57, 54, 97, 56, 51])), (15, Bytes([51, 56, 48, 53, 101, 101, 53, 57, 45, 98, 54, 50, 57, 45, 52, 51, 99, 51, 45, 97, 98, 97, 100, 45, 99, 54, 98, 101, 99, 51, 48, 97, 100, 97, 50, 50])), (20, Struct(Struct { fields: [(10, Bytes([99, 97, 100, 101, 110, 99, 101, 45, 115, 121, 115, 116, 101, 109])), (20, Struct(Struct { fields: [(10, Bytes([100, 105, 97, 103, 110, 111, 115, 116, 105, 99, 115, 45, 119, 102, 45, 116, 97, 115, 107, 108, 105, 115, 116])), (20, I32(0))] })), (30, Bytes([49, 49, 49, 52, 50, 64, 114, 117, 110, 110, 101, 114, 118, 109, 99, 99, 110, 109, 115, 64, 100, 105, 97, 103, 110, 111, 115, 116, 105, 99, 115, 45, 119, 102, 45, 116, 97, 115, 107, 108, 105, 115, 116, 64, 48, 57, 97, 99, 55, 56, 49, 49, 45, 56, 48, 97, 56, 45, 52, 56, 50, 55, 45, 97, 55, 50, 54, 45, 98, 57, 57, 55, 56, 100, 101, 98, 55, 57, 57, 98])), (40, Bytes([56, 56, 48, 56, 51, 48, 102, 100, 97, 100, 49, 101, 101, 51, 99, 49, 98, 49, 55, 56, 53, 50, 49, 97, 101, 57, 102, 50, 55, 55, 53, 100]))] }))] }))] }
+POLL-TRACE decision active=true list=GoString([100, 105, 97, 103, 110, 111, 115, 116, 105, 99, 115, 45, 119, 102, 45, 116, 97, 115, 107, 108, 105, 115, 116])
+TCHAN-TRACE MatchingService::PollForDecisionTask Struct { fields: [(1, Struct(Struct { fields: [(10, Bytes([51, 50, 48, 52, 57, 98, 54, 56, 45, 55, 56, 55, 50, 45, 52, 48, 57, 52, 45, 56, 101, 54, 51, 45, 100, 48, 100, 100, 53, 57, 56, 57, 54, 97, 56, 51])), (15, Bytes([50, 49, 99, 57, 102, 100, 99, 101, 45, 99, 52, 53, 53, 45, 52, 54, 48, 53, 45, 97, 56, 49, 101, 45, 100, 97, 102, 100, 102, 57, 49, 100, 48, 97, 100, 54])), (20, Struct(Struct { fields: [(10, Bytes([99, 97, 100, 101, 110, 99, 101, 45, 115, 121, 115, 116, 101, 109])), (20, Struct(Struct { fields: [(10, Bytes([99, 97, 100, 101, 110, 99, 101, 45, 115, 121, 115, 45, 112, 114, 111, 99, 101, 115, 115, 111, 114, 45, 112, 97, 114, 101, 110, 116, 45, 99, 108, 111, 115, 101, 45, 112, 111, 108, 105, 99, 121])), (20, I32(0))] })), (30, Bytes([49, 49, 49, 52, 50, 64, 114, 117, 110, 110, 101, 114, 118, 109, 99, 99, 110, 109, 115, 64, 99, 97, 100, 101, 110, 99, 101, 45, 115, 121, 115, 45, 112, 114, 111, 99, 101, 115, 115, 111, 114, 45, 112, 97, 114, 101, 110, 116, 45, 99, 108, 111, 115, 101, 45, 112, 111, 108, 105, 99, 121, 64, 56, 102, 102, 54, 56, 99, 101, 53, 45, 48, 98, 102, 99, 45, 52, 97, 50, 51, 45, 97, 51, 57, 53, 45, 50, 52, 57, 54, 49, 57, 102, 48, 48, 56, 54, 55])), (40, Bytes([56, 56, 48, 56, 51, 48, 102, 100, 97, 100, 49, 101, 101, 51, 99, 49, 98, 49, 55, 56, 53, 50, 49, 97, 101, 57, 102, 50, 55, 55, 53, 100]))] }))] }))] }
+POLL-TRACE decision active=true list=GoString([99, 97, 100, 101, 110, 99, 101, 45, 115, 121, 115, 45, 112, 114, 111, 99, 101, 115, 115, 111, 114, 45, 112, 97, 114, 101, 110, 116, 45, 99, 108, 111, 115, 101, 45, 112, 111, 108, 105, 99, 121])
+TCHAN-TRACE MatchingService::PollForDecisionTask Struct { fields: [(1, Struct(Struct { fields: [(10, Bytes([51, 50, 48, 52, 57, 98, 54, 56, 45, 55, 56, 55, 50, 45, 52, 48, 57, 52, 45, 56, 101, 54, 51, 45, 100, 48, 100, 100, 53, 57, 56, 57, 54, 97, 56, 51])), (15, Bytes([54, 97, 53, 48, 100, 101, 98, 52, 45, 49, 99, 100, 52, 45, 52, 53, 56, 48, 45, 97, 49, 97, 55, 45, 56, 52, 49, 98, 100, 52, 51, 99, 57, 102, 48, 53])), (20, Struct(Struct { fields: [(10, Bytes([99, 97, 100, 101, 110, 99, 101, 45, 115, 121, 115, 116, 101, 109])), (20, Struct(Struct { fields: [(10, Bytes([99, 97, 100, 101, 110, 99, 101, 45, 97, 114, 99, 104, 105, 118, 97, 108, 45, 116, 108])), (20, I32(0))] })), (30, Bytes([49, 49, 49, 52, 50, 64, 114, 117, 110, 110, 101, 114, 118, 109, 99, 99, 110, 109, 115, 64, 99, 97, 100, 101, 110, 99, 101, 45, 97, 114, 99, 104, 105, 118, 97, 108, 45, 116, 108, 64, 50, 56, 55, 48, 57, 50, 101, 54, 45, 97, 53, 101, 52, 45, 52, 55, 97, 100, 45, 97, 48, 102, 55, 45, 56, 99, 100, 98, 51, 52, 48, 102, 51, 101, 49, 100])), (40, Bytes([56, 56, 48, 56, 51, 48, 102, 100, 97, 100, 49, 101, 101, 51, 99, 49, 98, 49, 55, 56, 53, 50, 49, 97, 101, 57, 102, 50, 55, 55, 53, 100]))] }))] }))] }
+POLL-TRACE decision active=true list=GoString([99, 97, 100, 101, 110, 99, 101, 45, 97, 114, 99, 104, 105, 118, 97, 108, 45, 116, 108])
+TCHAN-TRACE MatchingService::PollForActivityTask Struct { fields: [(1, Struct(Struct { fields: [(10, Bytes([51, 50, 48, 52, 57, 98, 54, 56, 45, 55, 56, 55, 50, 45, 52, 48, 57, 52, 45, 56, 101, 54, 51, 45, 100, 48, 100, 100, 53, 57, 56, 57, 54, 97, 56, 51])), (15, Bytes([97, 98, 56, 98, 50, 99, 49, 48, 45, 49, 53, 102, 49, 45, 52, 55, 97, 49, 45, 97, 54, 48, 98, 45, 54, 51, 51, 49, 99, 100, 55, 51, 55, 51, 99, 52])), (20, Struct(Struct { fields: [(10, Bytes([99, 97, 100, 101, 110, 99, 101, 45, 115, 121, 115, 116, 101, 109])), (20, Struct(Struct { fields: [(10, Bytes([99, 97, 100, 101, 110, 99, 101, 45, 97, 114, 99, 104, 105, 118, 97, 108, 45, 116, 108])), (20, I32(0))] })), (30, Bytes([49, 49, 49, 52, 50, 64, 114, 117, 110, 110, 101, 114, 118, 109, 99, 99, 110, 109, 115, 64, 99, 97, 100, 101, 110, 99, 101, 45, 97, 114, 99, 104, 105, 118, 97, 108, 45, 116, 108, 64, 50, 56, 55, 48, 57, 50, 101, 54, 45, 97, 53, 101, 52, 45, 52, 55, 97, 100, 45, 97, 48, 102, 55, 45, 56, 99, 100, 98, 51, 52, 48, 102, 51, 101, 49, 100])), (40, Struct(Struct { fields: [(10, F64(100000.0))] }))] }))] }))] }
+NATIVE-TRACE begin add_decision_task AddDecisionTaskRequest { domain_id: GoString([48, 49, 97, 49, 100, 97, 49, 100, 45, 54, 55, 55, 102, 45, 55, 49, 55, 98, 45, 97, 55, 50, 55, 45, 102, 49, 57, 97, 99, 100, 102, 51, 57, 50, 50, 48]), workflow_execution: Some(WorkflowExecution { workflow_id: GoString([49, 56, 102, 49, 99, 102, 98, 100, 45, 56, 101, 55, 49, 45, 52, 56, 98, 55, 45, 57, 52, 100, 48, 45, 57, 52, 48, 54, 97, 54, 99, 97, 100, 49, 97, 51]), run_id: GoString([54, 54, 48, 56, 54, 49, 97, 102, 45, 57, 55, 50, 49, 45, 52, 52, 100, 55, 45, 56, 55, 51, 49, 45, 52, 57, 98, 55, 98, 101, 54, 49, 98, 101, 99, 57]) }), task_list: Some(TaskList { name: GoString([103, 114, 108, 45, 103, 108, 111, 98, 97, 108, 115, 104, 97, 100, 111, 119, 108, 111, 99, 97, 108]), kind: 1, base_name: GoString([]) }), schedule_id: 2, schedule_to_start_timeout: Some(Duration { seconds: 60, nanos: 0 }), source: 0, forwarded_from: GoString([]), partition_config: {} }
+ADD-TRACE active=true list=GoString([103, 114, 108, 45, 103, 108, 111, 98, 97, 108, 115, 104, 97, 100, 111, 119, 108, 111, 99, 97, 108]) type=0
+NATIVE-TRACE end ok add_decision_task 33ms
+dynamic config duration read failed (value was missing, had the wrong type, or was invalid); using default
+TCHAN-TRACE MatchingService::PollForActivityTask Struct { fields: [(1, Struct(Struct { fields: [(10, Bytes([48, 49, 97, 49, 100, 97, 50, 49, 45, 99, 99, 51, 56, 45, 55, 51, 97, 49, 45, 98, 54, 99, 57, 45, 56, 51, 53, 101, 102, 102, 102, 99, 48, 55, 54, 98])), (15, Bytes([57, 57, 53, 55, 97, 99, 54, 50, 45, 102, 55, 48, 53, 45, 52, 98, 49, 99, 45, 56, 57, 48, 55, 45, 101, 52, 55, 102, 55, 99, 102, 98, 98, 97, 49, 97])), (20, Struct(Struct { fields: [(10, Bytes([102, 101, 45, 103, 97, 116, 101, 45, 110, 111, 97, 114, 99, 104, 45, 48, 49, 98, 97, 56, 53])), (20, Struct(Struct { fields: [(10, Bytes([99, 97, 100, 101, 110, 99, 101, 45, 115, 99, 104, 101, 100, 117, 108, 101, 114])), (20, I32(0))] })), (30, Bytes([49, 49, 49, 52, 50, 64, 114, 117, 110, 110, 101, 114, 118, 109, 99, 99, 110, 109, 115, 64, 99, 97, 100, 101, 110, 99, 101, 45, 115, 99, 104, 101, 100, 117, 108, 101, 114, 64, 98, 56, 102, 100, 49, 101, 99, 50, 45, 57, 100, 53, 98, 45, 52, 52, 51, 54, 45, 57, 57, 56, 55, 45, 52, 53, 56, 100, 101, 98, 101, 53, 57, 57, 99, 101])), (40, Struct(Struct { fields: [(10, F64(100000.0))] }))] }))] }))] }
+TCHAN-TRACE MatchingService::PollForDecisionTask Struct { fields: [(1, Struct(Struct { fields: [(10, Bytes([48, 49, 97, 49, 100, 97, 50, 49, 45, 99, 99, 51, 56, 45, 55, 51, 97, 49, 45, 98, 54, 99, 57, 45, 56, 51, 53, 101, 102, 102, 102, 99, 48, 55, 54, 98])), (15, Bytes([55, 49, 100, 53, 98, 48, 50, 100, 45, 55, 54, 52, 49, 45, 52, 53, 52, 53, 45, 57, 52, 56, 101, 45, 55, 51, 53, 102, 101, 48, 97, 101, 98, 51, 49, 51])), (20, Struct(Struct { fields: [(10, Bytes([102, 101, 45, 103, 97, 116, 101, 45, 110, 111, 97, 114, 99, 104, 45, 48, 49, 98, 97, 56, 53])), (20, Struct(Struct { fields: [(10, Bytes([99, 97, 100, 101, 110, 99, 101, 45, 115, 99, 104, 101, 100, 117, 108, 101, 114])), (20, I32(0))] })), (30, Bytes([49, 49, 49, 52, 50, 64, 114, 117, 110, 110, 101, 114, 118, 109, 99, 99, 110, 109, 115, 64, 99, 97, 100, 101, 110, 99, 101, 45, 115, 99, 104, 101, 100, 117, 108, 101, 114, 64, 98, 56, 102, 100, 49, 101, 99, 50, 45, 57, 100, 53, 98, 45, 52, 52, 51, 54, 45, 57, 57, 56, 55, 45, 52, 53, 56, 100, 101, 98, 101, 53, 57, 57, 99, 101])), (40, Bytes([56, 56, 48, 56, 51, 48, 102, 100, 97, 100, 49, 101, 101, 51, 99, 49, 98, 49, 55, 56, 53, 50, 49, 97, 101, 57, 102, 50, 55, 55, 53, 100]))] }))] }))] }
+dynamic config boolean read failed (value was missing or had the wrong type); using default
+POLL-TRACE decision active=true list=GoString([99, 97, 100, 101, 110, 99, 101, 45, 115, 99, 104, 101, 100, 117, 108, 101, 114])
+NATIVE-TRACE begin add_decision_task AddDecisionTaskRequest { domain_id: GoString([48, 49, 97, 49, 100, 97, 49, 100, 45, 54, 55, 55, 102, 45, 55, 49, 55, 98, 45, 97, 55, 50, 55, 45, 102, 49, 57, 97, 99, 100, 102, 51, 57, 50, 50, 48]), workflow_execution: Some(WorkflowExecution { workflow_id: GoString([49, 56, 102, 49, 99, 102, 98, 100, 45, 56, 101, 55, 49, 45, 52, 56, 98, 55, 45, 57, 52, 100, 48, 45, 57, 52, 48, 54, 97, 54, 99, 97, 100, 49, 97, 51]), run_id: GoString([54, 54, 48, 56, 54, 49, 97, 102, 45, 57, 55, 50, 49, 45, 52, 52, 100, 55, 45, 56, 55, 51, 49, 45, 52, 57, 98, 55, 98, 101, 54, 49, 98, 101, 99, 57]) }), task_list: Some(TaskList { name: GoString([103, 114, 108, 45, 103, 108, 111, 98, 97, 108, 115, 104, 97, 100, 111, 119, 108, 111, 99, 97, 108]), kind: 1, base_name: GoString([]) }), schedule_id: 2, schedule_to_start_timeout: Some(Duration { seconds: 60, nanos: 0 }), source: 0, forwarded_from: GoString([]), partition_config: {} }
+ADD-TRACE active=true list=GoString([103, 114, 108, 45, 103, 108, 111, 98, 97, 108, 115, 104, 97, 100, 111, 119, 108, 111, 99, 97, 108]) type=0
+NATIVE-TRACE end ok add_decision_task 29ms
+--- rust-frontend.log tail
+BACKEND-TRACE end MatchingService::CancelOutstandingPoll 7ms err Connection reset by peer (os error 104)
+BACKEND-TRACE end MatchingService::CancelOutstandingPoll 8ms err Connection reset by peer (os error 104)
+BACKEND-TRACE end MatchingService::CancelOutstandingPoll 8ms err Connection reset by peer (os error 104)
+BACKEND-TRACE end MatchingService::CancelOutstandingPoll 8ms err Connection reset by peer (os error 104)
+BACKEND-TRACE end MatchingService::CancelOutstandingPoll 7ms err Connection reset by peer (os error 104)
+BACKEND-TRACE end MatchingService::CancelOutstandingPoll 6ms err Connection reset by peer (os error 104)
+BACKEND-TRACE end MatchingService::CancelOutstandingPoll 8ms err Connection reset by peer (os error 104)
+BACKEND-TRACE end MatchingService::CancelOutstandingPoll 7ms err Connection reset by peer (os error 104)
+BACKEND-TRACE end MatchingService::CancelOutstandingPoll 7ms err Connection reset by peer (os error 104)
+BACKEND-TRACE end MatchingService::CancelOutstandingPoll 6ms err Connection reset by peer (os error 104)
+BACKEND-TRACE end MatchingService::CancelOutstandingPoll 7ms err Connection reset by peer (os error 104)
+BACKEND-TRACE end MatchingService::CancelOutstandingPoll 7ms err Connection reset by peer (os error 104)
+BACKEND-TRACE end MatchingService::CancelOutstandingPoll 7ms err Connection reset by peer (os error 104)
+BACKEND-TRACE end MatchingService::CancelOutstandingPoll 6ms err Connection reset by peer (os error 104)
+BACKEND-TRACE end MatchingService::CancelOutstandingPoll 6ms err Connection reset by peer (os error 104)
+BACKEND-TRACE end MatchingService::CancelOutstandingPoll 6ms err Connection reset by peer (os error 104)
+BACKEND-TRACE end MatchingService::CancelOutstandingPoll 7ms err Connection reset by peer (os error 104)
+BACKEND-TRACE end MatchingService::CancelOutstandingPoll 6ms err Connection reset by peer (os error 104)
+BACKEND-TRACE end MatchingService::CancelOutstandingPoll 6ms err Connection reset by peer (os error 104)
+BACKEND-TRACE end MatchingService::CancelOutstandingPoll 6ms err Connection reset by peer (os error 104)
+BACKEND-TRACE end MatchingService::CancelOutstandingPoll 6ms err Connection reset by peer (os error 104)
+BACKEND-TRACE end MatchingService::CancelOutstandingPoll 6ms err Connection reset by peer (os error 104)
+BACKEND-TRACE end MatchingService::CancelOutstandingPoll 7ms err Connection reset by peer (os error 104)
+BACKEND-TRACE end MatchingService::CancelOutstandingPoll 6ms err Connection reset by peer (os error 104)
+BACKEND-TRACE end MatchingService::CancelOutstandingPoll 6ms err Connection reset by peer (os error 104)
+GATE SUMMARY failed: []
