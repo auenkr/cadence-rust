@@ -370,13 +370,16 @@ fn hook_operation(
         ("POST", "/api/v1/tasks/respond-activity-canceled") => "RespondActivityTaskCanceled",
         ("POST", "/api/v1/tasks/record-activity-heartbeat") => "RecordActivityTaskHeartbeat",
         ("GET", "/api/v1/workflows/describe") => {
-            return Some((
-                "DescribeWorkflowExecution",
-                Some(serde_json::json!({
-                    "domain": param("domain"),
-                    "execution": {"workflowId": param("workflowId"), "runId": param("runId")},
-                })),
-            ))
+            let mut body = serde_json::json!({
+                "domain": param("domain"),
+                "execution": {"workflowId": param("workflowId"), "runId": param("runId")},
+            });
+            // Go maps query_consistency_level into the handler request; keep
+            // unspecified absent and carry explicit values.
+            if let Ok(level) = param("queryConsistencyLevel").parse::<i32>() {
+                body["queryConsistencyLevel"] = serde_json::json!(level);
+            }
+            return Some(("DescribeWorkflowExecution", Some(body)));
         }
         ("GET", "/api/v1/search-attributes") => {
             return Some(("GetSearchAttributes", Some(serde_json::json!({}))))
@@ -384,6 +387,14 @@ fn hook_operation(
         _ => return None,
     };
     Some((op, None))
+}
+
+/// Go `handler.GetClusterInfo`: `client.SupportedGoSDKVersion` / `SupportedJavaSDKVersion`.
+fn supported_client_versions() -> p::SupportedClientVersions {
+    p::SupportedClientVersions {
+        go_sdk: "1.7.0".into(),
+        java_sdk: "1.5.0".into(),
+    }
 }
 
 #[derive(Clone)]
@@ -1403,13 +1414,8 @@ impl p::workflow_api_server::WorkflowApi for Frontend {
             reason: r.reason,
             identity: r.identity,
         };
-        if input
-            .workflow_execution
-            .as_ref()
-            .is_none_or(|e| e.workflow_id.is_empty() || e.run_id.is_empty())
-        {
-            return Err(Status::invalid_argument("Execution is not set on request."));
-        }
+        cadence_api::validation::check_execution(input.workflow_execution.as_ref())
+            .map_err(|e| Status::invalid_argument(e.message))?;
         let v: cadence_api::types::RestartWorkflowExecutionResponse = self
             .call(Method::POST, "/api/v1/workflows/restart", &input)
             .await?;
@@ -1433,13 +1439,8 @@ impl p::workflow_api_server::WorkflowApi for Frontend {
             request_id: r.request_id,
             skip_signal_reapply: r.skip_signal_reapply,
         };
-        if input
-            .workflow_execution
-            .as_ref()
-            .is_none_or(|e| e.workflow_id.is_empty() || e.run_id.is_empty())
-        {
-            return Err(Status::invalid_argument("Execution is not set on request."));
-        }
+        cadence_api::validation::check_execution(input.workflow_execution.as_ref())
+            .map_err(|e| Status::invalid_argument(e.message))?;
         let v: cadence_api::types::ResetWorkflowExecutionResponse = self
             .call(Method::POST, "/api/v1/workflows/reset", &input)
             .await?;
@@ -1525,14 +1526,20 @@ impl p::workflow_api_server::WorkflowApi for Frontend {
         let execution = r
             .workflow_execution
             .ok_or_else(|| Status::invalid_argument("Execution is not set on request."))?;
-        let path = query(
-            "/api/v1/workflows/describe",
-            &[
-                ("domain", &r.domain),
-                ("workflowId", &execution.workflow_id),
-                ("runId", &execution.run_id),
-            ],
-        );
+        let level = cv::enum_in(
+            r.query_consistency_level,
+            enums::QueryConsistencyLevel::from_i32,
+        )?
+        .map(|l| (l as i32).to_string());
+        let mut pairs: Vec<(&str, &str)> = vec![
+            ("domain", &r.domain),
+            ("workflowId", &execution.workflow_id),
+            ("runId", &execution.run_id),
+        ];
+        if let Some(level) = level.as_deref() {
+            pairs.push(("queryConsistencyLevel", level));
+        }
+        let path = query("/api/v1/workflows/describe", &pairs);
         let result: st::DescribeWorkflowExecutionResponse =
             self.call(Method::GET, &path, &()).await?;
         Ok(Response::new(cv::describe(result)))
@@ -1542,7 +1549,7 @@ impl p::workflow_api_server::WorkflowApi for Frontend {
         _: tonic::Request<p::GetClusterInfoRequest>,
     ) -> Result<Response<p::GetClusterInfoResponse>, Status> {
         Ok(Response::new(p::GetClusterInfoResponse {
-            supported_client_versions: Some(p::SupportedClientVersions::default()),
+            supported_client_versions: Some(supported_client_versions()),
         }))
     }
     async fn get_workflow_execution_history(
@@ -1666,9 +1673,7 @@ impl p::workflow_api_server::WorkflowApi for Frontend {
         let v: cadence_api::tasks::DescribeTaskListResponse = self
             .call(Method::POST, "/api/v1/tasklists/describe", &input)
             .await?;
-        let mut out = cv::describe_task_list_out(v);
-        out.task_list = r.task_list;
-        Ok(Response::new(out))
+        Ok(Response::new(cv::describe_task_list_out(v)))
     }
     async fn get_task_lists_by_domain(
         &self,
@@ -1687,15 +1692,7 @@ impl p::workflow_api_server::WorkflowApi for Frontend {
         >| {
             m.unwrap_or_default()
                 .into_iter()
-                .map(|(k, desc)| {
-                    let task_list = desc.task_list.clone().map(|t| p::TaskList {
-                        name: t.name,
-                        ..Default::default()
-                    });
-                    let mut out = cv::describe_task_list_out(desc);
-                    out.task_list = task_list;
-                    (k, out)
-                })
+                .map(|(k, desc)| (k, cv::describe_task_list_out(desc)))
                 .collect()
         };
         Ok(Response::new(p::GetTaskListsByDomainResponse {
@@ -3021,5 +3018,42 @@ mod cadence_error_status_tests {
         }));
         assert_eq!(s.code(), tonic::Code::ResourceExhausted);
         assert!(String::from_utf8_lossy(&detail_bytes(&s)).contains("rate-limit-reason"));
+    }
+
+    #[test]
+    fn solfix9_cluster_info_reports_go_supported_versions() {
+        let v = supported_client_versions();
+        assert_eq!((v.go_sdk.as_str(), v.java_sdk.as_str()), ("1.7.0", "1.5.0"));
+    }
+
+    #[test]
+    fn solfix7_describe_hook_carries_query_consistency_level() {
+        let (op, body) = hook_operation(
+            &Method::GET,
+            &query(
+                "/api/v1/workflows/describe",
+                &[("domain", "d"), ("workflowId", "w"), ("queryConsistencyLevel", "1")],
+            ),
+        )
+        .unwrap();
+        assert_eq!(op, "DescribeWorkflowExecution");
+        assert_eq!(body.unwrap()["queryConsistencyLevel"], 1);
+        let (_, body) = hook_operation(
+            &Method::GET,
+            &query("/api/v1/workflows/describe", &[("domain", "d"), ("workflowId", "w")]),
+        )
+        .unwrap();
+        assert!(body.unwrap().get("queryConsistencyLevel").is_none());
+    }
+
+    #[test]
+    fn solfix17_omitted_run_id_is_valid_execution() {
+        let e = cadence_api::types::WorkflowExecution::new("w", "");
+        assert!(cadence_api::validation::check_execution(Some(&e)).is_ok());
+        let e = cadence_api::types::WorkflowExecution::new("", "");
+        assert_eq!(
+            cadence_api::validation::check_execution(Some(&e)).unwrap_err().message,
+            "WorkflowId is not set on request."
+        );
     }
 }

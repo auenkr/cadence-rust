@@ -326,15 +326,15 @@ pub fn activity_task(
         activity_id: v.activity_id,
         activity_type: v.activity_type.map(|t| p::ActivityType { name: t.name }),
         input: payload(v.input),
-        scheduled_time: v.scheduled_timestamp.map(timestamp_nanos),
-        started_time: v.started_timestamp.map(timestamp_nanos),
+        scheduled_time: v.scheduled_timestamp.map(timestamp),
+        started_time: v.started_timestamp.map(timestamp),
         schedule_to_close_timeout: v
             .schedule_to_close_timeout_seconds
             .map(|s| duration(s.into())),
         start_to_close_timeout: v.start_to_close_timeout_seconds.map(|s| duration(s.into())),
         heartbeat_timeout: v.heartbeat_timeout_seconds.map(|s| duration(s.into())),
         attempt: v.attempt,
-        scheduled_time_of_this_attempt: v.scheduled_timestamp_of_this_attempt.map(timestamp_nanos),
+        scheduled_time_of_this_attempt: v.scheduled_timestamp_of_this_attempt.map(timestamp),
         heartbeat_details: payload(v.heartbeat_details),
         workflow_type: v.workflow_type.map(|t| p::WorkflowType { name: t.name }),
         workflow_domain: v.workflow_domain,
@@ -692,7 +692,7 @@ pub fn describe_task_list_out(v: tk::DescribeTaskListResponse) -> p::DescribeTas
             new_tasks_per_second: x.new_tasks_per_second,
             empty: x.empty,
         }),
-        task_list: None,
+        task_list: v.task_list.map(task_list_out),
         partition_config: None,
     }
 }
@@ -1542,5 +1542,40 @@ mod nanosecond_timestamp_tests {
             .cluster_attribute
             .unwrap();
         assert_eq!((attr.scope.as_str(), attr.name.as_str()), ("region", "us"));
+    }
+
+    #[test]
+    fn solfix6_activity_poll_millisecond_model_maps_to_epoch_correct_timestamps() {
+        let ms = 1_700_000_000_123_i64;
+        let out = activity_task(cadence_api::tasks::PollForActivityTaskResponse {
+            scheduled_timestamp: Some(ms),
+            started_timestamp: Some(ms),
+            scheduled_timestamp_of_this_attempt: Some(ms),
+            ..Default::default()
+        });
+        for t in [
+            out.scheduled_time,
+            out.started_time,
+            out.scheduled_time_of_this_attempt,
+        ] {
+            let t = t.unwrap();
+            assert_eq!((t.seconds, t.nanos), (1_700_000_000, 123_000_000));
+        }
+    }
+
+    #[test]
+    fn solfix8_describe_task_list_returns_the_response_task_list() {
+        let out = describe_task_list_out(tk::DescribeTaskListResponse {
+            task_list: Some(t::TaskList {
+                name: "tl".into(),
+                base_name: "base".into(),
+                kind: Some(e::TaskListKind::Sticky),
+            }),
+            ..Default::default()
+        });
+        let tl = out.task_list.unwrap();
+        assert_eq!(tl.name, "tl");
+        assert_eq!(tl.base_name, "base");
+        assert_eq!(tl.kind, e::TaskListKind::Sticky as i32 + 1);
     }
 }
