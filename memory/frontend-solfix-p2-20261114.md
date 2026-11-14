@@ -20,3 +20,4 @@ CI (head 49c7dc64b), rust-ci all success:
 - cadence-proto https://github.com/auenkr/cadence-rust/actions/runs/43595727682
 - Earlier runs on 5648ac9a0 failed on rustfmt + one test literal; fixed in 49c7dc64b.
 Mixed gate (mysql): https://github.com/auenkr/cadence-rust/actions/runs/43596181056 (result below)
+Mixed gate mysql (code head 49c7dc64b): conclusion success, log shows `GATE SUMMARY failed: []`.
