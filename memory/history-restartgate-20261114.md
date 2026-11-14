@@ -66,3 +66,9 @@ loses the value and late subscribe misses changed(). Fix uses send_replace plus
 initial value checks, with one-second immediate-stop regression assertions.
 This is confirmed static/test behavior, not yet proven the specific live timeout;
 launcher stage logs and per-restart shutdown log slices now preserve diagnostics.
+
+| run URL | head | lane | result |
+|---|---|---|---|
+| https://github.com/auenkr/cadence-rust/actions/runs/43568009688 |939409f21|clean History Clippy/tests|SUCCESS,903 tests in3.50s; immediate-stop tests now bounded1s|
+| https://github.com/auenkr/cadence-rust/actions/runs/43568012383 |939409f21|postgres1500s rerun|running|
+| https://github.com/auenkr/cadence-rust/actions/runs/43568781798 |939409f21|fresh workspace Clippy/tests|running|
