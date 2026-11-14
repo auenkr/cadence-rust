@@ -16,6 +16,14 @@ on:
         description: Run only the Rust History S3 archival end-to-end phase (MinIO container, mysql lane)
         type: boolean
         default: false
+      gcs:
+        description: With s3_archival, also run the Rust History GCS archival phase (fake-gcs-server; mysql lane only)
+        type: boolean
+        default: false
+      queue_v2:
+        description: Explicitly enable history.enableTimerQueueV2 and history.enableTransferQueueV2 for Rust History
+        type: boolean
+        default: false
       outbound:
         description: Rust service outbound transport
         type: choice
@@ -23,7 +31,7 @@ on:
         default: grpc
 
 concurrency:
-  group: history-mixed-${{ github.ref }}-${{ inputs.database }}-${{ inputs.outbound }}-${{ inputs.two_history }}-${{ inputs.s3_archival }}-${{ github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || '' }}
+  group: history-mixed-${{ github.ref }}-${{ inputs.database }}-${{ inputs.outbound }}-${{ inputs.two_history }}-${{ inputs.s3_archival }}-${{ inputs.gcs }}-${{ inputs.queue_v2 }}-${{ github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || '' }}
   cancel-in-progress: true
 
 jobs:
@@ -70,6 +78,8 @@ jobs:
         env:
           CADENCE_GATE_TWO_HISTORY: ${{ inputs.s3_archival && 'false' || inputs.two_history }}
           CADENCE_GATE_S3: ${{ inputs.s3_archival }}
+          CADENCE_GATE_GCS: ${{ inputs.gcs }}
+          CADENCE_GATE_QUEUE_V2: ${{ inputs.queue_v2 }}
           CADENCE_S3_DOCKER: ${{ inputs.s3_archival }}
           CADENCE_S3_READER: ${{ inputs.s3_archival }}
           RUST_BACKTRACE: 1
@@ -93,7 +103,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: history-mixed-gate-${{ inputs.database }}-${{ inputs.outbound }}-s3${{ inputs.s3_archival }}
+          name: history-mixed-gate-${{ inputs.database }}-${{ inputs.outbound }}-s3${{ inputs.s3_archival }}-gcs${{ inputs.gcs }}-q2${{ inputs.queue_v2 }}
           retention-days: 3
           path: |
             out/
