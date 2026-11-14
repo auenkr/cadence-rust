@@ -86,3 +86,17 @@ requests. The fix notifies after returning a healthy connection, outside the mut
 No runtime shutdown timeout or gate timeout relaxation used. A real-PostgreSQL
 contention regression registers a waiter atomically before lease drop and requires
 wakeup/reuse without the two-second deadline. Pre-fix run43574083135 pending.
+
+## Strict PostgreSQL regression checkpoint
+
+Initial run43574083135 was not valid red/green proof: wait_timeout_while
+rechecked its predicate at the deadline and passed after2s without notification.
+The corrected raw condvar wait test on pre-fix e39a06303 fails as expected:
+`healthy return did not wake the pool waiter` (followed by a secondary poisoned
+mutex destructor panic). Fixed451a974eb restores healthy-return notify_one.
+
+| run URL | head | lane | result |
+|---|---|---|---|
+| https://github.com/auenkr/cadence-rust/actions/runs/43574757454 |e39a06303|clean persistence CI, strict pre-fix regression|expected FAILURE, wakeup deadline assertion|
+| https://github.com/auenkr/cadence-rust/actions/runs/43575377044 |451a974eb|fresh workspace Clippy/tests and strict fixed regression|running|
+| https://github.com/auenkr/cadence-rust/actions/runs/43574115408 |1a952c6f7|fixed postgres1500s recovery|running|

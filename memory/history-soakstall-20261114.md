@@ -208,3 +208,5 @@ deadline path + passing restart soak explain the parent notification loss;
 original logs alone do not identify which exact request future was canceled.
 Reproducible summary,steps,source/binary SHA files retained under
 memory/evidence/history-soak-tail-20261114/passing-soak/.
+
+Checkpoint: soak acceptance remains green; subsequent recovery work found a separate PostgreSQL healthy-connection-return wakeup bug, proven by native stacks and strict pre-fix regression43574757454. Fixed recovery and final workspace CI are running; see history-restartgate-20261114.md.
