@@ -289,6 +289,10 @@ impl Drop for PostgresLease {
                 client,
                 created_at: self.created_at,
             });
+            drop(state);
+            // Go database/sql wakes a queued request when a healthy connection
+            // returns, as well as when discarding one opens a new slot.
+            self.pool.available.notify_one();
         } else {
             state.open -= 1;
             drop(state);

@@ -75,4 +75,14 @@ launcher stage logs and per-restart shutdown log slices now preserve diagnostics
 
 Diagnostic rerun43568012383 shows both launchers reached History shutdown complete within milliseconds; one process still failed to exit60s later. This rules out task processor stop as the whole live-shutdown cause. The sticky-watch fix remains valid (bounded tests now3.50s vs61s), but native stack capture is needed to distinguish local destructor blocking from Tokio runtime teardown. One workflow child activity timed out around DB pause (history shows ActivityTaskStarted then TimedOut, not missing child notification); preserve that as a separate recovery finding.
 
-| https://github.com/auenkr/cadence-rust/actions/runs/43571368853 |3d29666f3|postgres900s native-stack diagnostic; all fault scenarios/assertions unchanged|running at07:58Z|
+| https://github.com/auenkr/cadence-rust/actions/runs/43571368853 |3d29666f3|postgres900s native-stack diagnostic; all fault scenarios/assertions unchanged|FAILURE: both SIGTERM timeouts;2700/2700 complete|
+
+Native stacks from43571368853 prove the live shutdown root cause: main is in
+Tokio BlockingPool::shutdown; visibility record_closed blocking workers are in
+PostgresConnectionPool::checkout_until Condvar.wait. Healthy PostgresLease returns
+push idle but never notify available; queued requests remain asleep indefinitely
+while newer callers can reuse idle sockets. Go database/sql putConn wakes queued
+requests. The fix notifies after returning a healthy connection, outside the mutex.
+No runtime shutdown timeout or gate timeout relaxation used. A real-PostgreSQL
+contention regression registers a waiter atomically before lease drop and requires
+wakeup/reuse without the two-second deadline. Pre-fix run43574083135 pending.
