@@ -25,3 +25,15 @@ The relevant end-to-end lane is `.github/workflows/history-es-visibility.yml`. I
 - Updated the lane to generate and mount a temporary KafkaServer JAAS file and set `KAFKA_OPTS`; the gate harness and shell both pass static syntax validation. The corrected SASL run is pending.
 - Second SASL attempt: https://github.com/auenkr/cadence-rust/actions/runs/43576647189 (head `f90461d5bbc717f2f0bd261a947f593913ff9c0b`), failed during broker startup. The broker loaded the JAAS system property but reported a JAAS configuration `No such file or directory`; the generated file was mode 0600, which is not readable by the Kafka image's `appuser`. The lane now makes the temporary JAAS file world-readable for the container and removes it during cleanup. No Rust/Go application connection was attempted in this run.
 - Third SASL attempt: https://github.com/auenkr/cadence-rust/actions/runs/43577404535 (head `5e2fd2918e0a69098942667efa00ab9eed0849be`), failed during Kafka broker startup with `No serviceName defined in either JAAS or Kafka config`; Kafka selected its default GSSAPI mechanism despite the listener-specific SASL environment setting. Added the broker-wide `KAFKA_SASL_ENABLED_MECHANISMS=PLAIN` setting alongside the listener setting. The next SASL run will verify broker startup and the gate traffic.
+
+## Final SASL/PLAIN evidence
+
+- Lane: `history-es-visibility.yml`, `es_flavor=elasticsearch`, `two_history=false`, `kafka_auth=true`.
+- Run: https://github.com/auenkr/cadence-rust/actions/runs/43578304254
+- Run conclusion: **success**; head SHA: `d256e7c0549364e9676d337cdca0369750269b30`.
+- The CI log contains the required exact line: `GATE SUMMARY failed: []`.
+- The gate reports `kafka-broker-stopped` and `kafka-broker-restarted` passed, `es-index-has-documents` passed, and `go-worker-alive-after-es-sdk` passed. `gate/es-final-docs.json` records 114 ES documents, confirming Rust History's authenticated Kafka visibility writes were consumed by the Go Worker indexer.
+- Rust binary SHA256 from the clean runner target: `cadence-server` `807e8001ed0fa01e0d7087333fa9dd40a81ea4d4a8cfa1a3eb57dbb01f2b60f3`; `cadence-history` `d9adf548e552462983734c9f774ca8f01837798242a3db835f2b379670c5d897`.
+- Authenticated Kafka image: `apache/kafka:3.8.0`; SASL/PLAIN uses test-only `cadence` / `cadence-password`. No TLS mode was added, so there is no TLS lane to report.
+- The three earlier failed attempts (runs 43575836926, 43576647189, 43577404535) were Kafka broker test-fixture setup failures before the end-to-end gate; their fixes are recorded above. None reported a Rust Kafka application defect.
+- Validation commands run locally: `git diff --check`, Python syntax compilation, and `bash -n`; no local Cargo, Go, or Docker commands were run.
