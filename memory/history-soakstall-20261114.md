@@ -186,3 +186,5 @@ memory/evidence/history-soak-tail-20261114/diagnostic/.
 Pre-fix CI 43557514557 concluded FAILURE: 902 tests passed and only canceled_child_completion_is_retried_from_persisted_parent_state failed with EntityNotExists: Pending child execution not found. This confirms uncommitted cached child removal survives cancellation. Patched soak run: https://github.com/auenkr/cadence-rust/actions/runs/43558072143 (e2167b61a), pending.
 
 Patched fresh-target History validation: https://github.com/auenkr/cadence-rust/actions/runs/43558280598, head e2167b61ad242a1b20922f2d6d9473a326107912, SUCCESS: Clippy then 903 tests, including cancellation and real-cache capacity/TTL regressions.
+
+Fresh uncached workspace validation https://github.com/auenkr/cadence-rust/actions/runs/43559207202, head 6a885777a4cfea4764777a4ca0cf341d7c05588a (same Rust as e2167b61a), SUCCESS: workspace Clippy followed by tests. TChannel wiring/server/tchannel.rs handle_call wraps dispatch in timeout(remaining), establishing a production deadline-cancellation path for the regression.
