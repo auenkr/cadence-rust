@@ -752,15 +752,9 @@ mod tests {
         ),
         ("DeleteWorkflow", "AdminDeleteWorkflow"),
         ("GetGlobalIsolationGroups", "GetGlobalIsolationGroups"),
-        (
-            "UpdateGlobalIsolationGroups",
-            "UpdateGlobalIsolationGroups",
-        ),
+        ("UpdateGlobalIsolationGroups", "UpdateGlobalIsolationGroups"),
         ("GetDomainIsolationGroups", "GetDomainIsolationGroups"),
-        (
-            "UpdateDomainIsolationGroups",
-            "UpdateDomainIsolationGroups",
-        ),
+        ("UpdateDomainIsolationGroups", "UpdateDomainIsolationGroups"),
         (
             "GetDomainAsyncWorkflowConfiguraton",
             "GetDomainAsyncWorkflowConfiguraton",
