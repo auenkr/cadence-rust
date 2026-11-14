@@ -44,3 +44,9 @@ Retrieved the runner-generated Cargo.lock without invoking Cargo locally.
 It adds the optional profiler dependencies and reconciles pre-existing workspace
 manifest/lock drift. Full logs are under
 `/mnt/storage/service/matching-heap-profile/ci-targeted/`.
+
+Profile build 43647363855 succeeded; Go baseline and Rust lanes are running.
+Measured-soak count is now 1/3. The diagnostic executable artifact is ~208 MB
+compressed (includes debug symbols and the existing Go binaries); heap profiles
+and derived reports remain in the small lane artifact. Automatic full default
+CI at lockfile head `917c5829d` is run 43648251008, still active.
