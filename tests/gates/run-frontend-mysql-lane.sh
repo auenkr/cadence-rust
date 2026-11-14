@@ -82,6 +82,7 @@ KafkaServer {
   user_cadence="cadence-password";
 };
 JAAS
+    chmod 644 "$KAFKA_JAAS_FILE"
     KAFKA_AUTH_ARGS+=(
       --volume "$KAFKA_JAAS_FILE:/etc/kafka/kafka_server_jaas.conf:ro"
       --env KAFKA_OPTS=-Djava.security.auth.login.config=/etc/kafka/kafka_server_jaas.conf
