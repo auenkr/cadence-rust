@@ -62,9 +62,16 @@ if args.kafka_broker:
                        '          password: cadence-password\n          algorithm: plain\n')
         kafka_sasl = ('  sasl:\n    enabled: true\n    user: cadence\n'
                       '    password: cadence-password\n    algorithm: plain\n')
+    kafka_tls = '  tls:\n    enabled: false\n'
+    tls_async = ''
+    if os.environ.get('CADENCE_GATE_KAFKA_TLS', '').lower() in ('true', '1'):
+        td = os.environ['CADENCE_KAFKA_TLS_DIR']
+        kafka_tls = (f'  tls:\n    enabled: true\n    caFile: {td}/ca.pem\n    certFile: {td}/client.pem\n'
+                     f'    keyFile: {td}/client.key\n    enableHostVerification: true\n    serverName: localhost\n')
+        tls_async = kafka_tls.replace('  tls:', '        tls:', 1).replace('\n    ', '\n          ')
     async_yaml = (f'\nasyncWorkflowQueues:\n  {ASYNC_QUEUE}:\n    type: "kafka"\n    config:\n'
                   f'      connection:\n        brokers:\n          - "{args.kafka_broker}"\n'
-                  f'{auth_config}      topic: "{args.kafka_topic}"\n')
+                  f'{auth_config}{tls_async}      topic: "{args.kafka_topic}"\n')
 if args.sdk_timeout_seconds <= 0:
     ap.error('--sdk-timeout-seconds must be positive')
 root = Path(__file__).resolve().parents[2]
@@ -169,7 +176,7 @@ if args.es_url:
     es_yaml = (f'    es-visibility:\n      elasticsearch:\n        disableSniff: true\n        version: "{args.es_version}"\n'
                f'        url:\n          scheme: "{u.scheme}"\n          host: "{u.netloc}"\n        indices:\n          visibility: {args.es_index}\n')
     vis_topic = args.es_index
-    kafka_yaml = ('kafka:\n  tls:\n    enabled: false\n' + kafka_sasl + '  clusters:\n    test:\n      brokers:\n'
+    kafka_yaml = ('kafka:\n' + kafka_tls + kafka_sasl + '  clusters:\n    test:\n      brokers:\n'
                   f'        - {args.kafka_broker}\n  topics:\n    {vis_topic}:\n      cluster: test\n    {vis_topic}-dlq:\n      cluster: test\n'
                   f'  applications:\n    visibility:\n      topic: {vis_topic}\n      dlq-topic: {vis_topic}-dlq\n')
     persistence = persistence.replace('  numHistoryShards: 4\n', '  advancedVisibilityStore: es-visibility\n  numHistoryShards: 4\n', 1) + es_yaml + kafka_yaml
