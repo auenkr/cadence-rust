@@ -262,7 +262,7 @@ impl EngineExecutionContext {
 
     /// Go `mutableStateBuilder.StartTransaction`: `UpdateCurrentVersion(activeClusterInfo.FailoverVersion, false)`
     /// so a workflow that failed over is written (and policy-checked) at the domain's active version.
-    /// (The decision-failover flush of `startTransactionHandleDecisionFailover` is not ported here.)
+    /// Then Go `startTransactionHandleDecisionFailover` (incoming task version = EmptyVersion).
     async fn start_transaction_version(&self, state: &Arc<EngineMutableState>) -> HResult<()> {
         let version = self
             .core
@@ -271,6 +271,7 @@ impl EngineExecutionContext {
             .await?;
         if let Some(v) = version {
             state.update_current_version(v, false)?;
+            state.start_transaction_handle_decision_failover(crate::wiring::assembly::engine_state::EMPTY_VERSION)?;
         }
         Ok(())
     }
