@@ -1,0 +1,177 @@
+[
+  {
+    "step": "go-worker-schema-ready",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-history-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-history-2-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-matching-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-frontend-tchannel-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-frontend-grpc-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "cli-register-domain-tchannel",
+    "ok": true,
+    "detail": "Domain fe-gate-t-476e13 successfully registered."
+  },
+  {
+    "step": "cli-register-domain-grpc",
+    "ok": true,
+    "detail": "Domain fe-gate-g-2fe0b3 successfully registered."
+  },
+  {
+    "step": "cli-describe-domain-tchannel",
+    "ok": true,
+    "detail": "Name: fe-gate-t-476e13\nUUID: 01a1d81b-853e-7391-b1ca-f83c9ddd08b0\nDescription: \nOwnerEmail: \nDomainData: map[]\nStatus: REGISTERED\nRetentionInDays: 1\nEmitMetrics: true\nIsGlobal(XDC)Domain: true\nActiveClusterName: cluster0\nIsActiveActiveDomain: false\nClusters: [cluster0]\nHistoryArchivalStatus: ENABLED\nHistoryArchivalURI: file:///home/runner/work/cadence-rust/cadence-rust/out/gate/run/history-archive\nVisibilityArchivalStatus: ENABLED\nVisibilityArchivalURI: file:///home/runner/work/cadence-rust/cadence-rust/out/gate/run/visibility-archive"
+  },
+  {
+    "step": "cli-describe-domain-grpc",
+    "ok": true,
+    "detail": "Name: fe-gate-g-2fe0b3\nUUID: 01a1d81b-8556-722f-8285-a11e1396ee6c\nDescription: \nOwnerEmail: \nDomainData: map[]\nStatus: REGISTERED\nRetentionInDays: 1\nEmitMetrics: true\nIsGlobal(XDC)Domain: true\nActiveClusterName: cluster0\nIsActiveActiveDomain: false\nClusters: [cluster0]\nHistoryArchivalStatus: ENABLED\nHistoryArchivalURI: file:///home/runner/work/cadence-rust/cadence-rust/out/gate/run/history-archive\nVisibilityArchivalStatus: ENABLED\nVisibilityArchivalURI: file:///home/runner/work/cadence-rust/cadence-rust/out/gate/run/visibility-archive"
+  },
+  {
+    "step": "go-worker-alive-before-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-matching-alive-before-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-frontend-alive-before-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-history-alive-before-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-history-2-alive-before-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-history-2-killed-mid-soak",
+    "ok": true,
+    "detail": "t=600"
+  },
+  {
+    "step": "rust-history-2-restarted-listening",
+    "ok": true,
+    "detail": "t=606"
+  },
+  {
+    "step": "soak-restart-happened",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "soak-driver-exit",
+    "ok": false,
+    "detail": "exit=1"
+  },
+  {
+    "step": "go-worker-alive-after-soak",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-matching-alive-after-soak",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-frontend-alive-after-soak",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-history-alive-after-soak",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-history-2-alive-after-soak",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "soak-final-reported",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "soak-zero-failed-workflows",
+    "ok": false,
+    "detail": "failed=6 FAIL lines=6"
+  },
+  {
+    "step": "soak-all-started-completed",
+    "ok": false,
+    "detail": "started=4800 completed=4794 inflight=0"
+  },
+  {
+    "step": "soak-p99-recorded",
+    "ok": true,
+    "detail": "e2e_p95_ms=4179 e2e_p99_ms=4214 query_p95_ms=12 query_p99_ms=17 start_p95_ms=5 start_p99_ms=9"
+  },
+  {
+    "step": "go-worker-no-panic",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-matching-no-panic",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-frontend-no-panic",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-history-no-panic",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-history-2-no-panic",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-history-rss-stable",
+    "ok": false,
+    "detail": "{\"early_mb\": 167.9, \"late_mb\": 324.4, \"peak_mb\": 343.9, \"samples\": 32}"
+  },
+  {
+    "step": "rust-history-2-rss-stable",
+    "ok": true,
+    "detail": "{\"early_mb\": 237.2, \"late_mb\": 299.3, \"peak_mb\": 299.3, \"samples\": 10}"
+  }
+]

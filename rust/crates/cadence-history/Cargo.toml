@@ -9,6 +9,7 @@ name = "cadence-history"
 path = "src/main.rs"
 
 [dependencies]
+base64 = "0.22"
 anyhow = "1"
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"

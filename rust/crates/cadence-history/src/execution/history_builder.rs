@@ -415,7 +415,8 @@ impl HistoryBuilder {
             execution_start_to_close_timeout_seconds: a.execution_start_to_close_timeout_seconds, task_start_to_close_timeout_seconds: a.task_start_to_close_timeout_seconds,
             control: a.control.clone(), decision_task_completed_event_id: decision_completed_event_id, workflow_id_reuse_policy: a.workflow_id_reuse_policy,
             retry_policy: a.retry_policy.clone(), cron_schedule: a.cron_schedule.clone(), memo: a.memo.clone(), search_attributes: a.search_attributes.clone(),
-            parent_close_policy: Some(a.parent_close_policy.unwrap_or(ParentClosePolicy::Abandon)), cron_overlap_policy: a.cron_overlap_policy, ..Default::default()
+            parent_close_policy: Some(a.parent_close_policy.unwrap_or(ParentClosePolicy::Abandon)), cron_overlap_policy: a.cron_overlap_policy,
+            active_cluster_selection_policy: a.active_cluster_selection_policy.clone(), ..Default::default()
         })
     }
     /// Go `AddChildWorkflowExecutionStartedEvent`.

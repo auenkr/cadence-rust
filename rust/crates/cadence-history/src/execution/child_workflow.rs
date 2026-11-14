@@ -16,6 +16,8 @@ pub struct ChildExecutionInfo {
     pub started_run_id: String,
     pub create_request_id: String,
     pub domain_id: String,
+    /// Legacy persistence field used by Go `fillForBackwardsCompatibility`.
+    pub domain_name_deprecated: String,
     pub workflow_type_name: String,
     pub parent_close_policy: Option<ParentClosePolicy>,
 }

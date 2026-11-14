@@ -1,0 +1,262 @@
+[
+  {
+    "step": "go-worker-schema-ready",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-history-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-history-2-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-matching-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-frontend-tchannel-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-frontend-grpc-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "cli-register-domain-tchannel",
+    "ok": true,
+    "detail": "Domain fe-gate-t-0f129a successfully registered."
+  },
+  {
+    "step": "cli-register-domain-grpc",
+    "ok": true,
+    "detail": "Domain fe-gate-g-3b1a70 successfully registered."
+  },
+  {
+    "step": "cli-describe-domain-tchannel",
+    "ok": true,
+    "detail": "Name: fe-gate-t-0f129a\nUUID: 01a1d928-a508-70a5-a91c-0d8487fb4a21\nDescription: \nOwnerEmail: \nDomainData: map[]\nStatus: REGISTERED\nRetentionInDays: 1\nEmitMetrics: true\nIsGlobal(XDC)Domain: true\nActiveClusterName: cluster0\nIsActiveActiveDomain: false\nClusters: [cluster0]\nHistoryArchivalStatus: ENABLED\nHistoryArchivalURI: file:///home/runner/work/cadence-rust/cadence-rust/out/gate/run/history-archive\nVisibilityArchivalStatus: ENABLED\nVisibilityArchivalURI: file:///home/runner/work/cadence-rust/cadence-rust/out/gate/run/visibility-archive"
+  },
+  {
+    "step": "cli-describe-domain-grpc",
+    "ok": true,
+    "detail": "Name: fe-gate-g-3b1a70\nUUID: 01a1d928-a525-7071-87de-f5ddb7f9abe4\nDescription: \nOwnerEmail: \nDomainData: map[]\nStatus: REGISTERED\nRetentionInDays: 1\nEmitMetrics: true\nIsGlobal(XDC)Domain: true\nActiveClusterName: cluster0\nIsActiveActiveDomain: false\nClusters: [cluster0]\nHistoryArchivalStatus: ENABLED\nHistoryArchivalURI: file:///home/runner/work/cadence-rust/cadence-rust/out/gate/run/history-archive\nVisibilityArchivalStatus: ENABLED\nVisibilityArchivalURI: file:///home/runner/work/cadence-rust/cadence-rust/out/gate/run/visibility-archive"
+  },
+  {
+    "step": "go-worker-alive-before-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-matching-alive-before-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-frontend-alive-before-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-history-alive-before-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-history-2-alive-before-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "s1-begin",
+    "ok": true,
+    "detail": "t=45"
+  },
+  {
+    "step": "s1-kill9-rust-history-2-stopped",
+    "ok": true,
+    "detail": "signal=SIGKILL after=0s stats={'completed': 107, 'e2e_avg_ms': 4110, 'e2e_max_ms': 4216, 'e2e_p50_ms': 4102, 'e2e_p95_ms': 4174, 'e2e_p99_ms': 4197, 'failed': 0, 'inflight': 12, 'queries': 107, 'query_init_attempts': 151, 'query_init_workflows': 80, 'query_p50_ms': 9, 'query_p95_ms': 24, 'query_p99_ms': 28, 'retried_calls': 151, 'signals': 111, 'start_p50_ms': 5, 'start_p95_ms': 9, 'start_p99_ms': 10, 'started': 119, 'ts': 1794644734}"
+  },
+  {
+    "step": "s1-kill9-rust-history-2-restarted-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "s1-kill9-rust-history-2-load-still-running",
+    "ok": true,
+    "detail": "stats={'completed': 314, 'e2e_avg_ms': 4385, 'e2e_max_ms': 11197, 'e2e_p50_ms': 4115, 'e2e_p95_ms': 5286, 'e2e_p99_ms': 10434, 'failed': 0, 'inflight': 16, 'queries': 314, 'query_init_attempts': 712, 'query_init_workflows': 249, 'query_p50_ms': 9, 'query_p95_ms': 28, 'query_p99_ms': 37, 'retried_calls': 712, 'signals': 323, 'start_p50_ms': 5, 'start_p95_ms': 15, 'start_p99_ms': 3813, 'started': 329, 'ts': 1794644804}"
+  },
+  {
+    "step": "s1-kill9-rust-history-stopped",
+    "ok": true,
+    "detail": "signal=SIGKILL after=0s stats={'completed': 314, 'e2e_avg_ms': 4385, 'e2e_max_ms': 11197, 'e2e_p50_ms': 4115, 'e2e_p95_ms': 5286, 'e2e_p99_ms': 10434, 'failed': 0, 'inflight': 16, 'queries': 314, 'query_init_attempts': 712, 'query_init_workflows': 249, 'query_p50_ms': 9, 'query_p95_ms': 28, 'query_p99_ms': 37, 'retried_calls': 712, 'signals': 323, 'start_p50_ms': 5, 'start_p95_ms': 15, 'start_p99_ms': 3813, 'started': 329, 'ts': 1794644804}"
+  },
+  {
+    "step": "s1-kill9-rust-history-restarted-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "s1-kill9-rust-history-load-still-running",
+    "ok": true,
+    "detail": "stats={'completed': 497, 'e2e_avg_ms': 5001, 'e2e_max_ms': 75342, 'e2e_p50_ms': 4120, 'e2e_p95_ms': 9180, 'e2e_p99_ms': 12366, 'failed': 0, 'inflight': 13, 'queries': 497, 'query_init_attempts': 1044, 'query_init_workflows': 386, 'query_p50_ms': 9, 'query_p95_ms': 28, 'query_p99_ms': 98, 'retried_calls': 1045, 'signals': 502, 'start_p50_ms': 5, 'start_p95_ms': 31, 'start_p99_ms': 3869, 'started': 509, 'ts': 1794644864}"
+  },
+  {
+    "step": "s2-begin",
+    "ok": true,
+    "detail": "t=176"
+  },
+  {
+    "step": "s2-graceful-rust-history-stopped",
+    "ok": true,
+    "detail": "signal=SIGTERM after=0s stats={'completed': 497, 'e2e_avg_ms': 5001, 'e2e_max_ms': 75342, 'e2e_p50_ms': 4120, 'e2e_p95_ms': 9180, 'e2e_p99_ms': 12366, 'failed': 0, 'inflight': 13, 'queries': 497, 'query_init_attempts': 1044, 'query_init_workflows': 386, 'query_p50_ms': 9, 'query_p95_ms': 28, 'query_p99_ms': 98, 'retried_calls': 1045, 'signals': 502, 'start_p50_ms': 5, 'start_p95_ms': 31, 'start_p99_ms': 3869, 'started': 509, 'ts': 1794644864}"
+  },
+  {
+    "step": "s2-graceful-rust-history-restarted-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "s2-graceful-rust-history-load-still-running",
+    "ok": true,
+    "detail": "stats={'completed': 707, 'e2e_avg_ms': 4759, 'e2e_max_ms': 75342, 'e2e_p50_ms': 4119, 'e2e_p95_ms': 7561, 'e2e_p99_ms': 11437, 'failed': 0, 'inflight': 13, 'queries': 707, 'query_init_attempts': 1364, 'query_init_workflows': 555, 'query_p50_ms': 9, 'query_p95_ms': 29, 'query_p99_ms': 214, 'retried_calls': 1365, 'signals': 714, 'start_p50_ms': 5, 'start_p95_ms': 19, 'start_p99_ms': 3813, 'started': 719, 'ts': 1794644934}"
+  },
+  {
+    "step": "s2-graceful-rust-history-2-stopped",
+    "ok": true,
+    "detail": "signal=SIGTERM after=0s stats={'completed': 707, 'e2e_avg_ms': 4759, 'e2e_max_ms': 75342, 'e2e_p50_ms': 4119, 'e2e_p95_ms': 7561, 'e2e_p99_ms': 11437, 'failed': 0, 'inflight': 13, 'queries': 707, 'query_init_attempts': 1364, 'query_init_workflows': 555, 'query_p50_ms': 9, 'query_p95_ms': 29, 'query_p99_ms': 214, 'retried_calls': 1365, 'signals': 714, 'start_p50_ms': 5, 'start_p95_ms': 19, 'start_p99_ms': 3813, 'started': 719, 'ts': 1794644934}"
+  },
+  {
+    "step": "s2-graceful-rust-history-2-restarted-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "s2-graceful-rust-history-2-load-still-running",
+    "ok": true,
+    "detail": "stats={'completed': 887, 'e2e_avg_ms': 4669, 'e2e_max_ms': 75342, 'e2e_p50_ms': 4118, 'e2e_p95_ms': 5880, 'e2e_p99_ms': 11437, 'failed': 0, 'inflight': 12, 'queries': 887, 'query_init_attempts': 1673, 'query_init_workflows': 698, 'query_p50_ms': 9, 'query_p95_ms': 29, 'query_p99_ms': 214, 'retried_calls': 1679, 'signals': 890, 'start_p50_ms': 5, 'start_p95_ms': 19, 'start_p99_ms': 3803, 'started': 899, 'ts': 1794644994}"
+  },
+  {
+    "step": "s3-begin",
+    "ok": true,
+    "detail": "t=307"
+  },
+  {
+    "step": "s3-db-paused",
+    "ok": true,
+    "detail": "cadence-rust-gate-postgres-lane-20261114T082408-11252\n"
+  },
+  {
+    "step": "s3-db-unpaused",
+    "ok": true,
+    "detail": "paused=30s cadence-rust-gate-postgres-lane-20261114T082408-11252\n"
+  },
+  {
+    "step": "s3-dbpause-load-still-running",
+    "ok": true,
+    "detail": "stats={'completed': 1157, 'e2e_avg_ms': 7509, 'e2e_max_ms': 75342, 'e2e_p50_ms': 4125, 'e2e_p95_ms': 32752, 'e2e_p99_ms': 44759, 'failed': 0, 'inflight': 12, 'queries': 1157, 'query_init_attempts': 3263, 'query_init_workflows': 945, 'query_p50_ms': 10, 'query_p95_ms': 45, 'query_p99_ms': 322, 'retried_calls': 3295, 'signals': 1162, 'start_p50_ms': 6, 'start_p95_ms': 11122, 'start_p99_ms': 27271, 'started': 1169, 'ts': 1794645084}"
+  },
+  {
+    "step": "s4-begin",
+    "ok": true,
+    "detail": "t=397"
+  },
+  {
+    "step": "s4-rust-matching-killed",
+    "ok": true,
+    "detail": "stats={'completed': 1157, 'e2e_avg_ms': 7509, 'e2e_max_ms': 75342, 'e2e_p50_ms': 4125, 'e2e_p95_ms': 32752, 'e2e_p99_ms': 44759, 'failed': 0, 'inflight': 12, 'queries': 1157, 'query_init_attempts': 3263, 'query_init_workflows': 945, 'query_p50_ms': 10, 'query_p95_ms': 45, 'query_p99_ms': 322, 'retried_calls': 3295, 'signals': 1162, 'start_p50_ms': 6, 'start_p95_ms': 11122, 'start_p99_ms': 27271, 'started': 1169, 'ts': 1794645084}"
+  },
+  {
+    "step": "s4-rust-matching-restarted-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "s4-matching-load-still-running",
+    "ok": true,
+    "detail": "stats={'completed': 1367, 'e2e_avg_ms': 7345, 'e2e_max_ms': 75342, 'e2e_p50_ms': 4125, 'e2e_p95_ms': 30508, 'e2e_p99_ms': 44529, 'failed': 0, 'inflight': 13, 'queries': 1367, 'query_init_attempts': 3714, 'query_init_workflows': 1114, 'query_p50_ms': 10, 'query_p95_ms': 45, 'query_p99_ms': 322, 'retried_calls': 3856, 'signals': 1371, 'start_p50_ms': 6, 'start_p95_ms': 7594, 'start_p99_ms': 27253, 'started': 1379, 'ts': 1794645154}"
+  },
+  {
+    "step": "restartgate-all-scenarios-ran",
+    "ok": true,
+    "detail": "driver_exit=None"
+  },
+  {
+    "step": "soak-driver-exit",
+    "ok": true,
+    "detail": "exit=0"
+  },
+  {
+    "step": "go-worker-alive-after-faults",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-matching-alive-after-faults",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-frontend-alive-after-faults",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-history-alive-after-faults",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-history-2-alive-after-faults",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "final-reported",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "zero-failed-workflows",
+    "ok": true,
+    "detail": "failed=0 FAIL lines=0"
+  },
+  {
+    "step": "all-started-completed",
+    "ok": true,
+    "detail": "started=4500 completed=4500 inflight=0"
+  },
+  {
+    "step": "go-worker-no-panic",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-matching-no-panic",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-frontend-no-panic",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-history-no-panic",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-history-2-no-panic",
+    "ok": true,
+    "detail": ""
+  }
+]

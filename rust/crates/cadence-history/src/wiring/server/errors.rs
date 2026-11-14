@@ -27,6 +27,8 @@ pub fn thrift_exception(e: &HistoryError) -> (&'static str, String) {
         HistoryError::EventAlreadyStarted(x) => ("EventAlreadyStartedError", x.to_string()),
         HistoryError::PersistenceShardOwnershipLost { message: m, .. } => ("ShardOwnershipLostError", m.clone()),
         HistoryError::CurrentBranchChanged { message, .. } => ("CurrentBranchChangedError", message.clone()),
+        // Go handler.convertError: TransactionSizeLimitError -> BadRequestError.
+        HistoryError::TransactionSizeLimit(m) => ("BadRequestError", m.clone()),
         other => ("InternalServiceError", other.to_string()),
     }
 }
@@ -285,6 +287,13 @@ mod tests {
         assert_eq!(grpc_status(&cad(cadence_api::errors::BadRequestError::new("x"))).code(), Code::InvalidArgument);
         assert_eq!(grpc_status(&busy()).code(), Code::ResourceExhausted);
         assert_eq!(grpc_status(&cad(cadence_api::errors::EntityNotExistsError::new("x"))).code(), Code::NotFound);
+    }
+
+    #[test]
+    fn transaction_size_limit_is_bad_request_like_go_convert_error() {
+        let e = HistoryError::TransactionSizeLimit("transaction size of 5 bytes exceeds limit of 4 bytes".into());
+        assert_eq!(thrift_exception(&e), ("BadRequestError", "transaction size of 5 bytes exceeds limit of 4 bytes".to_string()));
+        assert_eq!(grpc_status(&e).code(), Code::InvalidArgument);
     }
 
     #[test]

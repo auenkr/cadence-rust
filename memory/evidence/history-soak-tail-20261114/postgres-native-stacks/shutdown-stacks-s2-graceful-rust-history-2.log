@@ -1,0 +1,400 @@
+#13 0x000063ec138206f3 in <std::thread::lifecycle::spawn_unchecked<<tokio::runtime::blocking::pool::Spawner>::spawn_thread::{closure#0}, ()>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#14 0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#15 0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#16 0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 31 (Thread 0x7c63eb3396c0 (LWP 106870) "tokio-rt-worker"):
+#0  0x00007c648e53ca2d in syscall () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x000063ec13962ae5 in <std::sys::sync::condvar::futex::Condvar>::wait ()
+#2  0x000063ec12a1babf in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout_until ()
+#3  0x000063ec12a1d0e3 in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout ()
+#4  0x000063ec107f0ccc in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1} ()
+#5  0x000063ec107d6519 in std::sys::backtrace::__rust_begin_short_backtrace::<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_started::{closure#0}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>> ()
+#6  0x000063ec107f3f1a in <std::thread::lifecycle::spawn_unchecked<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#7  0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#8  0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#9  0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 30 (Thread 0x7c63eaf376c0 (LWP 106874) "tokio-rt-worker"):
+#0  0x00007c648e53ca2d in syscall () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x000063ec13962ae5 in <std::sys::sync::condvar::futex::Condvar>::wait ()
+#2  0x000063ec12a1babf in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout_until ()
+#3  0x000063ec12a1d0e3 in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout ()
+#4  0x000063ec107f0ccc in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1} ()
+#5  0x000063ec107d6519 in std::sys::backtrace::__rust_begin_short_backtrace::<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_started::{closure#0}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>> ()
+#6  0x000063ec107f3f1a in <std::thread::lifecycle::spawn_unchecked<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#7  0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#8  0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#9  0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 29 (Thread 0x7c63eb1386c0 (LWP 106887) "tokio-rt-worker"):
+#0  0x00007c648e53ca2d in syscall () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x000063ec13962ae5 in <std::sys::sync::condvar::futex::Condvar>::wait ()
+#2  0x000063ec12a1babf in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout_until ()
+#3  0x000063ec12a1d0e3 in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout ()
+#4  0x000063ec107f0ccc in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1} ()
+#5  0x000063ec107d6519 in std::sys::backtrace::__rust_begin_short_backtrace::<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_started::{closure#0}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>> ()
+#6  0x000063ec107f3f1a in <std::thread::lifecycle::spawn_unchecked<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#7  0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#8  0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#9  0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 28 (Thread 0x7c63eab356c0 (LWP 106889) "tokio-rt-worker"):
+#0  0x00007c648e53ca2d in syscall () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x000063ec13962ae5 in <std::sys::sync::condvar::futex::Condvar>::wait ()
+#2  0x000063ec12a1babf in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout_until ()
+#3  0x000063ec12a1d0e3 in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout ()
+#4  0x000063ec107f0ccc in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1} ()
+#5  0x000063ec107d6519 in std::sys::backtrace::__rust_begin_short_backtrace::<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_started::{closure#0}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>> ()
+#6  0x000063ec107f3f1a in <std::thread::lifecycle::spawn_unchecked<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#7  0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#8  0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#9  0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 27 (Thread 0x7c63ead366c0 (LWP 106893) "tokio-rt-worker"):
+#0  0x00007c648e53ca2d in syscall () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x000063ec13962ae5 in <std::sys::sync::condvar::futex::Condvar>::wait ()
+#2  0x000063ec12a1babf in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout_until ()
+#3  0x000063ec12a1d0e3 in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout ()
+#4  0x000063ec107f0ccc in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1} ()
+#5  0x000063ec107d6519 in std::sys::backtrace::__rust_begin_short_backtrace::<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_started::{closure#0}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>> ()
+#6  0x000063ec107f3f1a in <std::thread::lifecycle::spawn_unchecked<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#7  0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#8  0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#9  0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 26 (Thread 0x7c63f41806c0 (LWP 106921) "tokio-rt-worker"):
+#0  0x00007c648e53ca2d in syscall () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x000063ec13962ae5 in <std::sys::sync::condvar::futex::Condvar>::wait ()
+#2  0x000063ec12a1babf in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout_until ()
+#3  0x000063ec12a1d0e3 in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout ()
+#4  0x000063ec107f0ccc in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1} ()
+#5  0x000063ec107d6519 in std::sys::backtrace::__rust_begin_short_backtrace::<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_started::{closure#0}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>> ()
+#6  0x000063ec107f3f1a in <std::thread::lifecycle::spawn_unchecked<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#7  0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#8  0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#9  0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 25 (Thread 0x7c63ea9346c0 (LWP 107179) "tokio-rt-worker"):
+#0  0x00007c648e53ca2d in syscall () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x000063ec13962ae5 in <std::sys::sync::condvar::futex::Condvar>::wait ()
+#2  0x000063ec12a1babf in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout_until ()
+#3  0x000063ec12a1d0e3 in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout ()
+#4  0x000063ec107f0ccc in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1} ()
+#5  0x000063ec107d6519 in std::sys::backtrace::__rust_begin_short_backtrace::<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_started::{closure#0}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>> ()
+#6  0x000063ec107f3f1a in <std::thread::lifecycle::spawn_unchecked<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#7  0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#8  0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#9  0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 24 (Thread 0x7c63eb53a6c0 (LWP 107236) "tokio-rt-worker"):
+#0  0x00007c648e53ca2d in syscall () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x000063ec13962ae5 in <std::sys::sync::condvar::futex::Condvar>::wait ()
+#2  0x000063ec12a1babf in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout_until ()
+#3  0x000063ec12a1d0e3 in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout ()
+#4  0x000063ec107f0ccc in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1} ()
+#5  0x000063ec107d6519 in std::sys::backtrace::__rust_begin_short_backtrace::<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_started::{closure#0}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>> ()
+#6  0x000063ec107f3f1a in <std::thread::lifecycle::spawn_unchecked<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#7  0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#8  0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#9  0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 23 (Thread 0x7c63eb93c6c0 (LWP 107237) "tokio-rt-worker"):
+#0  0x00007c648e53ca2d in syscall () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x000063ec13962ae5 in <std::sys::sync::condvar::futex::Condvar>::wait ()
+#2  0x000063ec12a1babf in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout_until ()
+#3  0x000063ec12a1d0e3 in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout ()
+#4  0x000063ec107f0ccc in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1} ()
+#5  0x000063ec107d6519 in std::sys::backtrace::__rust_begin_short_backtrace::<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_started::{closure#0}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>> ()
+#6  0x000063ec107f3f1a in <std::thread::lifecycle::spawn_unchecked<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#7  0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#8  0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#9  0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 22 (Thread 0x7c63ea3316c0 (LWP 107238) "tokio-rt-worker"):
+#0  0x00007c648e53ca2d in syscall () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x000063ec13962ae5 in <std::sys::sync::condvar::futex::Condvar>::wait ()
+#2  0x000063ec12a1babf in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout_until ()
+#3  0x000063ec12a1d0e3 in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout ()
+#4  0x000063ec107f0ccc in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1} ()
+#5  0x000063ec107d6519 in std::sys::backtrace::__rust_begin_short_backtrace::<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_started::{closure#0}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>> ()
+#6  0x000063ec107f3f1a in <std::thread::lifecycle::spawn_unchecked<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#7  0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#8  0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#9  0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 21 (Thread 0x7c63eb73b6c0 (LWP 108074) "tokio-rt-worker"):
+#0  0x00007c648e53ca2d in syscall () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x000063ec13962ae5 in <std::sys::sync::condvar::futex::Condvar>::wait ()
+#2  0x000063ec12a1babf in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout_until ()
+#3  0x000063ec12a1d0e3 in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout ()
+#4  0x000063ec107f0ccc in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1} ()
+#5  0x000063ec107d6519 in std::sys::backtrace::__rust_begin_short_backtrace::<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_started::{closure#0}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>> ()
+#6  0x000063ec107f3f1a in <std::thread::lifecycle::spawn_unchecked<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#7  0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#8  0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#9  0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 20 (Thread 0x7c63ed1486c0 (LWP 109125) "tokio-rt-worker"):
+#0  0x00007c648e53ca2d in syscall () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x000063ec13962ae5 in <std::sys::sync::condvar::futex::Condvar>::wait ()
+#2  0x000063ec12a1babf in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout_until ()
+#3  0x000063ec12a1d0e3 in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout ()
+#4  0x000063ec107f0ccc in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1} ()
+#5  0x000063ec107d6519 in std::sys::backtrace::__rust_begin_short_backtrace::<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_started::{closure#0}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>> ()
+#6  0x000063ec107f3f1a in <std::thread::lifecycle::spawn_unchecked<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#7  0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#8  0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#9  0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 19 (Thread 0x7c63ec9446c0 (LWP 109184) "tokio-rt-worker"):
+#0  0x00007c648e53ca2d in syscall () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x000063ec13962ae5 in <std::sys::sync::condvar::futex::Condvar>::wait ()
+#2  0x000063ec12a1babf in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout_until ()
+#3  0x000063ec12a1d0e3 in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout ()
+#4  0x000063ec107f0ccc in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1} ()
+#5  0x000063ec107d6519 in std::sys::backtrace::__rust_begin_short_backtrace::<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_started::{closure#0}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>> ()
+#6  0x000063ec107f3f1a in <std::thread::lifecycle::spawn_unchecked<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#7  0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#8  0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#9  0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 18 (Thread 0x7c63ea1306c0 (LWP 109185) "tokio-rt-worker"):
+#0  0x00007c648e53ca2d in syscall () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x000063ec13962ae5 in <std::sys::sync::condvar::futex::Condvar>::wait ()
+#2  0x000063ec12a1babf in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout_until ()
+#3  0x000063ec12a1d0e3 in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout ()
+#4  0x000063ec107f0ccc in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1} ()
+#5  0x000063ec107d6519 in std::sys::backtrace::__rust_begin_short_backtrace::<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_started::{closure#0}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>> ()
+#6  0x000063ec107f3f1a in <std::thread::lifecycle::spawn_unchecked<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#7  0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#8  0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#9  0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 17 (Thread 0x7c63ebb3d6c0 (LWP 109646) "tokio-rt-worker"):
+#0  0x00007c648e4b4792 in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x00007c648e4a82fc in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#2  0x00007c648e4a86d7 in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#3  0x00007c648e4add79 in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#4  0x000063ec13965401 in <std::sys::thread::unix::Thread>::join ()
+#5  0x000063ec107fafa5 in <std::thread::lifecycle::JoinInner<cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>>::join ()
+#6  0x000063ec107d5aeb in cadence_persistence::matching_postgres::outside_runtime::<cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>, <cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}> ()
+#7  0x000063ec10891eed in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}> ()
+#8  0x000063ec10bd238b in <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed ()
+#9  0x000063ec107f2105 in <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed_async::{closure#0}::{closure#0} ()
+#10 0x000063ec107a9ba8 in <tokio::runtime::task::core::Core<tokio::runtime::blocking::task::BlockingTask<<cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed_async::{closure#0}::{closure#0}>, tokio::runtime::blocking::schedule::BlockingSchedule>>::poll ()
+#11 0x000063ec10828b16 in <tokio::runtime::task::harness::Harness<tokio::runtime::blocking::task::BlockingTask<<cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed_async::{closure#0}::{closure#0}>, tokio::runtime::blocking::schedule::BlockingSchedule>>::poll ()
+#12 0x000063ec138263ce in std::sys::backtrace::__rust_begin_short_backtrace::<<tokio::runtime::blocking::pool::Spawner>::spawn_thread::{closure#0}, ()> ()
+#13 0x000063ec138206f3 in <std::thread::lifecycle::spawn_unchecked<<tokio::runtime::blocking::pool::Spawner>::spawn_thread::{closure#0}, ()>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#14 0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#15 0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#16 0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 16 (Thread 0x7c63ea7336c0 (LWP 109681) "tokio-rt-worker"):
+#0  0x00007c648e53ca2d in syscall () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x000063ec13962ae5 in <std::sys::sync::condvar::futex::Condvar>::wait ()
+#2  0x000063ec12a1babf in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout_until ()
+#3  0x000063ec12a1d0e3 in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout ()
+#4  0x000063ec107f0ccc in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1} ()
+#5  0x000063ec107d6519 in std::sys::backtrace::__rust_begin_short_backtrace::<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_started::{closure#0}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>> ()
+#6  0x000063ec107f3f1a in <std::thread::lifecycle::spawn_unchecked<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#7  0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#8  0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#9  0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 15 (Thread 0x7c63e8f276c0 (LWP 109682) "tokio-rt-worker"):
+#0  0x00007c648e53ca2d in syscall () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x000063ec13962ae5 in <std::sys::sync::condvar::futex::Condvar>::wait ()
+#2  0x000063ec12a1babf in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout_until ()
+#3  0x000063ec12a1d0e3 in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout ()
+#4  0x000063ec107f0ccc in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1} ()
+#5  0x000063ec107d6519 in std::sys::backtrace::__rust_begin_short_backtrace::<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_started::{closure#0}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>> ()
+#6  0x000063ec107f3f1a in <std::thread::lifecycle::spawn_unchecked<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#7  0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#8  0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#9  0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 14 (Thread 0x7c63e8d266c0 (LWP 110671) "tokio-rt-worker"):
+#0  0x00007c648e53ca2d in syscall () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x000063ec13962ae5 in <std::sys::sync::condvar::futex::Condvar>::wait ()
+#2  0x000063ec12a1babf in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout_until ()
+#3  0x000063ec12a1d0e3 in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout ()
+#4  0x000063ec107f0ccc in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1} ()
+#5  0x000063ec107d6519 in std::sys::backtrace::__rust_begin_short_backtrace::<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_started::{closure#0}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>> ()
+#6  0x000063ec107f3f1a in <std::thread::lifecycle::spawn_unchecked<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#7  0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#8  0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#9  0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 13 (Thread 0x7c63e93296c0 (LWP 110672) "tokio-rt-worker"):
+#0  0x00007c648e53ca2d in syscall () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x000063ec13962ae5 in <std::sys::sync::condvar::futex::Condvar>::wait ()
+#2  0x000063ec12a1babf in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout_until ()
+#3  0x000063ec12a1d0e3 in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout ()
+#4  0x000063ec107f0ccc in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1} ()
+#5  0x000063ec107d6519 in std::sys::backtrace::__rust_begin_short_backtrace::<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_started::{closure#0}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>> ()
+#6  0x000063ec107f3f1a in <std::thread::lifecycle::spawn_unchecked<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#7  0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#8  0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#9  0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 12 (Thread 0x7c63e992c6c0 (LWP 110800) "tokio-rt-worker"):
+#0  0x00007c648e4b4792 in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x00007c648e4a82fc in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#2  0x00007c648e4a86d7 in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#3  0x00007c648e4add79 in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#4  0x000063ec13965401 in <std::sys::thread::unix::Thread>::join ()
+#5  0x000063ec107fafa5 in <std::thread::lifecycle::JoinInner<cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>>::join ()
+#6  0x000063ec107d5aeb in cadence_persistence::matching_postgres::outside_runtime::<cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>, <cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}> ()
+#7  0x000063ec10891eed in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}> ()
+#8  0x000063ec10bd238b in <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed ()
+#9  0x000063ec107f2105 in <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed_async::{closure#0}::{closure#0} ()
+#10 0x000063ec107a9ba8 in <tokio::runtime::task::core::Core<tokio::runtime::blocking::task::BlockingTask<<cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed_async::{closure#0}::{closure#0}>, tokio::runtime::blocking::schedule::BlockingSchedule>>::poll ()
+#11 0x000063ec10828b16 in <tokio::runtime::task::harness::Harness<tokio::runtime::blocking::task::BlockingTask<<cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed_async::{closure#0}::{closure#0}>, tokio::runtime::blocking::schedule::BlockingSchedule>>::poll ()
+#12 0x000063ec138263ce in std::sys::backtrace::__rust_begin_short_backtrace::<<tokio::runtime::blocking::pool::Spawner>::spawn_thread::{closure#0}, ()> ()
+#13 0x000063ec138206f3 in <std::thread::lifecycle::spawn_unchecked<<tokio::runtime::blocking::pool::Spawner>::spawn_thread::{closure#0}, ()>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#14 0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#15 0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#16 0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 11 (Thread 0x7c63e952a6c0 (LWP 110817) "tokio-rt-worker"):
+#0  0x00007c648e53ca2d in syscall () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x000063ec13962ae5 in <std::sys::sync::condvar::futex::Condvar>::wait ()
+#2  0x000063ec12a1babf in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout_until ()
+#3  0x000063ec12a1d0e3 in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout ()
+#4  0x000063ec107f0ccc in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1} ()
+#5  0x000063ec107d6519 in std::sys::backtrace::__rust_begin_short_backtrace::<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_started::{closure#0}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>> ()
+#6  0x000063ec107f3f1a in <std::thread::lifecycle::spawn_unchecked<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#7  0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#8  0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#9  0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 10 (Thread 0x7c63ea5326c0 (LWP 111234) "tokio-rt-worker"):
+#0  0x00007c648e53ca2d in syscall () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x000063ec13962ae5 in <std::sys::sync::condvar::futex::Condvar>::wait ()
+#2  0x000063ec12a1babf in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout_until ()
+#3  0x000063ec12a1d0e3 in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout ()
+#4  0x000063ec107f0ccc in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1} ()
+#5  0x000063ec107d6519 in std::sys::backtrace::__rust_begin_short_backtrace::<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_started::{closure#0}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>> ()
+#6  0x000063ec107f3f1a in <std::thread::lifecycle::spawn_unchecked<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#7  0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#8  0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#9  0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 9 (Thread 0x7c63e9d2e6c0 (LWP 112051) "tokio-rt-worker"):
+#0  0x00007c648e4b4792 in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x00007c648e4a82fc in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#2  0x00007c648e4a86d7 in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#3  0x00007c648e4add79 in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#4  0x000063ec13965401 in <std::sys::thread::unix::Thread>::join ()
+#5  0x000063ec107fafa5 in <std::thread::lifecycle::JoinInner<cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>>::join ()
+#6  0x000063ec107d5aeb in cadence_persistence::matching_postgres::outside_runtime::<cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>, <cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}> ()
+#7  0x000063ec10891eed in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}> ()
+#8  0x000063ec10bd238b in <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed ()
+#9  0x000063ec107f2105 in <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed_async::{closure#0}::{closure#0} ()
+#10 0x000063ec107a9ba8 in <tokio::runtime::task::core::Core<tokio::runtime::blocking::task::BlockingTask<<cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed_async::{closure#0}::{closure#0}>, tokio::runtime::blocking::schedule::BlockingSchedule>>::poll ()
+#11 0x000063ec10828b16 in <tokio::runtime::task::harness::Harness<tokio::runtime::blocking::task::BlockingTask<<cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed_async::{closure#0}::{closure#0}>, tokio::runtime::blocking::schedule::BlockingSchedule>>::poll ()
+#12 0x000063ec138263ce in std::sys::backtrace::__rust_begin_short_backtrace::<<tokio::runtime::blocking::pool::Spawner>::spawn_thread::{closure#0}, ()> ()
+#13 0x000063ec138206f3 in <std::thread::lifecycle::spawn_unchecked<<tokio::runtime::blocking::pool::Spawner>::spawn_thread::{closure#0}, ()>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#14 0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#15 0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#16 0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 8 (Thread 0x7c63e89246c0 (LWP 116545) "tokio-rt-worker"):
+#0  0x00007c648e53ca2d in syscall () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x000063ec13962ae5 in <std::sys::sync::condvar::futex::Condvar>::wait ()
+#2  0x000063ec12a1babf in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout_until ()
+#3  0x000063ec12a1d0e3 in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout ()
+#4  0x000063ec107f0ccc in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1} ()
+#5  0x000063ec107d6519 in std::sys::backtrace::__rust_begin_short_backtrace::<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_started::{closure#0}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>> ()
+#6  0x000063ec107f3f1a in <std::thread::lifecycle::spawn_unchecked<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#7  0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#8  0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#9  0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 7 (Thread 0x7c63e83216c0 (LWP 119189) "tokio-rt-worker"):
+#0  0x00007c648e53ca2d in syscall () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x000063ec13962ae5 in <std::sys::sync::condvar::futex::Condvar>::wait ()
+#2  0x000063ec12a1babf in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout_until ()
+#3  0x000063ec12a1d0e3 in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout ()
+#4  0x000063ec107f0ccc in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1} ()
+#5  0x000063ec107d6519 in std::sys::backtrace::__rust_begin_short_backtrace::<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_started::{closure#0}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>> ()
+#6  0x000063ec107f3f1a in <std::thread::lifecycle::spawn_unchecked<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#7  0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#8  0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#9  0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 6 (Thread 0x7c63e87236c0 (LWP 121263) "tokio-rt-worker"):
+#0  0x00007c648e53ca2d in syscall () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x000063ec13962ae5 in <std::sys::sync::condvar::futex::Condvar>::wait ()
+#2  0x000063ec12a1babf in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout_until ()
+#3  0x000063ec12a1d0e3 in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout ()
+#4  0x000063ec107f0ccc in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1} ()
+#5  0x000063ec107d6519 in std::sys::backtrace::__rust_begin_short_backtrace::<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_started::{closure#0}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>> ()
+#6  0x000063ec107f3f1a in <std::thread::lifecycle::spawn_unchecked<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#7  0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#8  0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#9  0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 5 (Thread 0x7c63e8b256c0 (LWP 121272) "tokio-rt-worker"):
+#0  0x00007c648e53ca2d in syscall () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x000063ec13962ae5 in <std::sys::sync::condvar::futex::Condvar>::wait ()
+#2  0x000063ec12a1babf in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout_until ()
+#3  0x000063ec12a1d0e3 in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout ()
+#4  0x000063ec107f0ccc in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1} ()
+#5  0x000063ec107d6519 in std::sys::backtrace::__rust_begin_short_backtrace::<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_started::{closure#0}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>> ()
+#6  0x000063ec107f3f1a in <std::thread::lifecycle::spawn_unchecked<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#7  0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#8  0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#9  0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 4 (Thread 0x7c63e751a6c0 (LWP 138121) "tokio-rt-worker"):
+#0  0x00007c648e53ca2d in syscall () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x000063ec13962ae5 in <std::sys::sync::condvar::futex::Condvar>::wait ()
+#2  0x000063ec12a1babf in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout_until ()
+#3  0x000063ec12a1d0e3 in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout ()
+#4  0x000063ec107f0ccc in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1} ()
+#5  0x000063ec107d6519 in std::sys::backtrace::__rust_begin_short_backtrace::<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_started::{closure#0}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>> ()
+#6  0x000063ec107f3f1a in <std::thread::lifecycle::spawn_unchecked<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#7  0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#8  0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#9  0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 3 (Thread 0x7c63e6b156c0 (LWP 160895) "tokio-rt-worker"):
+#0  0x00007c648e53ca2d in syscall () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x000063ec13962ae5 in <std::sys::sync::condvar::futex::Condvar>::wait ()
+#2  0x000063ec12a1babf in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout_until ()
+#3  0x000063ec12a1d0e3 in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout ()
+#4  0x000063ec107f0ccc in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1} ()
+#5  0x000063ec107d6519 in std::sys::backtrace::__rust_begin_short_backtrace::<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_started::{closure#0}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>> ()
+#6  0x000063ec107f3f1a in <std::thread::lifecycle::spawn_unchecked<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#7  0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#8  0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#9  0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 2 (Thread 0x7c63e69146c0 (LWP 162607) "tokio-rt-worker"):
+#0  0x00007c648e53ca2d in syscall () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x000063ec13962ae5 in <std::sys::sync::condvar::futex::Condvar>::wait ()
+#2  0x000063ec12a1babf in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout_until ()
+#3  0x000063ec12a1d0e3 in <cadence_persistence::matching_postgres::PostgresConnectionPool>::checkout ()
+#4  0x000063ec107f0ccc in <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1} ()
+#5  0x000063ec107d6519 in std::sys::backtrace::__rust_begin_short_backtrace::<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_started::{closure#0}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>> ()
+#6  0x000063ec107f3f1a in <std::thread::lifecycle::spawn_unchecked<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<u64, <cadence_history::wiring::persistence::visibility::SqlVisibilityWriter>::record_closed::{closure#1}>::{closure#1}, cadence_persistence::history_sql_backend::AssertSend<core::result::Result<u64, cadence_persistence::history_contract::PersistenceError>>>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0} ()
+#7  0x000063ec1398366f in <std::sys::thread::unix::Thread>::new::thread_start ()
+#8  0x00007c648e4abe6b in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#9  0x00007c648e53f55c in ?? () from /usr/lib/x86_64-linux-gnu/libc.so.6
+
+Thread 1 (Thread 0x7c648ee7f280 (LWP 32467) "cadence-history"):
+#0  0x00007c648e53ca2d in syscall () from /usr/lib/x86_64-linux-gnu/libc.so.6
+#1  0x000063ec1383e039 in <parking_lot::condvar::Condvar>::wait_until_internal ()
+#2  0x000063ec1383170e in <tokio::runtime::park::Inner>::park ()
+#3  0x000063ec1382fbb6 in <tokio::runtime::park::CachedParkThread>::block_on::<&mut tokio::sync::oneshot::Receiver<()>> ()
+#4  0x000063ec13820e91 in <tokio::runtime::blocking::shutdown::Receiver>::wait ()
+#5  0x000063ec1382789b in <tokio::runtime::blocking::pool::BlockingPool>::shutdown ()
+#6  0x000063ec1018c55e in core::ptr::drop_glue::<tokio::runtime::blocking::pool::BlockingPool> ()
+#7  0x000063ec101aee17 in cadence_history::main ()
+#8  0x000063ec103c8c83 in std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), anyhow::Error>, core::result::Result<(), anyhow::Error>> ()
+#9  0x000063ec1037564d in std::rt::lang_start::<core::result::Result<(), anyhow::Error>>::{closure#0} ()
+#10 0x000063ec1397b048 in std::rt::lang_start_internal ()
+#11 0x000063ec101ea845 in main ()
+[Inferior 1 (process 32467) detached]

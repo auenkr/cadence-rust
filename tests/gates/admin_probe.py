@@ -69,9 +69,12 @@ check('get-dlq-replication-messages-empty', lambda **k: stub.GetDLQReplicationMe
 check('get-dlq-replication-messages-unknown-workflow', lambda **k: stub.GetDLQReplicationMessages(
     dq(task_infos=[rti(domain_id='22222222-2222-2222-2222-222222222222', workflow_execution=exe(workflow_id='w', run_id='11111111-1111-1111-1111-111111111111'),
                        task_type=0, task_id=1, version=1, first_event_id=1, next_event_id=2)]), **k), 'OK')
+# Go History logs conversion errors per workflow and returns an empty successful
+# response (handler/handler.go GetDLQReplicationMessages), rather than forwarding
+# the engine's unsupported-task-type error to Frontend.
 check('get-dlq-replication-messages-bad-type', lambda **k: stub.GetDLQReplicationMessages(
     dq(task_infos=[rti(domain_id='d', workflow_execution=exe(workflow_id='w', run_id='r'), task_type=9)]), **k),
-      'INTERNAL', 'unsupported task type')
+      'OK')
 
 for r in results:
     print(json.dumps(r))

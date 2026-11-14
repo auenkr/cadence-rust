@@ -45,11 +45,6 @@ fn failed_cause_out(v: Option<e::CrossClusterTaskFailedCause>) -> i32 {
 fn start_child_initiated_in(
     v: p::StartChildWorkflowExecutionInitiatedEventAttributes,
 ) -> Result<tk::StartChildWorkflowExecutionInitiatedEventAttributes, Status> {
-    if v.active_cluster_selection_policy.is_some() {
-        return Err(Status::unimplemented(
-            "Active cluster selection policy has not been ported.",
-        ));
-    }
     Ok(tk::StartChildWorkflowExecutionInitiatedEventAttributes {
         domain: v.domain,
         workflow_id: v.workflow_id,
@@ -85,6 +80,7 @@ fn start_child_initiated_in(
         jitter_start_seconds: seconds(v.jitter_start)?,
         first_run_at_timestamp: v.first_run_at.map(ns),
         cron_overlap_policy: enum_in(v.cron_overlap_policy, e::CronOverlapPolicy::from_i32)?,
+        active_cluster_selection_policy: v.active_cluster_selection_policy.map(super::selection_policy_in),
     })
 }
 

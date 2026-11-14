@@ -15,6 +15,8 @@ ap.add_argument('--out', type=Path, required=True)
 ap.add_argument('--rust-binary', type=Path, required=True)
 ap.add_argument('--rust-history-binary', type=Path,
                 help='replace every Go History host with the standalone Rust History binary; Go runs Worker only')
+ap.add_argument('--all-rust-recovery', action='store_true',
+                help='also crash Matching and Frontend with in-flight SDK recovery workflows')
 ap.add_argument('--go-server', type=Path, required=True)
 ap.add_argument('--go-cli', type=Path, required=True)
 ap.add_argument('--driver', type=Path, required=True)
@@ -39,6 +41,8 @@ ap.add_argument('--gcs-endpoint', help='http://host:port of fake-gcs-server; ena
 ap.add_argument('--gcs-bucket', default='cadence-archival-gate-gcs')
 ap.add_argument('--gcs-seed', help='path of the gcs-seed Go helper (prints Go gstorage history filenames)')
 args = ap.parse_args()
+if args.all_rust_recovery and not args.rust_history_binary:
+    ap.error('--all-rust-recovery requires --rust-history-binary')
 if args.gcs_endpoint:
     # Go (storage client) and the Rust Frontend honour STORAGE_EMULATOR_HOST and skip authentication.
     os.environ['STORAGE_EMULATOR_HOST'] = args.gcs_endpoint.replace('http://', '')
@@ -55,8 +59,23 @@ if args.kafka_broker and not args.kafka_container:
 ASYNC_QUEUE = 'gate-async-queue'
 async_yaml = ''
 if args.kafka_broker:
+    auth_config = ''
+    kafka_sasl = ''
+    if os.environ.get('CADENCE_GATE_KAFKA_AUTH', '').lower() in ('true', '1'):
+        auth_config = ('        sasl:\n          enabled: true\n          user: cadence\n'
+                       '          password: cadence-password\n          algorithm: plain\n')
+        kafka_sasl = ('  sasl:\n    enabled: true\n    user: cadence\n'
+                      '    password: cadence-password\n    algorithm: plain\n')
+    kafka_tls = '  tls:\n    enabled: false\n'
+    tls_async = ''
+    if os.environ.get('CADENCE_GATE_KAFKA_TLS', '').lower() in ('true', '1'):
+        td = os.environ['CADENCE_KAFKA_TLS_DIR']
+        kafka_tls = (f'  tls:\n    enabled: true\n    caFile: {td}/ca.pem\n    certFile: {td}/client.pem\n'
+                     f'    keyFile: {td}/client.key\n    enableHostVerification: true\n    serverName: localhost\n')
+        tls_async = kafka_tls.replace('  tls:', '        tls:', 1).replace('\n    ', '\n          ')
     async_yaml = (f'\nasyncWorkflowQueues:\n  {ASYNC_QUEUE}:\n    type: "kafka"\n    config:\n'
-                  f'      connection:\n        brokers:\n          - "{args.kafka_broker}"\n      topic: "{args.kafka_topic}"\n')
+                  f'      connection:\n        brokers:\n          - "{args.kafka_broker}"\n'
+                  f'{auth_config}{tls_async}      topic: "{args.kafka_topic}"\n')
 if args.sdk_timeout_seconds <= 0:
     ap.error('--sdk-timeout-seconds must be positive')
 root = Path(__file__).resolve().parents[2]
@@ -94,7 +113,7 @@ if args.es_url:
     dyn = dyn.replace('value: "db"', 'value: "es"')
 # development.yaml already sets system.minRetentionDays=0 and system.workflowDeletionJitterRange=1 (retention-0 archival scenario).
 (work / 'dynamic-config.yaml').write_text(dyn)
-(work / 'rust-dynamic-config.yaml').write_text(dyn + f'\nsystem.enableGRPCOutbound:\n  - value: {str(args.rust_outbound == "grpc").lower()}\nfrontend.sendRawWorkflowHistory:\n  - value: true\n')
+(work / 'rust-dynamic-config.yaml').write_text(dyn + f'\nsystem.enableGRPCOutbound:\n  - value: {str(args.rust_outbound == "grpc").lower()}\nfrontend.sendRawWorkflowHistory:\n  - value: true\n' + (''.join(f'\n{k}:\n  - value: true\n' for k in ('history.enableTimerQueueV2', 'history.enableTransferQueueV2') if k + ':' not in dyn) if os.environ.get('CADENCE_GATE_QUEUE_V2') == 'true' else ''))
 (work / 'config/base.yaml').write_text((root / 'go/config/base.yaml').read_text())
 seeds = ', '.join(f'"127.0.0.1:{ports[k]}"' for k in ['FRONTEND_PORT', 'HISTORY_PORT', 'WORKER_PORT', 'RUST_MATCHING_PORT'] + (['HISTORY2_PORT'] if args.two_history else []))
 text = (root / 'go/config/development.yaml').read_text()
@@ -113,7 +132,7 @@ def add_s3(cfg):
 def add_gcs(cfg):
     # development.yaml already has gstorage for history only; add it where missing (visibility)
     return re.sub(r'(        dirMode: "0766"\n)(?!      gstorage)', r'\1      gstorage:\n        credentialsPath: ""\n', cfg) if args.gcs_endpoint else cfg
-text = add_gcs(add_s3(text))
+text = add_s3(add_gcs(text))
 text = text.rstrip('\n') + '\n' + async_yaml
 (work / 'config/development.yaml').write_text(text)
 if args.two_history:
@@ -161,7 +180,7 @@ if args.es_url:
     es_yaml = (f'    es-visibility:\n      elasticsearch:\n        disableSniff: true\n        version: "{args.es_version}"\n'
                f'        url:\n          scheme: "{u.scheme}"\n          host: "{u.netloc}"\n        indices:\n          visibility: {args.es_index}\n')
     vis_topic = args.es_index
-    kafka_yaml = ('kafka:\n  tls:\n    enabled: false\n  clusters:\n    test:\n      brokers:\n'
+    kafka_yaml = ('kafka:\n' + kafka_tls + kafka_sasl + '  clusters:\n    test:\n      brokers:\n'
                   f'        - {args.kafka_broker}\n  topics:\n    {vis_topic}:\n      cluster: test\n    {vis_topic}-dlq:\n      cluster: test\n'
                   f'  applications:\n    visibility:\n      topic: {vis_topic}\n      dlq-topic: {vis_topic}-dlq\n')
     persistence = persistence.replace('  numHistoryShards: 4\n', '  advancedVisibilityStore: es-visibility\n  numHistoryShards: 4\n', 1) + es_yaml + kafka_yaml
@@ -178,7 +197,7 @@ rt = rt.replace('localhost:7833', f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}')
 rt = rt.replace('/tmp/cadence_archival/development', str(work / 'history-archive'))
 rt = rt.replace('/tmp/cadence_vis_archival/development', str(work / 'visibility-archive'))
 rt = rt.replace('/tmp/blobstore', str(work / 'blobstore'))
-rt = add_gcs(add_s3(rt))
+rt = add_s3(add_gcs(rt))
 _ms = socket.socket(); _ms.bind(('127.0.0.1', 0)); prom_port = _ms.getsockname()[1]; _ms.close()
 rt, n = re.subn(r'(?m)^(  frontend:\n(?:.*\n)*?    metrics:\n)      statsd:\n        hostPort: "127.0.0.1:8125"\n        prefix: "cadence"\n',
                 lambda m: m.group(1) + f'      prometheus:\n        timerType: histogram\n        listenAddress: "127.0.0.1:{prom_port}"\n', rt, count=1)
@@ -440,6 +459,64 @@ try:
                 r = subprocess.run([rd, 'visibility', args.s3_endpoint, rs_vis, dom_id, f"WorkflowTypeName = '{wtype}'"], capture_output=True, text=True, timeout=60)
                 (work / 'rs3-go-reader-visibility.log').write_text(r.stdout + r.stderr)
                 record('rs3-go-reads-rust-visibility', r.returncode == 0 and all(w in r.stdout for w in vis_runs), r.stdout + r.stderr)
+        if args.gcs_endpoint:
+            # ---- Rust History GCS (gstorage) archival against fake-gcs-server: Rust History archives at close, retention 0
+            # deletes the run, Rust Frontend serves history and visibility from the archive.
+            def gcs_rc(method, path, body=b''):
+                rq = urllib.request.Request(args.gcs_endpoint + path, data=body or None, method=method, headers={'Content-Type': 'application/json'})
+                try:
+                    with urllib.request.urlopen(rq, timeout=30) as rr:
+                        return rr.status, rr.read().decode()
+                except urllib.error.HTTPError as e:
+                    return e.code, e.read().decode()
+            gb = args.gcs_bucket
+            st, body = gcs_rc('POST', '/storage/v1/b?project=cadence-gate', json.dumps({'name': gb}).encode())
+            record('rgcs-create-bucket', st == 200, f'{st} {body}')
+            rg_hist, rg_vis = f'gs://{gb}/rust-history', f'gs://{gb}/rust-visibility'
+            dom_rg = 'rgcs-gate-' + secrets.token_hex(3)
+            cli_rg = lambda *a: [*cli_t, '--domain', dom_rg, *a]
+            run('rgcs-register-domain', cli_rg('domain', 'register', '--retention', '0', '--history_archival_status', 'enabled', '--history_uri', rg_hist,
+                                               '--visibility_archival_status', 'enabled', '--visibility_uri', rg_vis))
+            time.sleep(12)
+            d = subprocess.run(cli_rg('domain', 'describe'), capture_output=True, text=True, timeout=60)
+            (work / 'rgcs-describe-domain.log').write_text(d.stdout + d.stderr)
+            record('rgcs-describe-domain', d.returncode == 0 and rg_hist in d.stdout and rg_vis in d.stdout, d.stdout + d.stderr)
+            gruns = {}
+            for i in range(3):
+                wid = f'rgcs-wf-{secrets.token_hex(3)}'
+                r = subprocess.run(cli_rg('workflow', 'start', '--tl', 'rgcs-gate-tl', '--wt', 'RgcsGateType', '--wid', wid, '--et', '600', '--dt', '10'), capture_output=True, text=True, timeout=60)
+                rm = re.search(r'run Id:\s*(\S+)', r.stdout)
+                record(f'rgcs-start-{i}', r.returncode == 0 and rm is not None, r.stdout + r.stderr)
+                if rm:
+                    gruns[wid] = rm.group(1)
+                    run(f'rgcs-terminate-{i}', cli_rg('workflow', 'terminate', '--wid', wid, '--rid', rm.group(1), '--reason', 'rgcs-gate'))
+            hnames, vnames = [], []
+            for _ in range(36):
+                st, listing = gcs_rc('GET', f'/storage/v1/b/{gb}/o?prefix=' + urllib.parse.quote('rust-history/', safe=''))
+                hnames = [o['name'] for o in json.loads(listing).get('items', [])] if st == 200 else []
+                st, listing = gcs_rc('GET', f'/storage/v1/b/{gb}/o?prefix=' + urllib.parse.quote('rust-visibility/', safe=''))
+                vnames = [o['name'] for o in json.loads(listing).get('items', [])] if st == 200 else []
+                if len(hnames) >= len(gruns) > 0 and len(vnames) >= 2:
+                    break
+                time.sleep(5)
+            (work / 'rgcs-objects.log').write_text(json.dumps({'history': hnames, 'visibility': vnames}, indent=1))
+            record('rgcs-rust-wrote-history-objects', len(gruns) > 0 and len(hnames) >= len(gruns), '\n'.join(hnames[:10]))
+            record('rgcs-rust-wrote-visibility-objects', len(vnames) >= 2, '\n'.join(vnames[:10]))
+            gone_g = {}
+            for wid, rid in gruns.items():
+                for _ in range(40):
+                    r = subprocess.run(cli_rg('workflow', 'describe', '--wid', wid, '--rid', rid), capture_output=True, text=True, timeout=60)
+                    if r.returncode != 0:
+                        gone_g[wid] = True
+                        break
+                    time.sleep(5)
+            record('rgcs-retention-deleted-from-persistence', len(gone_g) == len(gruns) > 0, str(gone_g))
+            for tag, cli in (('tchannel', cli_t), ('grpc', cli_g)):
+                for wid, rid in gruns.items():
+                    out_f = work / f'rgcs-history-{tag}-{wid}.json'
+                    r = subprocess.run([*cli, '--domain', dom_rg, 'workflow', 'show', '--wid', wid, '--rid', rid, '--output_filename', str(out_f)], capture_output=True, text=True, timeout=60)
+                    exported = out_f.read_text() if out_f.exists() else ''
+                    record(f'rgcs-frontend-archived-history-{tag}-{wid}', 'WorkflowExecutionStarted' in exported and 'WorkflowExecutionTerminated' in exported, exported[-500:] + r.stdout + r.stderr)
         raise SystemExit(0)
     dom_t, dom_g = 'fe-gate-t-' + secrets.token_hex(3), 'fe-gate-g-' + secrets.token_hex(3)
     run('cli-register-domain-tchannel', [*cli_t, '--domain', dom_t, 'domain', 'register', '--retention', '1'])
@@ -564,6 +641,14 @@ try:
             if m:
                 record('sdk-' + m.group(1), m.group(2) == 'ok', m.group(3))
         print('ASYNC SDK LOG TAIL\n' + '\n'.join((work / 'sdk-async.log').read_text().splitlines()[-40:]), flush=True)
+        # Diagnostics for async message loss: the Go consumer retries the Frontend call for only 15s
+        # (CreateFrontendServiceRetryPolicy) and then Nacks the message to the DLQ.
+        try:
+            wl = (work / f'{worker_name}.log').read_text(errors='replace').splitlines()
+            hits = [l for l in wl if 'Failed to process message' in l or 'nack message' in l or 'fe-restart' in l and ('rror' in l or 'arn' in l)]
+            print('ASYNC CONSUMER FAILURE LINES (%d)\n' % len(hits) + '\n'.join(h[:600] for h in hits[:40]), flush=True)
+        except Exception as e:
+            print(f'ASYNC CONSUMER DIAG unavailable: {e}', flush=True)
         record('sdk-async-driver-exit', adrv.returncode == 0, f'exit={adrv.returncode}')
         record_services_alive('after-async-sdk')
     if args.es_url:
@@ -714,6 +799,8 @@ try:
     if args.rust_history_binary:
         db_container = os.environ.get(prefix + '_DOCKER_CONTAINER')
         rounds = ['killall'] + (['dbrestart'] if db_container else []) + (['killprimary'] if args.two_history else [])
+        if args.all_rust_recovery:
+            rounds += ['matching', 'frontend']
         dom_rc = 'fe-gate-recover-' + secrets.token_hex(3)
         run('recover-register-domain', [*cli_t, '--domain', dom_rc, 'domain', 'register', '--retention', '1'])
         time.sleep(12)  # domain cache refresh
@@ -758,6 +845,19 @@ try:
                         ok = start_history(history2_name, history2_cmd()) and ok
                     record('recover-killall-history-restarted-listening', ok)
                     time.sleep(30)
+                elif rd in ('matching', 'frontend'):
+                    name = 'rust-' + rd
+                    kill(name)
+                    record(f'recover-{rd}-killed', procs[name].returncode == -signal.SIGKILL)
+                    time.sleep(5)
+                    if rd == 'matching':
+                        start(name, rust_matching())
+                        ok = wait_port(ports['RUST_MATCHING_PORT_GRPC'], 240, name)
+                    else:
+                        start(name, rust_frontend(), env=frontend_env)
+                        ok = wait_port(ports['FRONTEND_PORT_GRPC'], 240, name)
+                    record(f'recover-{rd}-restarted-listening', ok)
+                    time.sleep(30)
                 elif rd == 'dbrestart':
                     r = subprocess.run(['docker', 'restart', '-t', '5', db_container], capture_output=True, text=True, timeout=300)
                     record('recover-dbrestart-docker-restart', r.returncode == 0, r.stdout + r.stderr)
@@ -779,6 +879,7 @@ try:
             if m:
                 record('sdk-' + m.group(1), m.group(2) == 'ok', m.group(3))
         print('RECOVER SDK LOG TAIL\n' + '\n'.join((work / 'sdk-recover.log').read_text().splitlines()[-40:]), flush=True)
+        record('sdk-recover-all-rounds-exercised', done_rounds == set(rounds), str(sorted(done_rounds)))
         record('sdk-recover-driver-exit', rdrv.returncode == 0, f'exit={rdrv.returncode}')
         record_services_alive('after-recover-sdk')
     # ---- archival phase: Go History/Worker archive (filestore), Rust Frontend registers/reads

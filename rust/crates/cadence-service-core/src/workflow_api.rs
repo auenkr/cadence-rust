@@ -27,6 +27,9 @@ pub struct CallerContext {
     pub deadline: Option<Instant>,
     /// Transport headers, lower-cased names.
     pub headers: HashMap<String, String>,
+    /// Go `req.Transport` (`grpc`, `tchannel`, `http`) for the inbound metrics
+    /// middleware's `transport` tag; empty when unknown.
+    pub transport: &'static str,
 }
 
 pub type ApiFuture<'a> =
@@ -61,9 +64,148 @@ pub trait AdminAuthorizer: Send + Sync {
     }
 }
 
+/// Result class of an Admin call, mirroring Go `adminHandlerImpl.error`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdminOutcome {
+    Ok,
+    /// `types.BadRequestError` -> `cadence_errors_bad_request`.
+    BadRequest,
+    /// `types.ServiceBusyError` -> `cadence_errors_service_busy`.
+    ServiceBusy,
+    /// `types.EntityNotExistsError`: no counter.
+    NotExists,
+    /// Internal/uncategorized -> `cadence_errors`.
+    Failure,
+}
+
+impl AdminOutcome {
+    /// Classify a gRPC status code (0 = OK).
+    pub fn from_grpc_code(code: i32) -> Self {
+        match code {
+            0 => Self::Ok,
+            3 => Self::BadRequest,
+            8 => Self::ServiceBusy,
+            5 => Self::NotExists,
+            _ => Self::Failure,
+        }
+    }
+
+    /// Classify a Thrift exception name.
+    pub fn from_exception(name: &str) -> Self {
+        match name {
+            "BadRequestError" => Self::BadRequest,
+            "ServiceBusyError" => Self::ServiceBusy,
+            "EntityNotExistsError" => Self::NotExists,
+            _ => Self::Failure,
+        }
+    }
+}
+
+/// Go `adminHandlerImpl.startRequestProfile` / `error` seam: the Frontend
+/// installs a sink; both the Thrift and gRPC Admin dispatch call it after
+/// authorization.
+pub trait AdminMetrics: Send + Sync {
+    /// Emits `cadence_requests` for the method's scope; `caller`/`transport` are
+    /// Go `InboundMetricsMiddleware` context tags (empty = unset).
+    fn admin_request(&self, method: &str, caller: &str, transport: &str);
+    /// Emits latency plus the typed error counter.
+    fn admin_finish(
+        &self,
+        method: &str,
+        caller: &str,
+        transport: &str,
+        elapsed: std::time::Duration,
+        outcome: AdminOutcome,
+    );
+}
+
+/// Failure of a Go `WorkflowHandler` domain pre-check.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DomainGuardError {
+    /// Go `types.BadRequestError`.
+    BadRequest(String),
+    /// Go `types.InternalServiceError`.
+    Internal(String),
+}
+
+pub type GuardFuture<'a> = Pin<Box<dyn Future<Output = Result<(), DomainGuardError>> + Send + 'a>>;
+
+/// Seam so the domain/semaphore handlers served from this crate run the
+/// Frontend's ported `RequestValidator` and graceful-failover checks exactly
+/// where Go's `WorkflowHandler` runs them (before the domain handler).
+pub trait DomainValidator: Send + Sync {
+    /// Go `requestValidator.Validate<Op>Request`. `operation` is one of
+    /// RegisterDomain, UpdateDomain, DeprecateDomain, DeleteDomain,
+    /// FailoverDomain, CreateSemaphore; `request` is the camelCase JSON form.
+    fn validate(
+        &self,
+        operation: &str,
+        request: &serde_json::Value,
+    ) -> Result<(), DomainGuardError>;
+    /// Go `checkOngoingFailover`.
+    fn check_ongoing_failover<'a>(&'a self, domain: &'a str) -> GuardFuture<'a>;
+    /// Go graceful failover counters. `failure_reason` is `None` for success.
+    fn graceful_failover_metric(
+        &self,
+        operation: &str,
+        domain: &str,
+        failure_reason: Option<&str>,
+    ) {
+        let _ = (operation, domain, failure_reason);
+    }
+}
+
+/// Runs the Go pre-checks for a domain API: validation, then (for graceful
+/// failover, `graceful_domain` set) the ongoing-failover check. Emits the
+/// initiation-failure metric like Go's `emitInitiationFailure`.
+pub async fn run_domain_guard(
+    api: Option<&SharedWorkflowApi>,
+    operation: &str,
+    request: &serde_json::Value,
+    graceful_domain: Option<&str>,
+) -> Result<(), DomainGuardError> {
+    let Some(guard) = api.and_then(|a| a.domain_validator()) else {
+        return Ok(());
+    };
+    if let Err(error) = guard.validate(operation, request) {
+        if let Some(domain) = graceful_domain {
+            guard.graceful_failover_metric(operation, domain, Some("validation"));
+        }
+        return Err(error);
+    }
+    if let Some(domain) = graceful_domain {
+        if let Err(error) = guard.check_ongoing_failover(domain).await {
+            guard.graceful_failover_metric(operation, domain, Some("ongoing_failover_check"));
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
+/// Go emits `GracefulFailoverInitiationSuccess` / failure(`handler`) after the
+/// domain handler returns for a graceful failover.
+pub fn record_graceful_outcome(
+    api: Option<&SharedWorkflowApi>,
+    operation: &str,
+    domain: &str,
+    ok: bool,
+) {
+    if let Some(guard) = api.and_then(|a| a.domain_validator()) {
+        guard.graceful_failover_metric(operation, domain, if ok { None } else { Some("handler") });
+    }
+}
+
 pub trait WorkflowApi: Send + Sync + std::fmt::Debug {
+    /// Domain pre-checks installed by the Frontend; `None` skips them.
+    fn domain_validator(&self) -> Option<&dyn DomainValidator> {
+        None
+    }
     /// Admin access control installed by the Frontend; `None` allows all.
     fn admin_authorizer(&self) -> Option<&dyn AdminAuthorizer> {
+        None
+    }
+    /// Admin request/error metrics installed by the Frontend; `None` skips.
+    fn admin_metrics(&self) -> Option<&dyn AdminMetrics> {
         None
     }
     /// True when the operation is served by this implementation.
@@ -227,10 +369,10 @@ macro_rules! op {
 }
 
 fn codec(method: &str) -> Option<Codec> {
+    use cadence_api::schedule as sc;
     use cadence_api::service_types as st;
     use cadence_api::tasks as tk;
     use cadence_api::types as ty;
-    use cadence_api::schedule as sc;
     Some(match method {
         "CreateSchedule" => op!(sc::CreateScheduleRequest, sc::CreateScheduleResponse),
         "DescribeSchedule" => op!(sc::DescribeScheduleRequest, sc::DescribeScheduleResponse),

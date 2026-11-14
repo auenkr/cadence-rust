@@ -119,6 +119,32 @@ fn checksum_json(sum: &crate::execution::checksum::Checksum) -> Vec<u8> {
     format!("{{\"Version\":{},\"Flavor\":{},\"Value\":\"{}\"}}", sum.version, sum.flavor, b64).into_bytes()
 }
 
+/// Go `VersionHistory.AddOrUpdateItem` (used by `updateWithLastWriteEvent`), including its BadRequest errors.
+fn add_or_update_version_item(items: &mut Vec<VersionHistoryItem>, event_id: i64, version: i64) -> HResult<()> {
+    let Some(last) = items.last_mut() else {
+        items.push(VersionHistoryItem { event_id, version });
+        return Ok(());
+    };
+    if version < last.version {
+        return Err(HistoryError::bad_request(format!(
+            "cannot update version history with a lower version {version}. Last version: {}",
+            last.version
+        )));
+    }
+    if event_id <= last.event_id {
+        return Err(HistoryError::bad_request(format!(
+            "cannot add version history with a lower event id {event_id}. Last event id: {}",
+            last.event_id
+        )));
+    }
+    if version > last.version {
+        items.push(VersionHistoryItem { event_id, version });
+    } else {
+        last.event_id = event_id;
+    }
+    Ok(())
+}
+
 fn enc(s: &cadence_thrift::value::Struct) -> HResult<Vec<u8>> {
     Encoding::ThriftRW.encode(s).map_err(|e| HistoryError::internal(format!("encode mutable state blob: {e}")))
 }
@@ -186,11 +212,9 @@ impl EngineMutableState {
             last_write_version = last.version;
             let (id, version) = (last.event_id, last.version);
             if let Some(vh) = g.version_histories.as_mut() {
-                if let Some(h) = vh.histories.get_mut(vh.current_version_history_index as usize) {
-                    match h.items.last_mut() {
-                        Some(item) if item.version == version => item.event_id = id,
-                        _ => h.items.push(VersionHistoryItem { event_id: id, version }),
-                    }
+                match vh.histories.get_mut(vh.current_version_history_index as usize) {
+                    Some(h) => add_or_update_version_item(&mut h.items, id, version)?,
+                    None => return Err(HistoryError::internal("version history index out of range")),
                 }
             }
         }
@@ -570,6 +594,72 @@ mod tests {
         s
     }
 
+    /// odd failover versions belong to cluster-a (current), even to cluster-b.
+    struct ParityCluster;
+    impl crate::engine::deps::ClusterMetadata for ParityCluster {
+        fn get_current_cluster_name(&self) -> String {
+            "cluster-a".into()
+        }
+        fn cluster_name_for_failover_version(&self, v: i64) -> HResult<String> {
+            Ok(if v % 2 != 0 { "cluster-a" } else { "cluster-b" }.into())
+        }
+    }
+
+    fn failover_state(in_flight: bool, buffered: usize, decision_v: i64, last_write: i64, current: i64) -> EngineMutableState {
+        let mut s = state(in_flight, buffered, 100);
+        s.domain.is_global_domain = true;
+        s.domain.clusters = vec!["cluster-a".into(), "cluster-b".into()];
+        s.params.close_policy = Some(crate::wiring::assembly::engine_state::ClosePolicy {
+            cluster: Arc::new(ParityCluster),
+            replication_enabled: Arc::new(|_, _| true),
+        });
+        {
+            let mut g = s.inner.lock().unwrap();
+            g.pc_exec.decision_version = decision_v;
+            g.pc_exec.last_write_version = last_write;
+            g.current_version = current;
+        }
+        s
+    }
+
+    #[test]
+    fn failover_without_in_flight_decision_or_with_newer_decision_is_noop() {
+        assert!(!failover_state(false, 0, 1, 1, 2).start_transaction_handle_decision_failover(-24).unwrap());
+        assert!(!failover_state(true, 0, 2, 2, 2).start_transaction_handle_decision_failover(-24).unwrap());
+    }
+
+    #[test]
+    fn failover_version_mismatch_is_internal_error() {
+        let e = failover_state(true, 0, 1, 3, 2).start_transaction_handle_decision_failover(-24).unwrap_err();
+        assert!(format!("{e:?}").contains("mismatch version"), "{e:?}");
+    }
+
+    #[test]
+    fn failover_active_to_passive_fails_in_flight_decision() {
+        // decision v1 (cluster-a, current), current version 2 (cluster-b): case 1.
+        let s = failover_state(true, 0, 1, 1, 2);
+        assert!(s.start_transaction_handle_decision_failover(-24).unwrap());
+        let g = s.inner.lock().unwrap();
+        assert_eq!(g.pc_exec.decision_started_id, crate::engine::deps::EMPTY_EVENT_ID);
+        assert_ne!(g.pc_exec.decision_schedule_id, crate::engine::deps::EMPTY_EVENT_ID);
+    }
+
+    #[test]
+    fn failover_previous_passive_workflow_with_buffered_events_errors() {
+        // decision v2 and current v4 both cluster-b: case 4.
+        assert!(!failover_state(true, 0, 2, 2, 4).start_transaction_handle_decision_failover(-24).unwrap());
+        let e = failover_state(true, 1, 2, 2, 4).start_transaction_handle_decision_failover(-24).unwrap_err();
+        assert!(format!("{e:?}").contains("previous passive workflow with buffered events"), "{e:?}");
+        // case 3 (passive -> active) with buffered events also errors.
+        assert!(failover_state(true, 1, 2, 2, 3).start_transaction_handle_decision_failover(-24).is_err());
+    }
+
+    #[test]
+    fn failover_case5_incoming_task_from_current_cluster_is_noop() {
+        // current version cluster-b, incoming task version from cluster-a.
+        assert!(!failover_state(true, 0, 1, 1, 2).start_transaction_handle_decision_failover(5).unwrap());
+    }
+
     #[test]
     fn active_close_of_global_domain_emits_history_and_sync_activity_tasks() {
         let s = global_state(true, true);
@@ -657,6 +747,22 @@ mod tests {
         assert_eq!(t.first(), Some(&EventType::DecisionTaskFailed));
         assert!(t.contains(&EventType::DecisionTaskScheduled));
         assert_eq!(t.iter().filter(|e| **e == EventType::WorkflowExecutionSignaled).count(), 3);
+    }
+
+    #[test]
+    fn version_history_update_matches_go_add_or_update_item() {
+        let item = |event_id, version| VersionHistoryItem { event_id, version };
+        let mut items = vec![];
+        add_or_update_version_item(&mut items, 5, 1).unwrap();
+        add_or_update_version_item(&mut items, 7, 1).unwrap();
+        assert_eq!(items, vec![item(7, 1)]);
+        add_or_update_version_item(&mut items, 9, 3).unwrap();
+        assert_eq!(items, vec![item(7, 1), item(9, 3)]);
+        let err = add_or_update_version_item(&mut items, 9, 3).unwrap_err().to_string();
+        assert!(err.contains("cannot add version history with a lower event id 9. Last event id: 9"), "{err}");
+        let err = add_or_update_version_item(&mut items, 12, 2).unwrap_err().to_string();
+        assert!(err.contains("cannot update version history with a lower version 2. Last version: 3"), "{err}");
+        assert_eq!(items, vec![item(7, 1), item(9, 3)]);
     }
 
     #[test]

@@ -273,6 +273,11 @@ impl ProductionBackend {
         self.visibility.as_ref().ok_or_else(not_supported)
     }
 
+    pub fn with_list_sampler(mut self, sampler: Arc<ListSampler>) -> Self {
+        self.list_sampler = Some(sampler);
+        self
+    }
+
     /// `ListOpenWorkflowExecutions` / `ListClosedWorkflowExecutions`.
     pub(crate) async fn list_visibility(
         &self,
@@ -283,6 +288,10 @@ impl ProductionBackend {
             return self.es_open_closed(request, closed).await;
         }
         let store = self.visibility_store()?.clone();
+        if let Some(sampler) = &self.list_sampler {
+            let domain = str_field(request, "domain").unwrap_or_default();
+            sampler.try_consume(&domain)?;
+        }
         let close_status = match request.get("status") {
             Some(v) if !v.is_null() => {
                 let status: WorkflowExecutionCloseStatus = serde_json::from_value(v.clone())
@@ -369,5 +378,173 @@ mod read_store_tests {
         // Unavailable stores fall back to DB visibility.
         assert!(!read_store_selects_es("pinot"));
         assert!(!read_store_selects_es(""));
+    }
+}
+
+/// Go `persistence/wrappers/sampled` list limiter: when
+/// `system.enableVisibilitySampling` is on, each domain gets a token bucket
+/// of `frontend.visibilityListMaxQPS`; an empty bucket yields
+/// `ServiceBusyError("Persistence Max QPS Reached for List Operations.")`.
+pub struct ListSampler {
+    enabled: Arc<dyn Fn() -> bool + Send + Sync>,
+    qps: Arc<dyn Fn(&str) -> i64 + Send + Sync>,
+    buckets: std::sync::Mutex<std::collections::HashMap<String, (f64, std::time::Instant)>>,
+}
+
+impl ListSampler {
+    pub fn new(
+        enabled: Arc<dyn Fn() -> bool + Send + Sync>,
+        qps: Arc<dyn Fn(&str) -> i64 + Send + Sync>,
+    ) -> Self {
+        Self {
+            enabled,
+            qps,
+            buckets: Default::default(),
+        }
+    }
+
+    pub fn try_consume(&self, domain: &str) -> Result<(), CadenceError> {
+        if !(self.enabled)() {
+            return Ok(());
+        }
+        let rate = (self.qps)(domain).max(0) as f64;
+        let burst = rate.max(1.0);
+        let now = std::time::Instant::now();
+        let mut map = self.buckets.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = map.entry(domain.to_string()).or_insert((burst, now));
+        let elapsed = now.duration_since(entry.1).as_secs_f64();
+        entry.0 = (entry.0 + elapsed * rate).min(burst);
+        entry.1 = now;
+        if entry.0 >= 1.0 {
+            entry.0 -= 1.0;
+            Ok(())
+        } else {
+            Err(CadenceError::ServiceBusy(
+                cadence_api::errors::ServiceBusyError::new(
+                    "Persistence Max QPS Reached for List Operations.",
+                ),
+            ))
+        }
+    }
+}
+
+#[cfg(test)]
+mod solfix16_tests {
+    use super::*;
+
+    #[test]
+    fn list_sampler_limits_per_domain_when_enabled() {
+        let s = ListSampler::new(Arc::new(|| true), Arc::new(|_| 1));
+        assert!(s.try_consume("a").is_ok());
+        assert!(matches!(
+            s.try_consume("a"),
+            Err(CadenceError::ServiceBusy(_))
+        ));
+        assert!(s.try_consume("b").is_ok());
+        let off = ListSampler::new(Arc::new(|| false), Arc::new(|_| 0));
+        assert!(off.try_consume("a").is_ok());
+    }
+}
+
+#[cfg(test)]
+mod timestamp_handler_tests {
+    use super::*;
+    use cadence_service_core::workflow_api::{ApiFuture, CallerContext, WorkflowApi};
+    use cadence_thrift::{FromThrift, ToThrift};
+
+    #[derive(Debug)]
+    struct Rows;
+    impl VisibilityStore for Rows {
+        fn select(&self, filter: &VisibilityFilter) -> Result<Vec<VisibilityRow>, VisibilityError> {
+            Ok(vec![VisibilityRow {
+                workflow_id: "workflow".into(),
+                run_id: "run".into(),
+                start_time_us: 1_700_000_000_123_456,
+                execution_time_us: 1_700_000_001_234_567,
+                close_time_us: filter.closed.then_some(1_700_000_002_345_678),
+                close_status: filter.closed.then_some(0),
+                ..Default::default()
+            }])
+        }
+        fn get_closed(&self, _: &str, _: &str) -> Result<Option<VisibilityRow>, VisibilityError> {
+            Ok(None)
+        }
+    }
+    struct Domains;
+    impl crate::handler_workflow::WorkflowDomainLookup for Domains {
+        fn domain_id(&self, _: &str) -> Result<String, CadenceError> {
+            Ok("domain-id".into())
+        }
+    }
+    struct Api(crate::handler_workflow::Handler<ProductionBackend>);
+    impl std::fmt::Debug for Api {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("visibility test API")
+        }
+    }
+    impl WorkflowApi for Api {
+        fn serves(&self, operation: &str) -> bool {
+            matches!(
+                operation,
+                "ListOpenWorkflowExecutions" | "ListClosedWorkflowExecutions"
+            )
+        }
+        fn call<'a>(
+            &'a self,
+            operation: &'a str,
+            request: serde_json::Value,
+            _: CallerContext,
+        ) -> ApiFuture<'a> {
+            Box::pin(self.0.dispatch(operation, request))
+        }
+    }
+    #[tokio::test]
+    async fn thrift_list_handler_returns_exact_nanosecond_timestamps() {
+        use cadence_thrift::value::{Struct, Value};
+        let handler = crate::handler_workflow::Handler::new(
+            ProductionBackend::new("127.0.0.1:1".into(), "127.0.0.1:2".into())
+                .with_visibility_store(Arc::new(Rows)),
+        )
+        .with_domain_lookup(Arc::new(Domains));
+        let state = cadence_service_core::handlers::AppState {
+            workflow_api: Some(Arc::new(Api(handler))),
+            ..Default::default()
+        };
+        for closed in [false, true] {
+            let request = st::ListOpenWorkflowExecutionsRequest {
+                domain: "domain".into(),
+                maximum_page_size: 10,
+                start_time_filter: Some(st::StartTimeFilter {
+                    earliest_time: Some(1),
+                    latest_time: Some(i64::MAX),
+                }),
+                ..Default::default()
+            };
+            let body = Struct {
+                fields: vec![(1, Value::Struct(request.to_thrift()))],
+            };
+            let operation = if closed {
+                "ListClosedWorkflowExecutions"
+            } else {
+                "ListOpenWorkflowExecutions"
+            };
+            let (reply, error) = cadence_service_core::yarpc::dispatch(
+                &state,
+                operation,
+                &body,
+                std::time::Instant::now() + std::time::Duration::from_secs(5),
+            )
+            .await
+            .unwrap();
+            assert!(error.is_none(), "{error:?}");
+            let Some(Value::Struct(response)) = reply.get(0) else {
+                panic!("missing response")
+            };
+            let response = st::ListOpenWorkflowExecutionsResponse::from_thrift(response).unwrap();
+            let info = &response.executions[0];
+            assert_eq!(info.start_time, Some(1_700_000_000_123_456_000));
+            assert_eq!(info.execution_time, Some(1_700_000_001_234_567_000));
+            assert_eq!(info.close_time, closed.then_some(1_700_000_002_345_678_000));
+        }
     }
 }

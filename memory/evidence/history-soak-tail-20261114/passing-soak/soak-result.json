@@ -1,0 +1,43 @@
+{
+  "final": {
+    "completed": 4800,
+    "e2e_avg_ms": 4106,
+    "e2e_max_ms": 4417,
+    "e2e_p50_ms": 4111,
+    "e2e_p95_ms": 4185,
+    "e2e_p99_ms": 4219,
+    "failed": 0,
+    "inflight": 0,
+    "queries": 4800,
+    "query_init_attempts": 7152,
+    "query_init_workflows": 3595,
+    "query_p50_ms": 6,
+    "query_p95_ms": 16,
+    "query_p99_ms": 23,
+    "retried_calls": 7152,
+    "signals": 4800,
+    "start_p50_ms": 4,
+    "start_p95_ms": 12,
+    "start_p99_ms": 24,
+    "started": 4800,
+    "ts": 1794633565
+  },
+  "rss": {
+    "rust-history": {
+      "early_mb": 164.0,
+      "late_mb": 177.6,
+      "peak_mb": 185.5,
+      "samples": 32
+    },
+    "rust-history-2": {
+      "early_mb": 48.0,
+      "late_mb": 48.1,
+      "peak_mb": 48.1,
+      "samples": 10
+    }
+  },
+  "restartAt": 600,
+  "restartedAt": 606,
+  "soakSeconds": 1200,
+  "rate": "4"
+}

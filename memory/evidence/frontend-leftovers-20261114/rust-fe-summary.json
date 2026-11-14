@@ -1,0 +1,55 @@
+{
+  "label": "rust-fe",
+  "samples": 21,
+  "duration_s": 1203,
+  "restart_at_s": 600,
+  "started": 12000,
+  "completed": 12000,
+  "failed": 0,
+  "in_flight_at_end": 0,
+  "fail_stage_counts": {},
+  "fail_examples": [],
+  "query_init_attempts": 8099,
+  "query_init_workflows": 5982,
+  "retried_calls": 8099,
+  "e2e_ms": {
+    "p50": 3062,
+    "p95": 4067,
+    "p99": 4105,
+    "max": 11538
+  },
+  "query_ms": {
+    "p50": 9,
+    "p95": 24,
+    "p99": 42
+  },
+  "start_ms": {
+    "p50": 6,
+    "p95": 8,
+    "p99": 17
+  },
+  "slopes": {
+    "window_s": [
+      0,
+      1203
+    ],
+    "frontend_window_s": [
+      900,
+      1203
+    ],
+    "fe_rss_mb_per_h": 9.59999999999999,
+    "fe_fds_per_h": -6.857142857142857,
+    "mt_rss_mb_per_h": 16.072032187599294,
+    "mt_fds_per_h": 23.502965010876053
+  },
+  "peak": {
+    "fe_rss_mb": 83.9,
+    "fe_fds": 122,
+    "mt_rss_mb": 113.4,
+    "mt_fds": 115,
+    "load1": 5.572265625
+  },
+  "panic_in_logs": false,
+  "service_died_steps": [],
+  "failed_steps": []
+}

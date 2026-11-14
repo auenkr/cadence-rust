@@ -52,7 +52,7 @@ pub enum HistoryError {
     #[error("context canceled")]
     Canceled,
     /// `persistence.DuplicateRequestError`
-    #[error("Request already started.  RequestType: {request_type:?}, RunID: {run_id}")]
+    #[error("Request has already been applied to runID: {run_id}")]
     DuplicateRequest { request_type: WorkflowRequestType, run_id: String },
     /// `persistence.WorkflowExecutionAlreadyStartedError`
     #[error("{0}")]
@@ -495,5 +495,11 @@ mod active_cluster_lookup_tests {
         let plain = DomainCacheEntry { active_clusters: vec![(None, "c0".into())], failover_version: 3, ..Default::default() };
         assert_eq!(plain.get_active_cluster_info_by_cluster_attribute(Some(&attr("region", "us"))), None);
         assert_eq!(plain.get_active_cluster_info_by_cluster_attribute(None), Some(("c0".into(), 3)));
+    }
+
+    #[test]
+    fn duplicate_request_message_matches_go() {
+        let e = HistoryError::DuplicateRequest { request_type: WorkflowRequestType::Signal, run_id: "r1".into() };
+        assert_eq!(e.to_string(), "Request has already been applied to runID: r1");
     }
 }

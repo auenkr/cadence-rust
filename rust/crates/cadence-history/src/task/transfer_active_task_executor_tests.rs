@@ -1188,3 +1188,29 @@ fn copy_search_attributes_nil_and_deep_copy() {
     // empty (non-nil) input stays empty non-nil, as Go make(map) does.
     assert_eq!(copy_search_attributes(Some(&BytesMap::new())), Some(BytesMap::new()));
 }
+
+#[tokio::test]
+async fn child_completion_transfer_retries_parent_notification_after_restart_errors() {
+    for close_task in [false, true] {
+        let h = harness();
+        closed_with_parent(&h);
+        for transient in [TaskError::InternalService("connection refused during restart".into()), TaskError::ShardOwnershipLost("parent shard moved".into())] {
+            h.deps.errors.lock().unwrap().insert("record_child_completed", transient.clone());
+            let result = if close_task {
+                h.exec.process_close_execution(&CloseExecutionTask { workflow_identifier: wi(), task_data: td(0) }).await
+            } else {
+                h.exec.process_record_child_execution_completed(&RecordChildExecutionCompletedTask { workflow_identifier: wi(), task_data: td(0), ..Default::default() }).await
+            };
+            assert_eq!(result, Err(transient));
+        }
+        h.deps.errors.lock().unwrap().remove("record_child_completed");
+        if close_task {
+            h.exec.process_close_execution(&CloseExecutionTask { workflow_identifier: wi(), task_data: td(0) }).await.unwrap();
+        } else {
+            h.exec.process_record_child_execution_completed(&RecordChildExecutionCompletedTask { workflow_identifier: wi(), task_data: td(0), ..Default::default() }).await.unwrap();
+        }
+        let calls = h.deps.log();
+        assert_eq!(calls.len(), 3);
+        assert!(calls.iter().all(|call| call == &calls[0]));
+    }
+}

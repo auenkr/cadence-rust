@@ -1,0 +1,5 @@
+clippy-test	Test	2026-11-14T04:54:52.9211809Z test wiring::assembly::engine_cache::evict_tests::configured_cache_capacity_and_ttl_apply_to_real_contexts ... ok
+clippy-test	Test	2026-11-14T04:54:53.1078269Z test wiring::assembly::real_engine_tests::canceled_child_completion_is_retried_from_persisted_parent_state ... ok
+clippy-test	Test	2026-11-14T04:55:52.8798375Z test result: ok. 903 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 61.44s
+clippy-test	Test	2026-11-14T04:55:52.8827126Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T04:55:55.3856815Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

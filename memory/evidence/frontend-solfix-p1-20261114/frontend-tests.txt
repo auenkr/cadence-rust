@@ -1,0 +1,5 @@
+clippy-test	Test	2026-11-14T12:53:08.8389247Z test handler_admin_history::history_error_passthrough_tests::admin_history_forwarding_preserves_original_status_details_and_metadata ... ok
+clippy-test	Test	2026-11-14T12:53:08.8797699Z test workflow_visibility::timestamp_handler_tests::thrift_list_handler_returns_exact_nanosecond_timestamps ... ok
+clippy-test	Test	2026-11-14T12:53:11.8205093Z test result: ok. 261 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.00s
+clippy-test	Test	2026-11-14T12:53:11.8237930Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T12:53:12.0544002Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

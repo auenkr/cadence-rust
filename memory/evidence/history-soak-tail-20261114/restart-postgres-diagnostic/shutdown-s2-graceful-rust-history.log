@@ -1,0 +1,7 @@
+2026-11-14T07:03:11.831862Z  INFO cadence_history::launcher: History shutdown: stopping service
+2026-11-14T07:03:11.831890Z  INFO cadence_history::service: ShutdownHandler: Evicting self from membership ring
+2026-11-14T07:03:11.832852Z  INFO cadence_history::service: ShutdownHandler: Waiting for others to discover I am unhealthy
+2026-11-14T07:03:11.836239Z  INFO cadence_history::service: history stopped
+2026-11-14T07:03:11.836250Z  INFO cadence_history::launcher: History shutdown: stopping task processor
+2026-11-14T07:03:11.836254Z  INFO cadence_history::launcher: History shutdown: stopping membership
+2026-11-14T07:03:11.836346Z  INFO cadence_history::launcher: History shutdown complete

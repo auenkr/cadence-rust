@@ -1,0 +1,5 @@
+clippy-test	Test	2026-11-14T12:52:04.2653903Z test result: ok. 434 passed; 0 failed; 14 ignored; 0 measured; 0 filtered out; finished in 0.72s
+clippy-test	Test	2026-11-14T12:52:04.2713543Z test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T12:52:05.5348290Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Verify PostgreSQL pool wakeup under contention	2026-11-14T12:52:05.7864074Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 447 filtered out; finished in 0.05s
+clippy-test	Verify PostgreSQL pool wakeup under contention	2026-11-14T12:52:05.7866641Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s

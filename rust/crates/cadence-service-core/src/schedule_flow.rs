@@ -669,6 +669,7 @@ mod caller_context_tests {
         let ctx = CallerContext {
             deadline: Some(deadline),
             headers: HashMap::from([("x-caller".into(), "preserved".into())]),
+            transport: "",
         };
         let create = CreateScheduleRequest {
             domain: "d".into(),

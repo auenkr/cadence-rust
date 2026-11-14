@@ -200,6 +200,11 @@ impl ProcInner {
         let mut ticker = tokio::time::interval(self.monitor_tick);
         ticker.tick().await;
         loop {
+            if *shutdown.borrow() {
+                let n = self.workers.lock().unwrap().len();
+                self.remove_worker(n);
+                return;
+            }
             tokio::select! {
                 _ = shutdown.changed() => {
                     let n = self.workers.lock().unwrap().len();
@@ -242,7 +247,7 @@ impl Daemon for ParallelTaskProcessor {
         {
             return;
         }
-        let _ = i.shutdown_tx.send(true);
+        i.shutdown_tx.send_replace(true);
         i.drain_and_nack();
         let handles: Vec<_> = std::mem::take(&mut *i.handles.lock().unwrap());
         let wait = async {
@@ -489,6 +494,9 @@ impl<K: Hash + Eq + Clone + Send + Sync + 'static> SchedInner<K> {
     async fn dispatcher(self: Arc<Self>) {
         let mut cancel = self.cancel.subscribe();
         loop {
+            if *cancel.borrow() {
+                return;
+            }
             tokio::select! {
                 _ = self.notify.notified() => {
                     if self.dispatch_tasks(&cancel).await { return; }
@@ -549,7 +557,7 @@ impl<K: Hash + Eq + Clone + Send + Sync + 'static> Daemon for WeightedRoundRobin
         {
             return;
         }
-        let _ = i.cancel.send(true);
+        i.cancel.send_replace(true);
         for c in i.pool.all_channels() {
             Self::drain(&c);
         }
@@ -691,7 +699,7 @@ mod tests {
         p.start().await;
         let t = Arc::new(T::default());
         p.submit(t.clone()).await.unwrap();
-        p.stop().await;
+        tokio::time::timeout(Duration::from_secs(1), p.stop()).await.expect("stop before monitor startup must not lose shutdown");
         assert!(t.nacked.load(Ordering::SeqCst));
         assert!(!t.acked.load(Ordering::SeqCst));
         let r = p.submit(Arc::new(T::default())).await;
@@ -779,7 +787,7 @@ mod tests {
         rec.tasks.lock().unwrap().insert(id, 2);
         assert!(s.try_submit(a_ref).unwrap());
         assert!(!s.try_submit(mk(2)).unwrap()); // dispatcher has not run yet (current_thread)
-        s.stop().await;
+        tokio::time::timeout(Duration::from_secs(1), s.stop()).await.expect("stop before dispatcher startup must not lose shutdown");
         assert!(a.nacked.load(Ordering::SeqCst));
         assert_eq!(s.try_submit(mk(2)), Err(SubmitError::SchedulerClosed));
         assert_eq!(s.submit(mk(2)).await, Err(SubmitError::SchedulerClosed));

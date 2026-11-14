@@ -137,8 +137,8 @@ impl PendingActivityMutableState for TypedReset<'_> {
                 started_id: ai.started_id,
                 scheduled_time_unix_nanos: ai.scheduled_time,
                 timer_task_status: ai.timer_task_status,
-                // Heartbeat details are persisted separately in the Rust model.
-                details: Vec::new(),
+                // Go passes ai.Details (last heartbeat details) to AddActivityTaskFailedEvent.
+                details: ai.details.clone(),
                 started_identity: ai.started_identity.clone(),
             })
             .collect()
@@ -349,6 +349,9 @@ impl EngineWorkflowResetter {
             .as_any_mut()
             .and_then(|a| a.downcast_mut::<OwnedNdcMutableState>())
             .ok_or_else(|| HistoryError::internal("workflow resetter: rebuilt state is not the typed state"))?;
+        let domain_name = core.domains.get_domain_name(&request.domain_id)?;
+        owned.typed_mut().task_gen_env.enable_strong_idempotency =
+            (core.enable_strong_idempotency)(&domain_name);
         owned.typed_mut().history_size = size;
 
         let mut env = DecisionEnv { now_nanos: now, ..Default::default() };
@@ -381,10 +384,6 @@ impl EngineWorkflowResetter {
             )
             .map_err(reset_err)?;
         }
-        // Go insertWorkflowRequest only records requests when
-        // EnableStrongIdempotency is on (default off); drop un-encoded ones.
-        owned.typed_mut().insert_workflow_requests.clear();
-
         let (snapshot, mut batches) = owned
             .close_transaction_as_snapshot(now, TransactionPolicy::Active)
             .map_err(ndc_err)?;
@@ -533,6 +532,25 @@ mod tests {
         assert!(err.to_string().contains("pending child"));
         let err = reset_err(ResetError("workflowResetter encounter version mismatch.".into()));
         assert!(err.to_string().contains("version mismatch"));
+    }
+
+    #[test]
+    fn pending_activity_infos_carry_heartbeat_details() {
+        let mut state = owned();
+        state.typed_mut().pending_activity_info_ids.insert(
+            5,
+            crate::mutable_state_activity::ActivityInfo {
+                schedule_id: 5,
+                started_id: 6,
+                details: b"hb".to_vec(),
+                started_identity: "w".into(),
+                ..Default::default()
+            },
+        );
+        let adapter = TypedReset { state: state.typed_mut(), env: DecisionEnv::default() };
+        let infos = adapter.pending_activity_infos();
+        assert_eq!(infos.len(), 1);
+        assert_eq!(infos[0].details, b"hb".to_vec());
     }
 
     #[test]

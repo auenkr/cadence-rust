@@ -1,0 +1,63 @@
+Run: https://github.com/auenkr/cadence-rust/actions/runs/43576413232
+Head: df25f4ece (Rust unchanged through final evidence commit)
+Conclusion: success; clean_target=true; Clippy then workspace tests.
+clippy-test	Test	2026-11-14T08:42:08.3833664Z test result: ok. 47 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:42:08.3874096Z test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:42:08.7979882Z test result: ok. 126 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.40s
+clippy-test	Test	2026-11-14T08:42:08.8024059Z test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:42:08.8054775Z test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:42:08.8093356Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:42:08.8134912Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:42:08.8204008Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:42:11.8311598Z test result: ok. 256 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.00s
+clippy-test	Test	2026-11-14T08:42:11.8345965Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:42:15.3063946Z test result: ok. 903 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.47s
+clippy-test	Test	2026-11-14T08:42:15.3087959Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:42:52.5427510Z test result: ok. 996 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 37.23s
+clippy-test	Test	2026-11-14T08:42:52.5469906Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:42:54.0017044Z test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.45s
+clippy-test	Test	2026-11-14T08:42:54.0095266Z test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:42:54.0258300Z test result: ok. 11 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.01s
+clippy-test	Test	2026-11-14T08:42:54.0465467Z test result: ok. 18 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.02s
+clippy-test	Test	2026-11-14T08:43:24.0771626Z test result: ok. 16 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 30.02s
+clippy-test	Test	2026-11-14T08:43:24.1333030Z test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+clippy-test	Test	2026-11-14T08:43:26.1809709Z test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.04s
+clippy-test	Test	2026-11-14T08:43:28.4073510Z test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.22s
+clippy-test	Test	2026-11-14T08:43:28.4098312Z test result: ok. 2 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:43:28.4680133Z test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+clippy-test	Test	2026-11-14T08:43:28.4718399Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:43:28.4730147Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:43:28.5700247Z test result: ok. 9 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.09s
+clippy-test	Test	2026-11-14T08:43:28.5746077Z test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:43:28.7396432Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+clippy-test	Test	2026-11-14T08:43:28.7604912Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+clippy-test	Test	2026-11-14T08:43:29.1203967Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.36s
+clippy-test	Test	2026-11-14T08:43:29.1226548Z test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:43:29.2550087Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+clippy-test	Test	2026-11-14T08:43:29.8254430Z test result: ok. 434 passed; 0 failed; 14 ignored; 0 measured; 0 filtered out; finished in 0.56s
+clippy-test	Test	2026-11-14T08:43:29.8353103Z test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:43:29.8527736Z test result: ok. 41 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+clippy-test	Test	2026-11-14T08:43:29.8753831Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+clippy-test	Test	2026-11-14T08:43:29.8810360Z test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:43:29.8823083Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:43:29.8839419Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:44:30.1791318Z test result: ok. 265 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 60.29s
+clippy-test	Test	2026-11-14T08:44:31.3508170Z test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.16s
+clippy-test	Test	2026-11-14T08:44:31.3607274Z test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:44:31.3637107Z test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:44:31.3663495Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:44:31.3689637Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:44:32.5704268Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:44:32.7090173Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:44:32.9132339Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:44:34.8372301Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:44:35.6698975Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:44:36.6075353Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:44:37.6953965Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:44:37.7311301Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:44:38.1726942Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:44:38.2438876Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T08:44:38.2582882Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Verify PostgreSQL pool wakeup under contention	2026-11-14T08:45:26.2654070Z test matching_postgres::tests::postgres_healthy_connection_return_wakes_waiter ... ok
+clippy-test	Verify PostgreSQL pool wakeup under contention	2026-11-14T08:45:26.2654550Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 447 filtered out; finished in 0.03s
+clippy-test	Verify PostgreSQL pool wakeup under contention	2026-11-14T08:45:26.2656319Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s

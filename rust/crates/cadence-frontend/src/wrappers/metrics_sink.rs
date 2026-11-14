@@ -76,6 +76,10 @@ impl SinkMetrics {
                 "signalName" => {
                     out.insert("signalName".to_owned(), unknown(&tag.value));
                 }
+                // Go InboundMetricsMiddleware context tags.
+                "caller" | "transport" => {
+                    out.insert(tag.key.to_owned(), tag.value.clone());
+                }
                 _ => {}
             }
         }
@@ -224,6 +228,158 @@ impl Metrics for SinkMetrics {
             MetricValue::Duration(elapsed),
             Self::tags(operation, &[]),
             Some(HistogramSpec::GoLow1ms100s),
+        );
+    }
+}
+
+/// Go `defs.go` operation tag of the `metrics.Admin*Scope` an Admin method uses
+/// (`startRequestProfile`). Methods not listed use their own name, as Go's
+/// isolation-group / async-config / partition-config scopes do.
+pub fn admin_scope_operation(method: &str) -> String {
+    match method {
+        "AddSearchAttribute"
+        | "DescribeWorkflowExecution"
+        | "DescribeHistoryHost"
+        | "DescribeCluster"
+        | "GetWorkflowExecutionRawHistoryV2"
+        | "GetWorkflowExecutionRawHistory"
+        | "GetReplicationMessages"
+        | "GetDomainReplicationMessages"
+        | "ReapplyEvents"
+        | "RefreshWorkflowTasks"
+        | "ResendReplicationTasks" => method.to_owned(),
+        "DescribeShardDistribution" => "AdminShardList".to_owned(),
+        "RemoveTask"
+        | "CloseShard"
+        | "ResetQueue"
+        | "DescribeQueue"
+        | "ReadDLQMessages"
+        | "PurgeDLQMessages"
+        | "CountDLQMessages"
+        | "MergeDLQMessages"
+        | "GetDLQReplicationMessages"
+        | "GetCrossClusterTasks"
+        | "RespondCrossClusterTasksCompleted"
+        | "GetDynamicConfig"
+        | "UpdateDynamicConfig"
+        | "RestoreDynamicConfig"
+        | "ListDynamicConfig"
+        | "GetOperationalDynamicConfig"
+        | "UpdateOperationalDynamicConfig"
+        | "RestoreOperationalDynamicConfig"
+        | "ListOperationalDynamicConfig"
+        | "DeleteWorkflow" => format!("Admin{method}"),
+        other => other.to_owned(),
+    }
+}
+
+/// Go's `adminHandlerImpl.MaintainCorruptWorkflow` is the only Admin method that
+/// never calls `startRequestProfile`, so it emits no metrics at all.
+pub fn admin_is_profiled(method: &str) -> bool {
+    method != "MaintainCorruptWorkflow"
+}
+
+/// Go `adminHandlerImpl.startRequestProfile` / `error` over a [`MetricSink`]:
+/// `cadence_requests`, `cadence_latency` (timer), `cadence_latency_ns`
+/// (histogram) and the typed error counters, tagged `operation` + `domain`
+/// (`_unknown_`, Go `DomainUnknownTag`).
+pub struct SinkAdminMetrics {
+    sink: Arc<dyn MetricSink>,
+}
+
+impl SinkAdminMetrics {
+    pub fn new(sink: Arc<dyn MetricSink>) -> Self {
+        Self { sink }
+    }
+
+    /// `operation`, `domain=_unknown_` and the `GetContextTags` pair
+    /// (`caller`, `transport`), each only when non-empty as in Go.
+    fn tags(method: &str, caller: &str, transport: &str) -> BTreeMap<String, String> {
+        let mut tags = BTreeMap::from([
+            ("operation".to_owned(), admin_scope_operation(method)),
+            ("domain".to_owned(), UNKNOWN.to_owned()),
+        ]);
+        if !caller.is_empty() {
+            tags.insert("caller".to_owned(), caller.to_owned());
+        }
+        if !transport.is_empty() {
+            tags.insert("transport".to_owned(), transport.to_owned());
+        }
+        tags
+    }
+
+    fn emit(
+        &self,
+        name: &'static str,
+        kind: MetricKind,
+        value: MetricValue,
+        method: &str,
+        (caller, transport): (&str, &str),
+        histogram: Option<HistogramSpec>,
+    ) {
+        if !admin_is_profiled(method) {
+            return;
+        }
+        self.sink.record(MetricEvent {
+            name,
+            kind,
+            value,
+            tags: Self::tags(method, caller, transport),
+            histogram,
+        });
+    }
+}
+
+impl cadence_service_core::workflow_api::AdminMetrics for SinkAdminMetrics {
+    fn admin_request(&self, method: &str, caller: &str, transport: &str) {
+        self.emit(
+            CADENCE_REQUESTS,
+            MetricKind::Counter,
+            MetricValue::Count(1),
+            method,
+            (caller, transport),
+            None,
+        );
+    }
+
+    fn admin_finish(
+        &self,
+        method: &str,
+        caller: &str,
+        transport: &str,
+        elapsed: Duration,
+        outcome: cadence_service_core::workflow_api::AdminOutcome,
+    ) {
+        use cadence_service_core::workflow_api::AdminOutcome as O;
+        self.emit(
+            CADENCE_LATENCY,
+            MetricKind::Timer,
+            MetricValue::Duration(elapsed),
+            method,
+            (caller, transport),
+            None,
+        );
+        self.emit(
+            CADENCE_LATENCY_NS,
+            MetricKind::Histogram,
+            MetricValue::Duration(elapsed),
+            method,
+            (caller, transport),
+            Some(HistogramSpec::GoLow1ms100s),
+        );
+        let counter = match outcome {
+            O::Ok | O::NotExists => return,
+            O::BadRequest => Counter::BadRequest,
+            O::ServiceBusy => Counter::ServiceBusy,
+            O::Failure => Counter::Failures,
+        };
+        self.emit(
+            counter.metric_name(),
+            MetricKind::Counter,
+            MetricValue::Count(1),
+            method,
+            (caller, transport),
+            None,
         );
     }
 }
@@ -458,5 +614,201 @@ mod tests {
         m.increment_requests_tagged("StartWorkflowExecution", &[]);
         let events = sink.events();
         assert_eq!(events[6].tags["tasklist"], "_unknown_");
+    }
+
+    #[test]
+    fn solfix14_caller_and_transport_tags_are_emitted() {
+        let tags = SinkMetrics::tags(
+            "StartWorkflowExecution",
+            &[
+                MetricTag {
+                    key: "caller",
+                    value: "cadence-web".into(),
+                },
+                MetricTag {
+                    key: "transport",
+                    value: "grpc".into(),
+                },
+            ],
+        );
+        assert_eq!(tags["caller"], "cadence-web");
+        assert_eq!(tags["transport"], "grpc");
+    }
+
+    #[derive(Default)]
+    struct Capture(std::sync::Mutex<Vec<MetricEvent>>);
+    impl MetricSink for Capture {
+        fn record(&self, event: MetricEvent) {
+            self.0.lock().unwrap().push(event);
+        }
+    }
+
+    fn admin_events(
+        method: &str,
+        outcome: cadence_service_core::workflow_api::AdminOutcome,
+    ) -> Vec<MetricEvent> {
+        use cadence_service_core::workflow_api::AdminMetrics as _;
+        let cap = Arc::new(Capture::default());
+        let m = SinkAdminMetrics::new(cap.clone());
+        m.admin_request(method, "svc", "grpc");
+        m.admin_finish(method, "svc", "grpc", Duration::from_millis(2), outcome);
+        let guard = cap.0.lock().unwrap();
+        guard.clone()
+    }
+
+    #[test]
+    fn admin_success_emits_requests_and_latency_only() {
+        use cadence_service_core::workflow_api::AdminOutcome;
+        let ev = admin_events("DescribeShardDistribution", AdminOutcome::Ok);
+        let names: Vec<_> = ev.iter().map(|e| e.name).collect();
+        assert_eq!(
+            names,
+            ["cadence_requests", "cadence_latency", "cadence_latency_ns"]
+        );
+        for e in &ev {
+            assert_eq!(e.tags["operation"], "AdminShardList");
+            assert_eq!(e.tags["domain"], "_unknown_");
+            assert_eq!(e.tags["caller"], "svc");
+            assert_eq!(e.tags["transport"], "grpc");
+        }
+    }
+
+    #[test]
+    fn admin_empty_caller_and_transport_tags_are_omitted() {
+        use cadence_service_core::workflow_api::AdminMetrics as _;
+        let cap = Arc::new(Capture::default());
+        SinkAdminMetrics::new(cap.clone()).admin_request("GetDynamicConfig", "", "");
+        let ev = cap.0.lock().unwrap();
+        assert!(!ev[0].tags.contains_key("caller"));
+        assert!(!ev[0].tags.contains_key("transport"));
+    }
+
+    #[test]
+    fn admin_maintain_corrupt_workflow_emits_nothing() {
+        use cadence_service_core::workflow_api::AdminOutcome;
+        assert!(admin_events("MaintainCorruptWorkflow", AdminOutcome::Failure).is_empty());
+    }
+
+    /// Every Go Admin handler method with the `operation` tag of the scope its
+    /// `startRequestProfile` call uses (go/common/metrics/defs.go).
+    const GO_ADMIN_SCOPES: &[(&str, &str)] = &[
+        ("DescribeHistoryHost", "DescribeHistoryHost"),
+        ("DescribeCluster", "DescribeCluster"),
+        ("AddSearchAttribute", "AddSearchAttribute"),
+        ("DescribeWorkflowExecution", "DescribeWorkflowExecution"),
+        (
+            "GetWorkflowExecutionRawHistory",
+            "GetWorkflowExecutionRawHistory",
+        ),
+        (
+            "GetWorkflowExecutionRawHistoryV2",
+            "GetWorkflowExecutionRawHistoryV2",
+        ),
+        ("GetReplicationMessages", "GetReplicationMessages"),
+        (
+            "GetDomainReplicationMessages",
+            "GetDomainReplicationMessages",
+        ),
+        (
+            "GetDLQReplicationMessages",
+            "AdminGetDLQReplicationMessages",
+        ),
+        ("ReapplyEvents", "ReapplyEvents"),
+        ("RefreshWorkflowTasks", "RefreshWorkflowTasks"),
+        ("ResendReplicationTasks", "ResendReplicationTasks"),
+        ("RemoveTask", "AdminRemoveTask"),
+        ("CloseShard", "AdminCloseShard"),
+        ("ResetQueue", "AdminResetQueue"),
+        ("DescribeQueue", "AdminDescribeQueue"),
+        ("CountDLQMessages", "AdminCountDLQMessages"),
+        ("ReadDLQMessages", "AdminReadDLQMessages"),
+        ("PurgeDLQMessages", "AdminPurgeDLQMessages"),
+        ("MergeDLQMessages", "AdminMergeDLQMessages"),
+        ("DescribeShardDistribution", "AdminShardList"),
+        ("GetCrossClusterTasks", "AdminGetCrossClusterTasks"),
+        (
+            "RespondCrossClusterTasksCompleted",
+            "AdminRespondCrossClusterTasksCompleted",
+        ),
+        ("GetDynamicConfig", "AdminGetDynamicConfig"),
+        ("UpdateDynamicConfig", "AdminUpdateDynamicConfig"),
+        ("RestoreDynamicConfig", "AdminRestoreDynamicConfig"),
+        ("ListDynamicConfig", "AdminListDynamicConfig"),
+        (
+            "GetOperationalDynamicConfig",
+            "AdminGetOperationalDynamicConfig",
+        ),
+        (
+            "UpdateOperationalDynamicConfig",
+            "AdminUpdateOperationalDynamicConfig",
+        ),
+        (
+            "RestoreOperationalDynamicConfig",
+            "AdminRestoreOperationalDynamicConfig",
+        ),
+        (
+            "ListOperationalDynamicConfig",
+            "AdminListOperationalDynamicConfig",
+        ),
+        ("DeleteWorkflow", "AdminDeleteWorkflow"),
+        ("GetGlobalIsolationGroups", "GetGlobalIsolationGroups"),
+        ("UpdateGlobalIsolationGroups", "UpdateGlobalIsolationGroups"),
+        ("GetDomainIsolationGroups", "GetDomainIsolationGroups"),
+        ("UpdateDomainIsolationGroups", "UpdateDomainIsolationGroups"),
+        (
+            "GetDomainAsyncWorkflowConfiguraton",
+            "GetDomainAsyncWorkflowConfiguraton",
+        ),
+        (
+            "UpdateDomainAsyncWorkflowConfiguraton",
+            "UpdateDomainAsyncWorkflowConfiguraton",
+        ),
+        (
+            "UpdateTaskListPartitionConfig",
+            "UpdateTaskListPartitionConfig",
+        ),
+    ];
+
+    #[test]
+    fn admin_scope_mapping_matches_go_defs() {
+        for (method, operation) in GO_ADMIN_SCOPES {
+            assert_eq!(admin_scope_operation(method), *operation, "{method}");
+            assert!(admin_is_profiled(method), "{method}");
+        }
+        assert!(!admin_is_profiled("MaintainCorruptWorkflow"));
+    }
+
+    #[test]
+    fn admin_error_counters_follow_go_error_switch() {
+        use cadence_service_core::workflow_api::AdminOutcome as O;
+        let last = |o| {
+            admin_events("GetDynamicConfig", o)
+                .into_iter()
+                .map(|e| (e.name, e.tags["operation"].clone()))
+                .next_back()
+        };
+        assert_eq!(
+            last(O::BadRequest),
+            Some(("cadence_errors_bad_request", "AdminGetDynamicConfig".into()))
+        );
+        assert_eq!(
+            last(O::ServiceBusy).unwrap().0,
+            "cadence_errors_service_busy"
+        );
+        assert_eq!(last(O::Failure).unwrap().0, "cadence_errors");
+        // EntityNotExists: no counter, last event is the latency histogram.
+        assert_eq!(last(O::NotExists).unwrap().0, "cadence_latency_ns");
+    }
+
+    #[test]
+    fn admin_outcome_classification() {
+        use cadence_service_core::workflow_api::AdminOutcome as O;
+        assert_eq!(O::from_grpc_code(0), O::Ok);
+        assert_eq!(O::from_grpc_code(3), O::BadRequest);
+        assert_eq!(O::from_grpc_code(8), O::ServiceBusy);
+        assert_eq!(O::from_grpc_code(5), O::NotExists);
+        assert_eq!(O::from_grpc_code(13), O::Failure);
+        assert_eq!(O::from_exception("BadRequestError"), O::BadRequest);
+        assert_eq!(O::from_exception("InternalServiceError"), O::Failure);
     }
 }

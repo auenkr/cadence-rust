@@ -143,7 +143,7 @@ pub(super) fn state_from_snapshot(
     let history_size = info.history_size;
     let pending = typed_pending_maps(&envelope).map_err(history_to_ndc)?;
     let mut state = OwnedNdcMutableState::new(domain_id, execution, now_nanos, TaskGenEnv::default());
-    state.typed_mut().load(
+    state.typed_mut().load_with_compatibility(
         info,
         pending.activities,
         pending.timers,
@@ -154,6 +154,9 @@ pub(super) fn state_from_snapshot(
         envelope.buffered_events,
         envelope.version_histories,
         history_size,
+        snapshot.checksum.as_ref().map(|b| b.data.clone()).unwrap_or_default(),
+        0,
+        |_| Err("legacy child domain lookup is unavailable in this loader".to_owned()),
     );
     state.typed_mut().load_semaphores(pending.semaphores);
     state.set_update_condition(next_event_id);

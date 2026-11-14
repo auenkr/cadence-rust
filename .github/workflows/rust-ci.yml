@@ -658,6 +658,17 @@ jobs:
           result=${PIPESTATUS[0]}
           echo "$result" > test.exit
           exit "$result"
+      - name: Verify PostgreSQL pool wakeup under contention
+        if: ${{ inputs.package == '' || inputs.package == 'cadence-persistence' || inputs.package == 'cadence-history' }}
+        env:
+          CADENCE_POSTGRES_POOL_TEST_DSN: host=127.0.0.1 port=5432 user=postgres password=cadence dbname=cadence
+        run: |
+          set +e
+          cargo test --manifest-path rust/Cargo.toml -p cadence-persistence postgres_healthy_connection_return_wakes_waiter -- --ignored > postgres-pool-test.log 2>&1
+          result=$?
+          echo "$result" > postgres-pool-test.exit
+          cat postgres-pool-test.log
+          exit "$result"
       - name: Decode Rust async payloads with original Go consumer codec
         if: env.PKG == 'cadence-frontend' || env.PKG == ''
         working-directory: go

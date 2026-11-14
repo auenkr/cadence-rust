@@ -1,0 +1,14 @@
+2026-11-14T07:04:17.367117Z  INFO cadence_history::launcher: History shutdown: stopping service
+2026-11-14T07:04:17.367136Z  INFO cadence_history::service: ShutdownHandler: Evicting self from membership ring
+2026-11-14T07:04:17.367582Z  INFO cadence_history::service: ShutdownHandler: Waiting for others to discover I am unhealthy
+2026-11-14T07:04:17.370359Z  INFO cadence_history::service: history stopped
+2026-11-14T07:04:17.370374Z  INFO cadence_history::launcher: History shutdown: stopping task processor
+2026-11-14T07:04:17.370375Z ERROR cadence_history::queue::transfer_queue_processor: Failed to complete transfer task during shutdown error=queue processor has been shutdown
+2026-11-14T07:04:17.370409Z ERROR cadence_history::queue::timer_queue_processor: Failed to complete timer task during drain error=queue processor has been shutdown
+2026-11-14T07:04:17.370420Z ERROR cadence_history::queue::timer_queue_processor: Failed to complete timer task during drain error=queue processor has been shutdown
+2026-11-14T07:04:17.370427Z ERROR cadence_history::queue::timer_queue_processor: Failed to complete timer task during drain error=queue processor has been shutdown
+2026-11-14T07:04:17.370442Z ERROR cadence_history::queue::transfer_queue_processor: Failed to complete transfer task during shutdown error=queue processor has been shutdown
+2026-11-14T07:04:17.373255Z ERROR cadence_history::queue::transfer_queue_processor: Failed to complete transfer task during shutdown error=queue processor has been shutdown
+2026-11-14T07:04:17.373379Z  INFO cadence_history::task::parallel_processor: Parallel task processor shutdown.
+2026-11-14T07:04:17.373384Z  INFO cadence_history::launcher: History shutdown: stopping membership
+2026-11-14T07:04:17.373432Z  INFO cadence_history::launcher: History shutdown complete

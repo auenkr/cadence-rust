@@ -414,6 +414,7 @@ fn start_child_workflow_execution_initiated_event_attributes(v: p::StartChildWor
         jitter_start_seconds: seconds(v.jitter_start)?,
         first_run_at_timestamp: v.first_run_at.map(millis),
         cron_overlap_policy: enum_in(v.cron_overlap_policy, enums::CronOverlapPolicy::from_i32)?,
+        active_cluster_selection_policy: v.active_cluster_selection_policy.map(selection_policy_in),
         ..Default::default()
     })
 }

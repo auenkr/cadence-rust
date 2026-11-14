@@ -157,6 +157,8 @@ pub struct TypedMutableState {
     pub has_buffered_events_in_db: bool,
 
     pub execution_info: WorkflowExecutionInfo,
+    /// Go `mutableStateBuilder.checksum`, loaded from `WorkflowSnapshot.Checksum`.
+    pub checksum: Vec<u8>,
     pub version_histories: Option<VersionHistories>,
     pub current_version: i64,
     pub next_event_id_in_db: i64,
@@ -237,6 +239,45 @@ impl TypedMutableState {
         version_histories: Option<VersionHistories>,
         history_size: i64,
     ) {
+        self.load_with_compatibility(
+            execution_info,
+            activities,
+            timers,
+            children,
+            request_cancels,
+            signals,
+            signal_requested_ids,
+            buffered_events,
+            version_histories,
+            history_size,
+            Vec::new(),
+            0,
+            |_| Err("legacy domain lookup is unavailable".to_owned()),
+        );
+    }
+
+    /// Go `Load` with the shard configuration and domain cache needed for its
+    /// checksum invalidation and legacy child-domain compatibility steps.
+    #[allow(clippy::too_many_arguments)]
+    pub fn load_with_compatibility<F>(
+        &mut self,
+        execution_info: WorkflowExecutionInfo,
+        activities: Vec<ActivityInfo>,
+        timers: Vec<TimerInfo>,
+        children: Vec<ChildExecutionInfo>,
+        request_cancels: Vec<RequestCancelInfo>,
+        signals: Vec<SignalInfo>,
+        signal_requested_ids: Vec<String>,
+        buffered_events: Vec<HistoryEvent>,
+        version_histories: Option<VersionHistories>,
+        history_size: i64,
+        checksum: Vec<u8>,
+        checksum_invalidate_before_secs: i64,
+        mut get_domain_id: F,
+    )
+    where
+        F: FnMut(&str) -> std::result::Result<String, String>,
+    {
         self.pending_activity_info_ids = activities.into_iter().map(|a| (a.schedule_id, a)).collect();
         self.pending_activity_id_to_event_id = self
             .pending_activity_info_ids
@@ -255,11 +296,27 @@ impl TypedMutableState {
             request_cancels.into_iter().map(|c| (c.initiated_id, c)).collect();
         self.pending_signal_info_ids = signals.into_iter().map(|s| (s.initiated_id, s)).collect();
         self.pending_signal_requested_ids = signal_requested_ids.into_iter().collect();
-        self.has_buffered_events_in_db = !buffered_events.is_empty();
-        self.buffered_events = buffered_events;
+        // Go: reorderAndFilterDuplicateEvents(state.BufferedEvents, "load").
+        self.buffered_events = reorder_and_filter_duplicate_events(buffered_events).0;
+        self.has_buffered_events_in_db = !self.buffered_events.is_empty();
         self.state_in_db = execution_info.state;
         self.next_event_id_in_db = execution_info.next_event_id;
         self.execution_info = execution_info;
+        self.checksum = checksum;
+        for info in self.pending_child_execution_info_ids.values_mut() {
+            if info.domain_id.is_empty() && !info.domain_name_deprecated.is_empty() {
+                // Go logs the lookup failure, then assigns the returned ID (empty
+                // on failure) to the child record.
+                info.domain_id = get_domain_id(&info.domain_name_deprecated).unwrap_or_default();
+            }
+        }
+        if !self.checksum.is_empty()
+            && checksum_invalidate_before_secs > 0
+            && self.execution_info.last_updated_time_unix_nanos
+                < checksum_invalidate_before_secs.saturating_mul(1_000_000_000)
+        {
+            self.checksum.clear();
+        }
         self.version_histories = version_histories;
         self.history_size = history_size;
         self.reset_update_tracking();
@@ -284,22 +341,21 @@ impl TypedMutableState {
     // ---- versions (Go UpdateCurrentVersion / GetCurrentVersion / ...) ----
 
     pub fn update_current_version(&mut self, version: i64, force_update: bool) -> Result<()> {
+        if self.execution_info.state == WORKFLOW_STATE_COMPLETED {
+            // Go: always set current version to last write version when workflow is completed.
+            self.current_version = self.get_last_write_version()?;
+            return Ok(());
+        }
         if let Some(histories) = &self.version_histories {
             let history = histories
                 .current_history()
                 .map_err(|e| TypedMutableStateError::Internal(e.message))?;
-            if history.items.is_empty() {
-                // Go: first event of a brand new history takes the incoming version.
-                self.current_version = version;
-                return Ok(());
+            if !history.items.is_empty() {
+                // Go: this makes sure current version >= last write version.
+                let last = history.last_item().map_err(|e| TypedMutableStateError::Internal(e.message))?;
+                self.current_version = last.version;
             }
-            let last = history.last_item().map_err(|e| TypedMutableStateError::Internal(e.message))?;
-            if !force_update && self.is_workflow_execution_running() {
-                self.current_version = version;
-                return Ok(());
-            }
-            self.current_version = last.version;
-            if force_update {
+            if version > self.current_version || force_update {
                 self.current_version = version;
             }
             return Ok(());
@@ -474,7 +530,7 @@ impl TypedMutableState {
         candidates.extend(std::mem::take(&mut self.update_buffered_events));
 
         // Go: reorderAndFilterDuplicateEvents on the old + new buffered bucket.
-        let (reordered, _) = reorder_and_filter_duplicate_events(&new_committed, candidates);
+        let (reordered, _) = reorder_and_filter_duplicate_events(candidates);
         // Assign event ids and patch started ids.
         let mut next_event_id = self.execution_info.next_event_id;
         let mut scheduled_to_started: BTreeMap<i64, i64> = BTreeMap::new();
@@ -759,7 +815,12 @@ impl TypedMutableState {
     fn prepared_workflow_requests(&self) -> Result<Vec<WorkflowRequest>> {
         let mut requests = self.workflow_requests.clone();
         for inserted in &self.insert_workflow_requests {
-            if inserted.data.data.is_empty() || inserted.data.encoding.is_empty() {
+            // Go `WorkflowRequest` has only request ID, version, and type;
+            // reset request rows are persisted from those key fields alone.
+            // Other Rust request kinds may carry an encoded payload.
+            if inserted.request_type != cadence_persistence::history_contract::WORKFLOW_REQUEST_TYPE_RESET
+                && (inserted.data.data.is_empty() || inserted.data.encoding.is_empty())
+            {
                 return internal(format!("workflow request {} has no encoded deduplication data", inserted.request_id));
             }
             if let Some(existing) = requests.iter_mut().find(|request| request.request_id == inserted.request_id && request.version == inserted.version && request.request_type == inserted.request_type) {
@@ -768,7 +829,10 @@ impl TypedMutableState {
                 requests.push(inserted.clone());
             }
         }
-        if requests.iter().any(|request| request.data.data.is_empty() || request.data.encoding.is_empty()) {
+        if requests.iter().any(|request| {
+            request.request_type != cadence_persistence::history_contract::WORKFLOW_REQUEST_TYPE_RESET
+                && (request.data.data.is_empty() || request.data.encoding.is_empty())
+        }) {
             return internal("workflow request is missing encoded deduplication data");
         }
         Ok(requests)
@@ -883,78 +947,106 @@ impl TypedMutableState {
 
 /// Go `reorderAndFilterDuplicateEvents`: activity/child completions go to the
 /// tail; duplicates (same type, scheduled id, attempt, started id) are dropped.
+/// Uniqueness is tracked only among the events passed in (Go starts with an empty set).
 /// Returns `(events, duplicate_count)`.
-pub fn reorder_and_filter_duplicate_events(
-    committed: &[HistoryEvent],
-    buffered: Vec<HistoryEvent>,
-) -> (Vec<HistoryEvent>, usize) {
-    let mut seen: BTreeSet<(i32, i64, i64, i64)> = BTreeSet::new();
-    for event in committed {
-        if let Some(key) = completion_key(event) {
-            seen.insert(key);
-        }
-    }
+pub fn reorder_and_filter_duplicate_events(buffered: Vec<HistoryEvent>) -> (Vec<HistoryEvent>, usize) {
+    let mut seen: BTreeSet<(i32, i64, i32, i64)> = BTreeSet::new();
     let mut head = Vec::new();
     let mut tail = Vec::new();
     let mut duplicates = 0;
     for event in buffered {
-        match completion_key(&event) {
-            Some(key) => {
-                if !seen.insert(key) {
-                    duplicates += 1;
-                    continue;
-                }
-                tail.push(event);
+        if let Some(key) = uniqueness_key(&event) {
+            if !seen.insert(key) {
+                duplicates += 1;
+                continue;
             }
-            None => head.push(event),
+        }
+        match event.event_type.as_ref() {
+            Some(
+                EventType::ActivityTaskCompleted
+                | EventType::ActivityTaskFailed
+                | EventType::ActivityTaskCanceled
+                | EventType::ActivityTaskTimedOut
+                | EventType::ChildWorkflowExecutionCompleted
+                | EventType::ChildWorkflowExecutionFailed
+                | EventType::ChildWorkflowExecutionCanceled
+                | EventType::ChildWorkflowExecutionTimedOut
+                | EventType::ChildWorkflowExecutionTerminated,
+            ) => tail.push(event),
+            _ => head.push(event),
         }
     }
     head.extend(tail);
     (head, duplicates)
 }
 
-fn completion_key(event: &HistoryEvent) -> Option<(i32, i64, i64, i64)> {
-    let event_type = event.event_type.as_ref()?;
-    let (scheduled, started) = match event_type {
-        EventType::ActivityTaskCompleted => event
-            .activity_task_completed_event_attributes
-            .as_ref()
-            .map(|a| (a.scheduled_event_id, a.started_event_id))?,
-        EventType::ActivityTaskFailed => event
-            .activity_task_failed_event_attributes
-            .as_ref()
-            .map(|a| (a.scheduled_event_id, a.started_event_id))?,
-        EventType::ActivityTaskTimedOut => event
-            .activity_task_timed_out_event_attributes
-            .as_ref()
-            .map(|a| (a.scheduled_event_id, a.started_event_id))?,
-        EventType::ActivityTaskCanceled => event
-            .activity_task_canceled_event_attributes
-            .as_ref()
-            .map(|a| (a.scheduled_event_id, a.started_event_id))?,
-        EventType::ChildWorkflowExecutionCompleted => event
-            .child_workflow_execution_completed_event_attributes
-            .as_ref()
-            .map(|a| (a.initiated_event_id, a.started_event_id))?,
-        EventType::ChildWorkflowExecutionFailed => event
-            .child_workflow_execution_failed_event_attributes
-            .as_ref()
-            .map(|a| (a.initiated_event_id, a.started_event_id))?,
-        EventType::ChildWorkflowExecutionCanceled => event
-            .child_workflow_execution_canceled_event_attributes
-            .as_ref()
-            .map(|a| (a.initiated_event_id, a.started_event_id))?,
-        EventType::ChildWorkflowExecutionTimedOut => event
-            .child_workflow_execution_timed_out_event_attributes
-            .as_ref()
-            .map(|a| (a.initiated_event_id, a.started_event_id))?,
-        EventType::ChildWorkflowExecutionTerminated => event
-            .child_workflow_execution_terminated_event_attributes
-            .as_ref()
-            .map(|a| (a.initiated_event_id, a.started_event_id))?,
+/// Go `eventUniquenessParams` as `(type, scheduled/initiated id, attempt, started id)`.
+fn uniqueness_key(event: &HistoryEvent) -> Option<(i32, i64, i32, i64)> {
+    let t = event.event_type.as_ref()?;
+    let (scheduled, attempt, started) = match t {
+        EventType::ActivityTaskStarted => {
+            let a = event.activity_task_started_event_attributes.as_ref()?;
+            (a.scheduled_event_id, a.attempt, 0)
+        }
+        EventType::ActivityTaskCompleted => {
+            let a = event.activity_task_completed_event_attributes.as_ref()?;
+            (a.scheduled_event_id, 0, a.started_event_id)
+        }
+        EventType::ActivityTaskFailed => {
+            let a = event.activity_task_failed_event_attributes.as_ref()?;
+            (a.scheduled_event_id, 0, a.started_event_id)
+        }
+        EventType::ActivityTaskCanceled => {
+            let a = event.activity_task_canceled_event_attributes.as_ref()?;
+            (a.scheduled_event_id, 0, a.started_event_id)
+        }
+        EventType::ActivityTaskTimedOut => {
+            let a = event.activity_task_timed_out_event_attributes.as_ref()?;
+            (a.scheduled_event_id, 0, a.started_event_id)
+        }
+        EventType::ChildWorkflowExecutionStarted => {
+            (event.child_workflow_execution_started_event_attributes.as_ref()?.initiated_event_id, 0, 0)
+        }
+        EventType::ChildWorkflowExecutionCompleted => {
+            let a = event.child_workflow_execution_completed_event_attributes.as_ref()?;
+            (a.initiated_event_id, 0, a.started_event_id)
+        }
+        EventType::ChildWorkflowExecutionFailed => {
+            let a = event.child_workflow_execution_failed_event_attributes.as_ref()?;
+            (a.initiated_event_id, 0, a.started_event_id)
+        }
+        EventType::ChildWorkflowExecutionTimedOut => {
+            let a = event.child_workflow_execution_timed_out_event_attributes.as_ref()?;
+            (a.initiated_event_id, 0, a.started_event_id)
+        }
+        EventType::ChildWorkflowExecutionCanceled => {
+            let a = event.child_workflow_execution_canceled_event_attributes.as_ref()?;
+            (a.initiated_event_id, 0, a.started_event_id)
+        }
+        EventType::ChildWorkflowExecutionTerminated => {
+            let a = event.child_workflow_execution_terminated_event_attributes.as_ref()?;
+            (a.initiated_event_id, 0, a.started_event_id)
+        }
+        EventType::StartChildWorkflowExecutionFailed => {
+            (event.start_child_workflow_execution_failed_event_attributes.as_ref()?.initiated_event_id, 0, 0)
+        }
+        EventType::ExternalWorkflowExecutionCancelRequested => {
+            (event.external_workflow_execution_cancel_requested_event_attributes.as_ref()?.initiated_event_id, 0, 0)
+        }
+        EventType::RequestCancelExternalWorkflowExecutionFailed => (
+            event.request_cancel_external_workflow_execution_failed_event_attributes.as_ref()?.initiated_event_id,
+            0,
+            0,
+        ),
+        EventType::ExternalWorkflowExecutionSignaled => {
+            (event.external_workflow_execution_signaled_event_attributes.as_ref()?.initiated_event_id, 0, 0)
+        }
+        EventType::SignalExternalWorkflowExecutionFailed => {
+            (event.signal_external_workflow_execution_failed_event_attributes.as_ref()?.initiated_event_id, 0, 0)
+        }
         _ => return None,
     };
-    Some((event_type.value(), scheduled, 0, started))
+    Some((t.value(), scheduled, attempt, started))
 }
 
 /// Go `assignEventIDToBufferedEvents` started-id patching for completions that
@@ -985,6 +1077,91 @@ fn patch_started_event_id(event: &mut HistoryEvent, scheduled_to_started: &BTree
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cadence_api::tasks::{ActivityTaskCompletedEventAttributes, ActivityTaskStartedEventAttributes};
+
+    fn ev(t: EventType) -> HistoryEvent {
+        HistoryEvent { event_type: Some(t), ..Default::default() }
+    }
+
+    fn completed(sched: i64, started: i64) -> HistoryEvent {
+        let mut e = ev(EventType::ActivityTaskCompleted);
+        e.activity_task_completed_event_attributes = Some(ActivityTaskCompletedEventAttributes {
+            scheduled_event_id: sched,
+            started_event_id: started,
+            ..Default::default()
+        });
+        e
+    }
+
+    fn act_started(sched: i64, attempt: i32) -> HistoryEvent {
+        let mut e = ev(EventType::ActivityTaskStarted);
+        e.activity_task_started_event_attributes =
+            Some(ActivityTaskStartedEventAttributes { scheduled_event_id: sched, attempt, ..Default::default() });
+        e
+    }
+
+    #[test]
+    fn reorder_filters_duplicates_and_moves_completions_to_tail_like_go() {
+        let input = vec![completed(5, 6), act_started(5, 0), act_started(5, 0), act_started(5, 1), completed(5, 6)];
+        let (out, dups) = reorder_and_filter_duplicate_events(input);
+        assert_eq!(dups, 2);
+        let types: Vec<_> = out.iter().map(|e| e.event_type.unwrap()).collect();
+        assert_eq!(
+            types,
+            vec![EventType::ActivityTaskStarted, EventType::ActivityTaskStarted, EventType::ActivityTaskCompleted]
+        );
+    }
+
+    #[test]
+    fn load_reorders_buffered_events_like_go() {
+        let mut state = TypedMutableState::new();
+        state.load(
+            WorkflowExecutionInfo::default(),
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![completed(5, 6), act_started(5, 0)],
+            None,
+            0,
+        );
+        assert_eq!(state.buffered_events[0].event_type, Some(EventType::ActivityTaskStarted));
+        assert_eq!(state.buffered_events[1].event_type, Some(EventType::ActivityTaskCompleted));
+    }
+
+    #[test]
+    fn typed_load_clears_checksum_before_invalidation_cutoff_like_go() {
+        let mut state = TypedMutableState::new();
+        let info = WorkflowExecutionInfo {
+            last_updated_time_unix_nanos: 9_000_000_000,
+            ..Default::default()
+        };
+        state.load_with_compatibility(
+            info, vec![], vec![], vec![], vec![], vec![], vec![], vec![], None, 0,
+            vec![1, 2, 3], 10, |_| Err("unused".to_owned()),
+        );
+        assert!(state.checksum.is_empty());
+    }
+
+    #[test]
+    fn typed_load_fills_legacy_child_domain_id_like_go() {
+        let mut state = TypedMutableState::new();
+        let child = ChildExecutionInfo {
+            initiated_id: 7,
+            domain_name_deprecated: "legacy-domain".into(),
+            ..Default::default()
+        };
+        state.load_with_compatibility(
+            WorkflowExecutionInfo::default(), vec![], vec![], vec![child], vec![], vec![],
+            vec![], vec![], None, 0, vec![], 0,
+            |name| Ok(format!("id-for-{name}")),
+        );
+        let child = &state.pending_child_execution_info_ids[&7];
+        assert_eq!(child.domain_id, "id-for-legacy-domain");
+        assert_eq!(child.domain_name_deprecated, "legacy-domain");
+    }
 
     #[test]
     fn new_state_matches_go_defaults() {
@@ -1064,6 +1241,30 @@ mod tests {
     }
 
     #[test]
+    fn update_current_version_matches_go() {
+        let mut state = TypedMutableState::new();
+        state.version_histories = Some(VersionHistories {
+            current_version_history_index: 0,
+            histories: vec![cadence_api::types::VersionHistory { branch_token: vec![1], items: vec![new_item(5, 10)] }],
+        });
+        state.execution_info.state = WORKFLOW_STATE_RUNNING;
+        // lower incoming version never lowers below last write version
+        state.update_current_version(4, false).unwrap();
+        assert_eq!(state.current_version, 10);
+        state.update_current_version(12, false).unwrap();
+        assert_eq!(state.current_version, 12);
+        // next call restarts from the last item unless forced
+        state.update_current_version(3, false).unwrap();
+        assert_eq!(state.current_version, 10);
+        state.update_current_version(3, true).unwrap();
+        assert_eq!(state.current_version, 3);
+        // completed workflow always uses last write version
+        state.execution_info.state = WORKFLOW_STATE_COMPLETED;
+        state.update_current_version(50, true).unwrap();
+        assert_eq!(state.current_version, 10);
+    }
+
+    #[test]
     fn snapshot_rejects_buffered_events() {
         let mut state = TypedMutableState::new();
         state.update_buffered_events.push(HistoryEvent::default());
@@ -1095,6 +1296,25 @@ mod tests {
         assert_eq!(state.history_events.len(), 1);
         assert_eq!(state.next_event_id_in_db, 12);
         assert_eq!(state.insert_workflow_requests.len(), 1);
+    }
+
+    #[test]
+    fn reset_workflow_request_needs_no_encoded_data_like_go_persistence() {
+        let mut state = TypedMutableState::new();
+        state.insert_workflow_requests.push(WorkflowRequest {
+            request_id: "reset-request".into(),
+            version: 23,
+            request_type: cadence_persistence::history_contract::WORKFLOW_REQUEST_TYPE_RESET,
+            data: Default::default(),
+        });
+
+        let requests = state.prepared_workflow_requests().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].request_id, "reset-request");
+        assert_eq!(requests[0].version, 23);
+        assert_eq!(requests[0].request_type, cadence_persistence::history_contract::WORKFLOW_REQUEST_TYPE_RESET);
+        assert!(requests[0].data.data.is_empty());
+        assert!(requests[0].data.encoding.is_empty());
     }
 
     #[test]

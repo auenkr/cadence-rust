@@ -1,0 +1,6 @@
+clippy-test	Test	2026-11-14T04:43:08.5219922Z test wiring::assembly::real_engine_tests::canceled_child_completion_is_retried_from_persisted_parent_state ... FAILED
+clippy-test	Test	2026-11-14T04:44:08.3177568Z ---- wiring::assembly::real_engine_tests::canceled_child_completion_is_retried_from_persisted_parent_state stdout ----
+clippy-test	Test	2026-11-14T04:44:08.3178332Z thread 'wiring::assembly::real_engine_tests::canceled_child_completion_is_retried_from_persisted_parent_state' (24274) panicked at crates/cadence-history/src/wiring/assembly/real_engine_tests.rs:1554:63:
+clippy-test	Test	2026-11-14T04:44:08.3179954Z called `Result::unwrap()` on an `Err` value: Cadence(EntityNotExists(EntityNotExistsError { message: "Pending child execution not found.", current_cluster: "", active_cluster: "", active_clusters: [] }))
+clippy-test	Test	2026-11-14T04:44:08.3180752Z     wiring::assembly::real_engine_tests::canceled_child_completion_is_retried_from_persisted_parent_state
+clippy-test	Test	2026-11-14T04:44:08.3181153Z test result: FAILED. 902 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 61.43s

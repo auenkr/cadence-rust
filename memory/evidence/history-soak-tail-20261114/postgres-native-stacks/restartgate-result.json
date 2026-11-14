@@ -1,0 +1,28 @@
+{
+  "final": {
+    "completed": 2700,
+    "e2e_avg_ms": 5686,
+    "e2e_max_ms": 45884,
+    "e2e_p50_ms": 4143,
+    "e2e_p95_ms": 13792,
+    "e2e_p99_ms": 37061,
+    "failed": 0,
+    "inflight": 0,
+    "queries": 2700,
+    "query_init_attempts": 5553,
+    "query_init_workflows": 2173,
+    "query_p50_ms": 8,
+    "query_p95_ms": 210,
+    "query_p99_ms": 441,
+    "retried_calls": 5682,
+    "signals": 2700,
+    "start_p50_ms": 5,
+    "start_p95_ms": 274,
+    "start_p99_ms": 21322,
+    "started": 2700,
+    "ts": 1794643313
+  },
+  "seconds": 900,
+  "rate": "3",
+  "dbPause": 30
+}

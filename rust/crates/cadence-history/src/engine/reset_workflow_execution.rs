@@ -83,3 +83,22 @@ pub fn check_reset_event_type(events: &[HistoryEvent], reset_id: i64) -> HResult
     }
     Err(HistoryError::Other(format!("reset event ID {reset_id} not found in the history events")))
 }
+
+#[cfg(test)]
+mod reset_event_name_tests {
+    use super::*;
+
+    #[test]
+    fn invalid_reset_event_error_uses_go_event_type_string() {
+        let event = HistoryEvent {
+            event_id: 3,
+            event_type: Some(EventType::ActivityTaskStarted),
+            ..Default::default()
+        };
+        let err = check_reset_event_type(&[event], 3).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "reset event must be of type DecisionTaskStarted, DecisionTaskTimedOut, DecisionTaskFailed, or DecisionTaskCompleted. Attempting to reset on event type: ActivityTaskStarted"
+        );
+    }
+}

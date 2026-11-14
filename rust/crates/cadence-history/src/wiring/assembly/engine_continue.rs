@@ -45,7 +45,7 @@ impl EngineMutableState {
 
         let mut g = self.inner.lock().unwrap();
         if !g.exec.is_running() {
-            return Err(HistoryError::internal(super::invalid_history_action_message("WorkflowExecutionContinuedAsNew", g.next_event_id)));
+            return Err(HistoryError::internal(crate::execution::mutable_state_methods_common::ERR_WORKFLOW_FINISHED));
         }
         let workflow_id = g.pc_exec.workflow_id.clone();
         let prev_run_id = g.pc_exec.run_id.clone();

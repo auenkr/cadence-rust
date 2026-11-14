@@ -289,6 +289,10 @@ impl Drop for PostgresLease {
                 client,
                 created_at: self.created_at,
             });
+            drop(state);
+            // Go database/sql wakes a queued request when a healthy connection
+            // returns, as well as when discarding one opens a new slot.
+            self.pool.available.notify_one();
         } else {
             state.open -= 1;
             drop(state);
@@ -1460,6 +1464,45 @@ mod tests {
                 .collect(),
             tls: None,
         }
+    }
+
+    #[test]
+    #[ignore = "requires CADENCE_POSTGRES_POOL_TEST_DSN; exercised by rust-ci"]
+    fn postgres_healthy_connection_return_wakes_waiter() {
+        let options: Config = std::env::var("CADENCE_POSTGRES_POOL_TEST_DSN")
+            .expect("PostgreSQL pool test DSN")
+            .parse()
+            .unwrap();
+        let pool = PostgresConnectionPool::new(options, None, 1, 1, None);
+        let lease = pool.checkout().unwrap();
+        let waiting_pool = pool.clone();
+        let (ready, waiting) = std::sync::mpsc::channel();
+        let waiter = std::thread::spawn(move || {
+            // Hold the pool lock until wait atomically releases it. The lease
+            // cannot return before this waiter is registered on the condvar.
+            let state = waiting_pool.state.lock().unwrap();
+            ready.send(()).unwrap();
+            let (state, timeout) = waiting_pool
+                .available
+                .wait_timeout(state, Duration::from_secs(2))
+                .unwrap();
+            assert!(
+                !timeout.timed_out(),
+                "healthy return did not wake the pool waiter"
+            );
+            assert_eq!(state.idle.len(), 1);
+            drop(state);
+            let mut reused = waiting_pool
+                .checkout_with_timeout(Duration::from_secs(1))
+                .unwrap();
+            assert_eq!(
+                reused.query_one("SELECT 1::INT", &[]).unwrap().get::<_, i32>(0),
+                1
+            );
+        });
+        waiting.recv_timeout(Duration::from_secs(2)).unwrap();
+        drop(lease);
+        waiter.join().unwrap();
     }
 
     #[test]

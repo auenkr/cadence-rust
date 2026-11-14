@@ -483,7 +483,9 @@ pub(crate) fn start_child_workflow_execution_initiated_event_attributes(
         jitter_start: v.jitter_start_seconds.map(|s| duration(s.into())),
         first_run_at: v.first_run_at_timestamp.map(timestamp_nanos),
         cron_overlap_policy: v.cron_overlap_policy.map_or(0, |e| e as i32 + 1),
-        ..Default::default()
+        active_cluster_selection_policy: v
+            .active_cluster_selection_policy
+            .map(selection_policy_out),
     }
 }
 fn start_child_workflow_execution_failed_event_attributes(
