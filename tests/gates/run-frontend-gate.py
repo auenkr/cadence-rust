@@ -450,6 +450,7 @@ try:
         run('cli-register-domain-async', [*cli_t, '--domain', dom_a, 'domain', 'register', '--retention', '1'])
         run('cli-register-domain-noasync', [*cli_t, '--domain', dom_n, 'domain', 'register', '--retention', '1'])
         cfg = json.dumps({'Enabled': True, 'PredefinedQueueName': ASYNC_QUEUE})
+        time.sleep(2)  # Go UpdateAsyncWorkflowConfiguraton honours frontend.failoverCoolDown (1s in dev config)
         ok = run('cli-admin-async-config-update-grpc', [*cli_g, '--domain', dom_a, 'admin', 'async-wf-queue', 'update', '--json', cfg])
         if not ok:
             run('cli-admin-async-config-update-tchannel', [*cli_t, '--domain', dom_a, 'admin', 'async-wf-queue', 'update', '--json', cfg])

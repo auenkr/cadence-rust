@@ -55,6 +55,8 @@ pub struct EngineCore {
     pub strong_idempotency_sanity_check: Arc<dyn Fn(&str) -> bool + Send + Sync>,
     /// Go `config.IsAdvancedVisibilityWritingEnabled()` (evaluated per use).
     pub advanced_visibility_writing: Arc<dyn Fn() -> bool + Send + Sync>,
+    /// Go `config.TransactionSizeLimit` (`system.transactionSizeLimit`).
+    pub transaction_size_limit: Arc<dyn Fn() -> i64 + Send + Sync>,
     /// Go `shard.GetActiveClusterManager()`.
     pub active_cluster_manager: Arc<dyn crate::engine::runtime::ActiveClusterManager>,
     /// Go `clientBean.GetRemoteAdminClient`.
@@ -207,6 +209,7 @@ impl EngineExecutionContext {
             if let Ok(d) = self.core.domains.get_domain_by_id(&self.domain_id) {
                 state.set_bad_binaries(d.bad_binaries.clone());
             }
+            self.start_transaction_version(&state).await?;
             return Ok(state);
         }
         let core = &self.core;
@@ -253,7 +256,24 @@ impl EngineExecutionContext {
             break state;
         };
         *self.state.lock().unwrap() = Some(state.clone());
+        self.start_transaction_version(&state).await?;
         Ok(state)
+    }
+
+    /// Go `mutableStateBuilder.StartTransaction`: `UpdateCurrentVersion(activeClusterInfo.FailoverVersion, false)`
+    /// so a workflow that failed over is written (and policy-checked) at the domain's active version.
+    /// Then Go `startTransactionHandleDecisionFailover` (incoming task version = EmptyVersion).
+    async fn start_transaction_version(&self, state: &Arc<EngineMutableState>) -> HResult<()> {
+        let version = self
+            .core
+            .active_cluster_manager
+            .failover_version_by_workflow(&self.domain_id, &self.execution.workflow_id, &self.execution.run_id)
+            .await?;
+        if let Some(v) = version {
+            state.update_current_version(v, false)?;
+            state.start_transaction_handle_decision_failover(crate::wiring::assembly::engine_state::EMPTY_VERSION)?;
+        }
+        Ok(())
     }
 
     /// NDC checkout must happen while the caller owns this context's cache
@@ -287,7 +307,8 @@ impl EngineExecutionContext {
         }
         self.core.domains.get_domain_name(&events.key.domain_id)?;
         let transaction_id = self.core.shard.generate_task_id().map_err(shard_err(self.core.shard.shard_id()))?;
-        let manager = SqlHistoryManager::new(self.core.history_v2.clone(), self.core.shard.shard_id());
+        let manager = SqlHistoryManager::new(self.core.history_v2.clone(), self.core.shard.shard_id())
+            .with_transaction_size_limit(self.core.transaction_size_limit.clone());
         let cleanup = if new_branch {
             format!("{}:{}:{}", events.key.domain_id, events.key.workflow_id, events.key.run_id)
         } else {
@@ -386,7 +407,8 @@ impl EngineExecutionContext {
             }
             last_event_task_id = ids.last().copied();
             let transaction_id = shard.generate_task_id().map_err(shard_err(shard.shard_id()))?;
-            let manager = SqlHistoryManager::new(core.history_v2.clone(), shard.shard_id());
+            let manager = SqlHistoryManager::new(core.history_v2.clone(), shard.shard_id())
+                .with_transaction_size_limit(core.transaction_size_limit.clone());
             let blob = manager
                 .append_history_nodes(&txn.branch_token, &txn.events, transaction_id, false, "")
                 .await

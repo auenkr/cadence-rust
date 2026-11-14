@@ -174,7 +174,7 @@ impl TypedMutableState {
         workflow_id: &str,
         run_id: &str,
     ) -> Result<HistoryEvent> {
-        let op = "add-external-workflow-cancel-requested-event";
+        let op = "add-externalworkflow-cancel-requested-event";
         self.check_mutability()?;
         if self.get_request_cancel_info(initiated_id).is_none() {
             return Err(self.create_internal_server_error(op));
@@ -219,7 +219,7 @@ impl TypedMutableState {
         run_id: &str,
         cause: CancelExternalWorkflowExecutionFailedCause,
     ) -> Result<HistoryEvent> {
-        let op = "add-request-cancel-external-workflow-failed-event";
+        let op = "add-externalworkflow-cancel-failed-event";
         self.check_mutability()?;
         if self.get_request_cancel_info(initiated_id).is_none() {
             return Err(self.create_internal_server_error(op));

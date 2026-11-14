@@ -529,6 +529,8 @@ pub enum PersistenceError {
     Timeout(String),
     ServiceBusy(String),
     Internal(String),
+    /// Go `persistence.TransactionSizeLimitError`.
+    TransactionSizeLimit(String),
 }
 impl std::fmt::Display for PersistenceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

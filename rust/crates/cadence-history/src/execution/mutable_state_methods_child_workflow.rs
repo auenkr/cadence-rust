@@ -71,7 +71,11 @@ impl TypedMutableState {
                         execution_start_to_close_timeout_seconds: attributes
                             .execution_start_to_close_timeout_seconds,
                         task_start_to_close_timeout_seconds: attributes.task_start_to_close_timeout_seconds,
-                        parent_close_policy: attributes.parent_close_policy,
+                        // Go: GetParentClosePolicy().Ptr() (unset -> ABANDON).
+                        parent_close_policy: Some(
+                            attributes.parent_close_policy.unwrap_or(cadence_api::enums::ParentClosePolicy::Abandon),
+                        ),
+                        cron_overlap_policy: attributes.cron_overlap_policy,
                         control: attributes.control.clone(),
                         decision_task_completed_event_id: decision_completed_event_id,
                         workflow_id_reuse_policy: attributes.workflow_id_reuse_policy,
@@ -134,7 +138,7 @@ impl TypedMutableState {
         initiated_id: i64,
         header: Option<Header>,
     ) -> Result<HistoryEvent> {
-        let op = "add-child-workflow-started-event";
+        let op = "add-childworkflow-started-event";
         self.check_mutability()?;
         match self.get_child_execution_info(initiated_id) {
             Some(ci) if ci.started_id == EMPTY_EVENT_ID => {}
@@ -178,7 +182,7 @@ impl TypedMutableState {
         cause: ChildWorkflowExecutionFailedCause,
         initiated_attributes: &StartChildWorkflowExecutionInitiatedEventAttributes,
     ) -> Result<HistoryEvent> {
-        let op = "add-start-child-workflow-failed-event";
+        let op = "add-childworkflow-initiation-failed-event";
         self.check_mutability()?;
         match self.get_child_execution_info(initiated_id) {
             Some(ci) if ci.started_id == EMPTY_EVENT_ID => {}
@@ -238,7 +242,7 @@ impl TypedMutableState {
         attributes: &WorkflowExecutionCompletedEventAttributes,
     ) -> Result<HistoryEvent> {
         let (init, started, workflow_type) =
-            self.child_terminal_prologue("add-child-workflow-completed-event", initiated_id)?;
+            self.child_terminal_prologue("add-childworkflow-completed-event", initiated_id)?;
         let event = self.add_history_event(timestamp_unix_nanos, EventType::ChildWorkflowExecutionCompleted, |e| {
             e.child_workflow_execution_completed_event_attributes =
                 Some(ChildWorkflowExecutionCompletedEventAttributes {
@@ -272,7 +276,7 @@ impl TypedMutableState {
         attributes: &WorkflowExecutionFailedEventAttributes,
     ) -> Result<HistoryEvent> {
         let (init, started, workflow_type) =
-            self.child_terminal_prologue("add-child-workflow-failed-event", initiated_id)?;
+            self.child_terminal_prologue("add-childworkflow-failed-event", initiated_id)?;
         let event = self.add_history_event(timestamp_unix_nanos, EventType::ChildWorkflowExecutionFailed, |e| {
             e.child_workflow_execution_failed_event_attributes = Some(ChildWorkflowExecutionFailedEventAttributes {
                 reason: attributes.reason.clone(),
@@ -306,7 +310,7 @@ impl TypedMutableState {
         attributes: &WorkflowExecutionCanceledEventAttributes,
     ) -> Result<HistoryEvent> {
         let (init, started, workflow_type) =
-            self.child_terminal_prologue("add-child-workflow-canceled-event", initiated_id)?;
+            self.child_terminal_prologue("add-childworkflow-canceled-event", initiated_id)?;
         let event = self.add_history_event(timestamp_unix_nanos, EventType::ChildWorkflowExecutionCanceled, |e| {
             e.child_workflow_execution_canceled_event_attributes =
                 Some(ChildWorkflowExecutionCanceledEventAttributes {
@@ -340,7 +344,7 @@ impl TypedMutableState {
         _attributes: &WorkflowExecutionTerminatedEventAttributes,
     ) -> Result<HistoryEvent> {
         let (init, started, workflow_type) =
-            self.child_terminal_prologue("add-child-workflow-terminated-event", initiated_id)?;
+            self.child_terminal_prologue("add-childworkflow-terminated-event", initiated_id)?;
         let event = self.add_history_event(
             timestamp_unix_nanos,
             EventType::ChildWorkflowExecutionTerminated,
@@ -377,7 +381,7 @@ impl TypedMutableState {
         attributes: &WorkflowExecutionTimedOutEventAttributes,
     ) -> Result<HistoryEvent> {
         let (init, started, workflow_type) =
-            self.child_terminal_prologue("add-child-workflow-timed-out-event", initiated_id)?;
+            self.child_terminal_prologue("add-childworkflow-timedout-event", initiated_id)?;
         let event = self.add_history_event(timestamp_unix_nanos, EventType::ChildWorkflowExecutionTimedOut, |e| {
             e.child_workflow_execution_timed_out_event_attributes =
                 Some(ChildWorkflowExecutionTimedOutEventAttributes {
@@ -399,5 +403,34 @@ impl TypedMutableState {
             return internal_err("ChildWorkflowExecutionTimedOut event is missing attributes");
         };
         self.delete_pending_child_execution(a.initiated_event_id)
+    }
+}
+
+#[cfg(test)]
+mod child_initiated_parity_tests {
+    use super::*;
+    use crate::execution::mutable_state_task_generator::TaskGeneratorDomains;
+    use crate::execution::mutable_state_builder::TypedMutableStateError;
+
+    struct Domains;
+    impl TaskGeneratorDomains for Domains {
+        fn domain_id_by_name(&self, name: &str) -> std::result::Result<String, TypedMutableStateError> { Ok(format!("id-{name}")) }
+        fn retention_days(&self, _: &str, _: &str) -> std::result::Result<Option<i32>, TypedMutableStateError> { Ok(Some(3)) }
+        fn is_global_domain(&self, _: &str) -> std::result::Result<bool, TypedMutableStateError> { Ok(false) }
+    }
+
+    #[test]
+    fn initiated_event_defaults_parent_close_policy_to_abandon() {
+        let mut s = TypedMutableState::new();
+        s.execution_info.state = 1;
+        s.execution_info.decision_started_id = 3;
+        s.task_gen_env.domains = Some(std::sync::Arc::new(Domains));
+        let attrs = StartChildWorkflowExecutionDecisionAttributes::default();
+        let (event, _) = s
+            .add_start_child_workflow_execution_initiated_event(1, 4, "req", &attrs, "parent", "cid")
+            .unwrap();
+        let a = event.start_child_workflow_execution_initiated_event_attributes.unwrap();
+        assert_eq!(a.parent_close_policy, Some(cadence_api::enums::ParentClosePolicy::Abandon));
+        assert_eq!(a.domain, "parent");
     }
 }

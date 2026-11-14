@@ -1830,14 +1830,12 @@ pub fn encode_go_sql_domain_metadata(
     put(42, Value::I16(metadata.history_archival_status_raw));
     put(48, text(&metadata.configuration.visibility_archival_uri));
     put(46, Value::I16(metadata.visibility_archival_status_raw));
-    put(
-        50,
-        Value::I64(
-            metadata
-                .failover_end_time_nanos
-                .unwrap_or(GO_ZERO_TIME_NANOS),
-        ),
-    );
+    // Go serialization.unixNanoPtr: a nil FailoverEndTime is omitted. A stored
+    // value (even the zero-time sentinel) makes Go treat the domain as
+    // pending-active (IsDomainPendingActive), so Go Matching only polls queries.
+    if let Some(end) = metadata.failover_end_time_nanos {
+        put(50, Value::I64(end));
+    }
     put(52, Value::I64(metadata.previous_failover_version));
     put(54, Value::I64(metadata.last_updated_time_nanos));
     if let Some(blob) = &metadata.bad_binaries {

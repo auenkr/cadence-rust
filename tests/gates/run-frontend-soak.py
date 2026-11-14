@@ -90,7 +90,7 @@ if args.es_url:
     dyn = dyn.replace('value: "db"', 'value: "es"')
 (work / 'dynamic-config.yaml').write_text(dyn)
 (work / 'rust-dynamic-config.yaml').write_text(dyn + f'\nsystem.enableGRPCOutbound:\n  - value: {str(args.rust_outbound == "grpc").lower()}\nfrontend.sendRawWorkflowHistory:\n  - value: true\n')
-(work / 'config/base.yaml').write_text((root / 'go/config/base.yaml').read_text())
+(work / 'config/base.yaml').write_text((root / 'go/config/base.yaml').read_text().replace('level: info', 'level: debug' if os.environ.get('SOAK_GO_DEBUG') else 'level: info', 1))
 seeds = ', '.join(f'"127.0.0.1:{ports[k]}"' for k in ['FRONTEND_PORT', 'HISTORY_PORT', 'WORKER_PORT', 'RUST_MATCHING_PORT' if RUST_MT else 'MATCHING_PORT'] + (['HISTORY2_PORT'] if args.two_history else []))
 text = (root / 'go/config/development.yaml').read_text()
 for k, v in ports.items():
@@ -220,7 +220,7 @@ def dump_domain_rows(tag):
         if not c:
             return
         if plugin == 'mysql':
-            stmts = ["SELECT HEX(id), name, shard_id FROM cadence.domains", "SELECT * FROM cadence.domain_metadata"]
+            stmts = ["SELECT HEX(id), name, shard_id FROM cadence.domains", "SELECT * FROM cadence.domain_metadata", "SELECT name, is_global, data_encoding, HEX(data) FROM cadence.domains WHERE name LIKE 'fe-gate%'"]
             cmds = [['docker', 'exec', c, 'mysql', '-uroot', f'-p{my_pass}', '-h127.0.0.1', '-N', '-B', '-e', q] for q in stmts]
         elif plugin == 'postgres':
             stmts = ["SELECT encode(id,'hex'), name, shard_id FROM domains", "SELECT * FROM domain_metadata"]
@@ -378,6 +378,18 @@ try:
             break
         time.sleep(SAMPLE)
     record('soak-driver-exit', drv.returncode == 0, f'exit={drv.returncode}')
+    # Diagnostics (non-gating): task list pollers/backlog and one workflow history as the Frontend sees them.
+    try:
+        _dl = driver_log.read_text(errors='replace')
+        _tl = re.search(r'"TaskList":"(fe-soak-[0-9a-f-]+)"', _dl)
+        _wf = re.search(r'FAIL (fe-soak-[0-9a-f-]+-\d+)', _dl)
+        if _tl:
+            for t in ('decision', 'activity'):
+                run('diag-tasklist-' + t, [*cli_t, '--domain', dom_t, 'tasklist', 'describe', '--tl', _tl.group(1), '--tlt', t], timeout=60)
+        if _wf:
+            run('diag-workflow-show', [*cli_t, '--domain', dom_t, 'workflow', 'show', '--wid', _wf.group(1)], timeout=60)
+    except Exception as _e:
+        print('diag failed', _e, flush=True)
     print('DRIVER TAIL\n' + '\n'.join(driver_log.read_text(errors='replace').splitlines()[-8:]), flush=True)
     record_services_alive('after-soak')
     for n in [FE, MT]:

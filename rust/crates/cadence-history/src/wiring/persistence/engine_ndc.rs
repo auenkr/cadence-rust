@@ -83,6 +83,7 @@ pub fn to_history_error(err: PersistenceError) -> HistoryError {
         PersistenceError::InvalidPersistenceRequest(m) | PersistenceError::InvalidArgument(m) => HistoryError::bad_request(m),
         PersistenceError::InternalDataInconsistency(m) | PersistenceError::Internal(m) => HistoryError::internal(m),
         PersistenceError::Timeout(m) => HistoryError::PersistenceTimeout(m),
+        PersistenceError::TransactionSizeLimit(m) => HistoryError::TransactionSizeLimit(m),
         PersistenceError::ServiceBusy(m) => HistoryError::internal(m),
     }
 }
@@ -144,7 +145,12 @@ pub type TransactionIdSource = Arc<dyn Fn() -> HResult<i64> + Send + Sync>;
 pub struct SqlHistoryManager {
     pub store: Arc<dyn GoHistoryV2Store>,
     pub shard_id: i32,
+    /// Go `TransactionSizeLimit` dynamic config (`system.transactionSizeLimit`).
+    pub transaction_size_limit: Arc<dyn Fn() -> i64 + Send + Sync>,
 }
+
+/// Go `constants.DefaultTransactionSizeLimit`.
+pub const DEFAULT_TRANSACTION_SIZE_LIMIT: i64 = 14 * 1024 * 1024;
 
 pub(crate) fn branch_request(shard_id: i32, token: &[u8]) -> Result<HistoryBranchRequest, PersistenceError> {
     let branch = cadence_persistence::history_branch::decode(token)
@@ -164,7 +170,12 @@ pub(crate) fn branch_request(shard_id: i32, token: &[u8]) -> Result<HistoryBranc
 
 impl SqlHistoryManager {
     pub fn new(store: Arc<dyn GoHistoryV2Store>, shard_id: i32) -> Self {
-        Self { store, shard_id }
+        Self { store, shard_id, transaction_size_limit: Arc::new(|| DEFAULT_TRANSACTION_SIZE_LIMIT) }
+    }
+
+    pub fn with_transaction_size_limit(mut self, limit: Arc<dyn Fn() -> i64 + Send + Sync>) -> Self {
+        self.transaction_size_limit = limit;
+        self
     }
 
     /// Go `ForkHistoryBranch`: returns the new branch token.
@@ -206,6 +217,13 @@ impl SqlHistoryManager {
         }
         let encoded = cadence_thrift::history_blob::encode(events.to_vec());
         let blob = DataBlob { encoding: "thriftrw".to_string(), data: encoded.data };
+        let size = blob.data.len() as i64;
+        let size_limit = (self.transaction_size_limit)();
+        if size > size_limit {
+            return Err(PersistenceError::TransactionSizeLimit(format!(
+                "transaction size of {size} bytes exceeds limit of {size_limit} bytes"
+            )));
+        }
         let mut request = branch_request(self.shard_id, token)?;
         request.node_id = first.event_id;
         request.transaction_id = transaction_id;

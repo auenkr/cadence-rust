@@ -112,8 +112,20 @@ impl StateBuilder {
 
                 match event.event_type {
                     Some(EventType::WorkflowExecutionStarted) => {
-                        let parent_domain_id = event.workflow_execution_started_event_attributes.as_ref()
-                            .and_then(|a| a.parent_workflow_domain_id.as_deref());
+                        // Go: use ParentWorkflowDomainID if present, otherwise fall back to
+                        // the domain cache lookup of ParentWorkflowDomain (older histories).
+                        let attrs = event.workflow_execution_started_event_attributes.as_ref();
+                        let mut resolved_parent: Option<String> = attrs.and_then(|a| a.parent_workflow_domain_id.clone());
+                        if resolved_parent.is_none() {
+                            let name = attrs.and_then(|a| a.parent_workflow_domain.as_deref()).unwrap_or("");
+                            if !name.is_empty() {
+                                let domains = state.task_gen_env.domains.clone().ok_or_else(|| {
+                                    StateBuilderError::Typed(TypedMutableStateError::Internal("domain cache is not configured for parent domain lookup".into()))
+                                })?;
+                                resolved_parent = Some(domains.domain_id_by_name(name).map_err(StateBuilderError::Typed)?);
+                            }
+                        }
+                        let parent_domain_id = resolved_parent.as_deref();
                         state.replicate_workflow_execution_started_event(
                             &mut StartedEnv { domain_id: domain_id.to_string(), ..Default::default() },
                             parent_domain_id,
