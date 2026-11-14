@@ -83,8 +83,6 @@ pub struct TypedWorkflowMutation {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TypedWorkflowSnapshot {
     pub execution_info: WorkflowExecutionInfo,
-    /// Go `mutableStateBuilder.checksum`, loaded from `WorkflowSnapshot.Checksum`.
-    pub checksum: Vec<u8>,
     pub version_histories: Option<VersionHistories>,
     pub start_version: i64,
     pub last_write_version: i64,
@@ -159,6 +157,8 @@ pub struct TypedMutableState {
     pub has_buffered_events_in_db: bool,
 
     pub execution_info: WorkflowExecutionInfo,
+    /// Go `mutableStateBuilder.checksum`, loaded from `WorkflowSnapshot.Checksum`.
+    pub checksum: Vec<u8>,
     pub version_histories: Option<VersionHistories>,
     pub current_version: i64,
     pub next_event_id_in_db: i64,
