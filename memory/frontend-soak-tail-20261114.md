@@ -32,3 +32,6 @@ https://github.com/auenkr/cadence-rust/actions/runs/43584330378 (head e159eba846
 - https://github.com/auenkr/cadence-rust/actions/runs/43598097477 — head 98b80762f, SUCCESS: fresh uncached target, formatting, workspace Clippy then workspace tests, PostgreSQL wakeup regression and Go/Rust metric parity.
 - https://github.com/auenkr/cadence-rust/actions/runs/43598691116 — head 304c2699a, SUCCESS: same full fresh-target validation including both write-only QPS regression tests. Compact logs in memory/evidence/frontend-soak-tail-20261114/.
 - Measured soak attempt 1: https://github.com/auenkr/cadence-rust/actions/runs/43598100147 — head 98b80762f, default 70 minutes/rate 10, go-baseline + rust lanes started 13:18 UTC, verdict pending. No second measured attempt dispatched yet.
+
+### In-turn wait checkpoint (14:00 UTC)
+Both fresh CI runs succeeded. Soak 43598100147 remains in progress after its scheduled midpoint; no verdict available yet, and no second measured soak has been dispatched. Waiting in-turn with status checks at least 120 seconds apart. Only read-only GitHub API/CLI and filesystem/git operations run locally.
