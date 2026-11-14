@@ -245,9 +245,9 @@ pub async fn allow_domain(
             Err(WaitFailure::CallerCancelled) => {
                 Err(CadenceError::Unknown("request context canceled".to_owned()))
             }
-            Err(_) if parent_expired() => {
-                Err(CadenceError::Unknown("context deadline exceeded".to_owned()))
-            }
+            Err(_) if parent_expired() => Err(CadenceError::Unknown(
+                "context deadline exceeded".to_owned(),
+            )),
             Err(WaitFailure::Other(message)) => Err(CadenceError::Unknown(message)),
             Err(WaitFailure::Deadline) if bypass.should_bypass(info) => Ok(()),
             Err(WaitFailure::Deadline) if bypass.allow_policy(policy, info) => Ok(()),

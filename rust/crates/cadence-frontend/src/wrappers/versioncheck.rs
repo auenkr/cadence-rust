@@ -244,9 +244,15 @@ mod tests {
         assert!(parse_version("1.0+").is_none());
         let checker = GoVersionChecker;
         assert!(checker.client_supported(true, "uber-go", "1.7.0").is_ok());
-        assert!(checker.client_supported(true, "uber-go", "1.7.0.1").is_err());
-        assert!(checker.client_supported(true, "uber-go", "1.7.0-rc.1").is_err());
+        assert!(checker
+            .client_supported(true, "uber-go", "1.7.0.1")
+            .is_err());
+        assert!(checker
+            .client_supported(true, "uber-go", "1.7.0-rc.1")
+            .is_err());
         assert!(checker.client_supported(true, "uber-java", "1.5").is_ok());
-        assert!(checker.client_supported(true, "uber-java", "1.5.1").is_err());
+        assert!(checker
+            .client_supported(true, "uber-java", "1.5.1")
+            .is_err());
     }
 }

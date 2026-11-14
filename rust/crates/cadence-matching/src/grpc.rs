@@ -581,7 +581,10 @@ impl Frontend {
                         headers: caller_headers,
                         transport: "grpc",
                     };
-                    let value = api.call(operation, request, ctx).await.map_err(|error| status_from_cadence_error(&error))?;
+                    let value = api
+                        .call(operation, request, ctx)
+                        .await
+                        .map_err(|error| status_from_cadence_error(&error))?;
                     return serde_json::from_value(value)
                         .map_err(|e| Status::internal(e.to_string()));
                 }
@@ -1967,7 +1970,12 @@ impl p::visibility_api_server::VisibilityApi for Frontend {
         &self,
         request: tonic::Request<p::ListWorkflowExecutionsRequest>,
     ) -> Result<Response<p::ListWorkflowExecutionsResponse>, Status> {
-        if self.state.workflow_api.as_ref().is_some_and(|api| api.serves("ListWorkflowExecutions")) {
+        if self
+            .state
+            .workflow_api
+            .as_ref()
+            .is_some_and(|api| api.serves("ListWorkflowExecutions"))
+        {
             let r = request.get_ref();
             let input = st::ListWorkflowExecutionsRequest {
                 domain: r.domain.clone(),
@@ -2164,7 +2172,12 @@ impl p::visibility_api_server::VisibilityApi for Frontend {
         &self,
         request: tonic::Request<p::ScanWorkflowExecutionsRequest>,
     ) -> Result<Response<p::ScanWorkflowExecutionsResponse>, Status> {
-        if self.state.workflow_api.as_ref().is_some_and(|api| api.serves("ScanWorkflowExecutions")) {
+        if self
+            .state
+            .workflow_api
+            .as_ref()
+            .is_some_and(|api| api.serves("ScanWorkflowExecutions"))
+        {
             let r = request.get_ref();
             let input = st::ListWorkflowExecutionsRequest {
                 domain: r.domain.clone(),
@@ -2193,7 +2206,12 @@ impl p::visibility_api_server::VisibilityApi for Frontend {
         &self,
         request: tonic::Request<p::CountWorkflowExecutionsRequest>,
     ) -> Result<Response<p::CountWorkflowExecutionsResponse>, Status> {
-        if self.state.workflow_api.as_ref().is_some_and(|api| api.serves("CountWorkflowExecutions")) {
+        if self
+            .state
+            .workflow_api
+            .as_ref()
+            .is_some_and(|api| api.serves("CountWorkflowExecutions"))
+        {
             let r = request.get_ref();
             let input = st::CountWorkflowExecutionsRequest {
                 domain: r.domain.clone(),
@@ -2202,7 +2220,9 @@ impl p::visibility_api_server::VisibilityApi for Frontend {
             let v: st::CountWorkflowExecutionsResponse = self
                 .call_with_headers(Method::POST, "/api/v1/workflows/count-all", &input, &[])
                 .await?;
-            return Ok(Response::new(p::CountWorkflowExecutionsResponse { count: v.count }));
+            return Ok(Response::new(p::CountWorkflowExecutionsResponse {
+                count: v.count,
+            }));
         }
         let r = request.into_inner();
         let mut all = self.visible(&r.domain, None)?;
@@ -3034,7 +3054,11 @@ mod cadence_error_status_tests {
             &Method::GET,
             &query(
                 "/api/v1/workflows/describe",
-                &[("domain", "d"), ("workflowId", "w"), ("queryConsistencyLevel", "1")],
+                &[
+                    ("domain", "d"),
+                    ("workflowId", "w"),
+                    ("queryConsistencyLevel", "1"),
+                ],
             ),
         )
         .unwrap();
@@ -3042,7 +3066,10 @@ mod cadence_error_status_tests {
         assert_eq!(body.unwrap()["queryConsistencyLevel"], 1);
         let (_, body) = hook_operation(
             &Method::GET,
-            &query("/api/v1/workflows/describe", &[("domain", "d"), ("workflowId", "w")]),
+            &query(
+                "/api/v1/workflows/describe",
+                &[("domain", "d"), ("workflowId", "w")],
+            ),
         )
         .unwrap();
         assert!(body.unwrap().get("queryConsistencyLevel").is_none());
@@ -3054,7 +3081,9 @@ mod cadence_error_status_tests {
         assert!(cadence_api::validation::check_execution(Some(&e)).is_ok());
         let e = cadence_api::types::WorkflowExecution::new("", "");
         assert_eq!(
-            cadence_api::validation::check_execution(Some(&e)).unwrap_err().message,
+            cadence_api::validation::check_execution(Some(&e))
+                .unwrap_err()
+                .message,
             "WorkflowId is not set on request."
         );
     }

@@ -147,7 +147,9 @@ pub fn forward_for_current_call(
     INBOUND_HEADERS
         .try_with(|inbound| {
             let outbound: HashMap<String, String> = existing.iter().cloned().collect();
-            forwarded_headers(rules, inbound, &outbound).into_iter().collect()
+            forwarded_headers(rules, inbound, &outbound)
+                .into_iter()
+                .collect()
         })
         .unwrap_or_default()
 }
@@ -159,14 +161,21 @@ mod tests {
     #[tokio::test]
     async fn clamp_uses_min_of_budget_and_caller_remaining_solfix10() {
         use std::time::{Duration, Instant};
-        assert_eq!(clamp_to_inbound_deadline(Duration::from_secs(30)), Duration::from_secs(30));
+        assert_eq!(
+            clamp_to_inbound_deadline(Duration::from_secs(30)),
+            Duration::from_secs(30)
+        );
         let d = Instant::now() + Duration::from_secs(5);
         let got = INBOUND_DEADLINE
-            .scope(Some(d), async { clamp_to_inbound_deadline(Duration::from_secs(30)) })
+            .scope(Some(d), async {
+                clamp_to_inbound_deadline(Duration::from_secs(30))
+            })
             .await;
         assert!(got <= Duration::from_secs(5));
         let got = INBOUND_DEADLINE
-            .scope(Some(d), async { clamp_to_inbound_deadline(Duration::from_secs(1)) })
+            .scope(Some(d), async {
+                clamp_to_inbound_deadline(Duration::from_secs(1))
+            })
             .await;
         assert_eq!(got, Duration::from_secs(1));
     }

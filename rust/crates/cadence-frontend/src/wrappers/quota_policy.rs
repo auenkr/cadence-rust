@@ -212,7 +212,11 @@ impl Policy for TokenBucketPolicy {
         self.reserve(info).is_ok()
     }
 
-    fn wait<'a>(&'a self, info: &'a QuotaInfo, timeout: Duration) -> super::ratelimited::WaitFuture<'a> {
+    fn wait<'a>(
+        &'a self,
+        info: &'a QuotaInfo,
+        timeout: Duration,
+    ) -> super::ratelimited::WaitFuture<'a> {
         Box::pin(async move {
             let deadline = tokio::time::Instant::now() + timeout;
             loop {

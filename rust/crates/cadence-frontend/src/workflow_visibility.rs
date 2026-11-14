@@ -396,7 +396,11 @@ impl ListSampler {
         enabled: Arc<dyn Fn() -> bool + Send + Sync>,
         qps: Arc<dyn Fn(&str) -> i64 + Send + Sync>,
     ) -> Self {
-        Self { enabled, qps, buckets: Default::default() }
+        Self {
+            enabled,
+            qps,
+            buckets: Default::default(),
+        }
     }
 
     pub fn try_consume(&self, domain: &str) -> Result<(), CadenceError> {
@@ -432,7 +436,10 @@ mod solfix16_tests {
     fn list_sampler_limits_per_domain_when_enabled() {
         let s = ListSampler::new(Arc::new(|| true), Arc::new(|_| 1));
         assert!(s.try_consume("a").is_ok());
-        assert!(matches!(s.try_consume("a"), Err(CadenceError::ServiceBusy(_))));
+        assert!(matches!(
+            s.try_consume("a"),
+            Err(CadenceError::ServiceBusy(_))
+        ));
         assert!(s.try_consume("b").is_ok());
         let off = ListSampler::new(Arc::new(|| false), Arc::new(|_| 0));
         assert!(off.try_consume("a").is_ok());

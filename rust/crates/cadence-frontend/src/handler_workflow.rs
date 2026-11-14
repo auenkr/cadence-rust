@@ -3803,6 +3803,7 @@ mod tests {
                     partition_config: None,
                     original_headers: HashMap::new(),
                     deadline: None,
+                    ..Default::default()
                 },
             )
             .await
@@ -5331,7 +5332,9 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(
-            tags.iter().map(|t| (t.key, t.value.as_str())).collect::<Vec<_>>(),
+            tags.iter()
+                .map(|t| (t.key, t.value.as_str()))
+                .collect::<Vec<_>>(),
             [("caller", "svc"), ("transport", "tchannel")]
         );
     }

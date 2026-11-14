@@ -238,7 +238,9 @@ async fn handle_delete_domain(
             uuid: None,
         })
         .map_err(|e| AppError::entity_not_exists(e.message))?;
-    if current.domain_info.as_ref().and_then(|info| info.status) != Some(cadence_api::enums::DomainStatus::Deprecated) {
+    if current.domain_info.as_ref().and_then(|info| info.status)
+        != Some(cadence_api::enums::DomainStatus::Deprecated)
+    {
         return Err(AppError::bad_request(
             "Domain is not in a deprecated state.".to_string(),
         ));
@@ -249,8 +251,8 @@ async fn handle_delete_domain(
         ..Default::default()
     };
     let has_executions = if let Some(api) = &state.workflow_api {
-        let value = serde_json::to_value(&list_request)
-            .map_err(|e| AppError::internal(e.to_string()))?;
+        let value =
+            serde_json::to_value(&list_request).map_err(|e| AppError::internal(e.to_string()))?;
         let out = api
             .call("ListWorkflowExecutions", value, ctx.clone())
             .await
@@ -1046,7 +1048,7 @@ async fn handle_describe_queue(state: &AppState, body: &Struct) -> HandlerResult
     )
     .await
     .map_err(|error| AppError::internal(error.message().to_string()))?
-        .into_inner();
+    .into_inner();
     Ok(wrap_success(&cadence_api::admin::DescribeQueueResponse {
         processing_queue_states: response.processing_queue_states,
     }))
@@ -3297,7 +3299,10 @@ mod schedule_dispatch_tests {
             operation: &str,
             _: &serde_json::Value,
         ) -> Result<(), crate::workflow_api::DomainGuardError> {
-            self.calls.lock().unwrap().push(format!("validate:{operation}"));
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("validate:{operation}"));
             if self.validation_passes {
                 Ok(())
             } else {
@@ -3320,10 +3325,10 @@ mod schedule_dispatch_tests {
         }
 
         fn graceful_failover_metric(&self, operation: &str, domain: &str, reason: Option<&str>) {
-            self.calls
-                .lock()
-                .unwrap()
-                .push(format!("metric:{operation}:{domain}:{}", reason.unwrap_or("ok")));
+            self.calls.lock().unwrap().push(format!(
+                "metric:{operation}:{domain}:{}",
+                reason.unwrap_or("ok")
+            ));
         }
     }
 
@@ -3481,9 +3486,12 @@ mod schedule_dispatch_tests {
             failover_timeout_in_seconds: Some(60),
             ..Default::default()
         };
-        let error =
-            dispatch_guarded(&guard, "WorkflowService::UpdateDomain", Value::Struct(update.to_thrift()))
-                .await;
+        let error = dispatch_guarded(
+            &guard,
+            "WorkflowService::UpdateDomain",
+            Value::Struct(update.to_thrift()),
+        )
+        .await;
         assert_eq!(
             error,
             Some((

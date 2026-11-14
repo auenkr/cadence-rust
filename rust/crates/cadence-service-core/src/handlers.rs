@@ -3294,7 +3294,10 @@ mod frontend_drain_tests {
             crate::admin::DynamicConfigOverlay::from_file(&path).unwrap();
         std::fs::remove_file(path).unwrap();
 
-        assert_eq!(state.domain_policy("payments").cooldown_nanos, 2_000_000_000);
+        assert_eq!(
+            state.domain_policy("payments").cooldown_nanos,
+            2_000_000_000
+        );
         assert_eq!(state.domain_policy("billing").cooldown_nanos, 1_000_000_000);
     }
 
