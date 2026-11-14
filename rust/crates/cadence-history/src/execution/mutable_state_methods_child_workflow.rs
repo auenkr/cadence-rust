@@ -120,6 +120,7 @@ impl TypedMutableState {
             started_workflow_id: attributes.workflow_id.clone(),
             create_request_id: create_request_id.to_string(),
             domain_id: child_domain_id.to_string(),
+            domain_name_deprecated: String::new(),
             workflow_type_name: attributes.workflow_type.as_ref().map(|t| t.name.clone()).unwrap_or_default(),
             parent_close_policy: attributes.parent_close_policy,
         };

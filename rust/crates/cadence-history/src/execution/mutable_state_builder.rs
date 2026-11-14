@@ -157,6 +157,8 @@ pub struct TypedMutableState {
     pub has_buffered_events_in_db: bool,
 
     pub execution_info: WorkflowExecutionInfo,
+    /// Go `mutableStateBuilder.checksum`, loaded from `WorkflowSnapshot.Checksum`.
+    pub checksum: Vec<u8>,
     pub version_histories: Option<VersionHistories>,
     pub current_version: i64,
     pub next_event_id_in_db: i64,
@@ -237,6 +239,45 @@ impl TypedMutableState {
         version_histories: Option<VersionHistories>,
         history_size: i64,
     ) {
+        self.load_with_compatibility(
+            execution_info,
+            activities,
+            timers,
+            children,
+            request_cancels,
+            signals,
+            signal_requested_ids,
+            buffered_events,
+            version_histories,
+            history_size,
+            Vec::new(),
+            0,
+            |_| Err("legacy domain lookup is unavailable".to_owned()),
+        );
+    }
+
+    /// Go `Load` with the shard configuration and domain cache needed for its
+    /// checksum invalidation and legacy child-domain compatibility steps.
+    #[allow(clippy::too_many_arguments)]
+    pub fn load_with_compatibility<F>(
+        &mut self,
+        execution_info: WorkflowExecutionInfo,
+        activities: Vec<ActivityInfo>,
+        timers: Vec<TimerInfo>,
+        children: Vec<ChildExecutionInfo>,
+        request_cancels: Vec<RequestCancelInfo>,
+        signals: Vec<SignalInfo>,
+        signal_requested_ids: Vec<String>,
+        buffered_events: Vec<HistoryEvent>,
+        version_histories: Option<VersionHistories>,
+        history_size: i64,
+        checksum: Vec<u8>,
+        checksum_invalidate_before_secs: i64,
+        mut get_domain_id: F,
+    )
+    where
+        F: FnMut(&str) -> std::result::Result<String, String>,
+    {
         self.pending_activity_info_ids = activities.into_iter().map(|a| (a.schedule_id, a)).collect();
         self.pending_activity_id_to_event_id = self
             .pending_activity_info_ids
@@ -261,6 +302,21 @@ impl TypedMutableState {
         self.state_in_db = execution_info.state;
         self.next_event_id_in_db = execution_info.next_event_id;
         self.execution_info = execution_info;
+        self.checksum = checksum;
+        for info in self.pending_child_execution_info_ids.values_mut() {
+            if info.domain_id.is_empty() && !info.domain_name_deprecated.is_empty() {
+                // Go logs the lookup failure, then assigns the returned ID (empty
+                // on failure) to the child record.
+                info.domain_id = get_domain_id(&info.domain_name_deprecated).unwrap_or_default();
+            }
+        }
+        if !self.checksum.is_empty()
+            && checksum_invalidate_before_secs > 0
+            && self.execution_info.last_updated_time_unix_nanos
+                < checksum_invalidate_before_secs.saturating_mul(1_000_000_000)
+        {
+            self.checksum.clear();
+        }
         self.version_histories = version_histories;
         self.history_size = history_size;
         self.reset_update_tracking();
@@ -1065,6 +1121,38 @@ mod tests {
         );
         assert_eq!(state.buffered_events[0].event_type, Some(EventType::ActivityTaskStarted));
         assert_eq!(state.buffered_events[1].event_type, Some(EventType::ActivityTaskCompleted));
+    }
+
+    #[test]
+    fn typed_load_clears_checksum_before_invalidation_cutoff_like_go() {
+        let mut state = TypedMutableState::new();
+        let info = WorkflowExecutionInfo {
+            last_updated_time_unix_nanos: 9_000_000_000,
+            ..Default::default()
+        };
+        state.load_with_compatibility(
+            info, vec![], vec![], vec![], vec![], vec![], vec![], vec![], None, 0,
+            vec![1, 2, 3], 10, |_| Err("unused".to_owned()),
+        );
+        assert!(state.checksum.is_empty());
+    }
+
+    #[test]
+    fn typed_load_fills_legacy_child_domain_id_like_go() {
+        let mut state = TypedMutableState::new();
+        let child = ChildExecutionInfo {
+            initiated_id: 7,
+            domain_name_deprecated: "legacy-domain".into(),
+            ..Default::default()
+        };
+        state.load_with_compatibility(
+            WorkflowExecutionInfo::default(), vec![], vec![], vec![child], vec![], vec![],
+            vec![], vec![], None, 0, vec![], 0,
+            |name| Ok(format!("id-for-{name}")),
+        );
+        let child = &state.pending_child_execution_info_ids[&7];
+        assert_eq!(child.domain_id, "id-for-legacy-domain");
+        assert_eq!(child.domain_name_deprecated, "legacy-domain");
     }
 
     #[test]
