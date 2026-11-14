@@ -692,6 +692,7 @@ pub struct HandlerApi {
     >,
     admin_auth: AdminAccessControl,
     schedule_redirect: Option<crate::wrappers::redirection_runtime::ScheduleRedirect>,
+    domain_guard: crate::domain_guard::DomainGuard,
 }
 
 /// Go `accesscontrolled.NewAdminHandler`: every Admin method needs
@@ -775,6 +776,10 @@ impl std::fmt::Debug for HandlerApi {
 }
 
 impl cadence_service_core::workflow_api::WorkflowApi for HandlerApi {
+    fn domain_validator(&self) -> Option<&dyn cadence_service_core::workflow_api::DomainValidator> {
+        Some(&self.domain_guard)
+    }
+
     fn admin_authorizer(&self) -> Option<&dyn cadence_service_core::workflow_api::AdminAuthorizer> {
         Some(&self.admin_auth)
     }
@@ -1477,6 +1482,21 @@ pub fn build_workflow_api(
         )),
     }
     .with_dynamic_config(dynamic_overlay.clone());
+    let domain_guard = crate::domain_guard::DomainGuard {
+        validator: validator.clone(),
+        clusters: std::sync::Arc::new(crate::domain_guard::LiveClusters {
+            current: metadata.current_cluster_name.clone(),
+            enabled: metadata
+                .cluster_group
+                .iter()
+                .filter(|(_, c)| c.enabled)
+                .map(|(name, _)| name.clone())
+                .collect(),
+            manager: ctx.state.domain_manager.clone(),
+            remotes: remotes.clone(),
+        }),
+        metrics: shared_metrics_sink.clone(),
+    };
     let handler = install_async_publisher(
         crate::handler_workflow::Handler::with_validator(forwarding_backend, validator),
         async_domains,
@@ -1604,6 +1624,7 @@ pub fn build_workflow_api(
         handler,
         admin_auth: AdminAccessControl(selected_authorizer),
         schedule_redirect,
+        domain_guard,
     }))
 }
 

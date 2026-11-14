@@ -613,10 +613,47 @@ pub fn apply_archival_registration_policy(
 }
 
 /// Mirrors Go `ValidateRegisterDomainRequest` core checks + `CreateDomain`.
+/// Go `WorkflowHandler` pre-checks (request validator, graceful-failover
+/// check) for the domain APIs; `Err` is the ready response.
+async fn domain_guard<T: serde::Serialize>(
+    state: &AppState,
+    operation: &str,
+    request: &T,
+    graceful_domain: Option<&str>,
+) -> Result<(), Response> {
+    let value = serde_json::to_value(request).map_err(|error| {
+        error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            error.to_string(),
+        )
+    })?;
+    crate::workflow_api::run_domain_guard(
+        state.workflow_api.as_ref(),
+        operation,
+        &value,
+        graceful_domain,
+    )
+    .await
+    .map_err(|error| match error {
+        crate::workflow_api::DomainGuardError::BadRequest(message) => {
+            bad_request(BadRequestError::new(message))
+        }
+        crate::workflow_api::DomainGuardError::Internal(message) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            message,
+        ),
+    })
+}
+
 async fn register_domain(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RegisterDomainRequest>,
 ) -> Response {
+    if let Err(response) = domain_guard(&state, "RegisterDomain", &req, None).await {
+        return response;
+    }
     // Go checks primary-cluster ownership before inspecting the requested
     // name, so preserve that error precedence for global-domain registration.
     if req.is_global_domain && !state.cluster_metadata.is_primary_cluster() {
@@ -751,6 +788,14 @@ async fn create_semaphore(
     State(state): State<Arc<AppState>>,
     Json(req): Json<cadence_api::types::CreateSemaphoreRequest>,
 ) -> Response {
+    if req.domain.is_empty() {
+        return bad_request(validation::err_domain_not_set());
+    }
+    if state.semaphore_enabled {
+        if let Err(response) = domain_guard(&state, "CreateSemaphore", &req, None).await {
+            return response;
+        }
+    }
     if let Err(e) = validation::validate_create_semaphore_request(Some(&req)) {
         return bad_request(e);
     }
@@ -822,15 +867,35 @@ async fn failover_domain(
     State(state): State<Arc<AppState>>,
     Json(req): Json<cadence_api::types::FailoverDomainRequest>,
 ) -> Response {
+    let graceful = req.failover_timeout_in_seconds.is_some();
+    if let Err(response) = domain_guard(
+        &state,
+        "FailoverDomain",
+        &req,
+        graceful.then_some(req.domain_name.as_str()),
+    )
+    .await
+    {
+        return response;
+    }
     if let Err(e) = validation::validate_failover_domain_request(Some(&req)) {
         return bad_request(e);
     }
-    match state.domain_manager.failover(
+    let failed_over = state.domain_manager.failover(
         &req,
         &state.current_cluster_name,
         &state.cluster_metadata,
         &state.domain_policy(&req.domain_name),
-    ) {
+    );
+    if graceful {
+        crate::workflow_api::record_graceful_outcome(
+            state.workflow_api.as_ref(),
+            "FailoverDomain",
+            &req.domain_name,
+            failed_over.is_ok(),
+        );
+    }
+    match failed_over {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(cadence_persistence::FrontendDomainError::NotFound(e)) => entity_not_exists(e),
         Err(cadence_persistence::FrontendDomainError::Busy(message)) => {
@@ -900,14 +965,34 @@ async fn update_domain(
     State(state): State<Arc<AppState>>,
     Json(req): Json<UpdateDomainRequest>,
 ) -> Response {
+    let graceful = req.failover_timeout_in_seconds.is_some();
+    if let Err(response) = domain_guard(
+        &state,
+        "UpdateDomain",
+        &req,
+        graceful.then_some(req.name.as_str()),
+    )
+    .await
+    {
+        return response;
+    }
     if req.name.is_empty() {
         return bad_request(validation::err_domain_not_set());
     }
-    match state.domain_manager.update(
+    let updated = state.domain_manager.update(
         &req,
         &state.cluster_metadata,
         &state.domain_policy(&req.name),
-    ) {
+    );
+    if graceful {
+        crate::workflow_api::record_graceful_outcome(
+            state.workflow_api.as_ref(),
+            "UpdateDomain",
+            &req.name,
+            updated.is_ok(),
+        );
+    }
+    match updated {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(cadence_persistence::FrontendDomainError::NotFound(e)) => entity_not_exists(e),
         Err(cadence_persistence::FrontendDomainError::Busy(message)) => {
@@ -933,6 +1018,9 @@ async fn deprecate_domain(
     State(state): State<Arc<AppState>>,
     Json(req): Json<DeprecateDomainRequest>,
 ) -> Response {
+    if let Err(response) = domain_guard(&state, "DeprecateDomain", &req, None).await {
+        return response;
+    }
     if req.name.is_empty() {
         return bad_request(validation::err_domain_not_set());
     }
@@ -2181,6 +2269,9 @@ async fn delete_domain(
     State(state): State<Arc<AppState>>,
     Json(req): Json<DeleteDomainRequest>,
 ) -> Response {
+    if let Err(response) = domain_guard(&state, "DeleteDomain", &req, None).await {
+        return response;
+    }
     if req.name.is_empty() {
         return bad_request(validation::err_domain_not_set());
     }

@@ -70,6 +70,7 @@ fn warn_counter_name(kind: &str) -> Option<&'static str> {
         "SignalName" => "cadence_errors_signal_name_exceeded_warn_limit",
         "WorkflowType" => "cadence_errors_workflow_type_exceeded_warn_limit",
         "RequestID" => "cadence_errors_request_id_exceeded_warn_limit",
+        "SemaphoreName" => "cadence_errors_semaphore_name_exceeded_warn_limit",
         "TaskListName" => "cadence_errors_task_list_name_exceeded_warn_limit",
         _ => return None,
     })
@@ -620,6 +621,42 @@ impl RequestValidator {
             }
         }
         self.check_failover_permission(&request.domain_name)
+    }
+
+    /// Go `WorkflowHandler.CreateSemaphore` request checks after the dynamic
+    /// enablement gate: domain, name, name length, capacity, bucket capacity.
+    pub fn validate_create_semaphore_request(
+        &self,
+        request: &cadence_api::types::CreateSemaphoreRequest,
+    ) -> Result<(), BadRequestError> {
+        Self::domain_missing(&request.domain)?;
+        if request.semaphore_name.is_empty() {
+            return Err(Self::bad("SemaphoreName is not set on request."));
+        }
+        let limit = self
+            .dynamic_integer("limit.semaphoreNameLength", Some(&request.domain), 1000)
+            .max(0) as usize;
+        if !self.is_valid_id_length(
+            &request.semaphore_name,
+            limit,
+            &request.domain,
+            "SemaphoreName",
+        ) {
+            return Err(Self::bad("SemaphoreName exceeds length limit."));
+        }
+        if request.capacity <= 0 {
+            return Err(Self::bad(format!(
+                "Capacity must be positive, got {}.",
+                request.capacity
+            )));
+        }
+        if !(0..=250).contains(&request.bucket_capacity) {
+            return Err(Self::bad(format!(
+                "BucketCapacity must be between 0 and 250, got {}.",
+                request.bucket_capacity
+            )));
+        }
+        Ok(())
     }
 
     fn check_failover_permission(&self, domain: &str) -> Result<(), BadRequestError> {

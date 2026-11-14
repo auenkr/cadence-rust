@@ -189,12 +189,42 @@ fn require_task_domain_thrift(state: &AppState, bytes: &[u8]) -> Result<(), AppE
         .map_err(|e| AppError::entity_not_exists(e.message))
 }
 
+fn guard_app_error(error: crate::workflow_api::DomainGuardError) -> AppError {
+    match error {
+        crate::workflow_api::DomainGuardError::BadRequest(message) => {
+            AppError::bad_request(message)
+        }
+        crate::workflow_api::DomainGuardError::Internal(message) => AppError::internal(message),
+    }
+}
+
+/// Go `WorkflowHandler` pre-checks (request validator, graceful-failover
+/// check) for the domain APIs served from this module.
+async fn domain_guard<T: serde::Serialize>(
+    state: &AppState,
+    operation: &str,
+    request: &T,
+    graceful_domain: Option<&str>,
+) -> Result<(), AppError> {
+    let value =
+        serde_json::to_value(request).map_err(|error| AppError::internal(error.to_string()))?;
+    crate::workflow_api::run_domain_guard(
+        state.workflow_api.as_ref(),
+        operation,
+        &value,
+        graceful_domain,
+    )
+    .await
+    .map_err(guard_app_error)
+}
+
 async fn handle_delete_domain(
     state: &AppState,
     body: &Struct,
     ctx: &crate::workflow_api::CallerContext,
 ) -> HandlerResult {
     let req: DeleteDomainRequest = decode_args(body).map_err(AppError::bad_request)?;
+    domain_guard(state, "DeleteDomain", &req, None).await?;
     if req.name.is_empty() {
         return Err(AppError::bad_request(
             "Domain not set on request.".to_string(),
@@ -283,6 +313,7 @@ async fn handle_register(state: &AppState, body: &Struct) -> HandlerResult {
     use cadence_api::types::RegisterDomainRequest;
     let req: RegisterDomainRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
+    domain_guard(state, "RegisterDomain", &req, None).await?;
     if req.name.is_empty() {
         return Err(AppError::bad_request(
             "Domain not set on request.".to_string(),
@@ -564,16 +595,33 @@ async fn handle_update_domain(state: &AppState, body: &Struct) -> HandlerResult 
     use cadence_api::service_types::UpdateDomainRequest;
     let req: UpdateDomainRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
+    let graceful = req.failover_timeout_in_seconds.is_some();
+    domain_guard(
+        state,
+        "UpdateDomain",
+        &req,
+        graceful.then_some(req.name.as_str()),
+    )
+    .await?;
     if req.name.is_empty() {
         return Err(AppError::bad_request(
             "Domain not set on request.".to_string(),
         ));
     }
-    match state.domain_manager.update(
+    let updated = state.domain_manager.update(
         &req,
         &state.cluster_metadata,
         &state.domain_policy(&req.name),
-    ) {
+    );
+    if graceful {
+        crate::workflow_api::record_graceful_outcome(
+            state.workflow_api.as_ref(),
+            "UpdateDomain",
+            &req.name,
+            updated.is_ok(),
+        );
+    }
+    match updated {
         Ok(resp) => Ok(wrap_success(&resp)),
         Err(cadence_persistence::FrontendDomainError::NotFound(e)) => {
             Err(AppError::entity_not_exists(e.message))
@@ -595,6 +643,7 @@ async fn handle_deprecate_domain(state: &AppState, body: &Struct) -> HandlerResu
     use cadence_api::service_types::DeprecateDomainRequest;
     let req: DeprecateDomainRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
+    domain_guard(state, "DeprecateDomain", &req, None).await?;
     if req.name.is_empty() {
         return Err(AppError::bad_request(
             "Domain not set on request.".to_string(),
@@ -1610,14 +1659,31 @@ async fn handle_failover_domain(state: &AppState, body: &Struct) -> HandlerResul
     use cadence_api::validation;
     let req: FailoverDomainRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
+    let graceful = req.failover_timeout_in_seconds.is_some();
+    domain_guard(
+        state,
+        "FailoverDomain",
+        &req,
+        graceful.then_some(req.domain_name.as_str()),
+    )
+    .await?;
     validation::validate_failover_domain_request(Some(&req))
         .map_err(|e| AppError::bad_request(e.message))?;
-    match state.domain_manager.failover(
+    let failed_over = state.domain_manager.failover(
         &req,
         &state.current_cluster_name,
         &state.cluster_metadata,
         &state.domain_policy(&req.domain_name),
-    ) {
+    );
+    if graceful {
+        crate::workflow_api::record_graceful_outcome(
+            state.workflow_api.as_ref(),
+            "FailoverDomain",
+            &req.domain_name,
+            failed_over.is_ok(),
+        );
+    }
+    match failed_over {
         Ok(resp) => Ok(wrap_success(&resp)),
         Err(cadence_persistence::FrontendDomainError::NotFound(e)) => {
             Err(AppError::entity_not_exists(e.message))
@@ -2138,7 +2204,13 @@ async fn handle_create_semaphore(state: &AppState, body: &Struct) -> HandlerResu
     use cadence_api::validation;
     let req: CreateSemaphoreRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
+    if req.domain.is_empty() {
+        return Err(AppError::bad_request(
+            validation::err_domain_not_set().message,
+        ));
+    }
     semaphore_gate(state, &req.domain)?;
+    domain_guard(state, "CreateSemaphore", &req, None).await?;
     validation::validate_create_semaphore_request(Some(&req))
         .map_err(|e| AppError::bad_request(e.message))?;
     let (semaphores, domain_id) = state
@@ -3197,5 +3269,243 @@ mod schedule_dispatch_tests {
             Some("EntityNotExistsError")
         );
         assert!(error.unwrap().1.contains("Domain d does not exist"));
+    }
+
+    #[derive(Debug, Default)]
+    struct ScriptedGuard {
+        calls: Mutex<Vec<String>>,
+        validation_passes: bool,
+    }
+
+    impl crate::workflow_api::DomainValidator for ScriptedGuard {
+        fn validate(
+            &self,
+            operation: &str,
+            _: &serde_json::Value,
+        ) -> Result<(), crate::workflow_api::DomainGuardError> {
+            self.calls.lock().unwrap().push(format!("validate:{operation}"));
+            if self.validation_passes {
+                Ok(())
+            } else {
+                Err(crate::workflow_api::DomainGuardError::BadRequest(format!(
+                    "guard rejected {operation}"
+                )))
+            }
+        }
+
+        fn check_ongoing_failover<'a>(
+            &'a self,
+            domain: &'a str,
+        ) -> crate::workflow_api::GuardFuture<'a> {
+            self.calls.lock().unwrap().push(format!("ongoing:{domain}"));
+            Box::pin(async {
+                Err(crate::workflow_api::DomainGuardError::Internal(
+                    "ongoing failover rejected".into(),
+                ))
+            })
+        }
+
+        fn graceful_failover_metric(&self, operation: &str, domain: &str, reason: Option<&str>) {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("metric:{operation}:{domain}:{}", reason.unwrap_or("ok")));
+        }
+    }
+
+    #[derive(Debug)]
+    struct GuardApi(Arc<ScriptedGuard>);
+
+    impl WorkflowApi for GuardApi {
+        fn domain_validator(&self) -> Option<&dyn crate::workflow_api::DomainValidator> {
+            Some(&*self.0)
+        }
+        fn serves(&self, _: &str) -> bool {
+            false
+        }
+        fn call<'a>(
+            &'a self,
+            _: &'a str,
+            _: serde_json::Value,
+            _: crate::workflow_api::CallerContext,
+        ) -> ApiFuture<'a> {
+            unreachable!("guard-only api")
+        }
+    }
+
+    async fn dispatch_guarded(
+        guard: &Arc<ScriptedGuard>,
+        method: &str,
+        request: Value,
+    ) -> Option<(&'static str, String)> {
+        let state = AppState {
+            workflow_api: Some(Arc::new(GuardApi(guard.clone()))),
+            semaphore_enabled: true,
+            ..AppState::default()
+        };
+        let args = Struct {
+            fields: vec![(1, request)],
+        };
+        dispatch_with_headers(
+            &state,
+            method,
+            &args,
+            Instant::now() + Duration::from_secs(5),
+            HashMap::new(),
+        )
+        .await
+        .unwrap()
+        .1
+    }
+
+    /// Review findings HIGH-1/2, MEDIUM-1/2: every domain RPC served by the
+    /// live Thrift dispatch runs the installed Go validator before the domain
+    /// handler, and its BadRequest is returned to the caller.
+    #[tokio::test]
+    async fn domain_rpcs_run_installed_request_validator_on_live_path() {
+        use cadence_api::service_types::{
+            DeleteDomainRequest, DeprecateDomainRequest, UpdateDomainRequest,
+        };
+        let cases: Vec<(&str, &str, Value)> = vec![
+            (
+                "WorkflowService::RegisterDomain",
+                "RegisterDomain",
+                Value::Struct(
+                    cadence_api::types::RegisterDomainRequest {
+                        name: "d".into(),
+                        ..Default::default()
+                    }
+                    .to_thrift(),
+                ),
+            ),
+            (
+                "WorkflowService::UpdateDomain",
+                "UpdateDomain",
+                Value::Struct(
+                    UpdateDomainRequest {
+                        name: "d".into(),
+                        ..Default::default()
+                    }
+                    .to_thrift(),
+                ),
+            ),
+            (
+                "WorkflowService::DeprecateDomain",
+                "DeprecateDomain",
+                Value::Struct(
+                    DeprecateDomainRequest {
+                        name: "d".into(),
+                        ..Default::default()
+                    }
+                    .to_thrift(),
+                ),
+            ),
+            (
+                "WorkflowService::DeleteDomain",
+                "DeleteDomain",
+                Value::Struct(
+                    DeleteDomainRequest {
+                        name: "d".into(),
+                        ..Default::default()
+                    }
+                    .to_thrift(),
+                ),
+            ),
+            (
+                "WorkflowService::FailoverDomain",
+                "FailoverDomain",
+                Value::Struct(
+                    cadence_api::types::FailoverDomainRequest {
+                        domain_name: "d".into(),
+                        domain_active_cluster_name: Some("c".into()),
+                        ..Default::default()
+                    }
+                    .to_thrift(),
+                ),
+            ),
+            (
+                "WorkflowService::CreateSemaphore",
+                "CreateSemaphore",
+                Value::Struct(
+                    cadence_api::types::CreateSemaphoreRequest {
+                        domain: "d".into(),
+                        semaphore_name: "s".into(),
+                        capacity: 1,
+                        bucket_capacity: 0,
+                    }
+                    .to_thrift(),
+                ),
+            ),
+        ];
+        for (method, operation, request) in cases {
+            let guard = Arc::new(ScriptedGuard::default());
+            let error = dispatch_guarded(&guard, method, request).await;
+            assert_eq!(
+                error,
+                Some(("BadRequestError", format!("guard rejected {operation}"))),
+                "{operation}"
+            );
+            assert_eq!(
+                guard.calls.lock().unwrap().as_slice(),
+                [format!("validate:{operation}")],
+                "{operation}"
+            );
+        }
+    }
+
+    /// Review finding HIGH-3: a graceful UpdateDomain/FailoverDomain runs the
+    /// ongoing-failover check after validation and reports the typed error and
+    /// the initiation-failure metric.
+    #[tokio::test]
+    async fn graceful_failover_runs_ongoing_failover_check_on_live_path() {
+        let guard = Arc::new(ScriptedGuard {
+            validation_passes: true,
+            ..Default::default()
+        });
+        let update = cadence_api::service_types::UpdateDomainRequest {
+            name: "d".into(),
+            failover_timeout_in_seconds: Some(60),
+            ..Default::default()
+        };
+        let error =
+            dispatch_guarded(&guard, "WorkflowService::UpdateDomain", Value::Struct(update.to_thrift()))
+                .await;
+        assert_eq!(
+            error,
+            Some(("InternalServiceError", "ongoing failover rejected".to_string()))
+        );
+        assert_eq!(
+            guard.calls.lock().unwrap().as_slice(),
+            [
+                "validate:UpdateDomain",
+                "ongoing:d",
+                "metric:UpdateDomain:d:ongoing_failover_check"
+            ]
+        );
+
+        let guard = Arc::new(ScriptedGuard {
+            validation_passes: true,
+            ..Default::default()
+        });
+        let failover = cadence_api::types::FailoverDomainRequest {
+            domain_name: "d".into(),
+            domain_active_cluster_name: Some("c".into()),
+            failover_timeout_in_seconds: Some(60),
+            ..Default::default()
+        };
+        let error = dispatch_guarded(
+            &guard,
+            "WorkflowService::FailoverDomain",
+            Value::Struct(failover.to_thrift()),
+        )
+        .await;
+        assert_eq!(
+            error,
+            Some(("InternalServiceError", "ongoing failover rejected".to_string()))
+        );
+        assert_eq!(
+            guard.calls.lock().unwrap().last().map(String::as_str),
+            Some("metric:FailoverDomain:d:ongoing_failover_check")
+        );
     }
 }

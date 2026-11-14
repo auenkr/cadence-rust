@@ -61,7 +61,80 @@ pub trait AdminAuthorizer: Send + Sync {
     }
 }
 
+/// Failure of a Go `WorkflowHandler` domain pre-check.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DomainGuardError {
+    /// Go `types.BadRequestError`.
+    BadRequest(String),
+    /// Go `types.InternalServiceError`.
+    Internal(String),
+}
+
+pub type GuardFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<(), DomainGuardError>> + Send + 'a>>;
+
+/// Seam so the domain/semaphore handlers served from this crate run the
+/// Frontend's ported `RequestValidator` and graceful-failover checks exactly
+/// where Go's `WorkflowHandler` runs them (before the domain handler).
+pub trait DomainValidator: Send + Sync {
+    /// Go `requestValidator.Validate<Op>Request`. `operation` is one of
+    /// RegisterDomain, UpdateDomain, DeprecateDomain, DeleteDomain,
+    /// FailoverDomain, CreateSemaphore; `request` is the camelCase JSON form.
+    fn validate(&self, operation: &str, request: &serde_json::Value)
+        -> Result<(), DomainGuardError>;
+    /// Go `checkOngoingFailover`.
+    fn check_ongoing_failover<'a>(&'a self, domain: &'a str) -> GuardFuture<'a>;
+    /// Go graceful failover counters. `failure_reason` is `None` for success.
+    fn graceful_failover_metric(&self, operation: &str, domain: &str, failure_reason: Option<&str>) {
+        let _ = (operation, domain, failure_reason);
+    }
+}
+
+/// Runs the Go pre-checks for a domain API: validation, then (for graceful
+/// failover, `graceful_domain` set) the ongoing-failover check. Emits the
+/// initiation-failure metric like Go's `emitInitiationFailure`.
+pub async fn run_domain_guard(
+    api: Option<&SharedWorkflowApi>,
+    operation: &str,
+    request: &serde_json::Value,
+    graceful_domain: Option<&str>,
+) -> Result<(), DomainGuardError> {
+    let Some(guard) = api.and_then(|a| a.domain_validator()) else {
+        return Ok(());
+    };
+    if let Err(error) = guard.validate(operation, request) {
+        if let Some(domain) = graceful_domain {
+            guard.graceful_failover_metric(operation, domain, Some("validation"));
+        }
+        return Err(error);
+    }
+    if let Some(domain) = graceful_domain {
+        if let Err(error) = guard.check_ongoing_failover(domain).await {
+            guard.graceful_failover_metric(operation, domain, Some("ongoing_failover_check"));
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
+/// Go emits `GracefulFailoverInitiationSuccess` / failure(`handler`) after the
+/// domain handler returns for a graceful failover.
+pub fn record_graceful_outcome(
+    api: Option<&SharedWorkflowApi>,
+    operation: &str,
+    domain: &str,
+    ok: bool,
+) {
+    if let Some(guard) = api.and_then(|a| a.domain_validator()) {
+        guard.graceful_failover_metric(operation, domain, if ok { None } else { Some("handler") });
+    }
+}
+
 pub trait WorkflowApi: Send + Sync + std::fmt::Debug {
+    /// Domain pre-checks installed by the Frontend; `None` skips them.
+    fn domain_validator(&self) -> Option<&dyn DomainValidator> {
+        None
+    }
     /// Admin access control installed by the Frontend; `None` allows all.
     fn admin_authorizer(&self) -> Option<&dyn AdminAuthorizer> {
         None
