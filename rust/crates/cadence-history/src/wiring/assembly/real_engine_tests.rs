@@ -1498,3 +1498,41 @@ async fn poll_mutable_state_wakes_on_close_after_continue_as_new() {
         assert_eq!(response.last_first_event_id, closed.last_first_event_id);
     }
 }
+
+
+#[tokio::test]
+async fn child_completion_after_parent_cache_reload_is_durable_and_idempotent() {
+    let h = Harness::new();
+    let run = run_first_decision(&h, Decision {
+        decision_type: Some(DecisionType::StartChildWorkflowExecution),
+        start_child_workflow_execution_decision_attributes: Some(StartChildWorkflowExecutionDecisionAttributes {
+            domain: DOMAIN_NAME.into(), workflow_id: "restart-child".into(),
+            workflow_type: Some(WorkflowType { name: "child-type".into() }),
+            task_list: Some(tl()), execution_start_to_close_timeout_seconds: Some(100),
+            task_start_to_close_timeout_seconds: Some(10), ..Default::default()
+        }), ..Default::default()
+    }).await;
+    let child = WorkflowExecution { workflow_id: "restart-child".into(), run_id: uuid::Uuid::new_v4().to_string() };
+    let parent = exec(&run).unwrap();
+    let (context, release) = h.cache.get_or_create(DOMAIN_ID, &parent).await.unwrap();
+    context.load_state().await.unwrap().add_child_started(DOMAIN_NAME, &child, 5, None).unwrap();
+    context.update_as_active(h.clock.now()).await.unwrap();
+    release(None);
+    h.cache.clear_all_for_test();
+    let before = h.execs.snapshot(WF, &run).unwrap().execution_info.next_event_id;
+    let request = RecordChildExecutionCompletedRequest {
+        domain_uuid: DOMAIN_ID.into(), workflow_execution: Some(parent), initiated_id: 5,
+        completed_execution: Some(child), completion_event: Some(HistoryEvent {
+            event_type: Some(cadence_api::enums::EventType::WorkflowExecutionCompleted),
+            workflow_execution_completed_event_attributes: Some(WorkflowExecutionCompletedEventAttributes { result: b"child-result".to_vec(), ..Default::default() }),
+            ..Default::default()
+        }), started_id: EMPTY_EVENT_ID,
+    };
+    h.engine.record_child_execution_completed(&request).await.unwrap();
+    let after = h.execs.snapshot(WF, &run).unwrap();
+    assert!(after.child_execution_infos.is_empty());
+    assert!(after.execution_info.next_event_id > before);
+    h.cache.clear_all_for_test();
+    assert!(h.engine.record_child_execution_completed(&request).await.unwrap_err().is_entity_not_exists());
+    assert_eq!(h.execs.snapshot(WF, &run).unwrap().execution_info.next_event_id, after.execution_info.next_event_id);
+}
