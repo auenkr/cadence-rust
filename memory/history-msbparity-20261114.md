@@ -25,3 +25,23 @@ mutable_state_builder.go core (StartTransaction/CloseTransactionAs*, version his
 ## CI (head SHA 162747db50c991ad1855784d88938e0354d1f26b; code identical, memory-only commit follows)
 - rust-ci package=cadence-history: success https://github.com/auenkr/cadence-rust/actions/runs/43530378440
 - history-mixed-gate two_history=true, all success AND `GATE SUMMARY failed: []`: mysql/grpc 43531231815, mysql/tchannel 43531244961, postgres/grpc 43531257413, postgres/tchannel 43531270912, cassandra/grpc 43531283533, cassandra/tchannel 43531295832 (https://github.com/auenkr/cadence-rust/actions/runs/<id>)
+
+# Part 2 (branch `history-msbparity2`)
+
+## Fixed (each with unit test)
+| Item | Change |
+|---|---|
+| (a) FailureOptions + category enum | Go persisted `FailureCategory` is Standard=0, Poll=1, Fatal=2; Rust API enum is Poll=0, Standard=1 (wire). Added `execution/retry.rs::failure_category_{to,from}_go_i32` (test `go_persisted_category_mapping`). Started (typed + engine_events non-transient + transient) and TimedOut (typed + engine_timer) events now ALWAYS carry `FailureOptions{category, nextRetryInterval}` and `last_failure_reason`/`details` like Go (previously None/omitted when zero). |
+| (b) LastFailureCategory | typed `ActivityInfo.last_failure_category` (Go encoding) set in typed `retry_activity` and `replicate_activity_info`; bridge/replication builders round-trip it (was preserved-from-old only, and engine path stored the Rust enum value, wrong for Go readers). Test `retry_stores_go_encoded_category...`. |
+| (c) check_resettable | semaphore pending holds -> BadRequest "...pending semaphore holds." (test `check_resettable_rejects_pending_semaphore_holds`). |
+| (d) TaskListKind | typed ActivityInfo.task_list_kind set on replicated scheduled; engine_decision_ops schedule_activity now sets `task_list_kind` (was always 0 -> Go sticky kind lost). Test `scheduled_activity_records_task_list_kind`. |
+| (e) pending activity limit | Already in production path (engine_decision_ops::schedule_activity, validation-enabled gated, text compared by task_handler); typed path left without (single check, no double-check). |
+| Engine error text | Production engine `invalid history action ...` messages replaced by Go `<action-tag> operation failed` via `wiring/assembly/mod.rs::invalid_history_action_message` (activity/decision/timer/child/workflow close paths). Test `invalid_action_uses_go_tag_text`. |
+
+## Re-read coverage
+Re-read: engine_events.rs activity production (completed/failed/canceled/started/retry attrs match Go), activity method file. NOT re-read line-by-line this round (no divergence checked): mutable_state_builder.go transactions/version histories/sticky, mutable_state_util.go, timer/signal/child/completed/cancellation files beyond tags. Remaining Go-reader compatibility: category persisted ints now Go-compatible; thrift FailureOptions field 10 unchanged. Go<->Rust blob swap gate passed.
+
+## CI (head SHA da38f70ad35f7a39fc78dc6e5994acc5d060f898; code identical to tested head, memory-only commit)
+- rust-ci cadence-history: success https://github.com/auenkr/cadence-rust/actions/runs/43535978859
+- history-mixed-gate two_history=true, success AND `GATE SUMMARY failed: []`: mysql/grpc 43536901509, mysql/tchannel 43536904623, postgres/grpc 43536908255, postgres/tchannel 43536911688, cassandra/grpc 43536914702, cassandra/tchannel 43536917966
+- history-swap mysql/grpc: success, `GATE SUMMARY failed: []` 43536921859

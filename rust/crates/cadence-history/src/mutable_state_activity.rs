@@ -57,6 +57,12 @@ pub struct ActivityInfo {
     pub last_failure_reason: String,
     pub last_failure_details: Vec<u8>,
     pub last_retry_interval_seconds: i32,
+    /// Go LastFailureCategory persisted integer (Standard=0, Poll=1, Fatal=2).
+    #[serde(default)]
+    pub last_failure_category: i32,
+    /// Go ActivityInfo.TaskListKind persisted integer (Normal=0, Sticky=1).
+    #[serde(default)]
+    pub task_list_kind: i32,
     #[serde(default)]
     pub last_worker_identity: String,
 }

@@ -139,10 +139,7 @@ impl EngineOps<'_> {
         let params = self.state.params.clone();
         let mut g = self.state.inner.lock().unwrap();
         if !g.exec.is_running() {
-            return Err(internal(format!(
-                "invalid history action {what} (next event id {})",
-                g.next_event_id
-            )));
+            return Err(internal(super::invalid_history_action_message(what, g.next_event_id)));
         }
         let ev = g.push_event(ty, ms * 1_000_000, fill);
         g.exec.state = WORKFLOW_STATE_COMPLETED;
@@ -293,6 +290,7 @@ impl Operations for EngineOps<'_> {
             heartbeat_timeout_seconds: a.heartbeat_timeout_seconds.unwrap_or(0),
             cancel_request_id: EMPTY_EVENT_ID,
             task_list: a.task_list.as_ref().map(|t| t.name.clone()).unwrap_or_default(),
+            task_list_kind: a.task_list.as_ref().and_then(|t| t.kind).map(|k| k as i32).unwrap_or(0),
             ..Default::default()
         };
         if let Some(p) = a.retry_policy.as_ref() {
