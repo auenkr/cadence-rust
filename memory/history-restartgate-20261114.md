@@ -54,3 +54,5 @@ Soak predecessor now passes all4800 workflows and RSS on e2167b61a (run435580721
 2026-11-14T05:47Z checkpoint: MySQL run43561066779 completed fresh release build and began fault/load phase at05:35:56Z; still running. No final outcome yet; PostgreSQL/Cassandra remain undispatched so recovery gates run sequentially.
 
 MySQL retained evidence: memory/evidence/history-soak-tail-20261114/restart-mysql/. All forced/graceful History restarts,30s DB pause,Matching restart and liveness/completion assertions passed; zero failed workflows,4500/4500 complete,p50 4109ms. Fresh binary SHA256 and source head included.
+
+2026-11-14T06:30Z checkpoint: PostgreSQL run43564455423 completed release build and is executing its1500s fault/load phase; MySQL acceptance passed, Cassandra next. Rust implementation unchanged since e2167b61a and clean workspace run43559207202.
