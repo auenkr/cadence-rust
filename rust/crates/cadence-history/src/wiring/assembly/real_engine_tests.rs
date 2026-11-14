@@ -1502,6 +1502,15 @@ async fn poll_mutable_state_wakes_on_close_after_continue_as_new() {
 
 #[tokio::test]
 async fn child_completion_after_parent_cache_reload_is_durable_and_idempotent() {
+    check_child_completion_reload(false).await;
+}
+
+#[tokio::test]
+async fn canceled_child_completion_is_retried_from_persisted_parent_state() {
+    check_child_completion_reload(true).await;
+}
+
+async fn check_child_completion_reload(cancel_update: bool) {
     let h = Harness::new();
     let run = run_first_decision(&h, Decision {
         decision_type: Some(DecisionType::StartChildWorkflowExecution),
@@ -1528,6 +1537,20 @@ async fn child_completion_after_parent_cache_reload_is_durable_and_idempotent() 
             ..Default::default()
         }), started_id: EMPTY_EVENT_ID,
     };
+    if cancel_update {
+        let entered = std::sync::Arc::new(tokio::sync::Notify::new());
+        let resume = std::sync::Arc::new(tokio::sync::Notify::new());
+        *h.execs.update_pause.lock().unwrap() = Some((entered.clone(), resume));
+        let engine = h.engine.clone();
+        let canceled_request = request.clone();
+        let update = tokio::spawn(async move { engine.record_child_execution_completed(&canceled_request).await });
+        entered.notified().await;
+        update.abort();
+        assert!(update.await.unwrap_err().is_cancelled());
+        *h.execs.update_pause.lock().unwrap() = None;
+        assert!(!h.execs.snapshot(WF, &run).unwrap().child_execution_infos.is_empty());
+        // Do not clear the cache: cancellation itself must discard the uncommitted removal.
+    }
     h.engine.record_child_execution_completed(&request).await.unwrap();
     let after = h.execs.snapshot(WF, &run).unwrap();
     assert!(after.child_execution_infos.is_empty());
