@@ -815,7 +815,12 @@ impl TypedMutableState {
     fn prepared_workflow_requests(&self) -> Result<Vec<WorkflowRequest>> {
         let mut requests = self.workflow_requests.clone();
         for inserted in &self.insert_workflow_requests {
-            if inserted.data.data.is_empty() || inserted.data.encoding.is_empty() {
+            // Go `WorkflowRequest` has only request ID, version, and type;
+            // reset request rows are persisted from those key fields alone.
+            // Other Rust request kinds may carry an encoded payload.
+            if inserted.request_type != cadence_persistence::history_contract::WORKFLOW_REQUEST_TYPE_RESET
+                && (inserted.data.data.is_empty() || inserted.data.encoding.is_empty())
+            {
                 return internal(format!("workflow request {} has no encoded deduplication data", inserted.request_id));
             }
             if let Some(existing) = requests.iter_mut().find(|request| request.request_id == inserted.request_id && request.version == inserted.version && request.request_type == inserted.request_type) {
@@ -824,7 +829,10 @@ impl TypedMutableState {
                 requests.push(inserted.clone());
             }
         }
-        if requests.iter().any(|request| request.data.data.is_empty() || request.data.encoding.is_empty()) {
+        if requests.iter().any(|request| {
+            request.request_type != cadence_persistence::history_contract::WORKFLOW_REQUEST_TYPE_RESET
+                && (request.data.data.is_empty() || request.data.encoding.is_empty())
+        }) {
             return internal("workflow request is missing encoded deduplication data");
         }
         Ok(requests)
@@ -1288,6 +1296,25 @@ mod tests {
         assert_eq!(state.history_events.len(), 1);
         assert_eq!(state.next_event_id_in_db, 12);
         assert_eq!(state.insert_workflow_requests.len(), 1);
+    }
+
+    #[test]
+    fn reset_workflow_request_needs_no_encoded_data_like_go_persistence() {
+        let mut state = TypedMutableState::new();
+        state.insert_workflow_requests.push(WorkflowRequest {
+            request_id: "reset-request".into(),
+            version: 23,
+            request_type: cadence_persistence::history_contract::WORKFLOW_REQUEST_TYPE_RESET,
+            data: Default::default(),
+        });
+
+        let requests = state.prepared_workflow_requests().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].request_id, "reset-request");
+        assert_eq!(requests[0].version, 23);
+        assert_eq!(requests[0].request_type, cadence_persistence::history_contract::WORKFLOW_REQUEST_TYPE_RESET);
+        assert!(requests[0].data.data.is_empty());
+        assert!(requests[0].data.encoding.is_empty());
     }
 
     #[test]

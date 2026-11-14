@@ -16,6 +16,10 @@
 - (Resolved in `history-resetverify`) `types.EventType.String()` and Rust `EventType` display use the same CamelCase name table (including `DecisionTaskCompleted`). Added a reset validation test asserting the complete Go-compatible error text for `ActivityTaskStarted`: `invalid_reset_event_error_uses_go_event_type_string`.
 - CI validation for these changes is pending; results and run URLs will be appended below after both required gates finish.
 
+## Follow-up from mixed gate
+- First mixed-gate attempt exposed Rust's generic encoded-data precondition on reset `WorkflowRequest` rows. Go persistence stores reset rows using request ID/version/type only, matching Go's `WorkflowRequest` shape. Rust now exempts reset rows from the extra `DataBlob` validation while retaining the check for other request types. Unit test: `reset_workflow_request_needs_no_encoded_data_like_go_persistence`.
+- First mixed-gate run: failure; `GATE SUMMARY failed: ['sdk-api-reset-workflow-execution', 'sdk-driver-exit', 'sdk-scen-autoreset-new-run-started', 'sdk-scen-driver-exit']`. Reset API reported `workflow request <id> has no encoded deduplication data`; autoreset then timed out waiting for the new run. This identified the Rust-only precondition fixed above. https://github.com/auenkr/cadence-rust/actions/runs/43561699801
+
 ## Runs
 See bottom (filled after CI).
 
