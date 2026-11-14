@@ -18,3 +18,12 @@ CI (head f7a35e302), all success:
 Frontend mixed gate mysql:
 - https://github.com/auenkr/cadence-rust/actions/runs/43599084228 FAILED (`sdk-async-frontend-restart-no-lost-messages`, 1 message lost; async Kafka restart, unrelated to admin path, flaky)
 - https://github.com/auenkr/cadence-rust/actions/runs/43600542329 success, `GATE SUMMARY failed: []`
+
+## Follow-up: caller/transport tags and scope table (branch fe-admin-metric-tags, head 3707392a8)
+- `AdminMetrics::admin_request/admin_finish` now take `caller` (`rpc-caller`/`cn` header) and `transport` (`tchannel`/`grpc`); `SinkAdminMetrics` adds them as `caller`/`transport` tags when non-empty (Go `GetContextTags`).
+- Scope names: re-audited against Go `adminHandlerImpl`: every method matches `startRequestProfile` scope (isolation-group/async/partition scopes use their own names, as in defs.go). Only `MaintainCorruptWorkflow` never profiles in Go, so it now emits no metrics (`admin_is_profiled`). Unit test `admin_scope_mapping_matches_go_defs` asserts the full 38-entry table.
+- CI (head 3707392a8, all success; earlier heads failed clippy arg count/rustfmt, fixed):
+  - cadence-frontend https://github.com/auenkr/cadence-rust/actions/runs/43606694215
+  - cadence-service-core https://github.com/auenkr/cadence-rust/actions/runs/43606696861
+  - cadence-matching https://github.com/auenkr/cadence-rust/actions/runs/43606699365
+  - Frontend mixed gate mysql https://github.com/auenkr/cadence-rust/actions/runs/43606709694 success, `GATE SUMMARY failed: []`
