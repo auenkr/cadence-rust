@@ -47,3 +47,6 @@ Soak 43598100147 still reports both go-baseline and rust in their Soak steps. Aw
 
 ### Final-attempt wait checkpoint (15:00 UTC)
 Run 43605415284 completed its fresh build and started both lanes at 14:44 UTC. It remains in progress; expected workload end around 15:54 UTC plus setup/analysis. Source unchanged since CI-validated 304c2699a. No local validation commands and no additional soak dispatched.
+
+### Final-attempt wait checkpoint (15:30 UTC)
+Run 43605415284 remains in progress after the scheduled midpoint restart. No code changes or extra runs. Waiting in-turn for the full second verdict and binary identity; measured attempt 1 remains FAIL solely on mt RSS.
