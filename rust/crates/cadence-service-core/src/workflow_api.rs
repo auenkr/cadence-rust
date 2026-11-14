@@ -64,6 +64,53 @@ pub trait AdminAuthorizer: Send + Sync {
     }
 }
 
+/// Result class of an Admin call, mirroring Go `adminHandlerImpl.error`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdminOutcome {
+    Ok,
+    /// `types.BadRequestError` -> `cadence_errors_bad_request`.
+    BadRequest,
+    /// `types.ServiceBusyError` -> `cadence_errors_service_busy`.
+    ServiceBusy,
+    /// `types.EntityNotExistsError`: no counter.
+    NotExists,
+    /// Internal/uncategorized -> `cadence_errors`.
+    Failure,
+}
+
+impl AdminOutcome {
+    /// Classify a gRPC status code (0 = OK).
+    pub fn from_grpc_code(code: i32) -> Self {
+        match code {
+            0 => Self::Ok,
+            3 => Self::BadRequest,
+            8 => Self::ServiceBusy,
+            5 => Self::NotExists,
+            _ => Self::Failure,
+        }
+    }
+
+    /// Classify a Thrift exception name.
+    pub fn from_exception(name: &str) -> Self {
+        match name {
+            "BadRequestError" => Self::BadRequest,
+            "ServiceBusyError" => Self::ServiceBusy,
+            "EntityNotExistsError" => Self::NotExists,
+            _ => Self::Failure,
+        }
+    }
+}
+
+/// Go `adminHandlerImpl.startRequestProfile` / `error` seam: the Frontend
+/// installs a sink; both the Thrift and gRPC Admin dispatch call it after
+/// authorization.
+pub trait AdminMetrics: Send + Sync {
+    /// Emits `cadence_requests` for the method's scope.
+    fn admin_request(&self, method: &str);
+    /// Emits latency plus the typed error counter.
+    fn admin_finish(&self, method: &str, elapsed: std::time::Duration, outcome: AdminOutcome);
+}
+
 /// Failure of a Go `WorkflowHandler` domain pre-check.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DomainGuardError {
@@ -147,6 +194,10 @@ pub trait WorkflowApi: Send + Sync + std::fmt::Debug {
     }
     /// Admin access control installed by the Frontend; `None` allows all.
     fn admin_authorizer(&self) -> Option<&dyn AdminAuthorizer> {
+        None
+    }
+    /// Admin request/error metrics installed by the Frontend; `None` skips.
+    fn admin_metrics(&self) -> Option<&dyn AdminMetrics> {
         None
     }
     /// True when the operation is served by this implementation.

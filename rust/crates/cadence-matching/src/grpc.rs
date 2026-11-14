@@ -2777,9 +2777,39 @@ where
             status.add_header(response.headers_mut()).ok();
             return Box::pin(async move { Ok(response) });
         }
+        let metrics = self.api.clone().filter(|api| api.admin_metrics().is_some());
+        let method = request
+            .uri()
+            .path()
+            .rsplit('/')
+            .next()
+            .unwrap_or_default()
+            .to_owned();
         let clone = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, clone);
-        Box::pin(async move { inner.call(request).await })
+        Box::pin(async move {
+            let Some(api) = metrics else {
+                return inner.call(request).await;
+            };
+            let sink = api.admin_metrics().expect("checked above");
+            sink.admin_request(&method);
+            let started = std::time::Instant::now();
+            let response = inner.call(request).await?;
+            // Unary errors are trailers-only: grpc-status is in the headers.
+            // Successful replies carry it in trailers (absent here => OK).
+            let code = response
+                .headers()
+                .get("grpc-status")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<i32>().ok())
+                .unwrap_or(0);
+            sink.admin_finish(
+                &method,
+                started.elapsed(),
+                cadence_service_core::workflow_api::AdminOutcome::from_grpc_code(code),
+            );
+            Ok(response)
+        })
     }
 }
 

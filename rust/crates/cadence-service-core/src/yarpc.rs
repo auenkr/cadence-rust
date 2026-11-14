@@ -2731,6 +2731,18 @@ pub async fn dispatch_with_transport(
             }
         }
     }
+    let admin_started = if admin {
+        state
+            .workflow_api
+            .as_ref()
+            .and_then(|api| api.admin_metrics())
+            .map(|m| {
+                m.admin_request(name);
+                std::time::Instant::now()
+            })
+    } else {
+        None
+    };
     let schedule_ctx = schedule_api_context(deadline, &caller_headers);
     let outcome: HandlerResult = match name {
         "health" => Ok(Struct {
@@ -2981,6 +2993,19 @@ pub async fn dispatch_with_transport(
         "QueryWorkflow" => handle_query(state, body, deadline).await,
         _ => return Err(format!("unknown method {method}")),
     };
+    if let (Some(started), Some(m)) = (
+        admin_started,
+        state
+            .workflow_api
+            .as_ref()
+            .and_then(|api| api.admin_metrics()),
+    ) {
+        let class = match &outcome {
+            Ok(_) => crate::workflow_api::AdminOutcome::Ok,
+            Err(e) => crate::workflow_api::AdminOutcome::from_exception(e.exc_name),
+        };
+        m.admin_finish(name, started.elapsed(), class);
+    }
     let def = find_method(method).ok_or_else(|| format!("unknown method {method}"))?;
     match outcome {
         Ok(success) => Ok((success, None)),

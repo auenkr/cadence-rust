@@ -695,6 +695,7 @@ pub struct HandlerApi {
     admin_auth: AdminAccessControl,
     schedule_redirect: Option<crate::wrappers::redirection_runtime::ScheduleRedirect>,
     domain_guard: crate::domain_guard::DomainGuard,
+    admin_metrics: crate::wrappers::metrics_sink::SinkAdminMetrics,
 }
 
 /// Go `accesscontrolled.NewAdminHandler`: every Admin method needs
@@ -784,6 +785,10 @@ impl cadence_service_core::workflow_api::WorkflowApi for HandlerApi {
 
     fn admin_authorizer(&self) -> Option<&dyn cadence_service_core::workflow_api::AdminAuthorizer> {
         Some(&self.admin_auth)
+    }
+
+    fn admin_metrics(&self) -> Option<&dyn cadence_service_core::workflow_api::AdminMetrics> {
+        Some(&self.admin_metrics)
     }
 
     fn serves(&self, operation: &str) -> bool {
@@ -1667,6 +1672,9 @@ pub fn build_workflow_api(
         admin_auth: AdminAccessControl(selected_authorizer),
         schedule_redirect,
         domain_guard,
+        admin_metrics: crate::wrappers::metrics_sink::SinkAdminMetrics::new(
+            shared_metrics_sink.clone(),
+        ),
     }))
 }
 
