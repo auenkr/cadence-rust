@@ -27,3 +27,8 @@ https://github.com/auenkr/cadence-rust/actions/runs/43584330378 (head e159eba846
 - Initial dispatches 43597975628 (CI) and 43597979686 (soak) cancelled during setup/build to include the trace removal; no soak lane ran.
 
 - QPS follow-up: sample the reporting bucket after acquiring the state mutex, so concurrent writers cannot insert into a window another writer just folded. CI/soak at 98b80762f exercise the bucket-folding and trace removal; this follow-up only orders clock sampling with state mutation.
+
+### Fresh CI validation
+- https://github.com/auenkr/cadence-rust/actions/runs/43598097477 — head 98b80762f, SUCCESS: fresh uncached target, formatting, workspace Clippy then workspace tests, PostgreSQL wakeup regression and Go/Rust metric parity.
+- https://github.com/auenkr/cadence-rust/actions/runs/43598691116 — head 304c2699a, SUCCESS: same full fresh-target validation including both write-only QPS regression tests. Compact logs in memory/evidence/frontend-soak-tail-20261114/.
+- Measured soak attempt 1: https://github.com/auenkr/cadence-rust/actions/runs/43598100147 — head 98b80762f, default 70 minutes/rate 10, go-baseline + rust lanes started 13:18 UTC, verdict pending. No second measured attempt dispatched yet.
