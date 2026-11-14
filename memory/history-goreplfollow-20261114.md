@@ -6,3 +6,4 @@
 4. Mutable-state JSON shape (describe/debug): NOT changed. The engine state keeps a persistence-shaped snapshot (`pc_exec`, `Inner`) rather than Go's `mutableStateBuilder` field layout, so matching Go's field names needs a dedicated serializer over Inner. Gap documented; gates normalise version histories.
 
 ## CI
+rust-ci package=cadence-history: https://github.com/auenkr/cadence-rust/actions/runs/43536804201 head 072a482638c4336f69bd8d15fdfb4364b8c36e77 conclusion success (clippy + tests). Earlier run 43535973405 failed on a bad test fixture (fixed).
