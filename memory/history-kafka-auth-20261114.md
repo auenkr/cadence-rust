@@ -18,3 +18,8 @@ The relevant end-to-end lane is `.github/workflows/history-es-visibility.yml`. I
 - Local validation: `git diff --check` passed. Per instructions, no local Cargo, Go, or Docker commands were run.
 - Authenticated SASL/PLAIN lane: pending CI dispatch.
 - Run URL, head SHA, conclusion, and the `GATE SUMMARY failed: []` evidence will be recorded here after the run completes.
+
+### First CI setup failure and correction
+
+- Initial SASL attempt: https://github.com/auenkr/cadence-rust/actions/runs/43575836926 (head `3246804d49b6c2b8a0487c10d26e2aaa546dcc3f`), failed during Kafka startup before the gate. The Apache Kafka entrypoint requires `KAFKA_OPTS` to reference a JAAS file for a SASL listener; its log reported `SASL is enabled` then `/etc/kafka/docker/configure: line 18: !1: unbound variable` because `KAFKA_OPTS` was unset.
+- Updated the lane to generate and mount a temporary KafkaServer JAAS file and set `KAFKA_OPTS`; the gate harness and shell both pass static syntax validation. The corrected SASL run is pending.
