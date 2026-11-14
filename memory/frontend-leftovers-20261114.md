@@ -62,3 +62,38 @@ Service-core clean-target clippy/tests [43547221809](https://github.com/auenkr/c
 concluded **success**, including the file-based cooldown regression test.
 Fresh full-workspace clippy then tests [43548694169](https://github.com/auenkr/cadence-rust/actions/runs/43548694169)
 on `8de10bd46` is in progress.
+
+## Final CI and soak results
+
+Fresh full-workspace clippy followed by tests: **success**,
+https://github.com/auenkr/cadence-rust/actions/runs/43548694169,
+head `8de10bd460bb518e620e5d9e9de59f075e485f5e`. Later commits are evidence only.
+
+Soak: **success**, https://github.com/auenkr/cadence-rust/actions/runs/43547229168,
+head `ef06ae9b97d2e9024ac88e1c2dee005bf56ad789`.
+Inputs: lanes ["go-baseline","rust-fe"], duration_minutes=20, rate=10.
+Fresh release Rust binary SHA256:
+`9fdb101a2e945b1e46f913f11d4d250d72caf73478573266b296a6f72f81036f`.
+Both lanes completed 12000/12000 workflows, zero failures and zero inflight at
+end; Frontend restarted at 600s. All comparison criteria passed.
+
+| Query latency | Rust FE + Go Matching | Go baseline |
+|---|---:|---:|
+| p50 | 9ms | 9ms |
+| p95 | 24ms | 27ms |
+| p99 | 42ms | 103ms |
+
+Query timeout divergence did not recur. Master's SQL-domain failoverEndTime fix
+is sufficient for this lane; no additional runtime logic change is justified.
+This 20-minute validation does not replace longer memory-leak qualification.
+The stale init-query criterion passed (Rust 5982 workflows / 8099 attempts;
+Go 5999 / 8198); transient reads also occur in Go and are not workflow failures.
+
+Durable small artifacts: `memory/evidence/frontend-leftovers-20261114/` contains
+both lane summaries and the full comparison verdict. A broad artifact download
+initially attempted binaries and hit /tmp quota; named small evidence downloads
+succeeded. Temporary evidence downloads were removed afterward.
+
+Result: corrected an invalid Go oracle, verified file-based cooldown mapping,
+and completed all requested CI, mysql/cassandra gates and soak. No production
+behavior changes needed. Branch pushed, unmerged and retained.
