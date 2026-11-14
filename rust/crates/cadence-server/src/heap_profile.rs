@@ -17,9 +17,7 @@ pub fn start() {
             let path = directory.join(format!("heap-{seconds:04}.heap"));
             let path = CString::new(path.to_string_lossy().as_bytes()).unwrap();
             // jemalloc consumes the NUL-terminated filename synchronously; it does not retain it.
-            let result = unsafe {
-                tikv_jemalloc_ctl::raw::write(b"prof.dump\0", path.as_ptr())
-            };
+            let result = unsafe { tikv_jemalloc_ctl::raw::write(b"prof.dump\0", path.as_ptr()) };
             let _ = tikv_jemalloc_ctl::epoch::advance();
             let stats = format!(
                 "seconds={seconds} dump={result:?} allocated={:?} active={:?} resident={:?}\n",

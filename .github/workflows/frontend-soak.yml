@@ -119,7 +119,7 @@ jobs:
           cp res/lane/run/heap-profiles/* res/up/heap-profiles/
           P=res/up/heap-profiles
           for T in 1200 2400 4000; do
-            jeprof --text --show_bytes --base="$P/heap-0180.heap" bin/cadence-server "$P/heap-$T.heap" > "$P/growth-$T.txt" 2>&1
+            jeprof --text --cum --show_bytes --base="$P/heap-0180.heap" bin/cadence-server "$P/heap-$T.heap" > "$P/growth-$T.txt" 2>&1
             jeprof --text --lines --show_bytes --base="$P/heap-0180.heap" bin/cadence-server "$P/heap-$T.heap" > "$P/growth-lines-$T.txt" 2>&1
           done
           jeprof --text --show_bytes bin/cadence-server "$P/heap-4000.heap" > "$P/live-4000.txt" 2>&1
