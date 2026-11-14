@@ -594,6 +594,72 @@ mod tests {
         s
     }
 
+    /// odd failover versions belong to cluster-a (current), even to cluster-b.
+    struct ParityCluster;
+    impl crate::engine::deps::ClusterMetadata for ParityCluster {
+        fn get_current_cluster_name(&self) -> String {
+            "cluster-a".into()
+        }
+        fn cluster_name_for_failover_version(&self, v: i64) -> HResult<String> {
+            Ok(if v % 2 != 0 { "cluster-a" } else { "cluster-b" }.into())
+        }
+    }
+
+    fn failover_state(in_flight: bool, buffered: usize, decision_v: i64, last_write: i64, current: i64) -> EngineMutableState {
+        let mut s = state(in_flight, buffered, 100);
+        s.domain.is_global_domain = true;
+        s.domain.clusters = vec!["cluster-a".into(), "cluster-b".into()];
+        s.params.close_policy = Some(crate::wiring::assembly::engine_state::ClosePolicy {
+            cluster: Arc::new(ParityCluster),
+            replication_enabled: Arc::new(|_, _| true),
+        });
+        {
+            let mut g = s.inner.lock().unwrap();
+            g.pc_exec.decision_version = decision_v;
+            g.pc_exec.last_write_version = last_write;
+            g.current_version = current;
+        }
+        s
+    }
+
+    #[test]
+    fn failover_without_in_flight_decision_or_with_newer_decision_is_noop() {
+        assert!(!failover_state(false, 0, 1, 1, 2).start_transaction_handle_decision_failover(-24).unwrap());
+        assert!(!failover_state(true, 0, 2, 2, 2).start_transaction_handle_decision_failover(-24).unwrap());
+    }
+
+    #[test]
+    fn failover_version_mismatch_is_internal_error() {
+        let e = failover_state(true, 0, 1, 3, 2).start_transaction_handle_decision_failover(-24).unwrap_err();
+        assert!(format!("{e:?}").contains("mismatch version"), "{e:?}");
+    }
+
+    #[test]
+    fn failover_active_to_passive_fails_in_flight_decision() {
+        // decision v1 (cluster-a, current), current version 2 (cluster-b): case 1.
+        let s = failover_state(true, 0, 1, 1, 2);
+        assert!(s.start_transaction_handle_decision_failover(-24).unwrap());
+        let g = s.inner.lock().unwrap();
+        assert_eq!(g.pc_exec.decision_started_id, crate::engine::deps::EMPTY_EVENT_ID);
+        assert_ne!(g.pc_exec.decision_schedule_id, crate::engine::deps::EMPTY_EVENT_ID);
+    }
+
+    #[test]
+    fn failover_previous_passive_workflow_with_buffered_events_errors() {
+        // decision v2 and current v4 both cluster-b: case 4.
+        assert!(!failover_state(true, 0, 2, 2, 4).start_transaction_handle_decision_failover(-24).unwrap());
+        let e = failover_state(true, 1, 2, 2, 4).start_transaction_handle_decision_failover(-24).unwrap_err();
+        assert!(format!("{e:?}").contains("previous passive workflow with buffered events"), "{e:?}");
+        // case 3 (passive -> active) with buffered events also errors.
+        assert!(failover_state(true, 1, 2, 2, 3).start_transaction_handle_decision_failover(-24).is_err());
+    }
+
+    #[test]
+    fn failover_case5_incoming_task_from_current_cluster_is_noop() {
+        // current version cluster-b, incoming task version from cluster-a.
+        assert!(!failover_state(true, 0, 1, 1, 2).start_transaction_handle_decision_failover(5).unwrap());
+    }
+
     #[test]
     fn active_close_of_global_domain_emits_history_and_sync_activity_tasks() {
         let s = global_state(true, true);
