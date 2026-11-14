@@ -818,30 +818,7 @@ impl EngineMutableState {
 
     /// Go `CopyToPersistence` (debug / describe view of the loaded state).
     pub(super) fn ev_copy_to_persistence(&self) -> HResult<serde_json::Value> {
-        let g = self.inner.lock().unwrap();
-        Ok(serde_json::json!({
-            "executionInfo": {
-                "domainId": g.exec.domain_id,
-                "workflowId": g.exec.workflow_id,
-                "runId": g.exec.run_id,
-                "state": g.exec.state,
-                "closeStatus": g.exec.close_status,
-                "nextEventId": g.next_event_id,
-                "lastFirstEventId": g.last_first_event_id,
-                "decisionScheduleId": g.pc_exec.decision_schedule_id,
-                "decisionStartedId": g.pc_exec.decision_started_id,
-                "decisionAttempt": g.pc_exec.decision_attempt,
-                "signalCount": g.exec.signal_count,
-                "cancelRequested": g.pc_exec.cancel_requested,
-            },
-            // Go `VersionHistories` (CLI reads the current branch token from it).
-            "versionHistories": g.version_histories,
-            "pendingActivities": g.pc_acts.keys().collect::<Vec<_>>(),
-            "pendingChildExecutions": g.pc_children.keys().collect::<Vec<_>>(),
-            // Go `BufferedEvents []*types.HistoryEvent`: the CLI unmarshals this
-            // into persistence.WorkflowMutableState, so it must be an event list.
-            "bufferedEvents": g.buffered.iter().chain(g.update_buffered.iter()).collect::<Vec<_>>(),
-        }))
+        serde_json::from_str(&self.persistence_json()?).map_err(|e| HistoryError::internal(e.to_string()))
     }
 }
 

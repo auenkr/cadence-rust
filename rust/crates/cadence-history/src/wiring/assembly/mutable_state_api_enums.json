@@ -1,0 +1,255 @@
+{
+  "TaskSource": {
+    "0": "HISTORY",
+    "1": "DB_BACKLOG"
+  },
+  "DLQType": {
+    "0": "Replication",
+    "1": "Domain"
+  },
+  "DomainOperation": {
+    "0": "Create",
+    "1": "Update",
+    "2": "Delete"
+  },
+  "ReplicationTaskType": {
+    "0": "Domain",
+    "1": "History",
+    "2": "SyncShardStatus",
+    "3": "SyncActivity",
+    "4": "HistoryMetadata",
+    "5": "HistoryV2",
+    "6": "FailoverMarker"
+  },
+  "FailureCategory": {
+    "0": "Standard",
+    "1": "Poll",
+    "2": "Fatal"
+  },
+  "ArchivalStatus": {
+    "0": "DISABLED",
+    "1": "ENABLED"
+  },
+  "CancelExternalWorkflowExecutionFailedCause": {
+    "0": "UNKNOWN_EXTERNAL_WORKFLOW_EXECUTION",
+    "1": "WORKFLOW_ALREADY_COMPLETED"
+  },
+  "ChildWorkflowExecutionFailedCause": {
+    "0": "WORKFLOW_ALREADY_RUNNING"
+  },
+  "ContinueAsNewInitiator": {
+    "0": "Decider",
+    "1": "RetryPolicy",
+    "2": "CronSchedule"
+  },
+  "DecisionTaskFailedCause": {
+    "0": "UNHANDLED_DECISION",
+    "1": "BAD_SCHEDULE_ACTIVITY_ATTRIBUTES",
+    "2": "BAD_REQUEST_CANCEL_ACTIVITY_ATTRIBUTES",
+    "3": "BAD_START_TIMER_ATTRIBUTES",
+    "4": "BAD_CANCEL_TIMER_ATTRIBUTES",
+    "5": "BAD_RECORD_MARKER_ATTRIBUTES",
+    "6": "BAD_COMPLETE_WORKFLOW_EXECUTION_ATTRIBUTES",
+    "7": "BAD_FAIL_WORKFLOW_EXECUTION_ATTRIBUTES",
+    "8": "BAD_CANCEL_WORKFLOW_EXECUTION_ATTRIBUTES",
+    "9": "BAD_REQUEST_CANCEL_EXTERNAL_WORKFLOW_EXECUTION_ATTRIBUTES",
+    "10": "BAD_CONTINUE_AS_NEW_ATTRIBUTES",
+    "11": "START_TIMER_DUPLICATE_I_D",
+    "12": "RESET_STICKY_TASKLIST",
+    "13": "WORKFLOW_WORKER_UNHANDLED_FAILURE",
+    "14": "BAD_SIGNAL_WORKFLOW_EXECUTION_ATTRIBUTES",
+    "15": "BAD_START_CHILD_EXECUTION_ATTRIBUTES",
+    "16": "FORCE_CLOSE_DECISION",
+    "17": "FAILOVER_CLOSE_DECISION",
+    "18": "BAD_SIGNAL_INPUT_SIZE",
+    "19": "RESET_WORKFLOW",
+    "20": "BAD_BINARY",
+    "21": "SCHEDULE_ACTIVITY_DUPLICATE_I_D",
+    "22": "BAD_SEARCH_ATTRIBUTES",
+    "23": "BAD_ACQUIRE_SEMAPHORE_ATTRIBUTES",
+    "24": "BAD_RELEASE_SEMAPHORE_ATTRIBUTES"
+  },
+  "DecisionTaskTimedOutCause": {
+    "0": "Timeout",
+    "1": "Reset"
+  },
+  "DecisionType": {
+    "0": "ScheduleActivityTask",
+    "1": "RequestCancelActivityTask",
+    "2": "StartTimer",
+    "3": "CompleteWorkflowExecution",
+    "4": "FailWorkflowExecution",
+    "5": "CancelTimer",
+    "6": "CancelWorkflowExecution",
+    "7": "RequestCancelExternalWorkflowExecution",
+    "8": "RecordMarker",
+    "9": "ContinueAsNewWorkflowExecution",
+    "10": "StartChildWorkflowExecution",
+    "11": "SignalExternalWorkflowExecution",
+    "12": "UpsertWorkflowSearchAttributes",
+    "13": "AcquireSemaphore",
+    "14": "ReleaseSemaphore"
+  },
+  "DomainStatus": {
+    "0": "REGISTERED",
+    "1": "DEPRECATED",
+    "2": "DELETED"
+  },
+  "EncodingType": {
+    "0": "ThriftRW",
+    "1": "JSON"
+  },
+  "EventType": {
+    "0": "WorkflowExecutionStarted",
+    "1": "WorkflowExecutionCompleted",
+    "2": "WorkflowExecutionFailed",
+    "3": "WorkflowExecutionTimedOut",
+    "4": "DecisionTaskScheduled",
+    "5": "DecisionTaskStarted",
+    "6": "DecisionTaskCompleted",
+    "7": "DecisionTaskTimedOut",
+    "8": "DecisionTaskFailed",
+    "9": "ActivityTaskScheduled",
+    "10": "ActivityTaskStarted",
+    "11": "ActivityTaskCompleted",
+    "12": "ActivityTaskFailed",
+    "13": "ActivityTaskTimedOut",
+    "14": "ActivityTaskCancelRequested",
+    "15": "RequestCancelActivityTaskFailed",
+    "16": "ActivityTaskCanceled",
+    "17": "TimerStarted",
+    "18": "TimerFired",
+    "19": "CancelTimerFailed",
+    "20": "TimerCanceled",
+    "21": "WorkflowExecutionCancelRequested",
+    "22": "WorkflowExecutionCanceled",
+    "23": "RequestCancelExternalWorkflowExecutionInitiated",
+    "24": "RequestCancelExternalWorkflowExecutionFailed",
+    "25": "ExternalWorkflowExecutionCancelRequested",
+    "26": "MarkerRecorded",
+    "27": "WorkflowExecutionSignaled",
+    "28": "WorkflowExecutionTerminated",
+    "29": "WorkflowExecutionContinuedAsNew",
+    "30": "StartChildWorkflowExecutionInitiated",
+    "31": "StartChildWorkflowExecutionFailed",
+    "32": "ChildWorkflowExecutionStarted",
+    "33": "ChildWorkflowExecutionCompleted",
+    "34": "ChildWorkflowExecutionFailed",
+    "35": "ChildWorkflowExecutionCanceled",
+    "36": "ChildWorkflowExecutionTimedOut",
+    "37": "ChildWorkflowExecutionTerminated",
+    "38": "SignalExternalWorkflowExecutionInitiated",
+    "39": "SignalExternalWorkflowExecutionFailed",
+    "40": "ExternalWorkflowExecutionSignaled",
+    "41": "UpsertWorkflowSearchAttributes",
+    "42": "SemaphoreAcquireInitiated",
+    "43": "SemaphoreAcquired",
+    "44": "SemaphoreReleased"
+  },
+  "HistoryEventFilterType": {
+    "0": "ALL_EVENT",
+    "1": "CLOSE_EVENT"
+  },
+  "IndexedValueType": {
+    "0": "STRING",
+    "1": "KEYWORD",
+    "2": "INT",
+    "3": "DOUBLE",
+    "4": "BOOL",
+    "5": "DATETIME"
+  },
+  "ParentClosePolicy": {
+    "0": "ABANDON",
+    "1": "REQUEST_CANCEL",
+    "2": "TERMINATE"
+  },
+  "PendingActivityState": {
+    "0": "SCHEDULED",
+    "1": "STARTED",
+    "2": "CANCEL_REQUESTED"
+  },
+  "PendingDecisionState": {
+    "0": "SCHEDULED",
+    "1": "STARTED"
+  },
+  "QueryConsistencyLevel": {
+    "0": "EVENTUAL",
+    "1": "STRONG"
+  },
+  "QueryRejectCondition": {
+    "0": "NOT_OPEN",
+    "1": "NOT_COMPLETED_CLEANLY"
+  },
+  "QueryResultType": {
+    "0": "ANSWERED",
+    "1": "FAILED"
+  },
+  "QueryTaskCompletedType": {
+    "0": "COMPLETED",
+    "1": "FAILED"
+  },
+  "SignalExternalWorkflowExecutionFailedCause": {
+    "0": "UNKNOWN_EXTERNAL_WORKFLOW_EXECUTION",
+    "1": "WORKFLOW_ALREADY_COMPLETED"
+  },
+  "TaskListKind": {
+    "0": "NORMAL",
+    "1": "STICKY",
+    "2": "EPHEMERAL"
+  },
+  "TaskListType": {
+    "0": "Decision",
+    "1": "Activity"
+  },
+  "TimeoutType": {
+    "0": "START_TO_CLOSE",
+    "1": "SCHEDULE_TO_START",
+    "2": "SCHEDULE_TO_CLOSE",
+    "3": "HEARTBEAT"
+  },
+  "WorkflowExecutionCloseStatus": {
+    "0": "COMPLETED",
+    "1": "FAILED",
+    "2": "CANCELED",
+    "3": "TERMINATED",
+    "4": "CONTINUED_AS_NEW",
+    "5": "TIMED_OUT"
+  },
+  "WorkflowExecutionStatus": {
+    "0": "PENDING",
+    "1": "STARTED",
+    "2": "COMPLETED",
+    "3": "FAILED",
+    "4": "CANCELED",
+    "5": "TERMINATED",
+    "6": "CONTINUED_AS_NEW",
+    "7": "TIMED_OUT"
+  },
+  "WorkflowIDReusePolicy": {
+    "0": "AllowDuplicateFailedOnly",
+    "1": "AllowDuplicate",
+    "2": "RejectDuplicate",
+    "3": "TerminateIfRunning"
+  },
+  "CrossClusterTaskType": {
+    "0": "StartChildExecution",
+    "1": "CancelExecution",
+    "2": "SignalExecution",
+    "3": "RecordChildWorkflowExecutionComplete",
+    "4": "ApplyParentClosePolicy"
+  },
+  "CrossClusterTaskFailedCause": {
+    "0": "DOMAIN_NOT_ACTIVE",
+    "1": "DOMAIN_NOT_EXISTS",
+    "2": "WORKFLOW_ALREADY_RUNNING",
+    "3": "WORKFLOW_NOT_EXISTS",
+    "4": "WORKFLOW_ALREADY_COMPLETED",
+    "5": "UNCATEGORIZED"
+  },
+  "GetTaskFailedCause": {
+    "0": "SERVICE_BUSY",
+    "1": "TIMEOUT",
+    "2": "SHARD_OWNERSHIP_LOST",
+    "3": "UNCATEGORIZED"
+  }
+}

@@ -106,3 +106,5 @@ mod action_tag_tests {
         assert_eq!(invalid_history_action_message("Other", 5), "invalid history action Other (next event id 5)");
     }
 }
+
+mod mutable_state_json;
