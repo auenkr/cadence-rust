@@ -35,3 +35,6 @@ https://github.com/auenkr/cadence-rust/actions/runs/43584330378 (head e159eba846
 
 ### In-turn wait checkpoint (14:00 UTC)
 Both fresh CI runs succeeded. Soak 43598100147 remains in progress after its scheduled midpoint; no verdict available yet, and no second measured soak has been dispatched. Waiting in-turn with status checks at least 120 seconds apart. Only read-only GitHub API/CLI and filesystem/git operations run locally.
+
+### In-turn wait checkpoint (14:30 UTC)
+Soak 43598100147 still reports both go-baseline and rust in their Soak steps. Awaiting workload completion, analyzer output and uploaded artifacts. No further implementation changes or second measured run.
