@@ -134,3 +134,29 @@ both requested mixed gates, but cannot be described as a fully passing soak.
 Further restart child-completion/recovery and RSS work is needed; no checks were
 weakened, workflow failures suppressed, or retries added to hide these findings.
 All validation ran on GitHub Actions; no local Cargo, Go or Docker commands.
+
+## Follow-up implementation: history-soak-tail (2026-11-14)
+
+Base origin/master 05fb1e57c; merged origin/history-restartgate without merging
+anything to master. Diagnostic soak captures child histories on query failures
+(the earlier evidence only captured parent histories). Restart gate now uses
+release binaries, matching the soak and avoiding the known debug-build overload.
+
+RSS audit found a real Go parity gap: EngineExecutionCache hard-coded 10,000
+entries per shard and evicted all idle entries only at capacity. Go NewCache
+uses history.cacheMaxSize (default 512), history.cacheTTL (default one hour),
+pinned entries and LRU eviction. Rust has those configuration properties but
+ignored them. Follow-up wires both properties, evicts expired idle entries and
+the least recently accessed unpinned entry, and refuses insertion when every
+entry is pinned. No RSS acceptance threshold changed. Validation pending.
+
+Child close executor comparison: both CloseExecution and the separate
+RecordChildExecutionCompleted transfer task notify the parent; connection and
+shard errors propagate for retry, while only EntityNotExists/already-completed
+are ignored. Added retry regression covering both task types and unchanged
+parent/child identifiers across attempts. Exact restart stall cause remains
+under investigation; diagnostic run below has no Rust behavior changes.
+
+| run URL | head | scenario | result |
+|---|---|---|---|
+| https://github.com/auenkr/cadence-rust/actions/runs/43554242022 | 76e7cc97c | mysql 20m diagnostic soak, child history dumps | running |

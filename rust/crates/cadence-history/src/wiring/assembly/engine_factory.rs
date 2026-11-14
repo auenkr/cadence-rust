@@ -174,7 +174,7 @@ pub fn build_core(env: &Arc<HistoryEnv>, shard: &Arc<ShardContext>) -> (Arc<Engi
             })
         },
     });
-    let cache = EngineExecutionCache::new(core.clone());
+    let cache = EngineExecutionCache::new(core.clone(), env.config.clone());
     (core, cache)
 }
 

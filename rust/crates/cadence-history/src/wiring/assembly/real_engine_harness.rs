@@ -551,7 +551,7 @@ impl Harness {
                 Arc::new(move |_| StateParams { retention_days: 1, history_nodes: Some(nodes.clone()), ..StateParams::default() })
             },
         });
-        let cache = EngineExecutionCache::new(core.clone());
+        let cache = EngineExecutionCache::new(core.clone(), config.clone());
         let mut engine = nop_engine();
         engine.current_cluster_name = CLUSTER.into();
         engine.cluster_metadata = Arc::new(TestClusterMetadata);
