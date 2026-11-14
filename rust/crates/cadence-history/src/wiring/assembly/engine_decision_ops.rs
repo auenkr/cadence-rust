@@ -142,14 +142,14 @@ impl EngineOps<'_> {
         ty: EventType,
         status: i32,
         completed_id: i64,
-        what: &str,
+        _what: &str,
         fill: impl FnOnce(&mut HistoryEvent),
     ) -> Result<()> {
         let ms = self.state.now_millis();
         let params = self.state.params.clone();
         let mut g = self.state.inner.lock().unwrap();
         if !g.exec.is_running() {
-            return Err(internal(super::invalid_history_action_message(what, g.next_event_id)));
+            return Err(internal(crate::execution::mutable_state_methods_common::ERR_WORKFLOW_FINISHED));
         }
         let ev = g.push_event(ty, ms * 1_000_000, fill);
         g.exec.state = WORKFLOW_STATE_COMPLETED;

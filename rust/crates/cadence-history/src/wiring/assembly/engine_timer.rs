@@ -313,7 +313,7 @@ impl EngineMutableState {
         let params = self.params.clone();
         let mut g = self.inner.lock().unwrap();
         if !g.exec.is_running() {
-            return Err(HistoryError::internal(super::invalid_history_action_message("WorkflowExecutionTimedOut", g.next_event_id)));
+            return Err(HistoryError::internal(crate::execution::mutable_state_methods_common::ERR_WORKFLOW_FINISHED));
         }
         let ev = g.push_event(EventType::WorkflowExecutionTimedOut, ms * 1_000_000, |e| {
             e.workflow_execution_timed_out_event_attributes =
