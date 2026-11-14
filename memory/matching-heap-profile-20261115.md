@@ -1,0 +1,27 @@
+# Matching live-heap investigation (2026-11-15)
+
+Branch: `matching-heap-profile`, based on `3a6a5a44fcb20fe871b6093526d447d01417a0ff`.
+
+## Measurement plan
+
+No local Cargo, Go or Docker invocations. At most three measured soaks.
+Default builds keep the system allocator. `frontend-soak.yml` has a new boolean
+`heap_profile` dispatch input (default false). Opt-in builds use jemalloc with
+profiling and release debug symbols. Only the Matching child enables sampled
+profiling (`prof:true,prof_active:true,lg_prof_sample:19`) and snapshot collection.
+Snapshots at 180, 1200, 2400 and 4000 seconds capture live sampled allocations;
+allocated/active/resident statistics distinguish live growth from page retention.
+The lane artifact includes raw profiles, stats and jeprof early/late diffs,
+with three-day retention. The unstripped executable stays in soak-binaries.
+
+## Runs
+
+1. Profiled 70-minute/rate-10 Go baseline + Rust soak:
+   https://github.com/auenkr/cadence-rust/actions/runs/43647087517
+   source `f1dd5dc4b` — queued; no conclusion yet.
+2. Targeted default-build server CI (fresh target):
+   https://github.com/auenkr/cadence-rust/actions/runs/43647125592
+   source `f1dd5dc4b` — queued.
+
+Redundant automatic full CI 43647086757 canceled while queued; final workspace
+validation will follow the measured fix. No root cause or parity verdict yet.
