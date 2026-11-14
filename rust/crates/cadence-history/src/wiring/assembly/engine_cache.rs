@@ -21,7 +21,7 @@ use tokio::sync::OwnedMutexGuard;
 
 use crate::engine::deps::{
     DomainCache, ExecutionCache, ExecutionContext, ExecutionContextRef, HResult, HistoryError,
-    MutableStateRef, ReleaseFunc, TimeSource, WorkflowExecution,
+    MutableState, MutableStateRef, ReleaseFunc, TimeSource, WorkflowExecution,
 };
 use crate::engine::runtime::{UpdateAction, UpdateFn, WorkflowUpdater};
 use crate::shard_context::{ShardContext, ShardContextError};
@@ -497,6 +497,20 @@ impl EngineExecutionContext {
                 shard.update_max_read_level(max_read_level);
                 core.notify_tasks(&txn.transfer, &txn.timer);
                 state.finish_transaction(history_size, last_event_task_id);
+                // Go execution/context.go updateWorkflowExecutionWithNew: every successful
+                // mutation wakes history long polls, including close and continue-as-new.
+                let info = state.get_execution_info();
+                core.notify_history_event(crate::engine::runtime::HistoryNotification {
+                    domain_id: self.domain_id.clone(),
+                    workflow_id: self.execution.workflow_id.clone(),
+                    run_id: self.execution.run_id.clone(),
+                    last_first_event_id: state.get_last_first_event_id(),
+                    next_event_id: state.get_next_event_id(),
+                    previous_started_event_id: state.get_previous_started_event_id(),
+                    workflow_state: info.state,
+                    workflow_close_state: info.close_status,
+                    version_histories: state.get_version_histories().unwrap_or_default(),
+                });
                 Ok(())
             }
             Err(e) => {

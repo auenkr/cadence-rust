@@ -99,6 +99,7 @@ var started, completed, failed, retries, signals, queries, inflight int64
 var latNs, latCount, latMax, queryInit, queryInitWfs int64
 
 // Latency samples (ms) for percentiles: end-to-end, start call, query call (successful attempt only).
+var dumped, dumpedOK int64
 var latMu sync.Mutex
 var lat = map[string][]int64{"e2e": nil, "start": nil, "query": nil}
 
@@ -205,6 +206,7 @@ func main() {
 		defer wg.Done()
 		defer atomic.AddInt64(&inflight, -1)
 		t0 := time.Now()
+		marks := []time.Time{t0}
 		fail := func(stage string, err error) {
 			atomic.AddInt64(&failed, 1)
 			fmt.Printf("FAIL %s %s %v\n", id, stage, err)
@@ -225,12 +227,14 @@ func main() {
 			return
 		}
 		atomic.AddInt64(&started, 1)
+		marks = append(marks, time.Now())
 		time.Sleep(time.Duration(1+rand.Intn(4)) * time.Second)
 		if err = retry(func() error { return c.SignalWorkflow(ctx, id, "", "wake", "w-"+id) }); err != nil {
 			fail("signal", err)
 			return
 		}
 		atomic.AddInt64(&signals, 1)
+		marks = append(marks, time.Now())
 		sawInit := false
 		if err = retry(func() error {
 			qs := time.Now()
@@ -256,9 +260,23 @@ func main() {
 			return nil
 		}); err != nil {
 			fail("query", err)
+			if atomic.AddInt64(&dumped, 1) <= 4 {
+				dctx, dcancel := context.WithTimeout(ctx, 20*time.Second)
+				it := c.GetWorkflowHistory(dctx, id, "", false, 0)
+				for it.HasNext() {
+					ev, e := it.Next()
+					if e != nil {
+						fmt.Printf("HISTDUMP %s err %v\n", id, e)
+						break
+					}
+					fmt.Printf("HISTDUMP %s #%d %v ts=%d\n", id, ev.GetEventId(), ev.GetEventType(), ev.GetTimestamp())
+				}
+				dcancel()
+			}
 			return
 		}
 		atomic.AddInt64(&queries, 1)
+		marks = append(marks, time.Now())
 		if err = retry(func() error { return c.SignalWorkflow(ctx, id, "", "done", "x") }); err != nil {
 			fail("signal-done", err)
 			return
@@ -276,8 +294,25 @@ func main() {
 			fail("result-value", fmt.Errorf("got %q", out))
 			return
 		}
+		marks = append(marks, time.Now())
 		ms := time.Since(t0).Milliseconds()
 		atomic.AddInt64(&completed, 1)
+		if ms > 12000 && atomic.AddInt64(&dumpedOK, 1) <= 3 {
+			dctx, dcancel := context.WithTimeout(ctx, 20*time.Second)
+			it := c.GetWorkflowHistory(dctx, id, "", false, 0)
+			for it.HasNext() {
+				ev, e := it.Next()
+				if e != nil {
+					break
+				}
+				fmt.Printf("HISTDUMP %s #%d %v ts=%d\n", id, ev.GetEventId(), ev.GetEventType(), ev.GetTimestamp())
+			}
+			dcancel()
+			for i := 1; i < len(marks); i++ {
+				fmt.Printf("STAGE %s %d %dms\n", id, i, marks[i].Sub(marks[i-1]).Milliseconds())
+			}
+			dumpChain(ctx, c, id)
+		}
 		atomic.AddInt64(&latNs, ms*1e6)
 		atomic.AddInt64(&latCount, 1)
 		record("e2e", ms)
@@ -312,5 +347,43 @@ func main() {
 	s := snapshot()
 	if s["started"] != s["completed"] || s["failed"] != 0 || s["started"] != int64(n) {
 		os.Exit(1)
+	}
+}
+
+// dumpChain prints the history of the first run (gen 0) of id and of its child workflows.
+func dumpChain(ctx context.Context, c client.Client, id string) {
+	dctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	prev := ""
+	it := c.GetWorkflowHistory(dctx, id, "", false, 0)
+	if it.HasNext() {
+		if ev, e := it.Next(); e == nil && ev.WorkflowExecutionStartedEventAttributes != nil {
+			prev = ev.WorkflowExecutionStartedEventAttributes.GetContinuedExecutionRunId()
+		}
+	}
+	if prev == "" {
+		return
+	}
+	children := []string{}
+	it = c.GetWorkflowHistory(dctx, id, prev, false, 0)
+	for it.HasNext() {
+		ev, e := it.Next()
+		if e != nil {
+			break
+		}
+		fmt.Printf("HISTDUMP %s-g0 #%d %v ts=%d\n", id, ev.GetEventId(), ev.GetEventType(), ev.GetTimestamp())
+		if a := ev.StartChildWorkflowExecutionInitiatedEventAttributes; a != nil && a.WorkflowId != nil {
+			children = append(children, *a.WorkflowId)
+		}
+	}
+	for _, ch := range children {
+		it = c.GetWorkflowHistory(dctx, ch, "", false, 0)
+		for it.HasNext() {
+			ev, e := it.Next()
+			if e != nil {
+				break
+			}
+			fmt.Printf("HISTDUMP %s-child #%d %v ts=%d\n", id, ev.GetEventId(), ev.GetEventType(), ev.GetTimestamp())
+		}
 	}
 }

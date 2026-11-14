@@ -223,7 +223,12 @@ pub async fn serve(
         let incoming = cadence_matching::grpc_matching::no_identity_tls_incoming(listener, acceptor);
         router.serve_with_incoming_shutdown(incoming, shutdown).await
     } else {
-        let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
+        use tokio_stream::StreamExt as _;
+        let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener).map(|s| {
+            s.inspect(|sock| {
+                let _ = sock.set_nodelay(true);
+            })
+        });
         router.serve_with_incoming_shutdown(incoming, shutdown).await
     };
     if let Err(e) = result {

@@ -1446,3 +1446,55 @@ async fn record_decision_started_on_closed_workflow_not_running_message() {
     let err = decision_started(&h, &run, 2, "dec-req-2").await.unwrap_err();
     assert!(err.to_string().contains("workflow execution already completed"), "{err}");
 }
+
+// Exercise the production persistence path and real notifier, rather than injecting
+// a notification into a fake channel. The original bug completed the write but
+// left this poll asleep until expiration.
+#[tokio::test]
+async fn poll_mutable_state_wakes_on_close_after_continue_as_new() {
+    use std::future::Future;
+    use std::task::Poll;
+    use std::time::Duration;
+
+    for empty_run_id in [false, true] {
+        let h = Harness::new();
+        let old_run = run_first_decision(&h, Decision {
+            decision_type: Some(DecisionType::ContinueAsNewWorkflowExecution),
+            continue_as_new_workflow_execution_decision_attributes: Some(ContinueAsNewWorkflowExecutionDecisionAttributes {
+                workflow_type: Some(WorkflowType { name: "wf-type".into() }),
+                task_list: Some(tl()),
+                execution_start_to_close_timeout_seconds: Some(100),
+                task_start_to_close_timeout_seconds: Some(10),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }).await;
+        let run = h.execs.current_run(WF).unwrap().run_id;
+        assert_ne!(old_run, run);
+        decision_started(&h, &run, 2, "new-run-decision").await.unwrap();
+        let before = h.execs.snapshot(WF, &run).unwrap().execution_info;
+        let request = PollMutableStateRequest {
+            domain_uuid: DOMAIN_ID.into(),
+            execution: exec(if empty_run_id { "" } else { &run }),
+            // Close-only callers may ask for an ID far beyond the current history.
+            expected_next_event_id: i64::MAX,
+            ..Default::default()
+        };
+        let poll = h.engine.poll_mutable_state(&request, None);
+        tokio::pin!(poll);
+        std::future::poll_fn(|cx| {
+            assert!(matches!(poll.as_mut().poll(cx), Poll::Pending), "must subscribe before closing");
+            Poll::Ready(())
+        }).await;
+        decision_completed(&h, &run, 2, vec![complete_decision()]).await.unwrap();
+        let response = tokio::time::timeout(Duration::from_millis(250), poll).await
+            .expect("close notification must wake the poll before its one-second expiry").unwrap();
+        let closed = h.execs.snapshot(WF, &run).unwrap().execution_info;
+        assert_eq!(response.execution.unwrap().run_id, run);
+        assert_eq!(response.workflow_state, Some(WORKFLOW_STATE_COMPLETED));
+        assert_eq!(response.workflow_close_state, Some(WORKFLOW_CLOSE_STATUS_COMPLETED));
+        assert!(response.next_event_id > before.next_event_id);
+        assert_eq!(response.next_event_id, closed.next_event_id);
+        assert_eq!(response.last_first_event_id, closed.last_first_event_id);
+    }
+}

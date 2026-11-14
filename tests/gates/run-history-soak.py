@@ -285,8 +285,9 @@ try:
         record('go-worker-schema-ready', ready)
         if not ready:
             raise SystemExit(1)
+        history_env = dict(os.environ, RUST_LOG=os.environ.get('HISTORY_RUST_LOG', 'warn'))
         history_cmd = lambda cfg: [args.rust_history_binary, '--config', cfg, '--root', work, 'start', '--services', 'history']
-        start(history_name, history_cmd(work / 'rust.yaml'))
+        start(history_name, history_cmd(work / 'rust.yaml'), env=history_env)
         history2_cmd = lambda: history_cmd(work / 'rust-history2.yaml')
         (work / 'service-stack.json').write_text(json.dumps({
             'history': 'rust', 'frontend': 'rust', 'matching': 'rust', 'worker': 'go',
@@ -298,8 +299,10 @@ try:
         if not ready:
             raise SystemExit(1)
         history2_cmd = lambda: [args.go_server, '--config', work / 'config2', '--zone', plugin, 'start', '--services', 'history']
+        history_cmd = lambda cfg: history2_cmd()
+        history_env = dict(os.environ)
     if args.two_history:
-        start(history2_name, history2_cmd())
+        start(history2_name, history2_cmd(), env=history_env)
     # Matching opens gRPC only after Ringpop bootstrap. Launch its Frontend
     # seed before waiting for Matching readiness so both can join the ring.
     start('rust-matching', rust_matching())
@@ -339,7 +342,6 @@ try:
     dump_domain_rows('before-sdk')
     record_services_alive('before-sdk')
 
-    assert args.rust_history_binary, '--rust-history-binary is required'
     SOAK_SECONDS = int(os.environ.get('SOAK_SECONDS', '2700'))
     SOAK_RATE = os.environ.get('SOAK_RATE', '4')
     RESTART_AT = int(os.environ.get('SOAK_RESTART_AT', str(SOAK_SECONDS // 2)))
@@ -387,7 +389,7 @@ try:
             kill(restart_name)
             record(f'{restart_name}-killed-mid-soak', True, f't={int(el)}')
             time.sleep(5)
-            start(restart_name, history2_cmd() if args.two_history else history_cmd(work / 'rust.yaml'))
+            start(restart_name, history2_cmd() if args.two_history else history_cmd(work / 'rust.yaml'), env=history_env)
             ok = wait_port(ports['HISTORY2_PORT_GRPC' if args.two_history else 'HISTORY_PORT_GRPC'], 240, restart_name)
             restart_t = int(time.monotonic() - t0)
             record(f'{restart_name}-restarted-listening', bool(ok), f't={restart_t}')
