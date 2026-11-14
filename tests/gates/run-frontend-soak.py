@@ -220,7 +220,7 @@ def dump_domain_rows(tag):
         if not c:
             return
         if plugin == 'mysql':
-            stmts = ["SELECT HEX(id), name, shard_id FROM cadence.domains", "SELECT * FROM cadence.domain_metadata"]
+            stmts = ["SELECT HEX(id), name, shard_id FROM cadence.domains", "SELECT * FROM cadence.domain_metadata", "SELECT name, is_global, data_encoding, HEX(data) FROM cadence.domains WHERE name LIKE 'fe-gate%'"]
             cmds = [['docker', 'exec', c, 'mysql', '-uroot', f'-p{my_pass}', '-h127.0.0.1', '-N', '-B', '-e', q] for q in stmts]
         elif plugin == 'postgres':
             stmts = ["SELECT encode(id,'hex'), name, shard_id FROM domains", "SELECT * FROM domain_metadata"]
