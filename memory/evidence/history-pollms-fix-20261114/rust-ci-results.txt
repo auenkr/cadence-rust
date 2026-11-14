@@ -1,0 +1,5 @@
+clippy-test	Clippy	2026-11-14T02:52:33.4360777Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 2m 15s
+clippy-test	Test	2026-11-14T02:56:04.9304226Z test wiring::assembly::real_engine_tests::poll_mutable_state_wakes_on_close_after_continue_as_new ... ok
+clippy-test	Test	2026-11-14T02:57:04.7012964Z test result: ok. 890 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 61.44s
+clippy-test	Test	2026-11-14T02:57:04.7031485Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+clippy-test	Test	2026-11-14T02:57:07.1956923Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

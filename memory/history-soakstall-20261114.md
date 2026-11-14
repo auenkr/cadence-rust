@@ -69,3 +69,16 @@ CI dispatched on c4d28963dcd6c825b62313d2247e57c6430ce4a4 (results pending):
 - cassandra/tchannel mixed, two_history=true: https://github.com/auenkr/cadence-rust/actions/runs/43548212487
 No Cargo, Go or Docker commands run on the dev host. An automatic rust-check push
 run (43548203626) was cancelled to honor the explicitly requested workflow scope.
+
+Validated so far on implementation head c4d28963dcd6c825b62313d2247e57c6430ce4a4:
+- rust-ci 43548203627: SUCCESS, fresh clean target, Clippy then 890 tests passed,
+  including `poll_mutable_state_wakes_on_close_after_continue_as_new`.
+- mysql/grpc mixed 43548210090: SUCCESS, `GATE SUMMARY failed: []`, artifact
+  `failedSteps: []`, exit 0, two_history=true.
+- cassandra/tchannel mixed 43548212487: SUCCESS, `GATE SUMMARY failed: []`, artifact
+  `failedSteps: []`, exit 0, two_history=true.
+- MySQL History binary SHA256: b588fef7e8ed539f418f7ce0a2b4cffff519c870e1891b87ab9a0c56593a459b
+- Cassandra History binary SHA256: 9478fac203d4cc190e4f7033eee5d519446e146b38949b7dc24c29c2ba3c0bbc
+- Durable compact evidence: `memory/evidence/history-pollms-fix-20261114/`.
+  Full gate artifacts downloaded and inspected; raw logs remain on Actions for
+  their configured three-day retention. Soak 43548206209 is running SDK traffic.
