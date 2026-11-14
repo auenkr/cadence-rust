@@ -1,0 +1,8 @@
+# Generated binaries, results, logs, downloads and watcher state.
+/bin/
+/evidence/
+/benchmark-source/
+*.log
+*.exit
+*.tmp
+__pycache__/

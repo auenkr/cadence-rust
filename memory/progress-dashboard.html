@@ -133,6 +133,7 @@
   </div>
 </header>
 <main>
+<p>2026-11-14 benchmark checkpoint: Matching completed 450/450 correctly in both arms; History completed 450/450 eventually with ~20s observed completion latency. Rust Frontend rerun failed all 50 warmup workflows with timeouts and routing errors. Generated benchmark output is ignored by Git. No capacity conclusion.</p>
 <p class="note">History checkpoint 2026-11-14: merged work now covers standby replication, cross-host failover marker routing, Go↔Rust database swap/recovery and bidirectional replication, S3 archival, advanced ES/OpenSearch visibility, decision-failover flush, and mutable-state parity part 2. Review 3 has identified remaining compatibility issues; timestamp units, archive enum encoding, authenticated Kafka, shard lifecycle, and the transfer decision guard remain open. The History soak stall and mutable-state parity re-read are also open. Mixed-cluster service completion and the admin CLI gate are not yet established. See the <a href="#history-1114">History status and evidence notes</a>.</p>
   <section class="est">
     <h2>Frontend + Matching benchmark — verified results</h2>
