@@ -161,8 +161,8 @@ impl EmaQpsTracker {
 
     /// Go `ReportCounter`: one arrival with no isolation group.
     pub fn report_counter(&self, amount: i64) {
-        let bucket = self.bucket();
         let mut state = self.lock();
+        let bucket = self.bucket();
         // Go folds on a ticker even when nobody reads QPS. Fold completed
         // windows here too, so write-only queues retain only the open bucket.
         state.root.fold_up_to(bucket - 1, self.exp, self.seconds());
@@ -171,8 +171,8 @@ impl EmaQpsTracker {
 
     /// Go `ReportGroup`: counts toward the root and toward the group.
     pub fn report_group(&self, group: &str, amount: i64) {
-        let bucket = self.bucket();
         let mut state = self.lock();
+        let bucket = self.bucket();
         state.root.fold_up_to(bucket - 1, self.exp, self.seconds());
         state.root.add(bucket, amount);
         let accumulator = state
