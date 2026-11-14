@@ -8,7 +8,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use cadence_api::enums::{DecisionType, EventType};
+use cadence_api::enums::{DecisionType, EventType, ParentClosePolicy};
 use cadence_api::service_types::HistoryEvent;
 use cadence_api::tasks::*;
 use cadence_persistence::history_contract as pc;
@@ -36,6 +36,16 @@ impl LocalDispatch for ActivityLocalDispatchInfo {
         self.scheduled_timestamp = Some(scheduled);
         self.scheduled_timestamp_of_this_attempt = Some(scheduled_this_attempt);
         self.started_timestamp = Some(started);
+    }
+}
+
+/// Go `HistoryBuilder.AddStartChildWorkflowExecutionInitiatedEvent`: an empty
+/// decision domain falls back to the (parent) execution's domain name.
+fn child_event_domain(domain: String, parent_domain_name: &str) -> String {
+    if domain.is_empty() {
+        parent_domain_name.to_string()
+    } else {
+        domain
     }
 }
 
@@ -691,6 +701,7 @@ impl Operations for EngineOps<'_> {
                     signal_name: attrs.signal_name,
                     input: attrs.input,
                     control: attrs.control,
+                    child_workflow_only: attrs.child_workflow_only,
                 });
         });
         let batch_id = g.hist.iter().find(|e| e.event_id > 0).map(|e| e.event_id).unwrap_or(completed_id);
@@ -716,20 +727,22 @@ impl Operations for EngineOps<'_> {
             .clone()
             .ok_or_else(|| bad("StartChildWorkflowExecutionDecisionAttributes is not set on decision."))?;
         let target_domain_id = self.target_domain_id(&a.domain)?;
+        let parent_domain_name = self.domain_name.clone();
         let ms = self.state.now_millis();
         let mut g = self.state.inner.lock().unwrap();
         let attrs = a.clone();
         let ev = g.push_event(EventType::StartChildWorkflowExecutionInitiated, ms * 1_000_000, |e| {
             e.start_child_workflow_execution_initiated_event_attributes =
                 Some(StartChildWorkflowExecutionInitiatedEventAttributes {
-                    domain: attrs.domain,
+                    domain: child_event_domain(attrs.domain, &parent_domain_name),
                     workflow_id: attrs.workflow_id,
                     workflow_type: attrs.workflow_type,
                     task_list: attrs.task_list,
                     input: attrs.input,
                     execution_start_to_close_timeout_seconds: attrs.execution_start_to_close_timeout_seconds,
                     task_start_to_close_timeout_seconds: attrs.task_start_to_close_timeout_seconds,
-                    parent_close_policy: attrs.parent_close_policy,
+                    // Go: `attributes.GetParentClosePolicy().Ptr()` (unset -> ABANDON).
+                    parent_close_policy: Some(attrs.parent_close_policy.unwrap_or(ParentClosePolicy::Abandon)),
                     control: attrs.control,
                     decision_task_completed_event_id: completed_id,
                     workflow_id_reuse_policy: attrs.workflow_id_reuse_policy,
@@ -1246,6 +1259,12 @@ mod tests {
         assert_eq!(g.exec.client_library_version, "1.2.3");
         assert_eq!(g.exec.client_feature_version, "1.5.0");
         assert_eq!(g.exec.client_impl, "uber-go");
+    }
+
+    #[test]
+    fn child_initiated_event_domain_falls_back_to_parent_domain() {
+        assert_eq!(super::child_event_domain(String::new(), "parent"), "parent");
+        assert_eq!(super::child_event_domain("other".into(), "parent"), "other");
     }
 
     #[test]
