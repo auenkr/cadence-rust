@@ -1,0 +1,26 @@
+{
+  "go": [
+    {
+      "step": "go-frontend-killed-mid-soak",
+      "ok": true,
+      "detail": "t=2101"
+    },
+    {
+      "step": "go-frontend-restarted-listening",
+      "ok": true,
+      "detail": "t=2104"
+    }
+  ],
+  "rust": [
+    {
+      "step": "rust-frontend-killed-mid-soak",
+      "ok": true,
+      "detail": "t=2100"
+    },
+    {
+      "step": "rust-frontend-restarted-listening",
+      "ok": true,
+      "detail": "t=2104"
+    }
+  ]
+}
