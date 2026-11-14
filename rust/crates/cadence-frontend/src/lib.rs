@@ -12,6 +12,7 @@ pub mod async_publisher;
 pub mod async_queue;
 pub use cadence_service_core::cloud_store;
 pub mod config;
+pub mod domain_guard;
 pub mod es_query;
 pub mod es_visibility;
 pub mod global_ratelimit;
