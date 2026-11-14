@@ -483,17 +483,22 @@ pub trait RequestAuthorization: Send + Sync {
     }
 }
 
+pub type RateLimitFuture<'a> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), CadenceError>> + Send + 'a>>;
+
 pub trait RequestRateLimit: Send + Sync {
     fn allow(&self, operation: &str, request: &Value) -> Result<(), CadenceError>;
     /// Like `allow`, with the inbound transport headers (lower-cased) so the
-    /// caller-type bypass can read `cadence-caller-type`.
-    fn allow_with_headers(
-        &self,
-        operation: &str,
-        request: &Value,
-        _headers: &HashMap<String, String>,
-    ) -> Result<(), CadenceError> {
-        self.allow(operation, request)
+    /// caller-type bypass can read `cadence-caller-type`, and the caller's
+    /// deadline so worker-poll waits are bounded by it (Go `waitForPolicy`).
+    fn allow_with_headers<'a>(
+        &'a self,
+        operation: &'a str,
+        request: &'a Value,
+        _headers: &'a HashMap<String, String>,
+        _deadline: Option<std::time::Instant>,
+    ) -> RateLimitFuture<'a> {
+        Box::pin(async move { self.allow(operation, request) })
     }
 }
 
@@ -557,7 +562,8 @@ pub trait SearchAttributeProvider: Send + Sync {
 
 #[derive(Clone)]
 struct VersionCheck {
-    enabled: bool,
+    /// Go evaluates `frontend.enableClientVersionCheck` on every call.
+    enabled: Arc<dyn Fn() -> bool + Send + Sync>,
     checker: Arc<dyn crate::wrappers::versioncheck::VersionChecker + Send + Sync>,
 }
 
@@ -705,7 +711,7 @@ impl<B: WorkflowBackend> Handler<B> {
     /// request preflight and before the API handler, inside metering.
     pub fn with_version_check(
         mut self,
-        enabled: bool,
+        enabled: Arc<dyn Fn() -> bool + Send + Sync>,
         checker: Arc<dyn crate::wrappers::versioncheck::VersionChecker + Send + Sync>,
     ) -> Self {
         self.version_check = Some(VersionCheck { enabled, checker });
@@ -1041,12 +1047,19 @@ impl<B: WorkflowBackend> Handler<B> {
     ) -> Result<Value, CadenceError> {
         validate_ratelimit_wrapper_request(operation, &request)?;
         if let Some(rate_limit) = &self.rate_limit {
-            rate_limit.allow_with_headers(operation.name(), &request, &caller.original_headers)?;
+            rate_limit
+                .allow_with_headers(
+                    operation.name(),
+                    &request,
+                    &caller.original_headers,
+                    caller.deadline,
+                )
+                .await?;
         }
         if let Some(version_check) = &self.version_check {
             crate::wrappers::versioncheck::check(
                 operation.name(),
-                version_check.enabled,
+                (version_check.enabled)(),
                 &caller.client_impl,
                 &caller.feature_version,
                 version_check.checker.as_ref(),
@@ -3754,7 +3767,7 @@ mod tests {
         )
         .with_access_control(authorization.clone())
         .with_rate_limit(rate_limit.clone())
-        .with_version_check(true, version.clone());
+        .with_version_check(Arc::new(|| true), version.clone());
         let error = handler
             .dispatch_with_metadata(
                 "DescribeWorkflowExecution",

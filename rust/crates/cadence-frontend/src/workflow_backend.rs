@@ -1147,15 +1147,16 @@ pub fn build_workflow_api(
         Ok(None) => {}
         Err(e) => return Err(anyhow::anyhow!(e)),
     }
-    let version_check_enabled = {
+    let version_check_enabled: std::sync::Arc<dyn Fn() -> bool + Send + Sync> = {
         let overlay = ctx.state.admin.dynamic_config.clone();
-        let guard = overlay.lock();
-        guard.is_ok_and(|overlay| {
-            cadence_persistence::dynamic_config::boolean(
-                overlay.property_values("frontend.enableClientVersionCheck"),
-                None,
-                false,
-            )
+        std::sync::Arc::new(move || {
+            overlay.lock().is_ok_and(|overlay| {
+                cadence_persistence::dynamic_config::boolean(
+                    overlay.property_values("frontend.enableClientVersionCheck"),
+                    None,
+                    false,
+                )
+            })
         })
     };
     let overlay = ctx.state.admin.dynamic_config.clone();
@@ -1305,14 +1306,17 @@ pub fn build_workflow_api(
         p = p.with_global_collections(domain_collection, tl_collection);
         std::sync::Arc::new(p) as std::sync::Arc<dyn crate::wrappers::ratelimited::Policy>
     };
-    let max_poll_delay_nanos = {
-        let guard = overlay.lock();
-        guard.map_or(0, |o| {
-            cadence_persistence::dynamic_config::duration(
-                o.property_values("frontend.maxWorkerPollDelay"),
-                None,
-                0,
-            )
+    let max_poll_delay: crate::wrappers::ratelimited::DomainDelaySource = {
+        let overlay = overlay.clone();
+        std::sync::Arc::new(move |domain: &str| {
+            let nanos = overlay.lock().map_or(0, |o| {
+                cadence_persistence::dynamic_config::duration(
+                    o.property_values("frontend.maxWorkerPollDelay"),
+                    Some(domain),
+                    0,
+                )
+            });
+            std::time::Duration::from_nanos(nanos.max(0) as u64)
         })
     };
     let rate_limit = crate::wrappers::ratelimited::HandlerRateLimit::new(
@@ -1368,7 +1372,7 @@ pub fn build_workflow_api(
                 )
             })
         })),
-        std::time::Duration::from_nanos(max_poll_delay_nanos.max(0) as u64),
+        max_poll_delay,
     );
     let async_domains: std::sync::Arc<dyn crate::async_publisher::AsyncDomainConfigLookup> =
         std::sync::Arc::new(crate::async_publisher::PersistenceAsyncDomainConfig::new(
