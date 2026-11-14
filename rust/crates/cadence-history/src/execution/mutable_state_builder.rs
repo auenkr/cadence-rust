@@ -53,8 +53,6 @@ fn internal<T>(message: impl Into<String>) -> Result<T> {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TypedWorkflowMutation {
     pub execution_info: WorkflowExecutionInfo,
-    /// Go `mutableStateBuilder.checksum`, loaded from `WorkflowSnapshot.Checksum`.
-    pub checksum: Vec<u8>,
     pub version_histories: Option<VersionHistories>,
     pub start_version: i64,
     pub last_write_version: i64,
@@ -85,6 +83,8 @@ pub struct TypedWorkflowMutation {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TypedWorkflowSnapshot {
     pub execution_info: WorkflowExecutionInfo,
+    /// Go `mutableStateBuilder.checksum`, loaded from `WorkflowSnapshot.Checksum`.
+    pub checksum: Vec<u8>,
     pub version_histories: Option<VersionHistories>,
     pub start_version: i64,
     pub last_write_version: i64,
