@@ -752,6 +752,7 @@ impl Operations for EngineOps<'_> {
                     memo: attrs.memo,
                     search_attributes: attrs.search_attributes,
                     cron_overlap_policy: attrs.cron_overlap_policy,
+                    active_cluster_selection_policy: attrs.active_cluster_selection_policy.clone(),
                     ..Default::default()
                 });
         });
