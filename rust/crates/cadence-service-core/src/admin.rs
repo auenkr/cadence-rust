@@ -2506,11 +2506,14 @@ pub async fn update_domain_isolation_groups(
         Err(cadence_persistence::FrontendDomainError::Invalid(m)) => {
             bad_request(BadRequestError::new(m))
         }
-        Err(e) => error_response(
-            "InternalServiceError",
-            StatusCode::INTERNAL_SERVER_ERROR,
-            e.to_string(),
-        ),
+        Err(e) => {
+            tracing::warn!(domain = %req.domain, error = %e, "UpdateDomainIsolationGroups failed");
+            error_response(
+                "InternalServiceError",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                e.to_string(),
+            )
+        }
     }
 }
 

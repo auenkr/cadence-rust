@@ -6243,6 +6243,7 @@ impl FromThrift for SignalExternalWorkflowExecutionInitiatedEventAttributes {
             signal_name: s.req_string(40, "")?,
             input: s.bytes_or_empty(50)?,
             control: s.bytes_or_empty(60)?,
+            child_workflow_only: s.opt_bool(70)?.unwrap_or(false),
         })
     }
 }
@@ -6259,6 +6260,7 @@ impl ToThrift for SignalExternalWorkflowExecutionInitiatedEventAttributes {
         f.sstr(40, &self.signal_name);
         f.sbytes(50, &self.input);
         f.sbytes(60, &self.control);
+        f.obool(70, self.child_workflow_only);
         f.finish()
     }
 }
