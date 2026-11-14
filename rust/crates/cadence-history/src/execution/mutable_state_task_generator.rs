@@ -48,8 +48,6 @@ pub trait TaskGeneratorState: TimerSequenceState {
     fn child_info(&self, initiated_id: i64) -> Option<ChildExecutionInfo>;
     fn has_request_cancel(&self, initiated_id: i64) -> bool;
     fn has_signal(&self, initiated_id: i64) -> bool;
-    /// Rust's signal-initiated attributes lack Go's ChildWorkflowOnly; callers supply it.
-    fn signal_child_only(&self, initiated_id: i64) -> bool;
     fn domain_id(&self, name: &str) -> Result<String, Self::Error>;
     /// Missing domains return None (one-day retention); all other errors propagate.
     fn retention_days(&self) -> Result<Option<i32>, Self::Error>;
@@ -164,7 +162,7 @@ impl<S: TaskGeneratorState> MutableStateTaskGenerator<'_, S> {
         let attr = event.signal_external_workflow_execution_initiated_event_attributes.as_ref().ok_or_else(|| self.state.internal_error("missing signal attributes".into()))?;
         if !self.state.has_signal(event.event_id) { return Err(self.state.internal_error(format!("it could be a bug, cannot get pending signal external workflow: {}", event.event_id))); }
         let execution = attr.workflow_execution.clone().unwrap_or_default();
-        let kind = TaskKind::SignalExecution { target_domain_id: self.target_domain_id(&attr.domain)?, target_workflow_id: execution.workflow_id, target_run_id: execution.run_id, child_only: self.state.signal_child_only(event.event_id), initiated_id: event.event_id };
+        let kind = TaskKind::SignalExecution { target_domain_id: self.target_domain_id(&attr.domain)?, target_workflow_id: execution.workflow_id, target_run_id: execution.run_id, child_only: attr.child_workflow_only, initiated_id: event.event_id };
         let task = self.task(event.version, None, self.state.execution().task_list, kind);
         self.state.add_transfer_task(task); Ok(())
     }
@@ -225,8 +223,6 @@ pub struct TypedTaskGeneratorState<'a, D: TaskGeneratorDomains> {
     /// Timer fields changed while generating activity timeout tasks; flushed
     /// back into pending activity rows by `run_task_generator`.
     pub activity_timer_status: BTreeMap<i64, (i32, i64)>,
-    /// initiated_id -> ChildWorkflowOnly for pending signals.
-    pub signal_child_only: BTreeMap<i64, bool>,
     pub transfer_tasks: Vec<GeneratedTask>,
     pub timer_tasks: Vec<GeneratedTask>,
 }
@@ -235,7 +231,7 @@ impl<'a, D: TaskGeneratorDomains> TypedTaskGeneratorState<'a, D> {
     pub fn new(state: &'a mut TypedMutableState, domains: &'a D, random: &'a mut dyn FnMut(i64) -> i64) -> Self {
         Self {
             state, domains, random, decision_schedule_to_start_timeout_nanos: 0,
-            activity_timer_status: BTreeMap::new(), signal_child_only: BTreeMap::new(),
+            activity_timer_status: BTreeMap::new(),
             transfer_tasks: Vec::new(), timer_tasks: Vec::new(),
         }
     }
@@ -336,7 +332,6 @@ impl<D: TaskGeneratorDomains> TaskGeneratorState for TypedTaskGeneratorState<'_,
     fn child_info(&self, initiated_id: i64) -> Option<ChildExecutionInfo> { self.state.pending_child_execution_info_ids.get(&initiated_id).cloned() }
     fn has_request_cancel(&self, initiated_id: i64) -> bool { self.state.pending_request_cancel_info_ids.contains_key(&initiated_id) }
     fn has_signal(&self, initiated_id: i64) -> bool { self.state.pending_signal_info_ids.contains_key(&initiated_id) }
-    fn signal_child_only(&self, initiated_id: i64) -> bool { self.signal_child_only.get(&initiated_id).copied().unwrap_or(false) }
     fn domain_id(&self, name: &str) -> Result<String, Self::Error> { self.domains.domain_id_by_name(name) }
     fn retention_days(&self) -> Result<Option<i32>, Self::Error> {
         let e = &self.state.execution_info;

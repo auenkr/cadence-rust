@@ -691,6 +691,7 @@ impl Operations for EngineOps<'_> {
                     signal_name: attrs.signal_name,
                     input: attrs.input,
                     control: attrs.control,
+                    child_workflow_only: attrs.child_workflow_only,
                 });
         });
         let batch_id = g.hist.iter().find(|e| e.event_id > 0).map(|e| e.event_id).unwrap_or(completed_id);

@@ -1911,6 +1911,8 @@ pub struct SignalExternalWorkflowExecutionInitiatedEventAttributes {
         deserialize_with = "crate::b64::deserialize_bytes"
     )]
     pub control: Vec<u8>,
+    #[serde(rename = "childWorkflowOnly", default, skip_serializing_if = "std::ops::Not::not")]
+    pub child_workflow_only: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

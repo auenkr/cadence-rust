@@ -384,7 +384,7 @@ impl HistoryBuilder {
     /// Go `AddSignalExternalWorkflowExecutionInitiatedEvent`.
     pub fn add_signal_external_initiated(&mut self, decision_task_completed_event_id: i64, a: &t::SignalExternalWorkflowExecutionDecisionAttributes) -> HistoryEvent {
         let e = a.execution.clone().unwrap_or_default();
-        self.add_signal_external_workflow_execution_initiated_event(t::SignalExternalWorkflowExecutionInitiatedEventAttributes { decision_task_completed_event_id, domain: a.domain.clone(), workflow_execution: we(&e.workflow_id, &e.run_id), signal_name: a.signal_name.clone(), input: a.input.clone(), control: a.control.clone() })
+        self.add_signal_external_workflow_execution_initiated_event(t::SignalExternalWorkflowExecutionInitiatedEventAttributes { decision_task_completed_event_id, domain: a.domain.clone(), workflow_execution: we(&e.workflow_id, &e.run_id), signal_name: a.signal_name.clone(), input: a.input.clone(), control: a.control.clone(), child_workflow_only: a.child_workflow_only })
     }
     /// Go `AddSignalExternalWorkflowExecutionFailedEvent`.
     #[allow(clippy::too_many_arguments)]
