@@ -495,9 +495,9 @@ pub fn start_out(v: t::StartWorkflowExecutionRequest) -> p::StartWorkflowExecuti
     }
 }
 pub fn info(v: st::WorkflowExecutionInfo) -> p::WorkflowExecutionInfo {
-    info_with_time(v, timestamp)
+    info_with_time(v, timestamp_nanos)
 }
-/// Production Cadence visibility timestamps are nanoseconds, unlike the local engine.
+/// Cadence WorkflowExecutionInfo timestamps are Unix nanoseconds.
 pub fn info_nanos(v: st::WorkflowExecutionInfo) -> p::WorkflowExecutionInfo {
     info_with_time(v, timestamp_nanos)
 }
@@ -1269,7 +1269,7 @@ mod tests {
         );
     }
     #[test]
-    fn production_visibility_preserves_nanoseconds_and_local_engine_milliseconds() {
+    fn visibility_preserves_nanoseconds() {
         let ns = 1_793_612_203_872_551_123;
         let value = st::WorkflowExecutionInfo {
             start_time: Some(ns),
@@ -1292,7 +1292,7 @@ mod tests {
                 ..Default::default()
             })
             .start_time,
-            Some(timestamp(1234))
+            Some(timestamp_nanos(1234))
         );
     }
     #[test]

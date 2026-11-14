@@ -1,0 +1,3 @@
+clippy-test	Test	2026-11-14T12:53:39.5444911Z test result: ok. 267 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 60.41s
+clippy-test	Test	2026-11-14T12:53:40.6872882Z test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.14s
+clippy-test	Test	2026-11-14T12:53:41.2000849Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

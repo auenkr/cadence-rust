@@ -139,6 +139,7 @@ pub fn decision_out(v: tasks::Decision) -> Result<p::Decision, Status> {
         Some(DecisionType::SignalExternalWorkflowExecution) => v.signal_external_workflow_execution_decision_attributes.map(signal_external_workflow_execution_decision_attributes).map(p::decision::Attributes::SignalExternalWorkflowExecutionDecisionAttributes),
         Some(DecisionType::UpsertWorkflowSearchAttributes) => v.upsert_workflow_search_attributes_decision_attributes.map(upsert_workflow_search_attributes_decision_attributes).map(p::decision::Attributes::UpsertWorkflowSearchAttributesDecisionAttributes),
         Some(DecisionType::AcquireSemaphore) => v.acquire_semaphore_decision_attributes.map(|a| p::AcquireSemaphoreDecisionAttributes { semaphore_name: a.semaphore_name, wait_timeout: a.wait_timeout_seconds.map(|s| duration(s.into())) }).map(p::decision::Attributes::AcquireSemaphoreDecisionAttributes),
+        Some(DecisionType::ReleaseSemaphore) => v.release_semaphore_decision_attributes.map(|a| p::ReleaseSemaphoreDecisionAttributes { initiated_event_id: a.initiated_event_id.unwrap_or_default() }).map(p::decision::Attributes::ReleaseSemaphoreDecisionAttributes),
         _ => return Err(Status::unimplemented("This decision type has not been ported.")),
     }.ok_or_else(|| Status::internal("Decision attributes are missing."))?;
     Ok(p::Decision { attributes: Some(attributes) })
