@@ -116,3 +116,28 @@ Evidence (head 4c002c4bdfee81cfd36b9202c5dc24399316d4d1, memory-only commit foll
 - rust-ci cadence-history https://github.com/auenkr/cadence-rust/actions/runs/43547380963 success
 - gate mysql/grpc two_history https://github.com/auenkr/cadence-rust/actions/runs/43547399664 success, GATE SUMMARY failed: []
 - gate cassandra/tchannel two_history https://github.com/auenkr/cadence-rust/actions/runs/43547403011 success, GATE SUMMARY failed: []
+
+## Part 6 (branch history-msbparity6)
+
+Compared Go mutable_state_builder.go vs Rust: Load, CopyToPersistence, fillForBackwardsCompatibility, SetVersionHistories, IsStickyTaskListEnabled
+(typed `mutable_state_methods_decision.rs` + production `engine_state.rs`: `!now.After(lastUpdated+ttl)` matches), pending-info accessors
+(GetActivityInfo/ByActivityID, child, request-cancel, signal, pending timer infos, GetUserTimerInfoByEventID, GetPendingRequestCancelExternalInfos:
+simple map lookups, no gap), reorderAndFilterDuplicateEvents, startTransactionHandleDecisionFailover vs `engine_failover.rs` (logic identical, all 5 cases).
+
+Fixed (unit test each):
+1. `reorder_and_filter_duplicate_events` seeded its uniqueness set with the transaction's committed events (Go starts empty) and only keyed 9 completion
+   types. Now keys exactly Go's set (ActivityTaskStarted with attempt, ChildWorkflowExecutionStarted, StartChildWorkflowExecutionFailed,
+   ExternalWorkflowExecutionCancelRequested, RequestCancelExternalWorkflowExecutionFailed, ExternalWorkflowExecutionSignaled,
+   SignalExternalWorkflowExecutionFailed + completions). Test `reorder_filters_duplicates_and_moves_completions_to_tail_like_go`.
+2. Load did not reorder/dedup persisted buffered events (Go: `reorderAndFilterDuplicateEvents(state.BufferedEvents, "load")`); fixed in typed `load` and
+   production `engine_state.rs`. Test `load_reorders_buffered_events_like_go`.
+3. Added missing `engine_failover` unit tests (in `engine_close.rs` tests): noop cases, version mismatch, active->passive fail+reschedule, case 3/4 buffered-event
+   errors, case 5. Tests `failover_*`.
+
+Remaining gaps: Rust Load does not clear checksum on `shouldInvalidateChecksum` in the typed path (production path does it in `verify_loaded_checksum`);
+fillForBackwardsCompatibility (DomainNameDEPRECATED -> DomainID) not ported (legacy pre-#4601 data only). No other gaps found in mutable_state_builder*.go.
+
+Evidence (head = commit "clippy fix in reorder test"):
+- rust-ci cadence-history https://github.com/auenkr/cadence-rust/actions/runs/43549470698 success
+- gate mysql/grpc two_history https://github.com/auenkr/cadence-rust/actions/runs/43550264195 success, GATE SUMMARY failed: []
+- gate cassandra/tchannel two_history https://github.com/auenkr/cadence-rust/actions/runs/43550267251 success, GATE SUMMARY failed: []
