@@ -81,9 +81,9 @@
 </style>
 </head>
 <body>
-<section style="padding:16px;border:2px solid #3a9a5b;margin:16px"><strong>ACTIVE — Last updated 2026-11-14.</strong><p>History has broad mixed-cluster coverage, including SQL/Cassandra, gRPC/TChannel, one/two History hosts, restart/recovery, replication, Go↔Rust DB swap, S3 archival, and Elasticsearch/OpenSearch visibility. This is progress, not a service-completion claim.</p><p>Matching: a soak stall is under investigation; RecordDecisionTaskStarted is dropped when polling is cancelled, and a fix is in progress. Frontend soak completes workflows but Rust tail latency remains about 3× Go. The admin CLI gate is in progress.</p></section>
+<section style="padding:16px;border:2px solid #3a9a5b;margin:16px"><strong>ACTIVE — Last updated 2026-11-14.</strong><p>History has broad mixed-cluster coverage, including SQL/Cassandra, gRPC/TChannel, one/two History hosts, restart/recovery, bidirectional Go↔Rust replication, DB swap, S3 archival, and Elasticsearch/OpenSearch visibility. Master validation was 20/21 green at <code>938b77005</code>; the single Cassandra isolation-group failure did not reproduce in two reruns after error logging was added. This is progress, not a service-completion claim.</p><p>Open: History soak stalls with about 99% of workflows not completing in Rust History+Matching+Frontend; Matching RSS slope and Rust Frontend→Go Matching query timeouts; mutable-state parity re-read part 3. Mutable-state JSON shape still differs from Go. Frontend soak tail latency remains about 3× Go; the admin CLI gate is in progress.</p></section>
 <section id="history-1114" style="padding:16px;border:2px solid #c9a227;margin:16px"><strong>History status — 2026-11-14.</strong>
-<p>Sources: the 2026-11-13 History and Frontend notes in <code>memory/</code>. CI evidence is from GitHub Actions; history-mixed-gate covers MySQL/Postgres/Cassandra × gRPC/TChannel × one/two History hosts.</p>
+<p>Sources: the 2026-11-14 History replication, parity, and master-validation notes in <code>memory/</code>, plus earlier History and Frontend notes. CI evidence is from GitHub Actions; history-mixed-gate covers MySQL/Postgres/Cassandra × gRPC/TChannel × one/two History hosts.</p>
 <h3>Merged work</h3>
 <ul>
 <li><a href="history-failcoord-20261113.md">failcoord</a> — failover coordinator parity audit and marker creation-time persistence. Cross-host marker routing was completed in <a href="history-markerroute-20261113.md">markerroute</a>.</li>
@@ -99,6 +99,10 @@
 <li><a href="history-s3race-20261113.md">s3race</a> — verified retention-zero visibility archive race also exists in Go; Rust matches Go behavior, so no code change was needed.</li>
 <li><a href="history-markerroute-20261113.md">markerroute</a> — routes failover marker notifications to the History host owning each domain shard; mixed gates and active two-cluster gate pass.</li>
 <li><a href="history-review3-20261113.md">review3 Codex</a> and <a href="history-review3-sonnet-20261113.md">review3 Sonnet</a> — independent static reviews completed; findings are being fixed below. Reviews do not establish runtime parity.</li>
+<li><a href="history-goreplgate-20261114.md">goreplgate</a> — Go↔Rust History replication gates pass in both directions on MySQL, Postgres, and Cassandra.</li>
+<li><a href="history-goreplfollow-20261114.md">goreplfollow</a> — removed temporary DIAG logs, added timer-visibility coverage, and ported the decision-failover buffered-event flush.</li>
+<li><a href="history-msbparity-20261114.md">mutable-state parity part 2</a> — failure category/options parity, semaphore reset validation, and task-list kind handling were fixed with focused tests. Part 3 re-read remains open.</li>
+<li><a href="master-validation-20261114c.md">master validation 20261114c</a> — 20/21 runs green at <code>938b77005</code>; the Cassandra isolation-group failure was not reproduced in two reruns. See <a href="frontend-isogroup-cass-20261114.md">frontend-isogroup-cass</a> for the added persistence error logging.</li>
 </ul>
 <h3>Review 3 fixes in progress</h3>
 <ul>
@@ -111,7 +115,9 @@
 </ul>
 <h3>Other open items</h3>
 <ul>
-<li>Matching soak stall: RecordDecisionTaskStarted is dropped when poll cancellation wins; fix in progress. The soakfix removed the earlier pending-decision retry loop, but the stall still needs its own fix and validation.</li>
+<li>History soak stall: about 99% of workflows do not complete with Rust History+Matching+Frontend; <code>history-soakstall</code> is investigating.</li>
+<li>Matching RSS slope and Rust Frontend→Go Matching query timeouts: investigation is active on <code>matching-rssfe</code>.</li>
+<li>Mutable-state parity part 3 re-read remains open on <code>history-msbparity3</code>. The mutable-state JSON shape still differs from Go; it is documented but not fixed.</li>
 <li>Frontend soak tail latency: Rust e2e p95 14,045 ms vs Go 4,099 ms and p99 23,071 ms vs 6,552 ms (about 3×); root cause remains open.</li>
 <li>Admin CLI compatibility gate is in progress.</li>
 </ul></section>
@@ -127,7 +133,7 @@
   </div>
 </header>
 <main>
-<p class="note">History checkpoint 2026-11-14: merged work now covers standby replication, cross-host failover marker routing, Go↔Rust database swap/recovery, S3 archival, and advanced ES/OpenSearch visibility. Review 3 has identified remaining compatibility issues; timestamp units, archive enum encoding, authenticated Kafka, shard lifecycle, and the transfer decision guard remain open. Mixed-cluster service completion and the admin CLI gate are not yet established. See the <a href="#history-1114">History status and evidence notes</a>.</p>
+<p class="note">History checkpoint 2026-11-14: merged work now covers standby replication, cross-host failover marker routing, Go↔Rust database swap/recovery and bidirectional replication, S3 archival, advanced ES/OpenSearch visibility, decision-failover flush, and mutable-state parity part 2. Review 3 has identified remaining compatibility issues; timestamp units, archive enum encoding, authenticated Kafka, shard lifecycle, and the transfer decision guard remain open. The History soak stall and mutable-state parity re-read are also open. Mixed-cluster service completion and the admin CLI gate are not yet established. See the <a href="#history-1114">History status and evidence notes</a>.</p>
   <section class="est">
     <h2>Frontend + Matching benchmark — verified results</h2>
     <p>Corrected capped run 41767896292 passed all 30,000 workflows in 30 measured runs. Five-run median Go/Rust throughput: concurrency1 12.77/10.78, concurrency16 33.58/29.82, concurrency64 31.13/27.55 workflows/s. Rust used more Frontend/Matching CPU time per fixed workload and less sampled cgroup memory. Strict CI/local evidence verification and report reproduction passed. Go History/Worker stayed constant; initial uncapped measurements remain separate.</p>
