@@ -91,15 +91,16 @@ if [[ "${CADENCE_GATE_KAFKA:-}" == "true" || "${CADENCE_GATE_KAFKA:-}" == "1" ]]
       openssl x509 -req -in client.csr -CA ca.pem -CAkey ca.key -CAcreateserial -out client.pem -days 2 2>/dev/null
       openssl pkcs12 -export -in broker.pem -inkey broker.key -certfile ca.pem -name broker -out keystore.p12 -passout pass:changeit
       keytool -importcert -noprompt -alias ca -file ca.pem -keystore truststore.p12 -storetype PKCS12 -storepass changeit
-      chmod 644 *.p12 *.pem *.key
+      printf 'changeit' > creds
+      chmod 644 *.p12 *.pem *.key creds
     ) || exit 8
     chmod 755 "$KAFKA_TLS_DIR"
     KAFKA_AUTH_ARGS+=(
       --volume "$KAFKA_TLS_DIR:/etc/kafka/secrets:ro"
-      --env KAFKA_SSL_KEYSTORE_LOCATION=/etc/kafka/secrets/keystore.p12
-      --env KAFKA_SSL_KEYSTORE_TYPE=PKCS12 --env KAFKA_SSL_KEYSTORE_PASSWORD=changeit --env KAFKA_SSL_KEY_PASSWORD=changeit
-      --env KAFKA_SSL_TRUSTSTORE_LOCATION=/etc/kafka/secrets/truststore.p12
-      --env KAFKA_SSL_TRUSTSTORE_TYPE=PKCS12 --env KAFKA_SSL_TRUSTSTORE_PASSWORD=changeit
+      --env KAFKA_SSL_KEYSTORE_FILENAME=keystore.p12 --env KAFKA_SSL_KEYSTORE_CREDENTIALS=creds
+      --env KAFKA_SSL_KEY_CREDENTIALS=creds --env KAFKA_SSL_KEYSTORE_TYPE=PKCS12
+      --env KAFKA_SSL_TRUSTSTORE_FILENAME=truststore.p12 --env KAFKA_SSL_TRUSTSTORE_CREDENTIALS=creds
+      --env KAFKA_SSL_TRUSTSTORE_TYPE=PKCS12
       --env KAFKA_SSL_CLIENT_AUTH=required
       --env KAFKA_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM=
     )
