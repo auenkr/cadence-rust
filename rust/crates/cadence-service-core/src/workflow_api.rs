@@ -27,6 +27,9 @@ pub struct CallerContext {
     pub deadline: Option<Instant>,
     /// Transport headers, lower-cased names.
     pub headers: HashMap<String, String>,
+    /// Go `req.Transport` (`grpc`, `tchannel`, `http`) for the inbound metrics
+    /// middleware's `transport` tag; empty when unknown.
+    pub transport: &'static str,
 }
 
 pub type ApiFuture<'a> =

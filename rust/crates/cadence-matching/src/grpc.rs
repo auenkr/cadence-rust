@@ -552,6 +552,7 @@ impl Frontend {
                 let ctx = cadence_service_core::workflow_api::CallerContext {
                     deadline,
                     headers: caller_headers,
+                    transport: "grpc",
                 };
                 let forwarded = api
                     .redirect(operation, &request, &ctx)
@@ -578,6 +579,7 @@ impl Frontend {
                     let ctx = cadence_service_core::workflow_api::CallerContext {
                         deadline,
                         headers: caller_headers,
+                        transport: "grpc",
                     };
                     let value = api.call(operation, request, ctx).await.map_err(|error| status_from_cadence_error(&error))?;
                     return serde_json::from_value(value)

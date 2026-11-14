@@ -367,6 +367,28 @@ pub struct CallerMetadata {
     pub deadline: Option<std::time::Instant>,
     /// Original transport headers copied into Go's async queue message.
     pub original_headers: HashMap<String, String>,
+    /// Go `InboundMetricsMiddleware` tags: RPC caller name and transport.
+    pub transport_caller: String,
+    pub transport: String,
+}
+
+/// Go `metrics.CallerTag` / `metrics.TransportTag` added by the inbound
+/// metrics middleware to every request scope.
+pub(crate) fn transport_tags(caller: &CallerMetadata) -> Vec<crate::wrappers::metered::MetricTag> {
+    let mut tags = Vec::new();
+    if !caller.transport_caller.is_empty() {
+        tags.push(crate::wrappers::metered::MetricTag {
+            key: "caller",
+            value: caller.transport_caller.clone(),
+        });
+    }
+    if !caller.transport.is_empty() {
+        tags.push(crate::wrappers::metered::MetricTag {
+            key: "transport",
+            value: caller.transport.clone(),
+        });
+    }
+    tags
 }
 
 /// Go checks task-list isolation health for selected workflow operations.
@@ -933,6 +955,7 @@ impl<B: WorkflowBackend> Handler<B> {
             let start = std::time::Instant::now();
             let mut tags = crate::wrappers::metered::request_tags(operation.name(), &request);
             self.augment_metric_tags(operation, &request, &mut tags);
+            tags.extend(transport_tags(caller));
             self.metrics
                 .increment_requests_tagged(operation.name(), &tags);
             let result = self
@@ -5296,6 +5319,20 @@ mod tests {
         assert_eq!(
             shape_decision_poll_response(serde_json::json!({"pollerID": "internal-poller"})),
             serde_json::json!({})
+        );
+    }
+
+    #[test]
+    fn solfix14_transport_tags_follow_caller_metadata() {
+        assert!(transport_tags(&CallerMetadata::default()).is_empty());
+        let tags = transport_tags(&CallerMetadata {
+            transport_caller: "svc".into(),
+            transport: "tchannel".into(),
+            ..Default::default()
+        });
+        assert_eq!(
+            tags.iter().map(|t| (t.key, t.value.as_str())).collect::<Vec<_>>(),
+            [("caller", "svc"), ("transport", "tchannel")]
         );
     }
 }

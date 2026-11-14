@@ -816,6 +816,13 @@ impl cadence_service_core::workflow_api::WorkflowApi for HandlerApi {
                 feature_version: header("cadence-client-feature-version"),
                 deadline: ctx.deadline,
                 original_headers: ctx.headers.clone(),
+                transport_caller: ctx
+                    .headers
+                    .get("rpc-caller")
+                    .or_else(|| ctx.headers.get("cn"))
+                    .cloned()
+                    .unwrap_or_default(),
+                transport: ctx.transport.to_owned(),
                 ..Default::default()
             };
             let inbound = ctx.headers.clone();

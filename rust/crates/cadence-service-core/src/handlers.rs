@@ -2415,6 +2415,7 @@ fn schedule_caller_context(headers: &HeaderMap) -> crate::workflow_api::CallerCo
     crate::workflow_api::CallerContext {
         deadline: Some(std::time::Instant::now() + std::time::Duration::from_millis(ttl_ms)),
         headers: forwarded,
+        transport: "http",
     }
 }
 

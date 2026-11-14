@@ -1763,6 +1763,7 @@ fn schedule_api_context(
     crate::workflow_api::CallerContext {
         deadline: Some(deadline),
         headers: headers.clone(),
+        transport: "",
     }
 }
 
@@ -2672,10 +2673,23 @@ pub async fn dispatch_with_headers(
     deadline: Instant,
     caller_headers: std::collections::HashMap<String, String>,
 ) -> Result<(Struct, Option<(&'static str, String)>), String> {
+    dispatch_with_transport(state, method, body, deadline, caller_headers, "tchannel").await
+}
+
+/// [`dispatch_with_headers`] naming the inbound transport (Go `req.Transport`).
+pub async fn dispatch_with_transport(
+    state: &AppState,
+    method: &str,
+    body: &Struct,
+    deadline: Instant,
+    caller_headers: std::collections::HashMap<String, String>,
+    transport: &'static str,
+) -> Result<(Struct, Option<(&'static str, String)>), String> {
     if let Some(api) = &state.workflow_api {
         let ctx = crate::workflow_api::CallerContext {
             deadline: Some(deadline),
             headers: caller_headers.clone(),
+            transport,
         };
         if let Some(reply) = crate::workflow_api::dispatch_thrift(api, method, body, ctx).await? {
             return Ok(reply);
@@ -3112,7 +3126,7 @@ pub async fn yarpc_handler(
             Some((name, value.to_str().ok()?.to_owned()))
         })
         .collect();
-    match dispatch_with_headers(&state, &method, &args, deadline, caller_headers).await {
+    match dispatch_with_transport(&state, &method, &args, deadline, caller_headers, "http").await {
         Ok((result, app_error)) => ok_reply(service_echo, result, app_error),
         Err(e) => transport_error(StatusCode::INTERNAL_SERVER_ERROR, e),
     }
