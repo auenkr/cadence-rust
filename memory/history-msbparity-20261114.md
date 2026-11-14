@@ -91,3 +91,28 @@ Evidence (head 3508b67a42a72835554431e20bf5b8fde34cd4f3):
 - rust-ci cadence-history https://github.com/auenkr/cadence-rust/actions/runs/43544749418 success; cadence-proto .../43544752718 success
 - gate mysql/grpc two_history .../43545549870 success, GATE SUMMARY failed: []
 - gate cassandra/tchannel two_history .../43545557499 success, GATE SUMMARY failed: []
+
+## Part 5 (branch history-msbparity5)
+
+Compared Go mutable_state_builder.go vs Rust (execution/mutable_state_builder.rs typed path, wiring/assembly/engine_close.rs production path):
+StartTransaction, CloseTransactionAsMutation/Snapshot, prepareCloseTransaction ordering (policy check, buffered-events limit, workflow reset,
+flush, activity/user timer tasks), cleanupTransaction, prepareEventsAndReplicationTasks / eventsToReplicationTask / syncActivityToReplicationTask
+(history task then sync-activity tasks, contradicting-version error text, passive guard), updateWithLastWriteEvent/updateWithLastFirstEvent,
+closeTransactionWithPolicyCheck, generateChecksum, UpdateCurrentVersion, GetStartVersion, GetLastWriteVersion, VersionHistory.AddOrUpdateItem,
+validateNoEventsAfterWorkflowFinish, ClearStickyness. Mutation/snapshot persisted fields and replication task order: no gap.
+
+Fixed (unit test each):
+1. Production close (`engine_close.rs`) updated the current version history inline and silently accepted a lower version / non-increasing event id;
+   Go `AddOrUpdateItem` returns BadRequest "cannot update version history with a lower version ..." / "cannot add version history with a lower event id ...".
+   Now `add_or_update_version_item`. Test `version_history_update_matches_go_add_or_update_item`.
+2. Typed `update_current_version` diverged from Go: no completed-workflow branch (Go uses last write version), and running case used incoming version
+   directly instead of max(last item version, incoming) unless forced. Test `update_current_version_matches_go`.
+
+Remaining / not re-read: Load/CopyToPersistence, SetVersionHistories, sticky task list accessors (IsStickyTaskListEnabled TTL), pending-info map accessors,
+startTransactionHandleDecisionFailover (exists in mutable_state_failover.rs / engine_failover.rs, not diffed this round), production close does not
+call Go's closeTransactionWithPolicyCheck for passive as no-op only by `active` flag (equivalent).
+
+Evidence (head 4c002c4bdfee81cfd36b9202c5dc24399316d4d1, memory-only commit follows):
+- rust-ci cadence-history https://github.com/auenkr/cadence-rust/actions/runs/43547380963 success
+- gate mysql/grpc two_history https://github.com/auenkr/cadence-rust/actions/runs/43547399664 success, GATE SUMMARY failed: []
+- gate cassandra/tchannel two_history https://github.com/auenkr/cadence-rust/actions/runs/43547403011 success, GATE SUMMARY failed: []
