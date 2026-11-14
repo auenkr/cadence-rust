@@ -45,10 +45,12 @@ be recorded below after child-completion investigation and fresh Rust tests.
 
 | run URL | head | lane | result |
 |---|---|---|---|
-| https://github.com/auenkr/cadence-rust/actions/runs/43561066779 | a79cb0741 | mysql,1500s | running |
-| pending | pending | postgres | not dispatched |
+| https://github.com/auenkr/cadence-rust/actions/runs/43561066779 | a79cb0741 | mysql,1500s | SUCCESS,4500/4500,GATE SUMMARY failed: [] |
+| https://github.com/auenkr/cadence-rust/actions/runs/43564455423 | ad45bd03e | postgres,1500s | running |
 | pending | pending | cassandra | not dispatched |
 
 Soak predecessor now passes all4800 workflows and RSS on e2167b61a (run43558072143). Cancellation-safe cache lease fixes uncommitted child removal retained across RPC deadline cancellation; Go deferred release clears before unlock. MySQL recovery gate dispatched after soak completed.
 
 2026-11-14T05:47Z checkpoint: MySQL run43561066779 completed fresh release build and began fault/load phase at05:35:56Z; still running. No final outcome yet; PostgreSQL/Cassandra remain undispatched so recovery gates run sequentially.
+
+MySQL retained evidence: memory/evidence/history-soak-tail-20261114/restart-mysql/. All forced/graceful History restarts,30s DB pause,Matching restart and liveness/completion assertions passed; zero failed workflows,4500/4500 complete,p50 4109ms. Fresh binary SHA256 and source head included.
