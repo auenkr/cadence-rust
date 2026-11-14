@@ -284,22 +284,21 @@ impl TypedMutableState {
     // ---- versions (Go UpdateCurrentVersion / GetCurrentVersion / ...) ----
 
     pub fn update_current_version(&mut self, version: i64, force_update: bool) -> Result<()> {
+        if self.execution_info.state == WORKFLOW_STATE_COMPLETED {
+            // Go: always set current version to last write version when workflow is completed.
+            self.current_version = self.get_last_write_version()?;
+            return Ok(());
+        }
         if let Some(histories) = &self.version_histories {
             let history = histories
                 .current_history()
                 .map_err(|e| TypedMutableStateError::Internal(e.message))?;
-            if history.items.is_empty() {
-                // Go: first event of a brand new history takes the incoming version.
-                self.current_version = version;
-                return Ok(());
+            if !history.items.is_empty() {
+                // Go: this makes sure current version >= last write version.
+                let last = history.last_item().map_err(|e| TypedMutableStateError::Internal(e.message))?;
+                self.current_version = last.version;
             }
-            let last = history.last_item().map_err(|e| TypedMutableStateError::Internal(e.message))?;
-            if !force_update && self.is_workflow_execution_running() {
-                self.current_version = version;
-                return Ok(());
-            }
-            self.current_version = last.version;
-            if force_update {
+            if version > self.current_version || force_update {
                 self.current_version = version;
             }
             return Ok(());
@@ -1061,6 +1060,30 @@ mod tests {
         })));
         assert!(state.delete_activity(5).is_ok());
         assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn update_current_version_matches_go() {
+        let mut state = TypedMutableState::new();
+        state.version_histories = Some(VersionHistories {
+            current_version_history_index: 0,
+            histories: vec![cadence_api::types::VersionHistory { branch_token: vec![1], items: vec![new_item(5, 10)] }],
+        });
+        state.execution_info.state = WORKFLOW_STATE_RUNNING;
+        // lower incoming version never lowers below last write version
+        state.update_current_version(4, false).unwrap();
+        assert_eq!(state.current_version, 10);
+        state.update_current_version(12, false).unwrap();
+        assert_eq!(state.current_version, 12);
+        // next call restarts from the last item unless forced
+        state.update_current_version(3, false).unwrap();
+        assert_eq!(state.current_version, 10);
+        state.update_current_version(3, true).unwrap();
+        assert_eq!(state.current_version, 3);
+        // completed workflow always uses last write version
+        state.execution_info.state = WORKFLOW_STATE_COMPLETED;
+        state.update_current_version(50, true).unwrap();
+        assert_eq!(state.current_version, 10);
     }
 
     #[test]
