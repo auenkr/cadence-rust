@@ -834,14 +834,48 @@ impl EngineMutableState {
                 "signalCount": g.exec.signal_count,
                 "cancelRequested": g.pc_exec.cancel_requested,
             },
-            // Go `VersionHistories` (CLI reads the current branch token from it).
-            "versionHistories": g.version_histories,
+            // Go encoding/json uses exported Go field names and includes zero
+            // values. The API structs use wire JSON tags (camelCase/omitempty),
+            // so build this persistence-only shape explicitly.
+            "versionHistories": g.version_histories.as_ref().map(version_histories_go_json),
             "pendingActivities": g.pc_acts.keys().collect::<Vec<_>>(),
             "pendingChildExecutions": g.pc_children.keys().collect::<Vec<_>>(),
             // Go `BufferedEvents []*types.HistoryEvent`: the CLI unmarshals this
             // into persistence.WorkflowMutableState, so it must be an event list.
             "bufferedEvents": g.buffered.iter().chain(g.update_buffered.iter()).collect::<Vec<_>>(),
         }))
+    }
+}
+
+fn version_histories_go_json(histories: &cadence_api::types::VersionHistories) -> serde_json::Value {
+    serde_json::json!({
+        "CurrentVersionHistoryIndex": histories.current_version_history_index,
+        "Histories": histories.histories.iter().map(|history| serde_json::json!({
+            "BranchToken": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &history.branch_token),
+            "Items": history.items.iter().map(|item| serde_json::json!({
+                "EventID": item.event_id,
+                "Version": item.version,
+            })).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
+    })
+}
+
+#[cfg(test)]
+mod mutable_state_json_tests {
+    use super::version_histories_go_json;
+    use cadence_api::types::{VersionHistories, VersionHistory, VersionHistoryItem};
+
+    #[test]
+    fn version_histories_match_go_encoding_json_fixture() {
+        let input = VersionHistories {
+            current_version_history_index: 0,
+            histories: vec![VersionHistory {
+                branch_token: vec![0x01, 0x02, 0xff],
+                items: vec![VersionHistoryItem { event_id: 7, version: 20 }],
+            }],
+        };
+        let expected = r#"{"CurrentVersionHistoryIndex":0,"Histories":[{"BranchToken":"AQL/","Items":[{"EventID":7,"Version":20}]}]}"#;
+        assert_eq!(serde_json::to_string(&version_histories_go_json(&input)).unwrap(), expected);
     }
 }
 

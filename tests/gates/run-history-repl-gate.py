@@ -173,13 +173,6 @@ def show(side, wid, rid):
             return rc, [], out + ' parse: ' + repr(ex)
     return rc, evs, raw if raw is not None else out
 
-def norm(o):
-    if isinstance(o, dict):
-        return {k.lower(): norm(v) for k, v in o.items() if 'branchtoken' not in k.lower() and not (k.lower() == 'currentversionhistoryindex' and v == 0)}
-    if isinstance(o, list):
-        return [norm(v) for v in o]
-    return o
-
 def version_histories(side, wid, rid):
     rc, out = cli(ADDR[side], '--domain', dom, 'admin', 'workflow', 'describe', '--wid', wid, '--rid', rid)
     if rc != 0:
@@ -191,7 +184,7 @@ def version_histories(side, wid, rid):
         ms = json.loads(low['mutablestateindatabase'])
         for k, v in ms.items():
             if k.lower() == 'versionhistories':
-                return norm(v), ''
+                return v, ''
         return None, 'no VersionHistories in mutable state: ' + str(list(ms)[:20])
     except Exception as ex:
         return None, repr(ex) + ' ' + out[:500]
