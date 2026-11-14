@@ -14,6 +14,10 @@ on:
       lanes:
         description: 'JSON list of lanes: go-baseline, rust, rust-fe (Rust FE + Go MT), rust-mt (Go FE + Rust MT)'
         default: '["go-baseline","rust"]'
+      system_heap_profile:
+        description: Sample live allocations using the unchanged system allocator
+        type: boolean
+        default: false
       heap_profile:
         description: Opt-in sampled jemalloc live heap snapshots (diagnostic allocator)
         type: boolean
@@ -22,7 +26,7 @@ on:
         description: Optional malloc environment assignments for the Rust Matching process only
         default: ''
 concurrency:
-  group: frontend-soak-${{ github.ref }}-${{ inputs.matching_malloc_env }}-${{ inputs.heap_profile }}
+  group: frontend-soak-${{ github.ref }}-${{ inputs.matching_malloc_env }}-${{ inputs.heap_profile }}-${{ inputs.system_heap_profile }}
   cancel-in-progress: true
 env:
   SOAK_RATE: ${{ inputs.rate || '10' }}
@@ -53,9 +57,14 @@ jobs:
             FEATURES=(--features heap-profile)
             export CARGO_PROFILE_RELEASE_DEBUG=1
           fi
+          if [ "${{ inputs.system_heap_profile }}" = true ]; then
+            test "${{ inputs.heap_profile }}" != true
+            FEATURES=(--features system-heap-profile)
+            export CARGO_PROFILE_RELEASE_DEBUG=1
+          fi
           cargo build "${FEATURES[@]}" --release --manifest-path rust/Cargo.toml -p cadence-server
           cp "$CARGO_TARGET_DIR/release/cadence-server" out/cadence-server
-          if [ "${{ inputs.heap_profile }}" != true ]; then strip out/cadence-server; fi
+          if [ "${{ inputs.heap_profile }}" != true ] && [ "${{ inputs.system_heap_profile }}" != true ]; then strip out/cadence-server; fi
           cp rust/Cargo.lock out/Cargo.lock
           (cd go/cmd/server && go build -ldflags='-s -w' -o "$GITHUB_WORKSPACE/out/cadence-go-server" .)
           (cd go && go build -ldflags='-s -w' -o "$GITHUB_WORKSPACE/out/cadence-cli" ./cmd/tools/cli)
@@ -93,7 +102,7 @@ jobs:
           export SOAK_RESTART_AT=$((SOAK_SECONDS / 2))
           mkdir -p res
           PROFILE=()
-          if [ "${{ inputs.heap_profile }}" = true ]; then PROFILE=(--matching-heap-profile); fi
+          if [ "${{ inputs.heap_profile }}" = true ] || [ "${{ inputs.system_heap_profile }}" = true ]; then PROFILE=(--matching-heap-profile); fi
           set +e
           tests/gates/run-frontend-soak-lane.sh res/lane --mode "$M" \
             --rust-binary "$PWD/bin/cadence-server" --go-server "$PWD/bin/cadence-go-server" \
@@ -124,6 +133,12 @@ jobs:
           done
           jeprof --text --show_bytes bin/cadence-server "$P/heap-4000.heap" > "$P/live-4000.txt" 2>&1
           cat "$P"/stats-*.txt "$P/growth-4000.txt"
+      - name: Analyze system allocator snapshots
+        if: always() && inputs.system_heap_profile == true && matrix.mode != 'go-baseline'
+        run: |
+          mkdir -p res/up/heap-profiles
+          cp res/lane/run/heap-profiles/* res/up/heap-profiles/
+          python3 tests/gates/system-heap-symbolize.py bin/cadence-server res/up/heap-profiles
       - uses: actions/upload-artifact@v4
         if: always()
         with:
