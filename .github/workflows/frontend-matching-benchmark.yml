@@ -9,8 +9,12 @@ on:
       service:
         description: Isolated service to replace in SDK benchmark
         type: choice
-        options: [matching, frontend, history]
+        options: [matching, frontend, history, all]
         default: matching
+      sdk_suite:
+        description: Run fixed-load, stepped capacity and database recovery smoke suite
+        type: boolean
+        default: false
       source_ref:
         description: Exact migrated source commit (empty uses workflow head)
         default: ''
@@ -62,6 +66,7 @@ jobs:
             go/go.sum
       - run: bash Benchmark/ci.sh
         env:
+          SUITE: ${{ inputs.sdk_suite }}
           SERVICE: ${{ inputs.service || 'matching' }}
           REPETITIONS: ${{ inputs.sdk_repetitions || '1' }}
           BENCHMARK_SOURCE_DIR: ${{ github.workspace }}/benchmark-source

@@ -145,3 +145,29 @@ To watch and download compact local results:
 ```sh
 python3 Benchmark/watch-benchmark.py <run-id> --service history
 ```
+
+## Five-configuration smoke suite
+
+Set `sdk_suite=true` on `frontend-matching-benchmark.yml` with `sdk_openloop=true`
+and `service=matching|frontend|history|all`. Each lane pairs its Rust deployment
+with All Go on the same runner, three alternating fresh-database repetitions.
+`all` replaces all three core services and retains the Go system Worker; both
+Rust launcher binary hashes are recorded. Use an exact `source_ref`.
+
+The suite preserves the earlier 10s warmup / 30s measured, 1 KiB/10ms one-activity
+protocol. Fixed load is 5 starts/s. Capacity adds fresh-database steps at 25 and
+100 starts/s; a step requires zero workflow errors, valid open-loop generation,
+completion p99 <=1000ms and at most max(2, 1% of arrivals) outstanding at the end.
+The maximum passing tested step is a bounded smoke estimate, not proof of
+long-term sustainability. The latency/error targets are synthetic, not production SLOs.
+
+Recovery repeats 5 starts/s and blocks MySQL TCP input for 3 seconds, 10 seconds
+after collector readiness. The host uses `nsenter`/`iptables` in MySQL's network
+namespace; local-socket SQL observation continues. Rules are removed in `finally`.
+Recovery time ends at the first complete healthy five-second arrival window
+with all workflows correct and completion latency <=1s. It is censored when
+no such window fits before arrivals end. Fault timestamps are recorded.
+
+`suite-summary.json` contains aggregates, per-service resources, hashes, config
+and correctness counts. Raw ledgers/logs remain ignored and expire with artifacts.
+Only a deliberately selected compact final report should be committed.

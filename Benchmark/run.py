@@ -10,7 +10,7 @@ import subprocess
 import time
 
 ROOT = Path(__file__).resolve().parent
-OUT = ROOT / 'evidence' / 'run'
+OUT = Path(os.environ.get('BENCHMARK_OUTPUT_DIR', ROOT / 'evidence' / 'run'))
 EVENTS = []
 PROJECT = 'cadence-sdk-benchmark'
 
@@ -39,13 +39,13 @@ def capture(command, env=None):
 
 
 def deployments(arm, service='matching'):
-    return {s: ('cadence-rust:ci' if s == service and arm == 'rust' else 'cadence-go:ci')
+    return {s: (('cadence-rust-history:ci' if service == 'all' and s == 'history' else 'cadence-rust:ci') if (s == service or service == 'all' and s != 'worker') and arm == 'rust' else 'cadence-go:ci')
             for s in ('frontend', 'matching', 'history', 'worker')}
 
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('--service', choices=('matching', 'frontend', 'history'), default='matching')
+    p.add_argument('--service', choices=('matching', 'frontend', 'history', 'all'), default='matching')
     p.add_argument('--rate', type=float, default=5)
     p.add_argument('--duration', type=int, default=30)
     p.add_argument('--warmup', type=int, default=10)
@@ -54,6 +54,7 @@ def main():
     p.add_argument('--payload-bytes', type=int, default=1024)
     p.add_argument('--activity-ms', type=int, default=10)
     p.add_argument('--worker-capacity', type=int, default=128)
+    p.add_argument('--recovery', action='store_true', help='drop database TCP traffic for 3s, 10s into measurement')
     a = p.parse_args()
     if not 0 < a.rate <= 100000 or a.duration < 1 or a.warmup < 0 or a.repetitions < 1:
         p.error('invalid load parameters')
@@ -78,10 +79,12 @@ def main():
                     hardware=capture(['lscpu']), protocol='open-loop-one-activity-v1',
                     metrics_unavailable=['database query latency percentiles', 'server retry counters',
                                          'server queue backlog age'],
-                    scope=f'{a.service.title()} only; other core services and system Worker stay Go in both arms')
+                    scope='All Rust core services; Go system Worker' if a.service == 'all' else f'{a.service.title()} only; other core services and system Worker stay Go in both arms')
     for arm, image in [('go','cadence-go:ci'),('rust','cadence-rust:ci')]:
         manifest[arm+'_image_id'] = capture(['docker','image','inspect',image,'--format','{{.Id}}'])
         manifest[arm+'_binary_sha256'] = capture(['docker','run','--rm','--entrypoint','sha256sum',image,'/usr/local/bin/cadence-server'])
+    if a.service == 'all':
+        manifest['rust_history_binary_sha256'] = capture(['docker','run','--rm','--entrypoint','sha256sum','cadence-rust-history:ci','/usr/local/bin/cadence-server'])
     (OUT/'manifest.json').write_text(json.dumps(manifest, indent=2))
     try:
         for rep in range(a.repetition_offset, a.repetition_offset+a.repetitions):
@@ -137,6 +140,11 @@ def main():
                         '--mysql-container',identities['mysql']['Name'].lstrip('/'),'--interval','0.25','--output',str(OUT/(key+'-resources.json')),'--containers',*containers]
                     with (OUT/(key+'-collector.log')).open('w') as log:
                         collector=subprocess.Popen(collector_cmd,stdout=log,stderr=subprocess.STDOUT)
+                    fault = None
+                    if a.recovery:
+                        fault_cmd=['python3',str(ROOT/'fault.py'),'--ready',str(ready),'--output',str(OUT/(key+'-fault.json')),'--mysql-pid',str(identities['mysql']['State']['Pid'])]
+                        fault_log=(OUT/(key+'-fault.log')).open('w')
+                        fault=subprocess.Popen(fault_cmd,stdout=fault_log,stderr=subprocess.STDOUT)
                     try:
                         run(['taskset','-c',str(cpus[0]),*common,'-mode','generate','-rate',str(a.rate),
                             '-warmup',f'{a.warmup}s','-duration',f'{a.duration}s',
@@ -144,11 +152,17 @@ def main():
                             '-prefix',key,'-measurement-start-file',start,'-measurement-end-file',end,
                             '-collector-ready-file',ready,'-output',OUT/(key+'-samples.jsonl')],
                             key+'-generate',timeout=a.warmup+a.duration+360)
+                        if fault is not None and fault.wait(timeout=30): raise RuntimeError('fault injection failed')
                         status=collector.wait(timeout=30)
                         if status: raise RuntimeError('resource collector failed')
                     finally:
+                        if fault is not None:
+                            if fault.poll() is None: fault.terminate();fault.wait(timeout=15)
+                            fault_log.close()
                         if collector.poll() is None:collector.terminate();collector.wait(timeout=10)
                         EVENTS.append(dict(command=shlex.join(collector_cmd),exit_code=collector.returncode))
+                except Exception as error:
+                    (OUT/(key+'-failure.json')).write_text(json.dumps({'error':str(error)},indent=2)+'\n')
                 finally:
                     if sdk_worker is not None:
                         sdk_worker.terminate();sdk_worker.wait(timeout=15)

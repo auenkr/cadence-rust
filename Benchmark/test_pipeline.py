@@ -19,6 +19,11 @@ class PipelineTests(unittest.TestCase):
         go,rust=deployments('go'),deployments('rust')
         self.assertEqual([k for k in go if go[k]!=rust[k]],['matching'])
 
+    def test_all_rust_keeps_go_worker(self):
+        deployment=deployments('rust','all')
+        self.assertEqual(deployment,{'frontend':'cadence-rust:ci','matching':'cadence-rust:ci','history':'cadence-rust-history:ci','worker':'cadence-go:ci'})
+        self.assertTrue(all(v=='cadence-go:ci' for v in deployments('go','all').values()))
+
     def test_frontend_only(self):
         go,rust=deployments('go','frontend'),deployments('rust','frontend')
         self.assertEqual([k for k in go if go[k]!=rust[k]],['frontend'])
