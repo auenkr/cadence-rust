@@ -160,3 +160,10 @@ under investigation; diagnostic run below has no Rust behavior changes.
 | run URL | head | scenario | result |
 |---|---|---|---|
 | https://github.com/auenkr/cadence-rust/actions/runs/43554242022 | 76e7cc97c | mysql 20m diagnostic soak, child history dumps | running |
+
+Fresh-target History Clippy/test run on 98a1e1b00 (cache implementation and child
+retry/reload regressions; later real-cache capacity/TTL test added in 521abb079):
+https://github.com/auenkr/cadence-rust/actions/runs/43555072334 — running.
+The repository's automatic rust-check push workflow ran on the first pushes;
+it was disabled through gh to keep subsequent validation within the explicitly
+requested workflow set. No local Cargo/Go/Docker commands were executed.

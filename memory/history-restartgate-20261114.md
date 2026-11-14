@@ -34,3 +34,17 @@ retrying stuck tasks) but is not proven; recheck after the soak stall fix.
 ## Next
 Rebase on master once history-soakstall is merged, re-run `git push` on this branch (or dispatch after the workflow reaches master) for mysql/postgres/cassandra and
 fill in pass results. A pass needs success conclusion and `GATE SUMMARY failed: []`. Scenario pass evidence is therefore still outstanding.
+
+## history-soak-tail follow-up (2026-11-14)
+
+Merged this branch into history-soak-tail from master 05fb1e57c. The gate now
+builds and executes release Rust binaries, as the preceding soak audit found
+debug builds can saturate the runner and invalidate latency/recovery evidence.
+No scenario or success criterion removed. MySQL/PostgreSQL/Cassandra runs will
+be recorded below after child-completion investigation and fresh Rust tests.
+
+| run URL | head | lane | result |
+|---|---|---|---|
+| pending | pending | mysql | not dispatched |
+| pending | pending | postgres | not dispatched |
+| pending | pending | cassandra | not dispatched |
