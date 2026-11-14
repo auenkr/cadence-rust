@@ -4201,9 +4201,13 @@ async fn serve_with_listener_tls_inner(
         let incoming = no_identity_tls_incoming(listener, acceptor);
         server.serve_with_incoming(incoming).await?;
     } else {
-        server
-            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
-            .await?;
+        use tokio_stream::StreamExt as _;
+        let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener).map(|s| {
+            s.inspect(|sock| {
+                let _ = sock.set_nodelay(true);
+            })
+        });
+        server.serve_with_incoming(incoming).await?;
     }
     Ok(())
 }
@@ -4236,6 +4240,7 @@ pub fn no_identity_tls_incoming(
                     tokio::select! {
                         accepted = listener.next() => match accepted {
                             Some(Ok(socket)) => {
+                                let _ = socket.set_nodelay(true);
                                 let acceptor = acceptor.clone();
                                 handshakes.push(Box::pin(async move {
                                     tokio::time::timeout(
