@@ -24,4 +24,6 @@ Static re-check of every open gap in `history-parity-audit-20261114.md` against 
 Not examined this round: line-level re-read of engineimpl/start/reset/signal-with-start paths (listed as not covered in history-respondparity).
 
 ## CI
-(filled below)
+Head c127b22ca48b4829df1cb5d4677e0bf9b793400e (code; memory-only commit follows).
+- rust-ci cadence-history: https://github.com/auenkr/cadence-rust/actions/runs/43557145231 success
+- history-mixed-gate two_history=true, success and `GATE SUMMARY failed: []`: mysql/grpc https://github.com/auenkr/cadence-rust/actions/runs/43557705518, cassandra/tchannel https://github.com/auenkr/cadence-rust/actions/runs/43557707773
