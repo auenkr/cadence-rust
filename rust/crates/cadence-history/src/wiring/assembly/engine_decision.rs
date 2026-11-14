@@ -76,7 +76,7 @@ mod respond_parity_tests {
 }
 
 fn invalid_action(what: &str, next_event_id: i64) -> HistoryError {
-    HistoryError::internal(format!("invalid history action {what} (next event id {next_event_id})"))
+    HistoryError::internal(super::invalid_history_action_message(what, next_event_id))
 }
 
 impl Inner {

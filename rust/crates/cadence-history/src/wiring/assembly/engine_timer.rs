@@ -157,7 +157,7 @@ impl EngineMutableState {
         let ms = self.now_millis();
         let mut g = self.inner.lock().unwrap();
         let Some(t) = g.timers.get(timer_id).cloned() else {
-            return Err(HistoryError::internal(format!("invalid history action TimerFired (timer {timer_id} not found)")));
+            return Err(HistoryError::internal(super::invalid_history_action_message("TimerFired", g.next_event_id)));
         };
         let id = timer_id.to_string();
         g.push_event(EventType::TimerFired, ms * 1_000_000, |e| {
@@ -200,16 +200,10 @@ impl EngineMutableState {
         let ms = self.now_millis();
         let mut g = self.inner.lock().unwrap();
         let Some(a) = g.pc_acts.get(&schedule_id).cloned() else {
-            return Err(HistoryError::internal(format!(
-                "invalid history action ActivityTaskTimedOut (next event id {})",
-                g.next_event_id
-            )));
+            return Err(HistoryError::internal(super::invalid_history_action_message("ActivityTaskTimedOut", g.next_event_id)));
         };
         if a.started_id != started_id {
-            return Err(HistoryError::internal(format!(
-                "invalid history action ActivityTaskTimedOut (next event id {})",
-                g.next_event_id
-            )));
+            return Err(HistoryError::internal(super::invalid_history_action_message("ActivityTaskTimedOut", g.next_event_id)));
         }
         let started = g.add_transient_started(schedule_id)?;
         let details = g.heartbeats.get(&schedule_id).map(|h| h.details.clone()).unwrap_or_default();
@@ -238,10 +232,7 @@ impl EngineMutableState {
         let now = self.now();
         let mut g = self.inner.lock().unwrap();
         if g.pc_exec.decision_schedule_id != schedule_id || g.pc_exec.decision_started_id != started_id {
-            return Err(HistoryError::internal(format!(
-                "invalid history action DecisionTaskTimedOut (next event id {})",
-                g.next_event_id
-            )));
+            return Err(HistoryError::internal(super::invalid_history_action_message("DecisionTaskTimedOut", g.next_event_id)));
         }
         if g.pc_exec.decision_attempt == 0 {
             g.push_event(EventType::DecisionTaskTimedOut, now, |e| {
@@ -322,10 +313,7 @@ impl EngineMutableState {
         let params = self.params.clone();
         let mut g = self.inner.lock().unwrap();
         if !g.exec.is_running() {
-            return Err(HistoryError::internal(format!(
-                "invalid history action WorkflowExecutionTimedOut (next event id {})",
-                g.next_event_id
-            )));
+            return Err(HistoryError::internal(super::invalid_history_action_message("WorkflowExecutionTimedOut", g.next_event_id)));
         }
         let ev = g.push_event(EventType::WorkflowExecutionTimedOut, ms * 1_000_000, |e| {
             e.workflow_execution_timed_out_event_attributes =
