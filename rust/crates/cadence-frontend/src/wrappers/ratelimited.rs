@@ -197,9 +197,14 @@ pub enum WaitFailure {
     Other(String),
 }
 
+pub type WaitFuture<'a> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), WaitFailure>> + Send + 'a>>;
+
 pub trait Policy: Send + Sync {
     fn allow(&self, info: &QuotaInfo) -> bool;
-    fn wait(&self, info: &QuotaInfo, timeout: Duration) -> Result<(), WaitFailure>;
+    /// Wait for a token without blocking the executor; dropping the future
+    /// (caller cancellation) abandons the wait.
+    fn wait<'a>(&'a self, info: &'a QuotaInfo, timeout: Duration) -> WaitFuture<'a>;
 }
 
 pub trait CallerBypass: Send + Sync {
@@ -209,10 +214,12 @@ pub trait CallerBypass: Send + Sync {
 
 /// Select the configured Go quota family and preserve worker long-poll wait
 /// behavior, including the deadline race re-check.
-pub fn allow_domain(
+#[allow(clippy::too_many_arguments)]
+pub async fn allow_domain(
     class: RequestClass,
     info: &QuotaInfo,
     max_worker_poll_delay: Duration,
+    caller_deadline: Option<std::time::Instant>,
     user: &dyn Policy,
     worker: &dyn Policy,
     visibility: &dyn Policy,
@@ -227,11 +234,20 @@ pub fn allow_domain(
     };
 
     if class == RequestClass::WorkerPoll && !max_worker_poll_delay.is_zero() {
-        return match policy.wait(info, max_worker_poll_delay) {
+        // Go `waitForPolicy`: the wait context is bounded by the parent
+        // deadline, and an expired parent wins over throttling.
+        let timeout = caller_deadline.map_or(max_worker_poll_delay, |d| {
+            max_worker_poll_delay.min(d.saturating_duration_since(std::time::Instant::now()))
+        });
+        let parent_expired = || caller_deadline.is_some_and(|d| std::time::Instant::now() >= d);
+        return match policy.wait(info, timeout).await {
             Ok(()) => Ok(()),
             Err(WaitFailure::CallerCancelled) => {
                 Err(CadenceError::Unknown("request context canceled".to_owned()))
             }
+            Err(_) if parent_expired() => Err(CadenceError::Unknown(
+                "context deadline exceeded".to_owned(),
+            )),
             Err(WaitFailure::Other(message)) => Err(CadenceError::Unknown(message)),
             Err(WaitFailure::Deadline) if bypass.should_bypass(info) => Ok(()),
             Err(WaitFailure::Deadline) if bypass.allow_policy(policy, info) => Ok(()),
@@ -249,10 +265,12 @@ pub fn allow_domain(
 /// Apply the generated method's rate-limit classification. Go deliberately
 /// observes but ignores denied worker request limits; user, visibility, async
 /// and worker-poll APIs return the policy error.
-pub fn allow_operation(
+#[allow(clippy::too_many_arguments)]
+pub async fn allow_operation(
     operation: &str,
     info: &QuotaInfo,
     max_worker_poll_delay: Duration,
+    caller_deadline: Option<std::time::Instant>,
     user: &dyn Policy,
     worker: &dyn Policy,
     visibility: &dyn Policy,
@@ -266,12 +284,14 @@ pub fn allow_operation(
         rule.class,
         info,
         max_worker_poll_delay,
+        caller_deadline,
         user,
         worker,
         visibility,
         asynchronous,
         bypass,
-    );
+    )
+    .await;
     if rule.reject_when_limited {
         result
     } else {
@@ -304,8 +324,11 @@ pub struct HandlerRateLimit {
     visibility: std::sync::Arc<dyn Policy>,
     asynchronous: std::sync::Arc<dyn Policy>,
     bypass: std::sync::Arc<dyn CallerBypass>,
-    max_worker_poll_delay: Duration,
+    /// Go `frontend.maxWorkerPollDelay` evaluated per call with the domain filter.
+    max_worker_poll_delay: DomainDelaySource,
 }
+
+pub type DomainDelaySource = std::sync::Arc<dyn Fn(&str) -> Duration + Send + Sync>;
 
 impl HandlerRateLimit {
     #[allow(clippy::too_many_arguments)]
@@ -316,7 +339,7 @@ impl HandlerRateLimit {
         visibility: std::sync::Arc<dyn Policy>,
         asynchronous: std::sync::Arc<dyn Policy>,
         bypass: std::sync::Arc<dyn CallerBypass>,
-        max_worker_poll_delay: Duration,
+        max_worker_poll_delay: DomainDelaySource,
     ) -> Self {
         Self {
             domains,
@@ -332,30 +355,56 @@ impl HandlerRateLimit {
 
 impl crate::handler_workflow::RequestRateLimit for HandlerRateLimit {
     fn allow(&self, operation: &str, request: &serde_json::Value) -> Result<(), CadenceError> {
-        self.allow_with_headers(operation, request, &std::collections::HashMap::new())
+        let info = quota_info(operation, request, self.domains.as_ref())?;
+        // Synchronous path never waits: Go's non-poll `AllowPolicy` check.
+        let Some(rule) = operation_rule(operation) else {
+            return Ok(());
+        };
+        let policy = self.policy_for(rule.class);
+        if !self.bypass.allow_policy(policy, &info) && rule.reject_when_limited {
+            return Err(rate_limited());
+        }
+        Ok(())
     }
 
-    fn allow_with_headers(
-        &self,
-        operation: &str,
-        request: &serde_json::Value,
-        headers: &std::collections::HashMap<String, String>,
-    ) -> Result<(), CadenceError> {
-        let mut info = quota_info(operation, request, self.domains.as_ref())?;
-        info.caller_type = headers
-            .get("cadence-caller-type")
-            .cloned()
-            .unwrap_or_default();
-        allow_operation(
-            operation,
-            &info,
-            self.max_worker_poll_delay,
-            self.user.as_ref(),
-            self.worker.as_ref(),
-            self.visibility.as_ref(),
-            self.asynchronous.as_ref(),
-            self.bypass.as_ref(),
-        )
+    fn allow_with_headers<'a>(
+        &'a self,
+        operation: &'a str,
+        request: &'a serde_json::Value,
+        headers: &'a std::collections::HashMap<String, String>,
+        deadline: Option<std::time::Instant>,
+    ) -> crate::handler_workflow::RateLimitFuture<'a> {
+        Box::pin(async move {
+            let mut info = quota_info(operation, request, self.domains.as_ref())?;
+            info.caller_type = headers
+                .get("cadence-caller-type")
+                .cloned()
+                .unwrap_or_default();
+            let delay = (self.max_worker_poll_delay)(&info.domain);
+            allow_operation(
+                operation,
+                &info,
+                delay,
+                deadline,
+                self.user.as_ref(),
+                self.worker.as_ref(),
+                self.visibility.as_ref(),
+                self.asynchronous.as_ref(),
+                self.bypass.as_ref(),
+            )
+            .await
+        })
+    }
+}
+
+impl HandlerRateLimit {
+    fn policy_for(&self, class: RequestClass) -> &dyn Policy {
+        match class {
+            RequestClass::User => self.user.as_ref(),
+            RequestClass::Worker | RequestClass::WorkerPoll => self.worker.as_ref(),
+            RequestClass::Visibility => self.visibility.as_ref(),
+            RequestClass::Async => self.asynchronous.as_ref(),
+        }
     }
 }
 
@@ -390,8 +439,9 @@ mod tests {
         fn allow(&self, _: &QuotaInfo) -> bool {
             self.allow
         }
-        fn wait(&self, _: &QuotaInfo, _: Duration) -> Result<(), WaitFailure> {
-            self.wait.clone()
+        fn wait<'a>(&'a self, _: &'a QuotaInfo, _: Duration) -> WaitFuture<'a> {
+            let result = self.wait.clone();
+            Box::pin(async move { result })
         }
     }
 
@@ -409,8 +459,8 @@ mod tests {
         PermitPolicy { allow, wait }
     }
 
-    #[test]
-    fn only_worker_poll_waits_and_deadline_race_rechecks_policy() {
+    #[tokio::test]
+    async fn only_worker_poll_waits_and_deadline_race_rechecks_policy() {
         let p = setup(true, Err(WaitFailure::Deadline));
         let bypass = Bypass(AtomicBool::new(false));
         let info = QuotaInfo::default();
@@ -418,31 +468,35 @@ mod tests {
             RequestClass::WorkerPoll,
             &info,
             Duration::from_millis(10),
+            None,
             &p,
             &p,
             &p,
             &p,
             &bypass
         )
+        .await
         .is_ok());
         let denied = setup(false, Err(WaitFailure::Deadline));
         assert!(allow_domain(
             RequestClass::WorkerPoll,
             &info,
             Duration::from_millis(10),
+            None,
             &denied,
             &denied,
             &denied,
             &denied,
             &bypass
         )
+        .await
         .unwrap_err()
         .to_string()
         .contains("Too many outstanding requests"));
     }
 
-    #[test]
-    fn generated_wrapper_ignores_worker_rate_denials_but_rejects_user_denials() {
+    #[tokio::test]
+    async fn generated_wrapper_ignores_worker_rate_denials_but_rejects_user_denials() {
         let denied = setup(false, Ok(()));
         let bypass = Bypass(AtomicBool::new(false));
         let info = QuotaInfo::default();
@@ -450,44 +504,50 @@ mod tests {
             "RespondActivityTaskCompleted",
             &info,
             Duration::ZERO,
+            None,
             &denied,
             &denied,
             &denied,
             &denied,
             &bypass,
         )
+        .await
         .is_ok());
         assert_eq!(
             allow_operation(
                 "StartWorkflowExecution",
                 &info,
                 Duration::ZERO,
+                None,
                 &denied,
                 &denied,
                 &denied,
                 &denied,
                 &bypass,
             )
+            .await
             .unwrap_err()
             .to_string(),
             "Too many outstanding requests to the cadence service"
         );
     }
 
-    #[test]
-    fn worker_poll_wait_returns_caller_cancellation() {
+    #[tokio::test]
+    async fn worker_poll_wait_returns_caller_cancellation() {
         let p = setup(false, Err(WaitFailure::CallerCancelled));
         let bypass = Bypass(AtomicBool::new(true));
         let err = allow_domain(
             RequestClass::WorkerPoll,
             &QuotaInfo::default(),
             Duration::from_secs(1),
+            None,
             &p,
             &p,
             &p,
             &p,
             &bypass,
         )
+        .await
         .unwrap_err();
         assert!(matches!(
             err,
@@ -611,5 +671,28 @@ mod tests {
                 "Go wrapper rate-limit classification differs for {name}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn solfix11_expired_parent_deadline_wins_over_throttling() {
+        let p = setup(false, Err(WaitFailure::Deadline));
+        let bypass = Bypass(AtomicBool::new(false));
+        let err = allow_domain(
+            RequestClass::WorkerPoll,
+            &QuotaInfo::default(),
+            Duration::from_secs(60),
+            Some(std::time::Instant::now()),
+            &p,
+            &p,
+            &p,
+            &p,
+            &bypass,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            CadenceError::Unknown(message) if message == "context deadline exceeded"
+        ));
     }
 }

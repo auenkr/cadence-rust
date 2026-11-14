@@ -29,5 +29,5 @@ impl HistoryEngine {
     }
 }
 pub fn to_mutable_state_json(state: &dyn MutableState) -> HResult<String> {
-    serde_json::to_string(&state.copy_to_persistence()?).map_err(|err| HistoryError::Other(err.to_string()))
+    state.copy_to_persistence_json()
 }

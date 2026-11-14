@@ -739,6 +739,9 @@ impl MutableState for EngineMutableState {
         g.exec.state = state;
         g.dirty = true;
     }
+    fn copy_to_persistence_json(&self) -> HResult<String> {
+        self.persistence_json()
+    }
     fn copy_to_persistence(&self) -> HResult<serde_json::Value> {
         self.ev_copy_to_persistence()
     }

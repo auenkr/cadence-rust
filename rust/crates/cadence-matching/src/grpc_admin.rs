@@ -591,6 +591,7 @@ impl a::admin_api_server::AdminApi for Admin {
             .domains
             .domain_id(&r.domain)
             .map_err(|e| crate::grpc::domain_not_found(e.message))?;
+        validate_partition_config_request(&r).map_err(Status::invalid_argument)?;
         let task_list = r.task_list.unwrap_or_default();
         let config = r.partition_config.unwrap_or_default();
         let resp = cadence_proto::matching::matching_api_server::MatchingApi::update_task_list_partition_config(
@@ -1191,10 +1192,84 @@ fn resend_replication_input(
     }
 }
 
+/// Go `adminHandlerImpl.UpdateTaskListPartitionConfig` request checks that
+/// follow the domain lookup, in Go order with Go messages.
+pub(crate) fn validate_partition_config_request(
+    r: &a::UpdateTaskListPartitionConfigRequest,
+) -> Result<(), &'static str> {
+    let task_list = r
+        .task_list
+        .as_ref()
+        .ok_or("TaskList is not set on request.")?;
+    if task_list.kind == 0 {
+        return Err("Task list kind not set.");
+    }
+    if task_list.kind != 1 {
+        return Err("Only normal tasklist's partition config can be updated.");
+    }
+    if r.task_list_type == 0 {
+        return Err("Task list type not set.");
+    }
+    let config = r
+        .partition_config
+        .as_ref()
+        .ok_or("Task list partition config is not set in the request.")?;
+    if config.write_partitions.len() > config.read_partitions.len() {
+        return Err(
+            "The number of write partitions cannot be larger than the number of read partitions.",
+        );
+    }
+    if config.write_partitions.is_empty() {
+        return Err("The number of partitions must be larger than 0.");
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod fix_fe_admin_tests {
     use super::*;
     use cadence_api::enums::{EncodingType, IsolationGroupState};
+
+    #[test]
+    fn partition_config_validation_matches_go_order() {
+        use cadence_proto::api;
+        let part = api::TaskListPartition::default;
+        let mut r = a::UpdateTaskListPartitionConfigRequest {
+            domain: "d".into(),
+            ..Default::default()
+        };
+        assert_eq!(validate_partition_config_request(&r), Err("TaskList is not set on request."));
+        r.task_list = Some(api::TaskList::default());
+        assert_eq!(validate_partition_config_request(&r), Err("Task list kind not set."));
+        r.task_list.as_mut().unwrap().kind = 2;
+        assert_eq!(
+            validate_partition_config_request(&r),
+            Err("Only normal tasklist's partition config can be updated.")
+        );
+        r.task_list.as_mut().unwrap().kind = 1;
+        assert_eq!(validate_partition_config_request(&r), Err("Task list type not set."));
+        r.task_list_type = 1;
+        assert_eq!(
+            validate_partition_config_request(&r),
+            Err("Task list partition config is not set in the request.")
+        );
+        let mut cfg = api::TaskListPartitionConfig::default();
+        cfg.write_partitions.insert(0, part());
+        r.partition_config = Some(cfg.clone());
+        assert_eq!(
+            validate_partition_config_request(&r),
+            Err("The number of write partitions cannot be larger than the number of read partitions.")
+        );
+        r.partition_config = Some(api::TaskListPartitionConfig::default());
+        assert_eq!(
+            validate_partition_config_request(&r),
+            Err("The number of partitions must be larger than 0.")
+        );
+        cfg.read_partitions.insert(0, part());
+        r.partition_config = Some(cfg);
+        assert_eq!(validate_partition_config_request(&r), Ok(()));
+    }
+
 
     #[test]
     fn isolation_state_has_no_offset() {

@@ -76,6 +76,10 @@ impl SinkMetrics {
                 "signalName" => {
                     out.insert("signalName".to_owned(), unknown(&tag.value));
                 }
+                // Go InboundMetricsMiddleware context tags.
+                "caller" | "transport" => {
+                    out.insert(tag.key.to_owned(), tag.value.clone());
+                }
                 _ => {}
             }
         }
@@ -458,5 +462,24 @@ mod tests {
         m.increment_requests_tagged("StartWorkflowExecution", &[]);
         let events = sink.events();
         assert_eq!(events[6].tags["tasklist"], "_unknown_");
+    }
+
+    #[test]
+    fn solfix14_caller_and_transport_tags_are_emitted() {
+        let tags = SinkMetrics::tags(
+            "StartWorkflowExecution",
+            &[
+                MetricTag {
+                    key: "caller",
+                    value: "cadence-web".into(),
+                },
+                MetricTag {
+                    key: "transport",
+                    value: "grpc".into(),
+                },
+            ],
+        );
+        assert_eq!(tags["caller"], "cadence-web");
+        assert_eq!(tags["transport"], "grpc");
     }
 }

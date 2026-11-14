@@ -38,6 +38,10 @@ pub trait MutableState: Send + Sync {
     fn has_processed_or_pending_decision(&self) -> bool;
     fn set_workflow_state(&self, state: i32);
     fn copy_to_persistence(&self) -> HResult<serde_json::Value>;
+    /// Ordered JSON for DescribeMutableState; production uses Go persistence structs.
+    fn copy_to_persistence_json(&self) -> HResult<String> {
+        serde_json::to_string(&self.copy_to_persistence()?).map_err(|e| super::deps::HistoryError::internal(e.to_string()))
+    }
     fn add_workflow_execution_signaled(&self, name: &str, input: &[u8], identity: &str, request_id: &str) -> HResult<()>;
     fn delete_signal_requested(&self, request_id: &str);
     fn clear_stickyness(&self);

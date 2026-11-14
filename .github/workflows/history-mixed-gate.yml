@@ -12,6 +12,10 @@ on:
         description: Kill and restart a Rust History host during SDK traffic
         type: boolean
         default: true
+      all_rust_recovery:
+        description: Crash and recover each Rust service with in-flight SDK workflows (Go Worker only)
+        type: boolean
+        default: false
       s3_archival:
         description: Run only the Rust History S3 archival end-to-end phase (MinIO container, mysql lane)
         type: boolean
@@ -31,7 +35,7 @@ on:
         default: grpc
 
 concurrency:
-  group: history-mixed-${{ github.ref }}-${{ inputs.database }}-${{ inputs.outbound }}-${{ inputs.two_history }}-${{ inputs.s3_archival }}-${{ inputs.gcs }}-${{ inputs.queue_v2 }}-${{ github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || '' }}
+  group: history-mixed-${{ github.ref }}-${{ inputs.database }}-${{ inputs.outbound }}-${{ inputs.two_history }}-${{ inputs.s3_archival }}-${{ inputs.gcs }}-${{ inputs.queue_v2 }}-${{ inputs.all_rust_recovery }}-${{ github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || '' }}
   cancel-in-progress: true
 
 jobs:
@@ -94,8 +98,13 @@ jobs:
             --driver "$GITHUB_WORKSPACE/out/frontend-gate-driver" \
             --rust-root "$GITHUB_WORKSPACE" \
             ${{ inputs.s3_archival && '--rust-s3-archival-only' || '' }} \
+            ${{ inputs.all_rust_recovery && '--all-rust-recovery' || '' }} \
             --rust-outbound "${{ inputs.outbound }}" > out/gate.log 2>&1
           result=$?
+          if [ "$result" -eq 0 ]; then
+            grep -Fx "GATE SUMMARY failed: []" out/gate.log || result=1
+          fi
+          cat out/rust-binaries.sha256
           echo "$result" > out/gate.exit
           tail -100 out/gate.log
           exit "$result"

@@ -582,7 +582,7 @@ async fn handle_call(
                     &state,
                     dispatch_method,
                     &request,
-                    deadline.min(Instant::now() + Duration::from_secs(60)),
+                    deadline,
                     caller_headers,
                 )
                 .await

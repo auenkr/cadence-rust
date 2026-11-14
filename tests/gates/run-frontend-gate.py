@@ -15,6 +15,8 @@ ap.add_argument('--out', type=Path, required=True)
 ap.add_argument('--rust-binary', type=Path, required=True)
 ap.add_argument('--rust-history-binary', type=Path,
                 help='replace every Go History host with the standalone Rust History binary; Go runs Worker only')
+ap.add_argument('--all-rust-recovery', action='store_true',
+                help='also crash Matching and Frontend with in-flight SDK recovery workflows')
 ap.add_argument('--go-server', type=Path, required=True)
 ap.add_argument('--go-cli', type=Path, required=True)
 ap.add_argument('--driver', type=Path, required=True)
@@ -39,6 +41,8 @@ ap.add_argument('--gcs-endpoint', help='http://host:port of fake-gcs-server; ena
 ap.add_argument('--gcs-bucket', default='cadence-archival-gate-gcs')
 ap.add_argument('--gcs-seed', help='path of the gcs-seed Go helper (prints Go gstorage history filenames)')
 args = ap.parse_args()
+if args.all_rust_recovery and not args.rust_history_binary:
+    ap.error('--all-rust-recovery requires --rust-history-binary')
 if args.gcs_endpoint:
     # Go (storage client) and the Rust Frontend honour STORAGE_EMULATOR_HOST and skip authentication.
     os.environ['STORAGE_EMULATOR_HOST'] = args.gcs_endpoint.replace('http://', '')
@@ -787,6 +791,8 @@ try:
     if args.rust_history_binary:
         db_container = os.environ.get(prefix + '_DOCKER_CONTAINER')
         rounds = ['killall'] + (['dbrestart'] if db_container else []) + (['killprimary'] if args.two_history else [])
+        if args.all_rust_recovery:
+            rounds += ['matching', 'frontend']
         dom_rc = 'fe-gate-recover-' + secrets.token_hex(3)
         run('recover-register-domain', [*cli_t, '--domain', dom_rc, 'domain', 'register', '--retention', '1'])
         time.sleep(12)  # domain cache refresh
@@ -831,6 +837,19 @@ try:
                         ok = start_history(history2_name, history2_cmd()) and ok
                     record('recover-killall-history-restarted-listening', ok)
                     time.sleep(30)
+                elif rd in ('matching', 'frontend'):
+                    name = 'rust-' + rd
+                    kill(name)
+                    record(f'recover-{rd}-killed', procs[name].returncode == -signal.SIGKILL)
+                    time.sleep(5)
+                    if rd == 'matching':
+                        start(name, rust_matching())
+                        ok = wait_port(ports['RUST_MATCHING_PORT_GRPC'], 240, name)
+                    else:
+                        start(name, rust_frontend(), env=frontend_env)
+                        ok = wait_port(ports['FRONTEND_PORT_GRPC'], 240, name)
+                    record(f'recover-{rd}-restarted-listening', ok)
+                    time.sleep(30)
                 elif rd == 'dbrestart':
                     r = subprocess.run(['docker', 'restart', '-t', '5', db_container], capture_output=True, text=True, timeout=300)
                     record('recover-dbrestart-docker-restart', r.returncode == 0, r.stdout + r.stderr)
@@ -852,6 +871,7 @@ try:
             if m:
                 record('sdk-' + m.group(1), m.group(2) == 'ok', m.group(3))
         print('RECOVER SDK LOG TAIL\n' + '\n'.join((work / 'sdk-recover.log').read_text().splitlines()[-40:]), flush=True)
+        record('sdk-recover-all-rounds-exercised', done_rounds == set(rounds), str(sorted(done_rounds)))
         record('sdk-recover-driver-exit', rdrv.returncode == 0, f'exit={rdrv.returncode}')
         record_services_alive('after-recover-sdk')
     # ---- archival phase: Go History/Worker archive (filestore), Rust Frontend registers/reads
