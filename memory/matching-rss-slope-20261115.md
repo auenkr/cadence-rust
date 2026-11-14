@@ -16,6 +16,10 @@
 - Matching queue owner maps, startup gates, query registrations, durable queue, ack manager, poller history and QPS pending buckets were previously audited as bounded/cleaned or fixed; see `memory/frontend-soak-tail-20261114.md` and the prior evidence notes.
 - The RSS shape and stable descriptors leave allocator retention/fragmentation plausible, but there is no direct evidence yet proving glibc allocator behavior is the cause. No allocator change was made on this evidence alone.
 
+## Allocator experiment update
+
+The controlled tests and their complete evidence are in [matching-rss-allocator-experiment-20261115.md](matching-rss-allocator-experiment-20261115.md). `MALLOC_ARENA_MAX=2` improved the slope only from 7.28 to 6.85 MB/h, still above allowance; adding `MALLOC_TRIM_THRESHOLD_=131072` measured 8.22 MB/h. Both failed overall RSS, so neither is an acceptable fix and the allocator root cause is not proven.
+
 ## Status
 
 No clear Rust-only retained state was identified in this pass. Root cause is unresolved; this branch does not claim the slope is fixed or the service passes. Next useful experiment is a controlled CI soak with allocator behavior recorded (e.g. glibc arena tuning) against the same workload and baseline, followed by confirmation that the intervention reduces the slope without functional changes. Do not treat a threshold pass from one noisy run as proof of no leak.
