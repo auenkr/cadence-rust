@@ -409,12 +409,22 @@ impl TypedMutableState {
 #[cfg(test)]
 mod child_initiated_parity_tests {
     use super::*;
+    use crate::execution::mutable_state_task_generator::TaskGeneratorDomains;
+    use crate::execution::mutable_state_builder::TypedMutableStateError;
+
+    struct Domains;
+    impl TaskGeneratorDomains for Domains {
+        fn domain_id_by_name(&self, name: &str) -> std::result::Result<String, TypedMutableStateError> { Ok(format!("id-{name}")) }
+        fn retention_days(&self, _: &str, _: &str) -> std::result::Result<Option<i32>, TypedMutableStateError> { Ok(Some(3)) }
+        fn is_global_domain(&self, _: &str) -> std::result::Result<bool, TypedMutableStateError> { Ok(false) }
+    }
 
     #[test]
     fn initiated_event_defaults_parent_close_policy_to_abandon() {
         let mut s = TypedMutableState::new();
         s.execution_info.state = 1;
         s.execution_info.decision_started_id = 3;
+        s.task_gen_env.domains = Some(std::sync::Arc::new(Domains));
         let attrs = StartChildWorkflowExecutionDecisionAttributes::default();
         let (event, _) = s
             .add_start_child_workflow_execution_initiated_event(1, 4, "req", &attrs, "parent", "cid")
