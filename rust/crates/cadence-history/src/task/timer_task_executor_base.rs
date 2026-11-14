@@ -49,6 +49,7 @@ pub fn new_timer_task_executor_base(shard:Arc<dyn ShardContext>,dependencies:Arc
 impl TimerTaskExecutorBase {
  fn counter(&self,name:MetricIdx){self.metrics_client.inc_counter("HistoryProcessDeleteHistoryEventScope",name);}
  pub async fn execute_delete_history_event_task(&self,task:&dyn PersistenceTask)->Result<()> {
+  tracing::warn!(workflow_id=task.get_workflow_id(),run_id=task.get_run_id(),visibility_ts=?task.get_visibility_timestamp(),task_id=task.get_task_id(),version=task.get_version(),"DIAG executing DeleteHistoryEvent timer");
   let Some(workflow)=self.dependencies.get_workflow(task).await? else {self.logger.debug_tags("could not load mutable state while attempting to clean up workflow",&[]);self.counter("TimerProcessingDeletionTimerNoopDueToMutableStateNotLoading");return Ok(());};
   let result=self.execute_cleanup(task,workflow.as_ref()).await;workflow.release(result.clone().err());result
  }
@@ -59,6 +60,7 @@ impl TimerTaskExecutorBase {
   else {self.counter("WorkflowCleanupDeleteCount");self.delete_workflow(task,workflow).await}
  }
  pub async fn delete_workflow(&self,task:&dyn PersistenceTask,workflow:&dyn CleanupWorkflow)->Result<()> {
+  tracing::warn!(domain_id=task.get_domain_id(),workflow_id=task.get_workflow_id(),run_id=task.get_run_id(),task_version=task.get_version(),"retention cleanup: deleting workflow execution");
   self.delete_workflow_history(task,workflow).await?;self.delete_workflow_visibility(task).await?;
   self.delete_current_workflow_execution(task).await?;self.delete_active_cluster_selection_policy(task).await?;
   self.cleanup_workflow_timer_tasks(task).await;self.delete_workflow_execution(task).await?;workflow.clear();Ok(())

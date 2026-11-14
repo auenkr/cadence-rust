@@ -191,6 +191,7 @@ impl Inner {
             let jitter_secs = rand::thread_rng().gen_range(0..params.deletion_jitter_range * 60);
             delete_at = delete_at.saturating_add(jitter_secs * NANOS_PER_SECOND);
         }
+        tracing::warn!(retention_days = params.retention_days, close_nanos, delete_at, version, "DIAG engine DeleteHistoryEvent");
         let tt = self.timer_base(TIMER_DELETE_HISTORY_EVENT, version, delete_at);
         self.timer_tasks.push(tt);
         self.dirty = true;
