@@ -25,3 +25,15 @@ with three-day retention. The unstripped executable stays in soak-binaries.
 
 Redundant automatic full CI 43647086757 canceled while queued; final workspace
 validation will follow the measured fix. No root cause or parity verdict yet.
+
+## Replacement dispatch (before any soak lane)
+
+The first profile dispatch 43647087517 and targeted CI 43647125592 were
+canceled while queued, before a build or soak lane. Inspecting the allocator
+crate showed its statistics API requires the explicit `stats` feature; enabled
+that feature and cumulative jeprof ordering in `25b510f0798afe6475da89fada649bf4ef60919b`.
+The current first measured soak is
+https://github.com/auenkr/cadence-rust/actions/runs/43647363855 and targeted
+server CI is https://github.com/auenkr/cadence-rust/actions/runs/43647366793.
+Both have started on standard hosted runners. Redundant automatic push CI
+43647363234 was canceled. Measured-soak count remains zero until lanes start.
