@@ -66,3 +66,12 @@ head 4e014ea994ffdc0e5ec957dcd2a1df5d13845ce9. Pending. No second soak started.
 Resumed after an interrupted agent turn/rate limit. Soak 43615529134 remains
 in progress in both lanes (jobs started 16:33 UTC). No replacement run or second
 soak dispatched. Code unchanged; targeted and full fresh-target CI remain green.
+
+## Binary identity, post-midpoint checkpoint
+
+Completed build job logs obtained directly from the GitHub job-log API.
+Soak 43615529134 built head 4e014ea994ffdc0e5ec957dcd2a1df5d13845ce9;
+Rust binary SHA256:
+`e29f01c446d61b25620cb466fc2d6bb6b3c31abaf0e0cf90d8d242bc5770f98b`.
+Both lanes remain in progress after the scheduled midpoint; final restart and
+completion evidence still pending. No second soak dispatched.
