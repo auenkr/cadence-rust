@@ -119,6 +119,32 @@ fn checksum_json(sum: &crate::execution::checksum::Checksum) -> Vec<u8> {
     format!("{{\"Version\":{},\"Flavor\":{},\"Value\":\"{}\"}}", sum.version, sum.flavor, b64).into_bytes()
 }
 
+/// Go `VersionHistory.AddOrUpdateItem` (used by `updateWithLastWriteEvent`), including its BadRequest errors.
+fn add_or_update_version_item(items: &mut Vec<VersionHistoryItem>, event_id: i64, version: i64) -> HResult<()> {
+    let Some(last) = items.last_mut() else {
+        items.push(VersionHistoryItem { event_id, version });
+        return Ok(());
+    };
+    if version < last.version {
+        return Err(HistoryError::bad_request(format!(
+            "cannot update version history with a lower version {version}. Last version: {}",
+            last.version
+        )));
+    }
+    if event_id <= last.event_id {
+        return Err(HistoryError::bad_request(format!(
+            "cannot add version history with a lower event id {event_id}. Last event id: {}",
+            last.event_id
+        )));
+    }
+    if version > last.version {
+        items.push(VersionHistoryItem { event_id, version });
+    } else {
+        last.event_id = event_id;
+    }
+    Ok(())
+}
+
 fn enc(s: &cadence_thrift::value::Struct) -> HResult<Vec<u8>> {
     Encoding::ThriftRW.encode(s).map_err(|e| HistoryError::internal(format!("encode mutable state blob: {e}")))
 }
@@ -186,11 +212,9 @@ impl EngineMutableState {
             last_write_version = last.version;
             let (id, version) = (last.event_id, last.version);
             if let Some(vh) = g.version_histories.as_mut() {
-                if let Some(h) = vh.histories.get_mut(vh.current_version_history_index as usize) {
-                    match h.items.last_mut() {
-                        Some(item) if item.version == version => item.event_id = id,
-                        _ => h.items.push(VersionHistoryItem { event_id: id, version }),
-                    }
+                match vh.histories.get_mut(vh.current_version_history_index as usize) {
+                    Some(h) => add_or_update_version_item(&mut h.items, id, version)?,
+                    None => return Err(HistoryError::internal("version history index out of range")),
                 }
             }
         }
@@ -657,6 +681,22 @@ mod tests {
         assert_eq!(t.first(), Some(&EventType::DecisionTaskFailed));
         assert!(t.contains(&EventType::DecisionTaskScheduled));
         assert_eq!(t.iter().filter(|e| **e == EventType::WorkflowExecutionSignaled).count(), 3);
+    }
+
+    #[test]
+    fn version_history_update_matches_go_add_or_update_item() {
+        let item = |event_id, version| VersionHistoryItem { event_id, version };
+        let mut items = vec![];
+        add_or_update_version_item(&mut items, 5, 1).unwrap();
+        add_or_update_version_item(&mut items, 7, 1).unwrap();
+        assert_eq!(items, vec![item(7, 1)]);
+        add_or_update_version_item(&mut items, 9, 3).unwrap();
+        assert_eq!(items, vec![item(7, 1), item(9, 3)]);
+        let err = add_or_update_version_item(&mut items, 9, 3).unwrap_err().to_string();
+        assert!(err.contains("cannot add version history with a lower event id 9. Last event id: 9"), "{err}");
+        let err = add_or_update_version_item(&mut items, 12, 2).unwrap_err().to_string();
+        assert!(err.contains("cannot update version history with a lower version 2. Last version: 3"), "{err}");
+        assert_eq!(items, vec![item(7, 1), item(9, 3)]);
     }
 
     #[test]
