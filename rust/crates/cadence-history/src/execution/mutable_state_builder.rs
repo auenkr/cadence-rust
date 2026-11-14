@@ -53,6 +53,8 @@ fn internal<T>(message: impl Into<String>) -> Result<T> {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TypedWorkflowMutation {
     pub execution_info: WorkflowExecutionInfo,
+    /// Go `mutableStateBuilder.checksum`, loaded from `WorkflowSnapshot.Checksum`.
+    pub checksum: Vec<u8>,
     pub version_histories: Option<VersionHistories>,
     pub start_version: i64,
     pub last_write_version: i64,
@@ -248,6 +250,7 @@ impl TypedMutableState {
             buffered_events,
             version_histories,
             history_size,
+            Vec::new(),
             0,
             |_| Err("legacy domain lookup is unavailable".to_owned()),
         );
@@ -268,6 +271,7 @@ impl TypedMutableState {
         buffered_events: Vec<HistoryEvent>,
         version_histories: Option<VersionHistories>,
         history_size: i64,
+        checksum: Vec<u8>,
         checksum_invalidate_before_secs: i64,
         mut get_domain_id: F,
     )
@@ -298,6 +302,7 @@ impl TypedMutableState {
         self.state_in_db = execution_info.state;
         self.next_event_id_in_db = execution_info.next_event_id;
         self.execution_info = execution_info;
+        self.checksum = checksum;
         for info in self.pending_child_execution_info_ids.values_mut() {
             if info.domain_id.is_empty() && !info.domain_name_deprecated.is_empty() {
                 // Go logs the lookup failure, then assigns the returned ID (empty
@@ -305,12 +310,12 @@ impl TypedMutableState {
                 info.domain_id = get_domain_id(&info.domain_name_deprecated).unwrap_or_default();
             }
         }
-        if !self.execution_info.checksum.is_empty()
+        if !self.checksum.is_empty()
             && checksum_invalidate_before_secs > 0
             && self.execution_info.last_updated_time_unix_nanos
                 < checksum_invalidate_before_secs.saturating_mul(1_000_000_000)
         {
-            self.execution_info.checksum.clear();
+            self.checksum.clear();
         }
         self.version_histories = version_histories;
         self.history_size = history_size;
@@ -1122,15 +1127,14 @@ mod tests {
     fn typed_load_clears_checksum_before_invalidation_cutoff_like_go() {
         let mut state = TypedMutableState::new();
         let info = WorkflowExecutionInfo {
-            checksum: vec![1, 2, 3],
             last_updated_time_unix_nanos: 9_000_000_000,
             ..Default::default()
         };
         state.load_with_compatibility(
             info, vec![], vec![], vec![], vec![], vec![], vec![], vec![], None, 0,
-            10, |_| Err("unused".to_owned()),
+            vec![1, 2, 3], 10, |_| Err("unused".to_owned()),
         );
-        assert!(state.execution_info.checksum.is_empty());
+        assert!(state.checksum.is_empty());
     }
 
     #[test]
@@ -1143,7 +1147,7 @@ mod tests {
         };
         state.load_with_compatibility(
             WorkflowExecutionInfo::default(), vec![], vec![], vec![child], vec![], vec![],
-            vec![], vec![], None, 0, 0,
+            vec![], vec![], None, 0, vec![], 0,
             |name| Ok(format!("id-for-{name}")),
         );
         let child = &state.pending_child_execution_info_ids[&7];
