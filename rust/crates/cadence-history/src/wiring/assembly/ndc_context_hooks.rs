@@ -55,7 +55,14 @@ mod timer_visibility_tests {
 
     #[test]
     fn timer_visibility_timestamp_is_preserved_from_row() {
-        let blob = timer_task_to_struct(&Default::default()).unwrap();
+        let blob = timer_task_to_struct(&cadence_persistence::history_contract::TimerTask {
+            domain_id: "11111111-1111-1111-1111-111111111111".into(),
+            run_id: "22222222-2222-2222-2222-222222222222".into(),
+            workflow_id: "wf".into(),
+            visibility_timestamp_unix_nanos: 42,
+            ..Default::default()
+        })
+        .unwrap();
         let decoded = timer_task_from_struct(&blob).unwrap();
         assert_eq!(decoded.visibility_timestamp_unix_nanos, 0);
         let fixed = with_row_visibility(decoded, 1_700_000_000_123);
