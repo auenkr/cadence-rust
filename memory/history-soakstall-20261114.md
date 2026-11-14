@@ -36,3 +36,36 @@ Next step for the next worker: add a unit/integration test for PollMutableState 
 - 45-minute soaks (mysql/postgres/cassandra) and 45-minute Go baseline.
 - 12 history-mixed-gate combos on the final head (earlier 18 runs on 0e46b77c1 were checked by conclusion only, not GATE SUMMARY).
 - Driver additions kept: `STAGE` timings and `HISTDUMP` for gen0/child of slow workflows (tests/history-soak/main.go); workflow inputs `go_history`, `history_log`.
+
+## PollMutableState implementation fix (2026-11-14, history-pollms-fix)
+
+Root cause: the live `EngineExecutionContext::persist` path in
+`wiring/assembly/engine_cache.rs` directly persists the mutation and notified
+transfer/timer queues, but never notified history subscribers. Decision completion,
+close, continue-as-new and ordinary engine updates use this path, bypassing the
+separate `WorkflowContext`/NDC `notify_history` hook. Thus the server committed the
+close while Frontend's close-only `PollMutableState` remained asleep until expiry.
+
+Comparison with Go `engineimpl/poll_mutable_state.go` and `events/notifier.go`:
+resolved run-ID subscription, domain/workflow/run keys, post-subscribe recheck,
+expected-event-ID comparison and close-status handling already match. Controller
+wiring shares the core's engine slot with the engine containing the subscribed
+notifier. Go `execution/context.go` notifies after successful update (including
+continue-as-new) and conflict resolution, not creation; Rust's NDC paths already
+have these hooks. The direct engine update path was the missing producer.
+
+Fix c4d28963d: notify the shard engine after successful persistence and transaction
+cleanup with the current run ID, last-first/next/previous-started IDs, workflow
+state/close status and version histories. Failed writes do not publish a close.
+Regression test uses real in-memory persistence, engine, cache and notifier:
+continue-as-new, subscribe a close-only poll (expected ID i64::MAX) with either
+explicit or empty/current run ID, then complete the new run. Require response
+within 250ms (test poll expiry is 1s), with persisted close state and event IDs.
+
+CI dispatched on c4d28963dcd6c825b62313d2247e57c6430ce4a4 (results pending):
+- rust-ci, cadence-history, clean_target=true: https://github.com/auenkr/cadence-rust/actions/runs/43548203627
+- mysql soak, 8m, rate=4, two_history=true, release/warn: https://github.com/auenkr/cadence-rust/actions/runs/43548206209
+- mysql/grpc mixed, two_history=true: https://github.com/auenkr/cadence-rust/actions/runs/43548210090
+- cassandra/tchannel mixed, two_history=true: https://github.com/auenkr/cadence-rust/actions/runs/43548212487
+No Cargo, Go or Docker commands run on the dev host. An automatic rust-check push
+run (43548203626) was cancelled to honor the explicitly requested workflow scope.
