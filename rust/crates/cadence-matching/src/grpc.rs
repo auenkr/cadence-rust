@@ -426,6 +426,44 @@ impl Frontend {
             Err(AdminAuthError::Failed(m)) => Err(Status::unknown(m)),
         }
     }
+    fn activity_token(
+        &self,
+        domain: &str,
+        execution: Option<p::WorkflowExecution>,
+        id: &str,
+    ) -> Result<Vec<u8>, Status> {
+        let executions = self.domain(domain)?;
+        let execution = execution
+            .map(cv::execution)
+            .ok_or_else(|| Status::invalid_argument("Execution is not set on request."))?;
+        cadence_api::validation::check_execution(Some(&execution))
+            .map_err(|e| Status::invalid_argument(e.message))?;
+        if id.is_empty() {
+            return Err(Status::invalid_argument(
+                "ActivityID is not set on request.",
+            ));
+        }
+        executions
+            .activity_token_by_id(domain, &execution, id)
+            .map_err(|e| match e {
+                cadence_persistence::TaskError::NotFound(e) => detailed_status(
+                    tonic::Code::NotFound,
+                    e.message,
+                    "EntityNotExistsError",
+                    p::EntityNotExistsError::default(),
+                ),
+                cadence_persistence::TaskError::AlreadyCompleted(e) => detailed_status(
+                    tonic::Code::NotFound,
+                    e.message,
+                    "WorkflowExecutionAlreadyCompletedError",
+                    p::WorkflowExecutionAlreadyCompletedError {},
+                ),
+                cadence_persistence::TaskError::InvalidToken(e)
+                | cadence_persistence::TaskError::BadDecision(e) => {
+                    Status::invalid_argument(e.message)
+                }
+            })
+    }
     fn visible(
         &self,
         domain: &str,
@@ -2207,6 +2245,22 @@ impl p::worker_api_server::WorkerApi for Frontend {
         &self,
         request: tonic::Request<p::RespondActivityTaskCompletedByIdRequest>,
     ) -> Result<Response<p::RespondActivityTaskCompletedByIdResponse>, Status> {
+        if !self.state.workflow_api.as_ref().is_some_and(|api| api.serves("RespondActivityTaskCompletedByID")) {
+        let r = request.into_inner();
+        let task_token = self.activity_token(&r.domain, r.workflow_execution, &r.activity_id)?;
+        p::worker_api_server::WorkerApi::respond_activity_task_completed(
+            self,
+            tonic::Request::new(p::RespondActivityTaskCompletedRequest {
+                task_token,
+                result: r.result,
+                identity: r.identity,
+            }),
+        )
+        .await?;
+        return Ok(Response::new(
+            p::RespondActivityTaskCompletedByIdResponse {},
+        ));
+        }
         let r = request.into_inner();
         let execution = r.workflow_execution.unwrap_or_default();
         let input = cadence_api::tasks::RespondActivityTaskCompletedByIDRequest {
@@ -2222,6 +2276,21 @@ impl p::worker_api_server::WorkerApi for Frontend {
         &self,
         request: tonic::Request<p::RespondActivityTaskFailedByIdRequest>,
     ) -> Result<Response<p::RespondActivityTaskFailedByIdResponse>, Status> {
+        if !self.state.workflow_api.as_ref().is_some_and(|api| api.serves("RespondActivityTaskFailedByID")) {
+        let r = request.into_inner();
+        let task_token = self.activity_token(&r.domain, r.workflow_execution, &r.activity_id)?;
+        p::worker_api_server::WorkerApi::respond_activity_task_failed(
+            self,
+            tonic::Request::new(p::RespondActivityTaskFailedRequest {
+                task_token,
+                failure: r.failure,
+                identity: r.identity,
+                heartbeat_details: r.heartbeat_details,
+            }),
+        )
+        .await?;
+        return Ok(Response::new(p::RespondActivityTaskFailedByIdResponse {}));
+        }
         let r = request.into_inner();
         let (reason, details, failure_options) = cv::failure_in(r.failure)?;
         let execution = r.workflow_execution.unwrap_or_default();
@@ -2236,6 +2305,20 @@ impl p::worker_api_server::WorkerApi for Frontend {
         &self,
         request: tonic::Request<p::RespondActivityTaskCanceledByIdRequest>,
     ) -> Result<Response<p::RespondActivityTaskCanceledByIdResponse>, Status> {
+        if !self.state.workflow_api.as_ref().is_some_and(|api| api.serves("RespondActivityTaskCanceledByID")) {
+        let r = request.into_inner();
+        let task_token = self.activity_token(&r.domain, r.workflow_execution, &r.activity_id)?;
+        p::worker_api_server::WorkerApi::respond_activity_task_canceled(
+            self,
+            tonic::Request::new(p::RespondActivityTaskCanceledRequest {
+                task_token,
+                details: r.details,
+                identity: r.identity,
+            }),
+        )
+        .await?;
+        return Ok(Response::new(p::RespondActivityTaskCanceledByIdResponse {}));
+        }
         let r = request.into_inner();
         let execution = r.workflow_execution.unwrap_or_default();
         let input = cadence_api::tasks::RespondActivityTaskCanceledByIDRequest {
@@ -2249,6 +2332,22 @@ impl p::worker_api_server::WorkerApi for Frontend {
         &self,
         request: tonic::Request<p::RecordActivityTaskHeartbeatByIdRequest>,
     ) -> Result<Response<p::RecordActivityTaskHeartbeatByIdResponse>, Status> {
+        if !self.state.workflow_api.as_ref().is_some_and(|api| api.serves("RecordActivityTaskHeartbeatByID")) {
+        let r = request.into_inner();
+        let task_token = self.activity_token(&r.domain, r.workflow_execution, &r.activity_id)?;
+        let v = p::worker_api_server::WorkerApi::record_activity_task_heartbeat(
+            self,
+            tonic::Request::new(p::RecordActivityTaskHeartbeatRequest {
+                task_token,
+                details: r.details,
+                identity: r.identity,
+            }),
+        )
+        .await?;
+        return Ok(Response::new(p::RecordActivityTaskHeartbeatByIdResponse {
+            cancel_requested: v.into_inner().cancel_requested,
+        }));
+        }
         let r = request.into_inner();
         let execution = r.workflow_execution.unwrap_or_default();
         let input = cadence_api::tasks::RecordActivityTaskHeartbeatByIDRequest {

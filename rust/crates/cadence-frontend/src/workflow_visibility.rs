@@ -414,7 +414,7 @@ mod timestamp_handler_tests {
         for closed in [false, true] {
             let request = st::ListOpenWorkflowExecutionsRequest { domain: "domain".into(), maximum_page_size: 10, start_time_filter: Some(st::StartTimeFilter { earliest_time: Some(1), latest_time: Some(i64::MAX) }), ..Default::default() };
             let body = Struct { fields: vec![(1, Value::Struct(request.to_thrift()))] };
-            let operation = if closed { "WorkflowService::ListClosedWorkflowExecutions" } else { "WorkflowService::ListOpenWorkflowExecutions" };
+            let operation = if closed { "ListClosedWorkflowExecutions" } else { "ListOpenWorkflowExecutions" };
             let (reply, error) = cadence_service_core::yarpc::dispatch(&state, operation, &body, std::time::Instant::now() + std::time::Duration::from_secs(5)).await.unwrap();
             assert!(error.is_none(), "{error:?}");
             let Some(Value::Struct(response)) = reply.get(0) else { panic!("missing response") };
