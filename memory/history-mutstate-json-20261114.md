@@ -27,7 +27,7 @@ Branch: `history-mutstate-json`
   The run artifact includes Rust History SHA256
   `a2f3a97da68b3db918bd7ff2f25ee5d94ed2fef03b7c8f2dfed0ca6eec40245f`.
 
-## Remaining parity work
+## Original remaining parity work (before implementation follow-up)
 
 The version-history subobject now has Go's JSON representation, but
 `ev_copy_to_persistence` still emits a reduced mutable-state view with camelCase
@@ -68,3 +68,49 @@ compatible.
   - https://github.com/auenkr/cadence-rust/actions/runs/43590059755
     (`9e14cf7d8`, pending when recorded), fresh dedicated target,
     `package=cadence-history`, clippy then tests.
+
+
+## Full-shape validation and limits
+
+History CI https://github.com/auenkr/cadence-rust/actions/runs/43590059755
+(head `9e14cf7d8`, conclusion `success`) ran clippy then tests in a fresh
+uncached dedicated target. History reported **916 passed, 0 failed**, including
+all four new mutable-state JSON fixtures.
+
+The final MySQL replication gate is
+https://github.com/auenkr/cadence-rust/actions/runs/43590735894
+(head `388ea849faee413db175522d6adbee4af20989d5`; pending when recorded).
+
+**Remaining exact-value limitation:** the output structs represent null versus
+empty maps/slices/bytes explicitly, but `history_contract::WorkflowExecutionInfo`
+and its activity/signal records already represent several nullable Go fields as
+non-optional Rust `Vec`/`BTreeMap`. The original presence information is not
+available to History's output adapter. Current conversion uses null for empty
+optional execution maps/retry lists/bytes and explicit empty containers for
+initialized pending maps and buffered events. The fixture proves the chosen
+Go JSON representation, not recovery of every original nil/empty distinction.
+Full parity for those cases requires retaining presence information at the
+persistence boundary; that is outside the requested History-only output change.
+The replication gate compares events and version histories, not the entire
+mutable-state object, so its pass does not close this limitation.
+
+## User-approved scope clarification
+
+- User explicitly selected **Go's actual enum strings**, superseding the initial
+  instruction that enums should be integers. Go TaskListKind,
+  WorkflowExecutionStatus, ParentClosePolicy, FailureCategory and nested API
+  enums implement MarshalText. Numeric output makes the existing Go admin CLI's
+  mutable-state unmarshal fail. CronOverlapPolicy has no MarshalText and stays
+  numeric.
+- Output enum names are transcribed from Go String/MarshalText definitions,
+  rather than assuming Rust's enum labels are identical (FailureCategory differs).
+- User explicitly selected **keep History-only scope and document the gap** for
+  nil/empty presence already lost at the persistence boundary. The limitation
+  above is accepted follow-up work, not claimed complete by these tests.
+- Gate https://github.com/auenkr/cadence-rust/actions/runs/43590735894
+  (`388ea849f`) was cancelled after identifying the enum/CLI incompatibility.
+- CI https://github.com/auenkr/cadence-rust/actions/runs/43591716744
+  (`007beb9ae`) was cancelled in favor of the Go-derived enum mapping.
+- Replacement fresh History CI:
+  https://github.com/auenkr/cadence-rust/actions/runs/43591791527
+  (head `22c54c847`, pending when recorded).
