@@ -255,8 +255,9 @@ impl TypedMutableState {
             request_cancels.into_iter().map(|c| (c.initiated_id, c)).collect();
         self.pending_signal_info_ids = signals.into_iter().map(|s| (s.initiated_id, s)).collect();
         self.pending_signal_requested_ids = signal_requested_ids.into_iter().collect();
-        self.has_buffered_events_in_db = !buffered_events.is_empty();
-        self.buffered_events = buffered_events;
+        // Go: reorderAndFilterDuplicateEvents(state.BufferedEvents, "load").
+        self.buffered_events = reorder_and_filter_duplicate_events(buffered_events).0;
+        self.has_buffered_events_in_db = !self.buffered_events.is_empty();
         self.state_in_db = execution_info.state;
         self.next_event_id_in_db = execution_info.next_event_id;
         self.execution_info = execution_info;
@@ -473,7 +474,7 @@ impl TypedMutableState {
         candidates.extend(std::mem::take(&mut self.update_buffered_events));
 
         // Go: reorderAndFilterDuplicateEvents on the old + new buffered bucket.
-        let (reordered, _) = reorder_and_filter_duplicate_events(&new_committed, candidates);
+        let (reordered, _) = reorder_and_filter_duplicate_events(candidates);
         // Assign event ids and patch started ids.
         let mut next_event_id = self.execution_info.next_event_id;
         let mut scheduled_to_started: BTreeMap<i64, i64> = BTreeMap::new();
@@ -882,78 +883,106 @@ impl TypedMutableState {
 
 /// Go `reorderAndFilterDuplicateEvents`: activity/child completions go to the
 /// tail; duplicates (same type, scheduled id, attempt, started id) are dropped.
+/// Uniqueness is tracked only among the events passed in (Go starts with an empty set).
 /// Returns `(events, duplicate_count)`.
-pub fn reorder_and_filter_duplicate_events(
-    committed: &[HistoryEvent],
-    buffered: Vec<HistoryEvent>,
-) -> (Vec<HistoryEvent>, usize) {
-    let mut seen: BTreeSet<(i32, i64, i64, i64)> = BTreeSet::new();
-    for event in committed {
-        if let Some(key) = completion_key(event) {
-            seen.insert(key);
-        }
-    }
+pub fn reorder_and_filter_duplicate_events(buffered: Vec<HistoryEvent>) -> (Vec<HistoryEvent>, usize) {
+    let mut seen: BTreeSet<(i32, i64, i32, i64)> = BTreeSet::new();
     let mut head = Vec::new();
     let mut tail = Vec::new();
     let mut duplicates = 0;
     for event in buffered {
-        match completion_key(&event) {
-            Some(key) => {
-                if !seen.insert(key) {
-                    duplicates += 1;
-                    continue;
-                }
-                tail.push(event);
+        if let Some(key) = uniqueness_key(&event) {
+            if !seen.insert(key) {
+                duplicates += 1;
+                continue;
             }
-            None => head.push(event),
+        }
+        match event.event_type.as_ref() {
+            Some(
+                EventType::ActivityTaskCompleted
+                | EventType::ActivityTaskFailed
+                | EventType::ActivityTaskCanceled
+                | EventType::ActivityTaskTimedOut
+                | EventType::ChildWorkflowExecutionCompleted
+                | EventType::ChildWorkflowExecutionFailed
+                | EventType::ChildWorkflowExecutionCanceled
+                | EventType::ChildWorkflowExecutionTimedOut
+                | EventType::ChildWorkflowExecutionTerminated,
+            ) => tail.push(event),
+            _ => head.push(event),
         }
     }
     head.extend(tail);
     (head, duplicates)
 }
 
-fn completion_key(event: &HistoryEvent) -> Option<(i32, i64, i64, i64)> {
-    let event_type = event.event_type.as_ref()?;
-    let (scheduled, started) = match event_type {
-        EventType::ActivityTaskCompleted => event
-            .activity_task_completed_event_attributes
-            .as_ref()
-            .map(|a| (a.scheduled_event_id, a.started_event_id))?,
-        EventType::ActivityTaskFailed => event
-            .activity_task_failed_event_attributes
-            .as_ref()
-            .map(|a| (a.scheduled_event_id, a.started_event_id))?,
-        EventType::ActivityTaskTimedOut => event
-            .activity_task_timed_out_event_attributes
-            .as_ref()
-            .map(|a| (a.scheduled_event_id, a.started_event_id))?,
-        EventType::ActivityTaskCanceled => event
-            .activity_task_canceled_event_attributes
-            .as_ref()
-            .map(|a| (a.scheduled_event_id, a.started_event_id))?,
-        EventType::ChildWorkflowExecutionCompleted => event
-            .child_workflow_execution_completed_event_attributes
-            .as_ref()
-            .map(|a| (a.initiated_event_id, a.started_event_id))?,
-        EventType::ChildWorkflowExecutionFailed => event
-            .child_workflow_execution_failed_event_attributes
-            .as_ref()
-            .map(|a| (a.initiated_event_id, a.started_event_id))?,
-        EventType::ChildWorkflowExecutionCanceled => event
-            .child_workflow_execution_canceled_event_attributes
-            .as_ref()
-            .map(|a| (a.initiated_event_id, a.started_event_id))?,
-        EventType::ChildWorkflowExecutionTimedOut => event
-            .child_workflow_execution_timed_out_event_attributes
-            .as_ref()
-            .map(|a| (a.initiated_event_id, a.started_event_id))?,
-        EventType::ChildWorkflowExecutionTerminated => event
-            .child_workflow_execution_terminated_event_attributes
-            .as_ref()
-            .map(|a| (a.initiated_event_id, a.started_event_id))?,
+/// Go `eventUniquenessParams` as `(type, scheduled/initiated id, attempt, started id)`.
+fn uniqueness_key(event: &HistoryEvent) -> Option<(i32, i64, i32, i64)> {
+    let t = event.event_type.as_ref()?;
+    let (scheduled, attempt, started) = match t {
+        EventType::ActivityTaskStarted => {
+            let a = event.activity_task_started_event_attributes.as_ref()?;
+            (a.scheduled_event_id, a.attempt, 0)
+        }
+        EventType::ActivityTaskCompleted => {
+            let a = event.activity_task_completed_event_attributes.as_ref()?;
+            (a.scheduled_event_id, 0, a.started_event_id)
+        }
+        EventType::ActivityTaskFailed => {
+            let a = event.activity_task_failed_event_attributes.as_ref()?;
+            (a.scheduled_event_id, 0, a.started_event_id)
+        }
+        EventType::ActivityTaskCanceled => {
+            let a = event.activity_task_canceled_event_attributes.as_ref()?;
+            (a.scheduled_event_id, 0, a.started_event_id)
+        }
+        EventType::ActivityTaskTimedOut => {
+            let a = event.activity_task_timed_out_event_attributes.as_ref()?;
+            (a.scheduled_event_id, 0, a.started_event_id)
+        }
+        EventType::ChildWorkflowExecutionStarted => {
+            (event.child_workflow_execution_started_event_attributes.as_ref()?.initiated_event_id, 0, 0)
+        }
+        EventType::ChildWorkflowExecutionCompleted => {
+            let a = event.child_workflow_execution_completed_event_attributes.as_ref()?;
+            (a.initiated_event_id, 0, a.started_event_id)
+        }
+        EventType::ChildWorkflowExecutionFailed => {
+            let a = event.child_workflow_execution_failed_event_attributes.as_ref()?;
+            (a.initiated_event_id, 0, a.started_event_id)
+        }
+        EventType::ChildWorkflowExecutionTimedOut => {
+            let a = event.child_workflow_execution_timed_out_event_attributes.as_ref()?;
+            (a.initiated_event_id, 0, a.started_event_id)
+        }
+        EventType::ChildWorkflowExecutionCanceled => {
+            let a = event.child_workflow_execution_canceled_event_attributes.as_ref()?;
+            (a.initiated_event_id, 0, a.started_event_id)
+        }
+        EventType::ChildWorkflowExecutionTerminated => {
+            let a = event.child_workflow_execution_terminated_event_attributes.as_ref()?;
+            (a.initiated_event_id, 0, a.started_event_id)
+        }
+        EventType::StartChildWorkflowExecutionFailed => {
+            (event.start_child_workflow_execution_failed_event_attributes.as_ref()?.initiated_event_id, 0, 0)
+        }
+        EventType::ExternalWorkflowExecutionCancelRequested => {
+            (event.external_workflow_execution_cancel_requested_event_attributes.as_ref()?.initiated_event_id, 0, 0)
+        }
+        EventType::RequestCancelExternalWorkflowExecutionFailed => (
+            event.request_cancel_external_workflow_execution_failed_event_attributes.as_ref()?.initiated_event_id,
+            0,
+            0,
+        ),
+        EventType::ExternalWorkflowExecutionSignaled => {
+            (event.external_workflow_execution_signaled_event_attributes.as_ref()?.initiated_event_id, 0, 0)
+        }
+        EventType::SignalExternalWorkflowExecutionFailed => {
+            (event.signal_external_workflow_execution_failed_event_attributes.as_ref()?.initiated_event_id, 0, 0)
+        }
         _ => return None,
     };
-    Some((event_type.value(), scheduled, 0, started))
+    Some((t.value(), scheduled, attempt, started))
 }
 
 /// Go `assignEventIDToBufferedEvents` started-id patching for completions that
@@ -984,6 +1013,59 @@ fn patch_started_event_id(event: &mut HistoryEvent, scheduled_to_started: &BTree
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cadence_api::tasks::{ActivityTaskCompletedEventAttributes, ActivityTaskStartedEventAttributes};
+
+    fn ev(t: EventType) -> HistoryEvent {
+        HistoryEvent { event_type: Some(t), ..Default::default() }
+    }
+
+    fn completed(sched: i64, started: i64) -> HistoryEvent {
+        let mut e = ev(EventType::ActivityTaskCompleted);
+        e.activity_task_completed_event_attributes = Some(ActivityTaskCompletedEventAttributes {
+            scheduled_event_id: sched,
+            started_event_id: started,
+            ..Default::default()
+        });
+        e
+    }
+
+    fn act_started(sched: i64, attempt: i32) -> HistoryEvent {
+        let mut e = ev(EventType::ActivityTaskStarted);
+        e.activity_task_started_event_attributes =
+            Some(ActivityTaskStartedEventAttributes { scheduled_event_id: sched, attempt, ..Default::default() });
+        e
+    }
+
+    #[test]
+    fn reorder_filters_duplicates_and_moves_completions_to_tail_like_go() {
+        let input = vec![completed(5, 6), act_started(5, 0), act_started(5, 0), act_started(5, 1), completed(5, 6)];
+        let (out, dups) = reorder_and_filter_duplicate_events(input);
+        assert_eq!(dups, 2);
+        let types: Vec<_> = out.iter().map(|e| e.event_type.clone().unwrap()).collect();
+        assert_eq!(
+            types,
+            vec![EventType::ActivityTaskStarted, EventType::ActivityTaskStarted, EventType::ActivityTaskCompleted]
+        );
+    }
+
+    #[test]
+    fn load_reorders_buffered_events_like_go() {
+        let mut state = TypedMutableState::new();
+        state.load(
+            WorkflowExecutionInfo::default(),
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![completed(5, 6), act_started(5, 0)],
+            None,
+            0,
+        );
+        assert_eq!(state.buffered_events[0].event_type, Some(EventType::ActivityTaskStarted));
+        assert_eq!(state.buffered_events[1].event_type, Some(EventType::ActivityTaskCompleted));
+    }
 
     #[test]
     fn new_state_matches_go_defaults() {

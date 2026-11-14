@@ -443,7 +443,8 @@ impl EngineMutableState {
         let timers = envelope.timers.clone();
         let version_histories = envelope.version_histories.clone();
         let current_version = envelope.current_version;
-        let buffered = envelope.buffered_events.clone();
+        // Go Load: reorderAndFilterDuplicateEvents(state.BufferedEvents, "load").
+        let buffered = crate::execution::mutable_state_builder::reorder_and_filter_duplicate_events(envelope.buffered_events.clone()).0;
         let mut pc_cancels = BTreeMap::new();
         for k in &snapshot.request_cancel_infos {
             let info = cadence_persistence::sqlblobs::request_cancel_info_from_struct(&decode(&k.value)?)
