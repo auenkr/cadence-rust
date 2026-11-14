@@ -42,7 +42,7 @@ fn event(data: &[u8], encoding: &str) -> HResult<Option<ApiJson>> {
     api(&event, "HistoryEvent").map(Some)
 }
 fn blob_api<T: FromThrift + Serialize>(blob: Option<&pc::DataBlob>, name: &'static str) -> HResult<Option<ApiJson>> {
-    blob.map(|b| {
+    blob.filter(|b| !b.data.is_empty()).map(|b| {
         let value = T::from_thrift(&decode(b)?).map_err(|e| HistoryError::internal(e.to_string()))?;
         api(&value, name)
     }).transpose()
@@ -489,7 +489,7 @@ impl EngineMutableState {
             Checksum: self.snapshot.checksum.as_ref().map(|b| serde_json::from_slice(&b.data))
                 .transpose().map_err(|e| HistoryError::internal(e.to_string()))?.unwrap_or_default(),
         };
-        serde_json::to_string(&state).map(|s| s.replace('&', "\\u0026").replace('<', "\\u003c").replace('>', "\\u003e").replace('\u2028', "\\u2028").replace('\u2029', "\\u2029"))
+        serde_json::to_string(&state).map(|s| s.replace('&', "\\u0026").replace('<', "\\u003c").replace('>', "\\u003e").replace('\u{2028}', "\\u2028").replace('\u{2029}', "\\u2029"))
             .map_err(|e| HistoryError::internal(e.to_string()))
     }
 }
