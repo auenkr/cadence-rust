@@ -535,6 +535,7 @@ impl Harness {
             cluster_metadata: Arc::new(crate::engine::test_support::FixedClusterMetadata(CLUSTER.to_string())),
             enable_replication_task_generation: Arc::new(|_, _| true),
             strong_idempotency_sanity_check: Arc::new(|_| false),
+            enable_strong_idempotency: Arc::new(|_| false),
             advanced_visibility_writing: Arc::new(|| false),
             transaction_size_limit: Arc::new(move || limit.load(Ordering::SeqCst)),
             active_cluster_manager: Arc::new(ActiveHere),

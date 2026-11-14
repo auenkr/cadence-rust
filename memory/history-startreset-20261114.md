@@ -12,8 +12,9 @@
 2. Reset `failInflightActivity` passed empty heartbeat details; Go passes `ai.Details`. Now `ai.details`. Test: `pending_activity_infos_carry_heartbeat_details` (engine_resetter.rs).
 
 ## Remaining / not verified
-- Reset `prepare()` clears insert_workflow_requests unconditionally; not re-verified against Go's Reset request recording under EnableStrongIdempotency.
-- EventType Display text in the reset error message not compared with Go String().
+- (Resolved in `history-resetverify`) Reset request parity: Go `insertWorkflowRequest` in `mutable_state_decision_task_manager.go` stores a reset row only when `EnableStrongIdempotency(domain)` is enabled and the request ID is nonempty. The row carries request ID, event version, and `WorkflowRequestTypeReset`; `execution/context.go` passes snapshot/mutation workflow requests to persistence under `CreateWorkflowRequestModeNew`. Rust now gates reset insertion using the same domain config and keeps the row through `prepare()` instead of unconditionally clearing it. Unit test: `reset_workflow_request_matches_go_strong_idempotency_gate`.
+- (Resolved in `history-resetverify`) `types.EventType.String()` and Rust `EventType` display use the same CamelCase name table (including `DecisionTaskCompleted`). Added a reset validation test asserting the complete Go-compatible error text for `ActivityTaskStarted`: `invalid_reset_event_error_uses_go_event_type_string`.
+- CI validation for these changes is pending; results and run URLs will be appended below after both required gates finish.
 
 ## Runs
 See bottom (filled after CI).

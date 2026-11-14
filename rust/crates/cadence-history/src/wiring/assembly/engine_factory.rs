@@ -109,6 +109,7 @@ pub fn build_core(env: &Arc<HistoryEnv>, shard: &Arc<ShardContext>) -> (Arc<Engi
         cluster_metadata: env.cluster.clone() as Arc<dyn crate::engine::deps::ClusterMetadata>,
         enable_replication_task_generation: env.config.enable_replication_task_generation.clone(),
         strong_idempotency_sanity_check: env.config.enable_strong_idempotency_sanity_check.clone(),
+        enable_strong_idempotency: env.config.enable_strong_idempotency.clone(),
         transaction_size_limit: env.config.transaction_size_limit.clone(),
         advanced_visibility_writing: {
             // Go `AdvancedVisibilityWritingMode() != "off"`: advanced store configured and written to.
