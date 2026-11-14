@@ -40,9 +40,9 @@ def build(paths,statuses):
            'One activity, existing pinned Go SDK over TChannel, 1 KiB payload, controlled 10ms activity, 128 worker capacity, non-sticky. 10s warmup / 30s measurement, three alternating Go/Rust pairs, fresh MySQL per arm. All-Rust retains the Go system Worker.',
            'Standard ubuntu-latest runners; services 1 CPU/1400MiB each, MySQL 1.5 CPU/1800MiB. SDK worker CPU1, generator CPU0, services/database CPUs2–3. Schema, DB version, shard count and generated configuration derive from the same pinned Go tree and Compose files in every arm.',
            '','## CI runs','']
-    for run in statuses:lines.append(f"- {run['url']} — {run['conclusion']}; harness `{run['headSha']}`.")
+    for run in statuses:lines.append(f"- **{run.get('service','lane')}**: {run['url']} — {run['conclusion']}; harness `{run['headSha']}`.")
     lines+=['','## Fixed 5 starts/sec','',
-            'Medians of per-run values, not pooled percentiles. CPU is the sum for Frontend+Matching+History, excluding the Go Worker and MySQL. Memory/RSS are sums of per-container sampled peaks, not simultaneous cluster peaks. Collection includes drain and History audits. All-Go below uses the All-Rust lane baseline; other paired baselines follow.',
+            'Medians of per-run values, not pooled percentiles. CPU is the sum for Frontend+Matching+History, excluding the Go Worker and MySQL. Memory/RSS are sums of per-container sampled peaks, not simultaneous cluster peaks; summed process RSS can count shared pages repeatedly. Collection includes drain and History audits. All-Go below uses the All-Rust lane baseline; other paired baselines follow.',
             '', '| Configuration | completions/s | p50 ms | p95 ms | p99 ms | core CPU | core peak MiB | core RSS MiB | correct | errors | valid repetitions |',
             '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|']
     labels={'all':'All Rust (Go Worker)','matching':'Rust Matching only','frontend':'Rust Frontend only','history':'Rust History only'}
@@ -79,6 +79,15 @@ def build(paths,statuses):
             runs=[r for k,r in recovery['runs'].items() if k.endswith('-'+arm)]
             good=[r['recovery']['seconds_after_restore'] for r in runs if r.get('recovery',{}).get('recovered')]
             lines.append(f"| {service} / {arm} | {max(passed) if passed else 'none'} | {len(good)}/3 | {fmt(median(good))} | {sum(sum(r['errors'].values()) for r in runs)} |")
+    lines+=['', 'All four 100-starts/sec stages reached the 1200s stage timeout (exit 124), with partial ledgers and workflow errors. These are failed overload tests, not measured sustainable capacities. CI success in three lanes means fixed/recovery correctness passed; it does not mean the capacity stages passed.',
+            'The Matching lane CI failure is in its All-Go recovery baseline: 19 warmup START_TO_CLOSE timeouts, before measurement/fault injection; only two Go recovery repetitions ran successfully. Rust Matching recovered 3/3 with no workflow errors. This does not establish a Rust Matching recovery regression.',
+            'The All-Go 25/s step passed all three targets in the Frontend and All-Rust lanes, missed one target in the Matching lane, and missed all three in the History lane. History-only Rust also missed one 5/s target. This baseline variation prevents ranking cross-runner capacity from the coarse steps.',
+            '', '| Lane | 25/s Go/Rust median p99 ms | 100/s Go/Rust recorded workflow errors |','|---|---:|---:|']
+    for service,suite in suites.items():
+        low=next(s for s in suite['stages'] if s['mode']=='capacity' and s['rate']==25)
+        high=next(s for s in suite['stages'] if s['mode']=='capacity' and s['rate']==100)
+        g,r=aggregate(low,'go'),aggregate(low,'rust');hg,hr=aggregate(high,'go'),aggregate(high,'rust')
+        lines.append(f"| {service} | {fmt(g['latency']['p99'])} / {fmt(r['latency']['p99'])} | {hg['errors']} / {hr['errors']} |")
     lines+=['','## Comparison to previous results','',
             'Previous SDK smoke source `c1bbd3ae71c84a71d5a226a70b0d8b71d021cb5b`: Matching run 43480728156, History run 43479770520; Frontend rerun 43487649192 failed all 50 warmup workflows before measurement. These used the same 5/s, 10s/30s, three-pair one-activity protocol. Hosted runners and compiler/image resolution vary, so deltas are observations rather than isolated causal attribution.',
             '', '| Isolated service | previous Go/Rust p99 ms | updated Go/Rust p99 ms |','|---|---:|---:|']

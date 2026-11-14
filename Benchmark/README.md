@@ -171,3 +171,5 @@ no such window fits before arrivals end. Fault timestamps are recorded.
 `suite-summary.json` contains aggregates, per-service resources, hashes, config
 and correctness counts. Raw ledgers/logs remain ignored and expire with artifacts.
 Only a deliberately selected compact final report should be committed.
+
+Suite-mode CI artifacts now contain only `suite-summary.json` and `ci.exit`; verbose logs and ledgers are excluded to keep retention small. Standalone smoke mode still uploads its raw temporary evidence.

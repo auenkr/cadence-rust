@@ -71,10 +71,18 @@ jobs:
           REPETITIONS: ${{ inputs.sdk_repetitions || '1' }}
           BENCHMARK_SOURCE_DIR: ${{ github.workspace }}/benchmark-source
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: ${{ always() && !inputs.sdk_suite }}
         with:
           name: sdk-${{ inputs.service || 'matching' }}-benchmark
           path: Benchmark/evidence/run/
+          retention-days: 3
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() && inputs.sdk_suite }}
+        with:
+          name: sdk-${{ inputs.service || 'matching' }}-benchmark
+          path: |
+            Benchmark/evidence/run/suite-summary.json
+            Benchmark/evidence/run/ci.exit
           retention-days: 3
   paired-benchmark:
     if: ${{ inputs.sdk_openloop != true }}
