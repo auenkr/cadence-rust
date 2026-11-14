@@ -232,6 +232,120 @@ impl Metrics for SinkMetrics {
     }
 }
 
+/// Go `defs.go` operation tag of the `metrics.Admin*Scope` an Admin method uses
+/// (`startRequestProfile`). Methods not listed use their own name, as Go's
+/// isolation-group / async-config / partition-config scopes do.
+pub fn admin_scope_operation(method: &str) -> String {
+    match method {
+        "AddSearchAttribute"
+        | "DescribeWorkflowExecution"
+        | "DescribeHistoryHost"
+        | "DescribeCluster"
+        | "GetWorkflowExecutionRawHistoryV2"
+        | "GetWorkflowExecutionRawHistory"
+        | "GetReplicationMessages"
+        | "GetDomainReplicationMessages"
+        | "ReapplyEvents"
+        | "RefreshWorkflowTasks"
+        | "ResendReplicationTasks" => method.to_owned(),
+        "DescribeShardDistribution" => "AdminShardList".to_owned(),
+        "RemoveTask" | "CloseShard" | "ResetQueue" | "DescribeQueue" | "ReadDLQMessages"
+        | "PurgeDLQMessages" | "CountDLQMessages" | "MergeDLQMessages"
+        | "GetDLQReplicationMessages" | "GetCrossClusterTasks"
+        | "RespondCrossClusterTasksCompleted" | "GetDynamicConfig" | "UpdateDynamicConfig"
+        | "RestoreDynamicConfig" | "ListDynamicConfig" | "GetOperationalDynamicConfig"
+        | "UpdateOperationalDynamicConfig" | "RestoreOperationalDynamicConfig"
+        | "ListOperationalDynamicConfig" | "DeleteWorkflow" => format!("Admin{method}"),
+        other => other.to_owned(),
+    }
+}
+
+/// Go `adminHandlerImpl.startRequestProfile` / `error` over a [`MetricSink`]:
+/// `cadence_requests`, `cadence_latency` (timer), `cadence_latency_ns`
+/// (histogram) and the typed error counters, tagged `operation` + `domain`
+/// (`_unknown_`, Go `DomainUnknownTag`).
+pub struct SinkAdminMetrics {
+    sink: Arc<dyn MetricSink>,
+}
+
+impl SinkAdminMetrics {
+    pub fn new(sink: Arc<dyn MetricSink>) -> Self {
+        Self { sink }
+    }
+
+    fn tags(method: &str) -> BTreeMap<String, String> {
+        BTreeMap::from([
+            ("operation".to_owned(), admin_scope_operation(method)),
+            ("domain".to_owned(), UNKNOWN.to_owned()),
+        ])
+    }
+
+    fn emit(
+        &self,
+        name: &'static str,
+        kind: MetricKind,
+        value: MetricValue,
+        method: &str,
+        histogram: Option<HistogramSpec>,
+    ) {
+        self.sink.record(MetricEvent {
+            name,
+            kind,
+            value,
+            tags: Self::tags(method),
+            histogram,
+        });
+    }
+}
+
+impl cadence_service_core::workflow_api::AdminMetrics for SinkAdminMetrics {
+    fn admin_request(&self, method: &str) {
+        self.emit(
+            CADENCE_REQUESTS,
+            MetricKind::Counter,
+            MetricValue::Count(1),
+            method,
+            None,
+        );
+    }
+
+    fn admin_finish(
+        &self,
+        method: &str,
+        elapsed: Duration,
+        outcome: cadence_service_core::workflow_api::AdminOutcome,
+    ) {
+        use cadence_service_core::workflow_api::AdminOutcome as O;
+        self.emit(
+            CADENCE_LATENCY,
+            MetricKind::Timer,
+            MetricValue::Duration(elapsed),
+            method,
+            None,
+        );
+        self.emit(
+            CADENCE_LATENCY_NS,
+            MetricKind::Histogram,
+            MetricValue::Duration(elapsed),
+            method,
+            Some(HistogramSpec::GoLow1ms100s),
+        );
+        let counter = match outcome {
+            O::Ok | O::NotExists => return,
+            O::BadRequest => Counter::BadRequest,
+            O::ServiceBusy => Counter::ServiceBusy,
+            O::Failure => Counter::Failures,
+        };
+        self.emit(
+            counter.metric_name(),
+            MetricKind::Counter,
+            MetricValue::Count(1),
+            method,
+            None,
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -481,5 +595,71 @@ mod tests {
         );
         assert_eq!(tags["caller"], "cadence-web");
         assert_eq!(tags["transport"], "grpc");
+    }
+
+    #[derive(Default)]
+    struct Capture(std::sync::Mutex<Vec<MetricEvent>>);
+    impl MetricSink for Capture {
+        fn record(&self, event: MetricEvent) {
+            self.0.lock().unwrap().push(event);
+        }
+    }
+
+    fn admin_events(
+        method: &str,
+        outcome: cadence_service_core::workflow_api::AdminOutcome,
+    ) -> Vec<MetricEvent> {
+        use cadence_service_core::workflow_api::AdminMetrics as _;
+        let cap = Arc::new(Capture::default());
+        let m = SinkAdminMetrics::new(cap.clone());
+        m.admin_request(method);
+        m.admin_finish(method, Duration::from_millis(2), outcome);
+        std::mem::take(&mut *cap.0.lock().unwrap())
+    }
+
+    #[test]
+    fn admin_success_emits_requests_and_latency_only() {
+        use cadence_service_core::workflow_api::AdminOutcome;
+        let ev = admin_events("DescribeShardDistribution", AdminOutcome::Ok);
+        let names: Vec<_> = ev.iter().map(|e| e.name).collect();
+        assert_eq!(
+            names,
+            ["cadence_requests", "cadence_latency", "cadence_latency_ns"]
+        );
+        for e in &ev {
+            assert_eq!(e.tags["operation"], "AdminShardList");
+            assert_eq!(e.tags["domain"], "_unknown_");
+        }
+    }
+
+    #[test]
+    fn admin_error_counters_follow_go_error_switch() {
+        use cadence_service_core::workflow_api::AdminOutcome as O;
+        let last = |o| {
+            admin_events("GetDynamicConfig", o)
+                .into_iter()
+                .map(|e| (e.name, e.tags["operation"].clone()))
+                .last()
+        };
+        assert_eq!(
+            last(O::BadRequest),
+            Some(("cadence_errors_bad_request", "AdminGetDynamicConfig".into()))
+        );
+        assert_eq!(last(O::ServiceBusy).unwrap().0, "cadence_errors_service_busy");
+        assert_eq!(last(O::Failure).unwrap().0, "cadence_errors");
+        // EntityNotExists: no counter, last event is the latency histogram.
+        assert_eq!(last(O::NotExists).unwrap().0, "cadence_latency_ns");
+    }
+
+    #[test]
+    fn admin_outcome_classification() {
+        use cadence_service_core::workflow_api::AdminOutcome as O;
+        assert_eq!(O::from_grpc_code(0), O::Ok);
+        assert_eq!(O::from_grpc_code(3), O::BadRequest);
+        assert_eq!(O::from_grpc_code(8), O::ServiceBusy);
+        assert_eq!(O::from_grpc_code(5), O::NotExists);
+        assert_eq!(O::from_grpc_code(13), O::Failure);
+        assert_eq!(O::from_exception("BadRequestError"), O::BadRequest);
+        assert_eq!(O::from_exception("InternalServiceError"), O::Failure);
     }
 }
