@@ -166,20 +166,46 @@ struct Frame {
     id: u32,
     payload: Vec<u8>,
 }
-async fn read_frame(reader: &mut tokio::net::tcp::OwnedReadHalf) -> Result<Frame> {
-    let mut header = [0; FRAME_HEADER];
-    reader.read_exact(&mut header).await?;
-    let size = u16::from_be_bytes(header[..2].try_into()?) as usize;
-    if size < FRAME_HEADER {
-        bail!("TChannel frame is smaller than its header");
+// `read_exact` is not cancellation safe. The connection selects frame reads
+// against completed RPCs and fragment expiry, so keep partial bytes here across
+// dropped read futures. Go's connection read loop likewise retains each frame.
+#[derive(Default)]
+struct FrameReader {
+    header: [u8; FRAME_HEADER],
+    header_read: usize,
+    payload: Vec<u8>,
+    payload_read: usize,
+}
+impl FrameReader {
+    async fn read(&mut self, reader: &mut (impl tokio::io::AsyncRead + Unpin)) -> Result<Frame> {
+        while self.header_read < FRAME_HEADER {
+            let count = reader.read(&mut self.header[self.header_read..]).await?;
+            if count == 0 {
+                bail!("TChannel EOF in frame header");
+            }
+            self.header_read += count;
+        }
+        let size = u16::from_be_bytes(self.header[..2].try_into()?) as usize;
+        if size < FRAME_HEADER {
+            bail!("TChannel frame is smaller than its header");
+        }
+        self.payload.resize(size - FRAME_HEADER, 0);
+        while self.payload_read < self.payload.len() {
+            let count = reader.read(&mut self.payload[self.payload_read..]).await?;
+            if count == 0 {
+                bail!("TChannel EOF in frame payload");
+            }
+            self.payload_read += count;
+        }
+        let frame = Frame {
+            kind: self.header[2],
+            id: u32::from_be_bytes(self.header[4..8].try_into()?),
+            payload: std::mem::take(&mut self.payload),
+        };
+        self.header_read = 0;
+        self.payload_read = 0;
+        Ok(frame)
     }
-    let mut payload = vec![0; size - FRAME_HEADER];
-    reader.read_exact(&mut payload).await?;
-    Ok(Frame {
-        kind: header[2],
-        id: u32::from_be_bytes(header[4..8].try_into()?),
-        payload,
-    })
 }
 async fn write_frame(writer: &mut OwnedWriteHalf, frame: Frame) -> Result<()> {
     let size = u16::try_from(FRAME_HEADER + frame.payload.len())?;
@@ -646,7 +672,8 @@ async fn connection(
     let local = stream.local_addr()?.to_string();
     let (mut reader, writer) = stream.into_split();
     let writer = Arc::new(Mutex::new(writer));
-    let init = tokio::time::timeout(Duration::from_secs(10), read_frame(&mut reader)).await??;
+    let mut frames = FrameReader::default();
+    let init = tokio::time::timeout(Duration::from_secs(10), frames.read(&mut reader)).await??;
     if init.kind != INIT_REQ {
         bail!("TChannel connection must start with init");
     }
@@ -694,7 +721,7 @@ async fn connection(
             completed=tasks.join_next(),if !tasks.is_empty()=>{
                 if let Some(Ok((id,result)))=completed {aborts.remove(&id);result?;}
             }
-            frame=read_frame(&mut reader)=>{
+            frame=frames.read(&mut reader)=>{
                 let frame=frame?;
                 match frame.kind {
                     PING_REQ=>write_frame(&mut *writer.lock().await,Frame {kind:PING_RES,id:frame.id,payload:Vec::new()}).await?,
@@ -835,6 +862,39 @@ async fn serve_listener(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn interrupted_frame_reads_preserve_header_payload_and_next_frame() {
+        // An RPC completing (or fragment timer firing) can win the connection
+        // select at every byte boundary, including after a full header. Force
+        // that interleaving without relying on network timing.
+        let body = b"activity completion";
+        let mut wire = vec![0; FRAME_HEADER];
+        wire[..2].copy_from_slice(&((FRAME_HEADER + body.len()) as u16).to_be_bytes());
+        wire[2] = CALL_REQ;
+        wire[4..8].copy_from_slice(&42u32.to_be_bytes());
+        wire.extend_from_slice(body);
+        for split in 1..wire.len() {
+            let (mut writer, mut reader) = tokio::io::duplex(1024);
+            let mut frames = FrameReader::default();
+            writer.write_all(&wire[..split]).await.unwrap();
+            // Poll the read first: it consumes the available prefix and blocks.
+            // The ready branch then drops it, as tasks.join_next does in serve.
+            tokio::select! {
+                biased;
+                _ = frames.read(&mut reader) => panic!("partial frame completed"),
+                _ = std::future::ready(()) => {}
+            }
+            writer.write_all(&wire[split..]).await.unwrap();
+            writer.write_all(&wire).await.unwrap();
+            for _ in 0..2 {
+                let frame = frames.read(&mut reader).await.unwrap();
+                assert_eq!(frame.kind, CALL_REQ);
+                assert_eq!(frame.id, 42);
+                assert_eq!(frame.payload, body);
+            }
+        }
+    }
+
     #[test]
     fn frontend_tchannel_accepts_admin_while_matching_service_set_is_unchanged() {
         assert!(accepts_thrift_service("WorkflowService", false));

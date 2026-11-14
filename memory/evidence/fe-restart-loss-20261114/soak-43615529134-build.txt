@@ -1,0 +1,3 @@
+https://github.com/auenkr/cadence-rust/actions/runs/43615529134
+2026-11-14T16:26:16.3210612Z head=4e014ea994ffdc0e5ec957dcd2a1df5d13845ce9
+2026-11-14T16:32:55.3802599Z e29f01c446d61b25620cb466fc2d6bb6b3c31abaf0e0cf90d8d242bc5770f98b  out/cadence-server
