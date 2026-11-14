@@ -37,3 +37,10 @@ https://github.com/auenkr/cadence-rust/actions/runs/43647363855 and targeted
 server CI is https://github.com/auenkr/cadence-rust/actions/runs/43647366793.
 Both have started on standard hosted runners. Redundant automatic push CI
 43647363234 was canceled. Measured-soak count remains zero until lanes start.
+
+Targeted server CI 43647366793 completed SUCCESS on source `25b510f07`:
+fresh `/home/runner/work/_temp/cargo-target-final`, clippy exit 0, tests exit 0.
+Retrieved the runner-generated Cargo.lock without invoking Cargo locally.
+It adds the optional profiler dependencies and reconciles pre-existing workspace
+manifest/lock drift. Full logs are under
+`/mnt/storage/service/matching-heap-profile/ci-targeted/`.
