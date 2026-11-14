@@ -324,14 +324,16 @@ struct Checksum {
     Value: Option<String>,
 }
 
-// Go enum MarshalText is used by encoding/json; CronOverlapPolicy has no
-// MarshalText and remains numeric. Unknown values follow Go's String fallback.
-macro_rules! enum_text {
-    ($ty:path, $value:expr) => {{
-        let value = $value as i32;
-        <$ty>::from_i32(value).map(|v| v.as_str().to_owned())
-            .unwrap_or_else(|| format!("{}({value})", stringify!($ty).rsplit("::").next().unwrap()))
-    }};
+// Go's enum names come from Go String/MarshalText, including where the
+// current Rust enum names differ. CronOverlapPolicy has no MarshalText.
+type ApiEnums = BTreeMap<String, BTreeMap<String, String>>;
+fn api_enums() -> &'static ApiEnums {
+    static ENUMS: std::sync::OnceLock<ApiEnums> = std::sync::OnceLock::new();
+    ENUMS.get_or_init(|| serde_json::from_str(include_str!("mutable_state_api_enums.json")).expect("Go enum JSON names"))
+}
+fn enum_text(kind: &str, value: i64) -> String {
+    api_enums().get(kind).and_then(|values| values.get(&value.to_string())).cloned()
+        .unwrap_or_else(|| format!("{kind}({value})"))
 }
 
 fn workflow_execution_info(g: &Inner) -> HResult<WorkflowExecutionInfo> {
@@ -351,7 +353,7 @@ fn workflow_execution_info(g: &Inner) -> HResult<WorkflowExecutionInfo> {
             "HistoryEvent",
         )?,
         TaskList: p.task_list.clone(),
-        TaskListKind: enum_text!(cadence_api::enums::TaskListKind, p.task_list_kind as i64),
+        TaskListKind: enum_text("TaskListKind", p.task_list_kind as i64),
         WorkflowTypeName: p.workflow_type_name.clone(),
         WorkflowTimeout: p.workflow_timeout_nanos / 1_000_000_000,
         DecisionStartToCloseTimeout: p.decision_start_to_close_timeout_nanos / 1_000_000_000,
@@ -389,7 +391,7 @@ fn workflow_execution_info(g: &Inner) -> HResult<WorkflowExecutionInfo> {
         Memo: byte_map(&p.memo),
         SearchAttributes: byte_map(&p.search_attributes),
         PartitionConfig: (!p.partition_config.is_empty()).then(|| p.partition_config.clone()),
-        ExecutionStatus: enum_text!(cadence_api::enums::WorkflowExecutionStatus, 0),
+        ExecutionStatus: enum_text("WorkflowExecutionStatus", 0),
         ScheduledExecutionTimestamp: 0,
         Attempt: p.attempt as i64,
         HasRetryPolicy: p.has_retry_policy,
@@ -445,7 +447,7 @@ fn activity_info(id: i64, p: &pc::ActivityInfo, g: &Inner) -> HResult<ActivityIn
         Attempt: p.attempt as i64,
         StartedIdentity: p.started_identity.clone(),
         TaskList: p.task_list.clone(),
-        TaskListKind: enum_text!(cadence_api::enums::TaskListKind, p.task_list_kind as i64),
+        TaskListKind: enum_text("TaskListKind", p.task_list_kind as i64),
         HasRetryPolicy: p.has_retry_policy,
         InitialInterval: p.retry_initial_interval_seconds as i64,
         BackoffCoefficient: p.retry_backoff_coefficient,
@@ -457,7 +459,7 @@ fn activity_info(id: i64, p: &pc::ActivityInfo, g: &Inner) -> HResult<ActivityIn
         LastFailureReason: p.retry_last_failure_reason.clone(),
         LastWorkerIdentity: p.retry_last_worker_identity.clone(),
         LastFailureDetails: bytes(&p.retry_last_failure_details),
-        LastFailureCategory: enum_text!(cadence_api::enums::FailureCategory, p.retry_last_failure_category as i64),
+        LastFailureCategory: enum_text("FailureCategory", p.retry_last_failure_category as i64),
         LastRetryIntervalSeconds: p.retry_last_retry_interval_seconds as i64,
         LastHeartbeatTimeoutVisibilityInSeconds: p.last_heartbeat_timeout_visibility_in_seconds,
     })
@@ -477,7 +479,7 @@ fn child_execution_info(id: i64, p: &pc::ChildExecutionInfo) -> HResult<ChildExe
         DomainID: p.domain_id.clone(),
         DomainNameDEPRECATED: p.domain_name.clone(),
         WorkflowTypeName: p.workflow_type_name.clone(),
-        ParentClosePolicy: enum_text!(cadence_api::enums::ParentClosePolicy, p.parent_close_policy as i64),
+        ParentClosePolicy: enum_text("ParentClosePolicy", p.parent_close_policy as i64),
     })
 }
 
@@ -646,7 +648,7 @@ struct ApiJson {
 }
 fn api<T: Serialize>(value: &T, kind: &'static str) -> HResult<ApiJson> {
     Ok(ApiJson {
-        value: cadence_api::enums::to_go_json_value(value).map_err(|e| HistoryError::internal(e.to_string()))?,
+        value: serde_json::to_value(value).map_err(|e| HistoryError::internal(e.to_string()))?,
         kind,
     })
 }
@@ -708,6 +710,11 @@ impl Serialize for ApiField<'_> {
                 map.serialize_entry(key, &ApiField { value, kind: child })?;
             }
             return map.end();
+        }
+        if api_enums().contains_key(kind) {
+            if let Some(value) = self.value.as_i64() {
+                return serializer.serialize_str(&enum_text(kind, value));
+            }
         }
         if let Some(fields) = api_schema().get(kind) {
             let mut map = serializer.serialize_map(None)?;
@@ -781,7 +788,7 @@ mod tests {
         let state =
             EngineMutableState::from_snapshot(snapshot, Default::default(), 0, Arc::new(|| 0))
                 .unwrap();
-        let expected = r#"{"ActivityInfos":{},"TimerInfos":{},"ChildExecutionInfos":{},"RequestCancelInfos":{},"SignalInfos":{},"SemaphoreInfos":{},"SignalRequestedIDs":{},"ExecutionInfo":{"DomainID":"domain","WorkflowID":"workflow","RunID":"run","FirstExecutionRunID":"","ParentDomainID":"","ParentWorkflowID":"","ParentRunID":"","InitiatedID":0,"CompletionEventBatchID":0,"CompletionEvent":null,"TaskList":"","TaskListKind":"Normal","WorkflowTypeName":"","WorkflowTimeout":12,"DecisionStartToCloseTimeout":0,"ExecutionContext":"AQL/","State":0,"CloseStatus":0,"LastFirstEventID":0,"LastEventTaskID":0,"NextEventID":0,"LastProcessedEvent":0,"StartTimestamp":"1970-01-01T00:00:01.23456789Z","LastUpdatedTimestamp":"0001-01-01T00:00:00Z","CreateRequestID":"","SignalCount":0,"DecisionVersion":0,"DecisionScheduleID":0,"DecisionStartedID":0,"DecisionRequestID":"","DecisionTimeout":3,"DecisionAttempt":0,"DecisionStartedTimestamp":0,"DecisionScheduledTimestamp":0,"DecisionOriginalScheduledTimestamp":0,"CancelRequested":false,"CancelRequestID":"","StickyTaskList":"","StickyScheduleToStartTimeout":0,"ClientLibraryVersion":"","ClientFeatureVersion":"","ClientImpl":"","AutoResetPoints":null,"Memo":{"empty":""},"SearchAttributes":null,"PartitionConfig":null,"ExecutionStatus":"Created","ScheduledExecutionTimestamp":0,"Attempt":0,"HasRetryPolicy":false,"InitialInterval":0,"BackoffCoefficient":0,"JitterCoefficient":0,"MaximumInterval":0,"ExpirationTime":"0001-01-01T00:00:00Z","MaximumAttempts":0,"NonRetriableErrors":null,"BranchToken":null,"IsCron":false,"CronOverlapPolicy":0,"ExpirationSeconds":0,"CronSchedule":"","ActiveClusterSelectionPolicy":null},"ExecutionStats":{"HistorySize":0},"BufferedEvents":[],"VersionHistories":null,"ReplicationState":null,"Checksum":{"Version":0,"Flavor":0,"Value":null}}"#;
+        let expected = r#"{"ActivityInfos":{},"TimerInfos":{},"ChildExecutionInfos":{},"RequestCancelInfos":{},"SignalInfos":{},"SemaphoreInfos":{},"SignalRequestedIDs":{},"ExecutionInfo":{"DomainID":"domain","WorkflowID":"workflow","RunID":"run","FirstExecutionRunID":"","ParentDomainID":"","ParentWorkflowID":"","ParentRunID":"","InitiatedID":0,"CompletionEventBatchID":0,"CompletionEvent":null,"TaskList":"","TaskListKind":"NORMAL","WorkflowTypeName":"","WorkflowTimeout":12,"DecisionStartToCloseTimeout":0,"ExecutionContext":"AQL/","State":0,"CloseStatus":0,"LastFirstEventID":0,"LastEventTaskID":0,"NextEventID":0,"LastProcessedEvent":0,"StartTimestamp":"1970-01-01T00:00:01.23456789Z","LastUpdatedTimestamp":"0001-01-01T00:00:00Z","CreateRequestID":"","SignalCount":0,"DecisionVersion":0,"DecisionScheduleID":0,"DecisionStartedID":0,"DecisionRequestID":"","DecisionTimeout":3,"DecisionAttempt":0,"DecisionStartedTimestamp":0,"DecisionScheduledTimestamp":0,"DecisionOriginalScheduledTimestamp":0,"CancelRequested":false,"CancelRequestID":"","StickyTaskList":"","StickyScheduleToStartTimeout":0,"ClientLibraryVersion":"","ClientFeatureVersion":"","ClientImpl":"","AutoResetPoints":null,"Memo":{"empty":""},"SearchAttributes":null,"PartitionConfig":null,"ExecutionStatus":"PENDING","ScheduledExecutionTimestamp":0,"Attempt":0,"HasRetryPolicy":false,"InitialInterval":0,"BackoffCoefficient":0,"JitterCoefficient":0,"MaximumInterval":0,"ExpirationTime":"0001-01-01T00:00:00Z","MaximumAttempts":0,"NonRetriableErrors":null,"BranchToken":null,"IsCron":false,"CronOverlapPolicy":0,"ExpirationSeconds":0,"CronSchedule":"","ActiveClusterSelectionPolicy":null},"ExecutionStats":{"HistorySize":0},"BufferedEvents":[],"VersionHistories":null,"ReplicationState":null,"Checksum":{"Version":0,"Flavor":0,"Value":null}}"#;
         assert_eq!(state.persistence_json().unwrap(), expected);
     }
 
@@ -836,6 +843,14 @@ mod tests {
             serde_json::to_string(&histories).unwrap(),
             r#"{"CurrentVersionHistoryIndex":0,"Histories":[{"BranchToken":"AQL/","Items":[{"EventID":7,"Version":20}]}]}"#
         );
+    }
+
+    #[test]
+    fn enum_text_uses_go_names_and_keeps_non_text_enums_numeric() {
+        assert_eq!(enum_text("FailureCategory", 0), "Standard");
+        assert_eq!(enum_text("FailureCategory", 1), "Poll");
+        assert_eq!(enum_text("TaskListKind", 0), "NORMAL");
+        assert!(!api_enums().contains_key("CronOverlapPolicy"));
     }
 
     #[test]
