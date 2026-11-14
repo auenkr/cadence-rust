@@ -324,7 +324,15 @@ impl Handler for HandlerImpl {
             return Ok(adm::GetDLQReplicationMessagesResponse::default());
         };
         let e = self.engine(&first.workflow_id).await?;
-        let tasks = e.get_dlq_replication_messages(&r.task_infos).await?;
+        // Go's handler logs an engine conversion/fetch error and omits that
+        // workflow's tasks from the successful response.
+        let tasks = match e.get_dlq_replication_messages(&r.task_infos).await {
+            Ok(tasks) => tasks,
+            Err(error) => {
+                tracing::error!(error = %error, "Failed to get dlq replication tasks.");
+                Vec::new()
+            }
+        };
         Ok(adm::GetDLQReplicationMessagesResponse { replication_tasks: Some(tasks) })
     }
 
