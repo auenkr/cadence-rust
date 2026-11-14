@@ -486,7 +486,6 @@ pub(crate) fn start_child_workflow_execution_initiated_event_attributes(
         active_cluster_selection_policy: v
             .active_cluster_selection_policy
             .map(selection_policy_out),
-        ..Default::default()
     }
 }
 fn start_child_workflow_execution_failed_event_attributes(
