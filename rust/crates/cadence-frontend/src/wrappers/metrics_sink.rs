@@ -614,7 +614,8 @@ mod tests {
         let m = SinkAdminMetrics::new(cap.clone());
         m.admin_request(method);
         m.admin_finish(method, Duration::from_millis(2), outcome);
-        std::mem::take(&mut *cap.0.lock().unwrap())
+        let guard = cap.0.lock().unwrap();
+        guard.clone()
     }
 
     #[test]
