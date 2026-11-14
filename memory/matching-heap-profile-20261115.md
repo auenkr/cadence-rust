@@ -65,3 +65,36 @@ Profile soak 43647363855 still has both Go baseline and Rust lane jobs active
 in their Soak steps (~53 minutes since lane step start). No early exit or
 uploaded lane reports yet. One measured soak has been started; two slots remain.
 No further code changes, local builds, tests, or runtime processes.
+
+## Profiled jemalloc soak result (measured soak 1/3)
+
+- Run 43647363855: workflow SUCCESS, **RUST OVERALL: PASS**, 42,000/42,000
+  completed, zero failures/panics. Matching RSS slope 4.01 MiB/h vs Go 1.29.
+- Source: `25b510f0798afe6475da89fada649bf4ef60919b`; binary SHA256
+  `afcd05b7428c313827bac70a5f5d38c23f3c71b08a6bf7640fa72f3ec665a603`.
+- All four `prof.dump` calls succeeded. Exact jemalloc allocated bytes:
+  180s 117928912; 1200s 113299488; 2400s 113667600; 4000s 113623504.
+  After 1200s, allocated bytes grew only 324016 bytes, then fell between 2400s
+  and 4000s. Resident bytes fell from 135507968 to 133832704 (180→4000s).
+- Sampled live-heap diffs vs 180s: 1200s -2692801 B; 2400s +4991749 B;
+  4000s -2251919 B. Sampling at 512 KiB has substantial variance; exact stats
+  are stronger evidence that live jemalloc allocations plateaued in this run.
+- Largest positive late cumulative stack: TChannel serve_listener +2635547 B,
+  including AppState/cluster metadata BTreeMap clones +2102277 B; Thrift value
+  decoding +524312 B. Earlier positives included active activity-poll futures.
+  These are concurrent connection/RPC state, not a monotonic live-byte trend.
+  Total late live estimate ~101.6 MB; ~83.9 MB was connection/pool initialization
+  and ~75.5 MB was owner lease/connect initialization (overlapping stacks).
+- Raw profiles, derived reports, full samples, summary, verdict and binary
+  identity committed under `memory/evidence/matching-heap-profile-20261115/jemalloc/`.
+  Raw profiles are ~25 KB each; the 43 MB lane artifact is mostly service logs.
+
+This proves a live-heap plateau **with the diagnostic jemalloc allocator**,
+not the default system allocator. It does not yet establish the cause of the
+original default-build slope. A second, opt-in System-allocator measurement
+adds exact requested-live-byte counters, 64-KiB byte-interval sampled stacks,
+glibc mallinfo2 and smaps_rollup snapshots, without replacing the allocator.
+Symbolization runs after process exit to avoid caching debug data in the server.
+Feature-specific clippy and a sample lifetime/reallocation regression test are
+queued in https://github.com/auenkr/cadence-rust/actions/runs/43655373681.
+No second soak has started yet. Default builds remain unchanged.

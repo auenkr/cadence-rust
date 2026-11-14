@@ -1,0 +1,135 @@
+Using local file bin/cadence-server.
+Using local file res/up/heap-profiles/heap-4000.heap.
+Total: -2251919 B
+       0  -0.0%  -0.0%  2635547 -117.0% cadence_matching::launcher::run_with_lifecycle::{closure#0}::{closure#77}
+       0  -0.0%  -0.0%  2635547 -117.0% cadence_matching::tchannel::serve_listener::{closure#0}
+       0  -0.0%  -0.0%  2635547 -117.0% cadence_matching::tchannel::serve_matching_with_ringpop_listener::{closure#0} (inline)
+       0  -0.0%  -0.0%  2102277 -93.4% ::clone
+       0  -0.0%  -0.0%  2102277 -93.4% ::clone::clone_subtree::
+       0  -0.0%  -0.0%  2102277 -93.4% ::new_leaf:: (inline)
+       0  -0.0%  -0.0%  2102277 -93.4% ::new_uninit_in (inline)
+       0  -0.0%  -0.0%  2102277 -93.4% ::try_new_uninit_in (inline)
+       0  -0.0%  -0.0%  2096070 -93.1% ::alloc (inline)
+       0  -0.0%  -0.0%  2096070 -93.1% ::new:: (inline)
+       0  -0.0%  -0.0%  2096070 -93.1% __rustc::__rust_alloc (inline)
+       0  -0.0%  -0.0%  1577973 -70.1% ::clone (inline)
+       0  -0.0%  -0.0%  1058839 -47.0% tokio::task::spawn::spawn::@1aab870
+       0  -0.0%  -0.0%   524312 -23.3% ::to_vec (inline)
+       0  -0.0%  -0.0%   524312 -23.3% ::to_vec:: (inline)
+       0  -0.0%  -0.0%   524312 -23.3% ::to_vec_in:: (inline)
+       0  -0.0%  -0.0%   524312 -23.3% ::try_allocate_in (inline)
+       0  -0.0%  -0.0%   524312 -23.3% ::with_capacity_in (inline)
+       0  -0.0%  -0.0%   524312 -23.3% cadence_thrift::value::read_struct
+       0  -0.0%  -0.0%   524312 -23.3% cadence_thrift::value::read_value
+       0  -0.0%  -0.0%    -6207   0.3% ::bind:: (inline)
+       0  -0.0%  -0.0%    -6207   0.3% ::bind_new_task::
+       0  -0.0%  -0.0%    -6207   0.3% ::new
+       0  -0.0%  -0.0%    -6207   0.3% ::spawn:: (inline)
+       0  -0.0%  -0.0%    -6207   0.3% _rjem_mallocx
+       0  -0.0%  -0.0%    -6207   0.3% tokio::runtime::context::current::with_current:: (inline)
+       0  -0.0%  -0.0%    -6207   0.3% tokio::runtime::context::current::with_current::::{closure#0} (inline)
+       0  -0.0%  -0.0%    -6207   0.3% tokio::runtime::task::new_task:: (inline)
+       0  -0.0%  -0.0%    -6207   0.3% tokio::task::spawn::spawn_inner:: (inline)
+       0  -0.0%  -0.0%    -6207   0.3% tokio::task::spawn::spawn_inner::::{closure#0} (inline)
+       0  -0.0%  -0.0%  -524304  23.3% ::or_insert_with:: (inline)
+       0  -0.0%  -0.0%  -524304  23.3% ::or_try_insert_with:: (inline)
+       0  -0.0%  -0.0%  -524304  23.3% ::poll2 (inline)
+       0  -0.0%  -0.0%  -524304  23.3% ::with::
+       0  -0.0%  -0.0%  -524304  23.3% bytes::bytes::promotable_even_clone
+       0  -0.0%  -0.0%  -524304  23.3% bytes::bytes::shallow_clone_vec
+       0  -0.0%  -0.0%  -524304  23.3% hyper::common::date::update_and_header_value::{closure#0} (inline)
+       0  -0.0%  -0.0%  -524368  23.3% ::grow_one
+       0  -0.0%  -0.0%  -524368  23.3% ::grow_one (inline)
+       0  -0.0%  -0.0%  -524368  23.3% ::push (inline)
+       0  -0.0%  -0.0%  -524368  23.3% ::push_mut (inline)
+       0  -0.0%  -0.0%  -524368  23.3% cadence_matching::thrift_matching::native_dispatch::dispatch_native_with_context::{closure#0}::{closure#0}::{closure#2} (inline)
+       0  -0.0%  -0.0%  -524368  23.3% cadence_matching::thrift_matching::normalize
+       0  -0.0%  -0.0%  -524480  23.3% ::append_elements (inline)
+       0  -0.0%  -0.0%  -524480  23.3% ::chunks
+       0  -0.0%  -0.0%  -524480  23.3% ::extend_from_slice (inline)
+       0  -0.0%  -0.0%  -524480  23.3% ::initial
+       0  -0.0%  -0.0%  -524480  23.3% ::reserve (inline)
+       0  -0.0%  -0.0%  -524480  23.3% ::reserve::do_reserve_and_handle::
+       0  -0.0%  -0.0%  -524480  23.3% ::spec_extend (inline)
+       0  -0.0%  -0.0%  -525826  23.4% ::core_poll_for_decision_task::{closure#0} (inline)
+       0  -0.0%  -0.0%  -525826  23.4% ::matching_request::::{closure#0} (inline)
+       0  -0.0%  -0.0%  -525826  23.4% ::poll_decision_inner::{closure#0} (inline)
+       0  -0.0%  -0.0%  -525826  23.4% ::poll_decision_with_poller::{closure#0} (inline)
+       0  -0.0%  -0.0%  -525826  23.4% ::poll_for_decision_task::{closure#0}
+       0  -0.0%  -0.0%  -525826  23.4% ::poll_for_decision_task::{closure#0} (inline)
+       0  -0.0%  -0.0%  -525826  23.4% ::poll_for_decision_task::{closure#0}::{closure#0} (inline)
+       0  -0.0%  -0.0%  -525826  23.4% ::poll_for_decision_task::{closure#0}::{closure#2}
+       0  -0.0%  -0.0%  -525826  23.4% ::poll_for_decision_task::{closure#0}::{closure#4} (inline)
+       0  -0.0%  -0.0%  -525826  23.4% ::poll_with_lifecycle::::{closure#0} (inline)
+       0  -0.0%  -0.0%  -525826  23.4% cadence_matching::matching_panic::capture::::{closure#0} (inline)
+       0  -0.0%  -0.0%  -525826  23.4% cadence_matching::matching_panic::capture::::{closure#0}::{closure#0} (inline)
+       0  -0.0%  -0.0%  -525826  23.4% cadence_matching::matching_panic::capture::::{closure#0}::{closure#0}::{closure#0} (inline)
+       0  -0.0%  -0.0%  -525826  23.4% cadence_matching::matching_service_native::observe::::{closure#0} (inline)
+       0  -0.0%  -0.0%  -525826  23.4% tokio::sync::oneshot::channel:: (inline)
+       0  -0.0%  -0.0%  -530575  23.6% ::map:: (inline)
+       0  -0.0%  -0.0%  -592841  26.3% ::poll_for_decision_task
+       0  -0.0%  -0.0% -1048848  46.6% ::finish_grow
+       0  -0.0%  -0.0% -1048848  46.6% ::grow_amortized (inline)
+       0  -0.0%  -0.0% -1063957  47.2% cadence_matching::tchannel::connection::{closure#0} (inline)
+       0  -0.0%  -0.0% -1063957  47.2% cadence_matching::tchannel::serve_listener::{closure#0}::{closure#1}
+       0  -0.0%  -0.0% -1065046  47.3% ::spawn::
+       0  -0.0%  -0.0% -1065046  47.3% tokio::task::spawn::spawn::@1aab630
+       0  -0.0%  -0.0% -2180483  96.8% ::poll_for_activity_task
+       0  -0.0%  -0.0% -2245712  99.7% _rjem_je_malloc_default
+       0  -0.0%  -0.0% -2251919 100.0% ::alloc_impl (inline)
+       0  -0.0%  -0.0% -2251919 100.0% ::alloc_impl_runtime (inline)
+       0  -0.0%  -0.0% -2251919 100.0% ::allocate (inline)
+       0  -0.0%  -0.0% -2251919 100.0% ::call_once (inline)
+       0  -0.0%  -0.0% -2251919 100.0% ::call_once::{shim:vtable#0}
+       0  -0.0%  -0.0% -2251919 100.0% ::launch::{closure#0} (inline)
+       0  -0.0%  -0.0% -2251919 100.0% ::new::thread_start
+       0  -0.0%  -0.0% -2251919 100.0% ::poll
+       0  -0.0%  -0.0% -2251919 100.0% ::poll (inline)
+       0  -0.0%  -0.0% -2251919 100.0% ::poll::{closure#0} (inline)
+       0  -0.0%  -0.0% -2251919 100.0% ::poll_inner (inline)
+       0  -0.0%  -0.0% -2251919 100.0% ::run
+       0  -0.0%  -0.0% -2251919 100.0% ::run (inline)
+       0  -0.0%  -0.0% -2251919 100.0% ::run_task
+       0  -0.0%  -0.0% -2251919 100.0% ::run_task::{closure#0} (inline)
+       0  -0.0%  -0.0% -2251919 100.0% ::set::
+       0  -0.0%  -0.0% -2251919 100.0% ::spawn_thread::{closure#0} (inline)
+       0  -0.0%  -0.0% -2251919 100.0% ::try_with:: (inline)
+       0  -0.0%  -0.0% -2251919 100.0% ::with:: (inline)
+       0  -0.0%  -0.0% -2251919 100.0% ::with_mut:: (inline)
+       0  -0.0%  -0.0% -2251919 100.0% __clone@@GLIBC_2.2.5
+       0  -0.0%  -0.0% -2251919 100.0% _rjem_je_prof_backtrace
+       0  -0.0%  -0.0% -2251919 100.0% _rjem_je_prof_tctx_create
+       0  -0.0%  -0.0% -2251919 100.0% alloc::alloc::alloc (inline)
+       0  -0.0%  -0.0% -2251919 100.0% imalloc (inline)
+       0  -0.0%  -0.0% -2251919 100.0% imalloc_body (inline)
+       0  -0.0%  -0.0% -2251919 100.0% prof_alloc_prep (inline)
+-2251919 100.0% 100.0% -2251919 100.0% prof_backtrace_impl
+       0  -0.0% 100.0% -2251919 100.0% pthread_condattr_setpshared@GLIBC_2.2.5
+       0  -0.0% 100.0% -2251919 100.0% std::panic::catch_unwind:: (inline)
+       0  -0.0% 100.0% -2251919 100.0% std::panicking::catch_unwind:: (inline)
+       0  -0.0% 100.0% -2251919 100.0% std::panicking::catch_unwind::do_call:: (inline)
+       0  -0.0% 100.0% -2251919 100.0% std::sys::backtrace::__rust_begin_short_backtrace::
+       0  -0.0% 100.0% -2251919 100.0% std::thread::lifecycle::spawn_unchecked::::{closure#1} (inline)
+       0  -0.0% 100.0% -2251919 100.0% std::thread::lifecycle::spawn_unchecked::::{closure#1}::{closure#0} (inline)
+       0  -0.0% 100.0% -2251919 100.0% tokio::runtime::context::runtime::enter_runtime::@4f2e5d0
+       0  -0.0% 100.0% -2251919 100.0% tokio::runtime::context::set_scheduler:: (inline)
+       0  -0.0% 100.0% -2251919 100.0% tokio::runtime::context::set_scheduler::::{closure#0} (inline)
+       0  -0.0% 100.0% -2251919 100.0% tokio::runtime::scheduler::multi_thread::worker::run
+       0  -0.0% 100.0% -2251919 100.0% tokio::runtime::scheduler::multi_thread::worker::run::{closure#0} (inline)
+       0  -0.0% 100.0% -2251919 100.0% tokio::runtime::scheduler::multi_thread::worker::run::{closure#0}::{closure#0} (inline)
+       0  -0.0% 100.0% -2251919 100.0% tokio::runtime::task::harness::poll_future:: (inline)
+       0  -0.0% 100.0% -2251919 100.0% tokio::runtime::task::harness::poll_future::::{closure#0} (inline)
+       0  -0.0% 100.0% -2251919 100.0% tokio::task::coop::budget:: (inline)
+       0  -0.0% 100.0% -2251919 100.0% tokio::task::coop::with_budget:: (inline)
+       0  -0.0% 100.0% -2773324 123.2% ::pin (inline)
+       0  -0.0% 100.0% -3299150 146.5% cadence_matching::thrift_matching::native_dispatch::invoke::{closure#0} (inline)
+       0  -0.0% 100.0% -3299206 146.5% cadence_matching::tchannel::connection::{closure#0}::{closure#5}
+       0  -0.0% 100.0% -3299206 146.5% cadence_matching::tchannel::handle_call::{closure#0}
+       0  -0.0% 100.0% -3823518 169.8% ::scope_inner:: (inline)
+       0  -0.0% 100.0% -3823518 169.8% ::with_inbound_context::::{closure#0} (inline)
+       0  -0.0% 100.0% -3823518 169.8% cadence_matching::tchannel::handle_call::{closure#0}::{closure#4} (inline)
+       0  -0.0% 100.0% -3823518 169.8% cadence_matching::thrift_matching::dispatch_with_context::{closure#0} (inline)
+       0  -0.0% 100.0% -3823518 169.8% cadence_matching::thrift_matching::native_dispatch::dispatch_native_with_context::{closure#0} (inline)
+       0  -0.0% 100.0% -3823518 169.8% cadence_matching::thrift_matching::native_dispatch::dispatch_native_with_context::{closure#0}::{closure#0} (inline)
+       0  -0.0% 100.0% -3829661 170.1% ::new (inline)
+       0  -0.0% 100.0% -3829661 170.1% alloc::boxed::box_new_uninit (inline)
