@@ -60,3 +60,9 @@ Soak attempt 1 dispatched with defaults (70 minutes, 10 workflows/s,
 lanes go-baseline,rust):
 https://github.com/auenkr/cadence-rust/actions/runs/43615529134,
 head 4e014ea994ffdc0e5ec957dcd2a1df5d13845ce9. Pending. No second soak started.
+
+## Resume checkpoint, 16:53 UTC
+
+Resumed after an interrupted agent turn/rate limit. Soak 43615529134 remains
+in progress in both lanes (jobs started 16:33 UTC). No replacement run or second
+soak dispatched. Code unchanged; targeted and full fresh-target CI remain green.
