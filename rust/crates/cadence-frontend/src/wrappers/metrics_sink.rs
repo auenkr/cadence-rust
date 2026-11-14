@@ -640,7 +640,7 @@ mod tests {
             admin_events("GetDynamicConfig", o)
                 .into_iter()
                 .map(|e| (e.name, e.tags["operation"].clone()))
-                .last()
+                .next_back()
         };
         assert_eq!(
             last(O::BadRequest),
