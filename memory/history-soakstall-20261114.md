@@ -82,3 +82,13 @@ Validated so far on implementation head c4d28963dcd6c825b62313d2247e57c6430ce4a4
 - Durable compact evidence: `memory/evidence/history-pollms-fix-20261114/`.
   Full gate artifacts downloaded and inspected; raw logs remain on Actions for
   their configured three-day retention. Soak 43548206209 is running SDK traffic.
+
+First fixed-code mysql soak 43548206209: workflow latency FIXED, but overall run
+FAILURE. p50=4124ms, p95=4440ms, p99=6301ms (baseline Go p50~4100ms, old Rust
+p50=24102ms). Completed 1918/1920; two workflows (IDs ending 0000948/0000949)
+failed with `query state "init"` after the History restart. Their dumped histories
+show child started before restart, wake signal after restart, but no child-completed
+event or continue-as-new; these are distinct from the result long-poll wakeup.
+The soak also cannot pass restarted-host RSS sampling at 8m: restart at 245s +
+300s warm-up exceeds end=456s, yielding zero samples. Do not report this run green.
+Evidence retained under `memory/evidence/history-pollms-fix-20261114/soak-8m/`.
