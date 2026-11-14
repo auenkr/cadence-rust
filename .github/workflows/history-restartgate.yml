@@ -1,0 +1,100 @@
+name: History restart gate (kill -9, graceful restart, DB outage, Matching kill)
+
+on:
+  # push trigger on the work branch: dispatch is not possible until the workflow exists on master.
+  push:
+    branches: [history-restartgate]
+    paths: ['.github/workflows/history-restartgate.yml', 'tests/gates/run-history-restartgate.py']
+  workflow_dispatch:
+    inputs:
+      database:
+        description: Persistence lane
+        type: choice
+        options: [mysql, postgres, cassandra]
+        default: mysql
+      seconds:
+        description: SDK load duration in seconds
+        default: "1500"
+
+concurrency:
+  group: history-restartgate-${{ github.ref }}-${{ github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  restartgate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        database: ${{ fromJSON(github.event_name == 'push' && '["mysql","postgres","cassandra"]' || format('["{0}"]', inputs.database)) }}
+    name: restartgate-${{ matrix.database }}
+    env:
+      CARGO_TARGET_DIR: /tmp/cadence-history-restartgate-${{ github.run_id }}-${{ github.run_attempt }}
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: |
+            go/go.sum
+            tests/history-soak/go.sum
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install probe dependencies
+        run: python3 -m pip install --user grpcio grpcio-tools
+      - name: Validate harness syntax and record source identity
+        run: |
+          mkdir -p out
+          git rev-parse HEAD > out/head-sha.txt
+          python3 -m py_compile tests/gates/run-history-restartgate.py
+          bash -n tests/gates/run-frontend-${{ matrix.database }}-lane.sh
+      - name: Build Rust services in fresh target directory
+        run: |
+          set +e
+          cargo build --manifest-path rust/Cargo.toml -p cadence-server -p cadence-history > out/cargo-build.log 2>&1
+          result=$?
+          echo "$result" > out/cargo-build.exit
+          tail -40 out/cargo-build.log
+          if [ "$result" -ne 0 ]; then exit "$result"; fi
+          sha256sum "$CARGO_TARGET_DIR/debug/cadence-server" "$CARGO_TARGET_DIR/debug/cadence-history" > out/rust-binaries.sha256
+          cat out/rust-binaries.sha256
+      - name: Build Go Worker, CLI and soak driver
+        run: |
+          (cd go && go build -p 2 -ldflags='-s -w' -o "$GITHUB_WORKSPACE/out/cadence-go-server" ./cmd/server)
+          (cd go && go build -p 2 -ldflags='-s -w' -o "$GITHUB_WORKSPACE/out/cadence-cli" ./cmd/tools/cli)
+          (cd tests/history-soak && go build -o "$GITHUB_WORKSPACE/out/history-soak-driver" .)
+      - name: Faults under sustained SDK load
+        env:
+          CADENCE_GATE_SCRIPT: run-history-restartgate.py
+          CADENCE_GATE_TWO_HISTORY: "true"
+          RUST_BACKTRACE: 1
+          RUST_LOG: warn
+        run: |
+          set +e
+          export RG_SECONDS='${{ inputs.seconds || '1500' }}'
+          tests/gates/run-frontend-${{ matrix.database }}-lane.sh out/gate \
+            --rust-binary "$CARGO_TARGET_DIR/debug/cadence-server" \
+            --rust-history-binary "$CARGO_TARGET_DIR/debug/cadence-history" \
+            --go-server "$GITHUB_WORKSPACE/out/cadence-go-server" \
+            --go-cli "$GITHUB_WORKSPACE/out/cadence-cli" \
+            --driver "$GITHUB_WORKSPACE/out/history-soak-driver" \
+            --rust-root "$GITHUB_WORKSPACE" > out/gate.log 2>&1
+          result=$?
+          echo "$result" > out/gate.exit
+          grep -a 'GATE ' out/gate.log | cut -c1-300 | tail -80
+          tail -40 out/gate.log | cut -c1-300
+          mkdir -p out/up/logs
+          for f in out/gate/run/*.log; do [ -f "$f" ] && tail -n 400 "$f" > "out/up/logs/$(basename "$f")"; done
+          cp out/gate/run/{steps.json,summary.json,restartgate-result.json,samples.jsonl,soak-driver.log,rust-binary.sha256,rust-history-binary.sha256} out/up/ 2>/dev/null || true
+          cp out/head-sha.txt out/rust-binaries.sha256 out/gate.exit out/up/
+          exit "$result"
+      - name: Upload reproducible evidence
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: history-restartgate-${{ matrix.database }}
+          retention-days: 3
+          path: out/up/
