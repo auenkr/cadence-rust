@@ -21,7 +21,7 @@ use cadence_api::types::FailureOptions;
 
 use super::mutable_state_builder::{TypedMutableState, EMPTY_EVENT_ID};
 use super::mutable_state_methods_common::{internal_err, Result, TIMER_TASK_STATUS_NONE};
-use super::retry::{backoff_interval, should_retry};
+use super::retry::{backoff_interval, failure_category_from_go_i32, failure_category_to_go_i32, should_retry};
 use crate::mutable_state_activity::ActivityInfo;
 
 /// Go `common.TransientEventID`.
@@ -101,6 +101,9 @@ impl TypedMutableState {
             .as_ref()
             .and_then(|o| o.next_retry_interval_seconds)
             .unwrap_or_default();
+        ai.last_failure_category = failure_category_to_go_i32(
+            request.last_failure_options.as_ref().and_then(|o| o.failure_category),
+        );
         if reset_activity_timer_task_status {
             ai.timer_task_status = TIMER_TASK_STATUS_NONE;
         }
@@ -200,6 +203,7 @@ impl TypedMutableState {
             cancel_request_id: EMPTY_EVENT_ID,
             last_heartbeat_updated_time: 0,
             task_list: attributes.task_list.as_ref().map(|t| t.name.clone()).unwrap_or_default(),
+            task_list_kind: attributes.task_list.as_ref().and_then(|t| t.kind).map(|k| k as i32).unwrap_or(0),
             has_retry_policy: attributes.retry_policy.is_some(),
             ..ActivityInfo::default()
         };
@@ -243,7 +247,7 @@ impl TypedMutableState {
                 last_failure_reason: Some(ai.last_failure_reason.clone()),
                 last_failure_details: ai.last_failure_details.clone(),
                 last_failure_options: Some(FailureOptions {
-                    failure_category: None,
+                    failure_category: failure_category_from_go_i32(ai.last_failure_category),
                     next_retry_interval_seconds: Some(ai.last_retry_interval_seconds),
                 }),
             });
@@ -273,7 +277,7 @@ impl TypedMutableState {
                     last_failure_reason: Some(ai.last_failure_reason.clone()),
                     last_failure_details: ai.last_failure_details.clone(),
                     last_failure_options: Some(FailureOptions {
-                        failure_category: None,
+                        failure_category: failure_category_from_go_i32(ai.last_failure_category),
                         next_retry_interval_seconds: Some(ai.last_retry_interval_seconds),
                     }),
                 });
@@ -416,7 +420,7 @@ impl TypedMutableState {
                 last_failure_reason: Some(ai.last_failure_reason.clone()),
                 last_failure_details: ai.last_failure_details.clone(),
                 last_failure_options: Some(FailureOptions {
-                    failure_category: None,
+                    failure_category: failure_category_from_go_i32(ai.last_failure_category),
                     next_retry_interval_seconds: Some(ai.last_retry_interval_seconds),
                 }),
             });
@@ -600,6 +604,7 @@ impl TypedMutableState {
         ai.last_worker_identity = ai.started_identity.clone();
         ai.last_failure_details = failure_details;
         ai.last_retry_interval_seconds = next_interval_seconds;
+        ai.last_failure_category = failure_category_to_go_i32(failure_options.and_then(|o| o.failure_category));
         self.pending_activity_info_ids.insert(schedule_id, ai.clone());
         self.run_task_generator(0, |g| g.generate_activity_retry_tasks(schedule_id))?;
         self.update_activity_infos.insert(schedule_id, ai);
@@ -635,5 +640,37 @@ mod activity_timer_retry_tests {
         let retried = state.get_activity_info(7).unwrap();
         assert_eq!(retried.timer_task_status, TIMER_TASK_STATUS_NONE);
         assert_eq!(retried.last_heartbeat_timeout_visibility_in_seconds, 0);
+    }
+}
+
+#[cfg(test)]
+mod failure_category_persist_tests {
+    use super::*;
+
+    #[test]
+    fn retry_stores_go_encoded_category_and_started_event_carries_options() {
+        let mut state = TypedMutableState::new();
+        state.current_version = 1;
+        state.pending_activity_info_ids.insert(7, ActivityInfo {
+            schedule_id: 7, has_retry_policy: true, initial_interval: 1, backoff_coefficient: 2.0,
+            maximum_interval: 10, maximum_attempts: 5, started_id: 9, ..Default::default()
+        });
+        let opts = FailureOptions { failure_category: Some(cadence_api::enums::FailureCategory::Poll), next_retry_interval_seconds: Some(3) };
+        assert!(state.retry_activity(7, 1_000_000_000, "boom", vec![], Some(&opts), false, 0.0).unwrap());
+        let ai = state.get_activity_info(7).unwrap();
+        assert_eq!(ai.last_failure_category, 1); // Go Poll == 1
+        assert_eq!(ai.last_retry_interval_seconds, 3);
+    }
+
+    #[test]
+    fn scheduled_activity_records_task_list_kind() {
+        let mut state = TypedMutableState::new();
+        let attrs = ScheduleActivityTaskDecisionAttributes {
+            activity_id: "a".into(),
+            task_list: Some(cadence_api::types::TaskList { name: "tl".into(), kind: Some(cadence_api::enums::TaskListKind::Sticky), ..Default::default() }),
+            ..Default::default()
+        };
+        let (_, ai) = state.add_activity_task_scheduled_event(1, 4, &attrs, "d").unwrap();
+        assert_eq!(ai.task_list_kind, 1);
     }
 }

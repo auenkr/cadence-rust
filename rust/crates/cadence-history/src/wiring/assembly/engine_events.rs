@@ -263,16 +263,13 @@ impl Inner {
         }
         let started_ns = a.started_time_unix_nanos;
         let (attempt, request_id, identity) = (a.attempt, a.request_id.clone(), a.started_identity.clone());
-        let reason = if a.retry_last_failure_reason.is_empty() { None } else { Some(a.retry_last_failure_reason.clone()) };
+        let reason = Some(a.retry_last_failure_reason.clone());
         let details = a.retry_last_failure_details.clone();
-        let options = if a.retry_last_failure_category != 0 || a.retry_last_retry_interval_seconds != 0 {
-            Some(FailureOptions {
-                failure_category: category_from_i32(a.retry_last_failure_category),
-                next_retry_interval_seconds: Some(a.retry_last_retry_interval_seconds),
-            })
-        } else {
-            None
-        };
+        // Go always writes FailureOptions{FailureCategory: ptr, NextRetryIntervalSeconds}.
+        let options = Some(FailureOptions {
+            failure_category: category_from_i32(a.retry_last_failure_category),
+            next_retry_interval_seconds: Some(a.retry_last_retry_interval_seconds),
+        });
         let ev = self.push_event(EventType::ActivityTaskStarted, started_ns, |e| {
             e.activity_task_started_event_attributes = Some(ActivityTaskStartedEventAttributes {
                 scheduled_event_id: schedule_id,
@@ -291,13 +288,9 @@ impl Inner {
     }
 }
 
+/// Persisted Go value (Standard=0, Poll=1, Fatal=2) -> API enum.
 fn category_from_i32(v: i32) -> Option<FailureCategory> {
-    match v {
-        0 => Some(FailureCategory::Poll),
-        1 => Some(FailureCategory::Standard),
-        2 => Some(FailureCategory::Fatal),
-        _ => None,
-    }
+    crate::execution::retry::failure_category_from_go_i32(v)
 }
 
 impl EngineMutableState {
@@ -326,13 +319,21 @@ impl EngineMutableState {
         } else {
             let attempt = a.attempt;
             let (rid, ident) = (request_id.to_string(), identity.to_string());
+            let last_reason = Some(a.retry_last_failure_reason.clone());
+            let last_details = a.retry_last_failure_details.clone();
+            let last_options = Some(FailureOptions {
+                failure_category: category_from_i32(a.retry_last_failure_category),
+                next_retry_interval_seconds: Some(a.retry_last_retry_interval_seconds),
+            });
             let ev = g.push_event(EventType::ActivityTaskStarted, now, |e| {
                 e.activity_task_started_event_attributes = Some(ActivityTaskStartedEventAttributes {
                     scheduled_event_id: schedule_id,
                     identity: ident,
                     request_id: rid,
                     attempt,
-                    ..Default::default()
+                    last_failure_reason: last_reason,
+                    last_failure_details: last_details,
+                    last_failure_options: last_options,
                 });
             });
             a.started_id = ev.event_id;
@@ -488,7 +489,7 @@ impl EngineMutableState {
         a.retry_last_failure_reason = reason.to_string();
         a.retry_last_worker_identity = a.started_identity.clone();
         a.retry_last_failure_details = details.to_vec();
-        a.retry_last_failure_category = category.map(|c| c as i32).unwrap_or(0);
+        a.retry_last_failure_category = crate::execution::retry::failure_category_to_go_i32(category);
         a.retry_last_retry_interval_seconds = options.and_then(|o| o.next_retry_interval_seconds).unwrap_or(0);
         let (version, attempt) = (a.version, a.attempt as i64);
         g.pc_acts.insert(info.schedule_id, a);

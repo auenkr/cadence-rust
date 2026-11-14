@@ -168,6 +168,8 @@ pub fn mutation_to_persistence(
             retry_jitter_coefficient: info.jitter_coefficient, retry_non_retriable_errors: info.non_retriable_errors.clone(),
             retry_last_failure_reason: info.last_failure_reason.clone(), retry_last_worker_identity: info.last_worker_identity.clone(),
             retry_last_failure_details: info.last_failure_details.clone(), retry_last_retry_interval_seconds: info.last_retry_interval_seconds,
+            retry_last_failure_category: info.last_failure_category,
+            task_list_kind: info.task_list_kind,
             ..Default::default()
         };
         // Persistence-only scheduled/started event blobs, encodings, task-list kind and failure category survive updates.
@@ -177,7 +179,7 @@ pub fn mutation_to_persistence(
             .map_err(|e| HistoryError::internal(format!("decode prior activity: {e}")))?;
             typed.scheduled_event = prev.scheduled_event; typed.scheduled_event_encoding = prev.scheduled_event_encoding;
             typed.started_event = prev.started_event; typed.started_event_encoding = prev.started_event_encoding;
-            typed.task_list_kind = prev.task_list_kind; typed.retry_last_failure_category = prev.retry_last_failure_category;
+           
         }
         result.upsert_activity_infos.push(keyed(id, &typed, old)?);
         if !info.details.is_empty() || info.last_heartbeat_updated_time != 0 {
@@ -238,7 +240,7 @@ pub fn typed_pending_maps(envelope: &MutableStateEnvelope) -> HResult<TypedPendi
             maximum_interval: a.retry_maximum_interval_seconds, maximum_attempts: a.retry_maximum_attempts,
             expiration_time: a.retry_expiration_time_unix_nanos, non_retriable_errors: a.retry_non_retriable_errors.clone(),
             last_failure_reason: a.retry_last_failure_reason.clone(), last_failure_details: a.retry_last_failure_details.clone(),
-            last_retry_interval_seconds: a.retry_last_retry_interval_seconds, last_worker_identity: a.retry_last_worker_identity.clone(),
+            last_retry_interval_seconds: a.retry_last_retry_interval_seconds, last_failure_category: a.retry_last_failure_category, task_list_kind: a.task_list_kind, last_worker_identity: a.retry_last_worker_identity.clone(),
         });
     }
     let timers = envelope.timers.iter().map(|(id, t)| super::timer::TimerInfo {

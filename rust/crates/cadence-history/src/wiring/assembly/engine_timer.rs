@@ -213,8 +213,12 @@ impl EngineMutableState {
         }
         let started = g.add_transient_started(schedule_id)?;
         let details = g.heartbeats.get(&schedule_id).map(|h| h.details.clone()).unwrap_or_default();
-        let reason = (!a.retry_last_failure_reason.is_empty()).then(|| a.retry_last_failure_reason.clone());
+        let reason = Some(a.retry_last_failure_reason.clone());
         let last_details = a.retry_last_failure_details.clone();
+        let options = Some(cadence_api::types::FailureOptions {
+            failure_category: crate::execution::retry::failure_category_from_go_i32(a.retry_last_failure_category),
+            next_retry_interval_seconds: Some(a.retry_last_retry_interval_seconds),
+        });
         g.push_event(EventType::ActivityTaskTimedOut, ms * 1_000_000, |e| {
             e.activity_task_timed_out_event_attributes = Some(ActivityTaskTimedOutEventAttributes {
                 details,
@@ -223,7 +227,7 @@ impl EngineMutableState {
                 timeout_type: Some(timeout_type),
                 last_failure_reason: reason,
                 last_failure_details: last_details,
-                last_failure_options: None,
+                last_failure_options: options,
             });
         });
         g.remove_activity(schedule_id)

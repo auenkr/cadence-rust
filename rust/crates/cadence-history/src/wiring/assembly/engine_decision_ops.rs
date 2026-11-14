@@ -293,6 +293,7 @@ impl Operations for EngineOps<'_> {
             heartbeat_timeout_seconds: a.heartbeat_timeout_seconds.unwrap_or(0),
             cancel_request_id: EMPTY_EVENT_ID,
             task_list: a.task_list.as_ref().map(|t| t.name.clone()).unwrap_or_default(),
+            task_list_kind: a.task_list.as_ref().and_then(|t| t.kind).map(|k| k as i32).unwrap_or(0),
             ..Default::default()
         };
         if let Some(p) = a.retry_policy.as_ref() {

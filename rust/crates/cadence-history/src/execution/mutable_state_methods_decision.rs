@@ -558,6 +558,11 @@ impl TypedMutableState {
                 "it is not allowed resetting to a point that workflow has pending signals to send.".into(),
             ));
         }
+        if !self.semaphore_state.pending.is_empty() {
+            return Err(TypedMutableStateError::BadRequest(
+                "it is not allowed resetting to a point that workflow has pending semaphore holds.".into(),
+            ));
+        }
         Ok(())
     }
 
@@ -975,6 +980,19 @@ mod decision_tests {
                 ..Default::default()
             }),
             ..Default::default()
+        }
+    }
+
+    #[test]
+    fn check_resettable_rejects_pending_semaphore_holds() {
+        let mut ms = TypedMutableState::new();
+        assert!(ms.check_resettable().is_ok());
+        ms.semaphore_state.pending.insert(5, super::super::semaphore::SemaphoreInfo::default());
+        match ms.check_resettable() {
+            Err(TypedMutableStateError::BadRequest(m)) => {
+                assert_eq!(m, "it is not allowed resetting to a point that workflow has pending semaphore holds.");
+            }
+            other => panic!("unexpected {other:?}"),
         }
     }
 

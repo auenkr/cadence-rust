@@ -2,6 +2,30 @@
 
 use std::time::{Duration, SystemTime};
 
+use cadence_api::enums::FailureCategory;
+
+/// Go `types.FailureCategory` persisted integer (Standard=0, Poll=1, Fatal=2).
+/// The Rust API enum uses the wire values (Poll=0, Standard=1), so persisted
+/// activity info must go through this mapping to stay readable by Go History.
+pub fn failure_category_to_go_i32(c: Option<FailureCategory>) -> i32 {
+    match c {
+        None | Some(FailureCategory::Standard) => 0,
+        Some(FailureCategory::Poll) => 1,
+        Some(FailureCategory::Fatal) => 2,
+    }
+}
+
+/// Inverse of [`failure_category_to_go_i32`]; unknown values map to None.
+pub fn failure_category_from_go_i32(v: i32) -> Option<FailureCategory> {
+    match v {
+        0 => Some(FailureCategory::Standard),
+        1 => Some(FailureCategory::Poll),
+        2 => Some(FailureCategory::Fatal),
+        _ => None,
+    }
+}
+
+
 /// Upper bound used by the Go implementation before converting seconds to a
 /// nanosecond `time.Duration`.
 pub const MAX_BACKOFF_INTERVAL_SECONDS: i64 = i64::MAX / 1_000_000_000;
@@ -62,5 +86,22 @@ mod tests {
         assert!(!should_retry(now, 2, 3, None, "err", &[], false));
         assert!(should_retry(now, 0, 0, Some(now), "err", &[], false));
         assert_eq!(backoff_interval(2, 3, 20, 2.0, 0.5, 0.25), Some(Duration::from_secs_f64(10.5)));
+    }
+}
+
+#[cfg(test)]
+mod failure_category_tests {
+    use super::*;
+
+    #[test]
+    fn go_persisted_category_mapping() {
+        assert_eq!(failure_category_to_go_i32(None), 0);
+        assert_eq!(failure_category_to_go_i32(Some(FailureCategory::Standard)), 0);
+        assert_eq!(failure_category_to_go_i32(Some(FailureCategory::Poll)), 1);
+        assert_eq!(failure_category_to_go_i32(Some(FailureCategory::Fatal)), 2);
+        for c in [FailureCategory::Standard, FailureCategory::Poll, FailureCategory::Fatal] {
+            assert_eq!(failure_category_from_go_i32(failure_category_to_go_i32(Some(c))), Some(c));
+        }
+        assert_eq!(failure_category_from_go_i32(9), None);
     }
 }
