@@ -47,7 +47,7 @@ be recorded below after child-completion investigation and fresh Rust tests.
 |---|---|---|---|
 | https://github.com/auenkr/cadence-rust/actions/runs/43561066779 | a79cb0741 | mysql,1500s | SUCCESS,4500/4500,GATE SUMMARY failed: [] |
 | https://github.com/auenkr/cadence-rust/actions/runs/43564455423 | ad45bd03e | postgres,1500s | FAILURE:4500/4500 complete; both SIGTERM stops exceeded60s |
-| pending | pending | cassandra | not dispatched |
+| https://github.com/auenkr/cadence-rust/actions/runs/43577811696 |df25f4ece|cassandra1500s|SUCCESS,4500/4500,GATE SUMMARY failed: []|
 
 Soak predecessor now passes all4800 workflows and RSS on e2167b61a (run43558072143). Cancellation-safe cache lease fixes uncommitted child removal retained across RPC deadline cancellation; Go deferred release clears before unlock. MySQL recovery gate dispatched after soak completed.
 
@@ -116,3 +116,23 @@ the live process shutdown hang. Earlier isolated child activity timeout did not
 recur. Compact source/binary-SHA and gate evidence: restart-postgres-fixed/.
 
 Checkpoint 2026-11-14T09:17Z: Cassandra43577811696 fresh release build passed;1500s fault/load phase began09:06:53Z and is still running. No source changes since passing workspace run43576413232.
+
+## Final acceptance: all requested lanes pass
+
+| run URL | source head | lane | conclusion / acceptance |
+|---|---|---|---|
+| https://github.com/auenkr/cadence-rust/actions/runs/43558072143 |e2167b61ad242a1b20922f2d6d9473a326107912|mysql20min soak|SUCCESS;4800/4800;0failed;p50=4111ms;both unchanged RSS guards pass|
+| https://github.com/auenkr/cadence-rust/actions/runs/43561066779 |a79cb0741|mysql1500s recovery|SUCCESS;4500/4500;GATE SUMMARY failed: []|
+| https://github.com/auenkr/cadence-rust/actions/runs/43574115408 |1a952c6f7ea612f3aba9dacb4ecd9f6477246620|postgres1500s recovery|SUCCESS;4500/4500;p50=4108ms;GATE SUMMARY failed: []|
+| https://github.com/auenkr/cadence-rust/actions/runs/43577811696 |df25f4ece|cassandra1500s recovery|SUCCESS;4500/4500;p50=4078ms;GATE SUMMARY failed: []|
+| https://github.com/auenkr/cadence-rust/actions/runs/43576413232 |df25f4ece|fresh workspace Clippy then tests|SUCCESS;strict PostgreSQL regression0.03s|
+
+Cassandra all52 checks pass. History SHA256:
+`f45e6237d2d2f00dd33f4eea173bf0395f988ae10586a45bdc162b801b7d1e98`.
+All lanes retain source/binary identities, summaries, exit codes and assertions
+under memory/evidence/history-soak-tail-20261114/. Historical failures above
+remain for traceability. Final Rust source equals the passing workspace and
+Cassandra run source; later commits only update memory/evidence. The soak ran
+after child/cache fixes; subsequent changes fix shutdown notification and the
+PostgreSQL pool, with no soak workload/threshold changes. No local Cargo, Go or
+Docker commands were run. No merge to master or branch deletion performed.

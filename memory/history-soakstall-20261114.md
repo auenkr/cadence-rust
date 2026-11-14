@@ -1,13 +1,13 @@
 # History soak stall: findings (2026-11-14, branch history-soakstall)
 
-## Current result: acceptance soak passes; Cassandra recovery running
+## Current result: acceptance soak and all three recovery lanes pass
 
 Branch `history-soak-tail` fixes canceled parent-update cache leases and ignored
 Go cache capacity/TTL. Run43558072143 passes4800/4800 workflows, p50=4111ms
 (Go~4100ms), unchanged RSS guards. MySQL and PostgreSQL restart gates each pass
 4500/4500 and `GATE SUMMARY failed: []`. PostgreSQL also needed healthy pool
 return notification; fresh workspace CI43576413232 passes including its strict
-regression. Cassandra1500s gate43577811696 is running. Details and historical
+regression. Cassandra1500s gate43577811696 passes4500/4500 and all52 checks. Details and historical
 failed runs follow; earlier pending notes below describe those checkpoints.
 
 ## Original result before the fix: NOT fixed; narrowed to result long-poll
@@ -224,3 +224,23 @@ PostgreSQL all52 assertions pass, including both graceful restarts (no deadline
 relaxation). p50=4108ms. This confirms the missing healthy-return wakeup caused
 the live process shutdown hang. Earlier isolated child activity timeout did not
 recur. Compact source/binary-SHA and gate evidence: restart-postgres-fixed/.
+
+## Final acceptance: all requested lanes pass
+
+| run URL | source head | lane | conclusion / acceptance |
+|---|---|---|---|
+| https://github.com/auenkr/cadence-rust/actions/runs/43558072143 |e2167b61ad242a1b20922f2d6d9473a326107912|mysql20min soak|SUCCESS;4800/4800;0failed;p50=4111ms;both unchanged RSS guards pass|
+| https://github.com/auenkr/cadence-rust/actions/runs/43561066779 |a79cb0741|mysql1500s recovery|SUCCESS;4500/4500;GATE SUMMARY failed: []|
+| https://github.com/auenkr/cadence-rust/actions/runs/43574115408 |1a952c6f7ea612f3aba9dacb4ecd9f6477246620|postgres1500s recovery|SUCCESS;4500/4500;p50=4108ms;GATE SUMMARY failed: []|
+| https://github.com/auenkr/cadence-rust/actions/runs/43577811696 |df25f4ece|cassandra1500s recovery|SUCCESS;4500/4500;p50=4078ms;GATE SUMMARY failed: []|
+| https://github.com/auenkr/cadence-rust/actions/runs/43576413232 |df25f4ece|fresh workspace Clippy then tests|SUCCESS;strict PostgreSQL regression0.03s|
+
+Cassandra all52 checks pass. History SHA256:
+`f45e6237d2d2f00dd33f4eea173bf0395f988ae10586a45bdc162b801b7d1e98`.
+All lanes retain source/binary identities, summaries, exit codes and assertions
+under memory/evidence/history-soak-tail-20261114/. Historical failures above
+remain for traceability. Final Rust source equals the passing workspace and
+Cassandra run source; later commits only update memory/evidence. The soak ran
+after child/cache fixes; subsequent changes fix shutdown notification and the
+PostgreSQL pool, with no soak workload/threshold changes. No local Cargo, Go or
+Docker commands were run. No merge to master or branch deletion performed.

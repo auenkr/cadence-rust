@@ -1,0 +1,5 @@
+Run: https://github.com/auenkr/cadence-rust/actions/runs/43574757454
+Head: e39a06303be3ce00d56e9aa6aaa3e963d05bc13c
+Expected failure with healthy-return notification removed.
+clippy-test	Verify PostgreSQL pool wakeup under contention	2026-11-14T08:18:44.7503954Z healthy return did not wake the pool waiter
+Secondary poisoned mutex destructor abort follows the assertion.
