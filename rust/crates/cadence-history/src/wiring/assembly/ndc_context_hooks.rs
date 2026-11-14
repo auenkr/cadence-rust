@@ -294,7 +294,10 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
             let mut decoded = Vec::with_capacity(list.len());
             for task in list.iter() {
                 let s = Encoding::ThriftRW.decode(&task.data.data).map_err(|e| internal(e.to_string()))?;
-                decoded.push(timer_task_from_struct(&s).map_err(|e| internal(e.to_string()))?);
+                let mut t = timer_task_from_struct(&s).map_err(|e| internal(e.to_string()))?;
+                // The blob does not carry the visibility timestamp (Go keeps it on the row).
+                t.visibility_timestamp_unix_nanos = task.visibility_timestamp_unix_nanos;
+                decoded.push(t);
             }
             let mut slots: Vec<(i64, i64)> = decoded.iter().map(|t| (0, t.visibility_timestamp_unix_nanos)).collect();
             shard.allocate_timer_ids(&self.core.current_cluster, &mut slots).map_err(shard_err(shard.shard_id()))?;
