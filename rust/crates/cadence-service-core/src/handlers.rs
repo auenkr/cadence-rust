@@ -615,6 +615,7 @@ pub fn apply_archival_registration_policy(
 /// Mirrors Go `ValidateRegisterDomainRequest` core checks + `CreateDomain`.
 /// Go `WorkflowHandler` pre-checks (request validator, graceful-failover
 /// check) for the domain APIs; `Err` is the ready response.
+#[allow(clippy::result_large_err)]
 async fn domain_guard<T: serde::Serialize>(
     state: &AppState,
     operation: &str,
