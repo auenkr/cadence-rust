@@ -43,6 +43,9 @@ on:
       rust_history_side:
         description: With two_cluster+rust_history, run Rust History on the standby (A, default) or active (B, source of replication; A all Go) cluster
         default: standby
+      repl_rust_cluster:
+        description: History replication gate (Go<->Rust History, two clusters, any database). A = Go active -> Rust standby, B = Rust active -> Go standby; empty = off
+        default: ""
       two_history_graceful:
         description: With two_cluster+rust_history (side standby), run two Rust History hosts on cluster A and a graceful failover to A asserting cross-host failover markers
         type: boolean
@@ -56,7 +59,7 @@ on:
         default: ""
 
 concurrency:
-  group: frontend-mixed-gate-${{ github.ref }}-${{ inputs.database }}-${{ inputs.es_flavor }}-${{ inputs.es }}-${{ inputs.gcs }}-${{ inputs.two_history_graceful }}-${{ inputs.rust_history }}-${{ inputs.two_cluster }}-${{ inputs.rust_history_side }}-${{ inputs.rust_frontend_active }}
+  group: frontend-mixed-gate-${{ github.ref }}-${{ inputs.database }}-${{ inputs.es_flavor }}-${{ inputs.es }}-${{ inputs.gcs }}-${{ inputs.two_history_graceful }}-${{ inputs.rust_history }}-${{ inputs.two_cluster }}-${{ inputs.rust_history_side }}-${{ inputs.rust_frontend_active }}-${{ inputs.repl_rust_cluster }}
   cancel-in-progress: true
 
 jobs:
@@ -89,7 +92,7 @@ jobs:
           mkdir -p out
           echo "rust_ref=${{ inputs.rust_ref || github.ref_name }} head=$(git -C rustsrc rev-parse HEAD) gate_head=$(git rev-parse HEAD)" | tee out/commit.txt
           set +e
-          cargo build --manifest-path rustsrc/rust/Cargo.toml -p cadence-server ${{ inputs.rust_history && '-p cadence-history' || '' }} -j2 > out/cargo-build.log 2>&1; echo $? > out/cargo-build.exit
+          cargo build --manifest-path rustsrc/rust/Cargo.toml -p cadence-server ${{ (inputs.rust_history || inputs.repl_rust_cluster != '') && '-p cadence-history' || '' }} -j2 > out/cargo-build.log 2>&1; echo $? > out/cargo-build.exit
           set -e
           test "$(cat out/cargo-build.exit)" = 0 || { tail -60 out/cargo-build.log; exit 1; }
           sha256sum "$CARGO_TARGET_DIR/debug/cadence-server" | tee out/binary.sha256
@@ -98,6 +101,7 @@ jobs:
           (cd go/cmd/server && go build -p 2 -ldflags='-s -w' -o "$GITHUB_WORKSPACE/out/cadence-go-server" .)
           (cd go && go build -p 2 -ldflags='-s -w' -o "$GITHUB_WORKSPACE/out/cadence-cli" ./cmd/tools/cli)
           (cd tests/frontend-gate && go build -o "$GITHUB_WORKSPACE/out/frontend-gate-driver" .)
+          (cd tests/history-repl && go build -o "$GITHUB_WORKSPACE/out/history-repl-driver" .)
       - name: Gate (SDK child, completed backfill, API coverage, IPv6 gRPC)
         env:
           CADENCE_GATE_KAFKA: ${{ inputs.kafka }}
@@ -108,7 +112,14 @@ jobs:
           CADENCE_GATE_TWO_HISTORY: ${{ inputs.two_history }}
         run: |
           set +e
-          if [ "${{ inputs.two_cluster }}" = true ]; then
+          if [ -n "${{ inputs.repl_rust_cluster }}" ]; then
+            tests/gates/run-history-repl-lane.sh ${{ inputs.database || 'mysql' }} out/gate \
+              --rust-history-binary "$CARGO_TARGET_DIR/debug/cadence-history" --rust-cluster ${{ inputs.repl_rust_cluster }} \
+              --go-server "$GITHUB_WORKSPACE/out/cadence-go-server" \
+              --go-cli "$GITHUB_WORKSPACE/out/cadence-cli" \
+              --driver "$GITHUB_WORKSPACE/out/history-repl-driver" \
+              --rust-root "$GITHUB_WORKSPACE/rustsrc" > out/gate.log 2>&1
+          elif [ "${{ inputs.two_cluster }}" = true ]; then
             if [ "${{ inputs.database || 'mysql' }}" = mysql ]; then LANE=(tests/gates/run-frontend-two-cluster-lane.sh out/gate); else LANE=(tests/gates/run-frontend-two-cluster-lane-db.sh "${{ inputs.database }}" out/gate); fi
             "${LANE[@]}" \
               --rust-binary "$CARGO_TARGET_DIR/debug/cadence-server" \
@@ -145,5 +156,6 @@ jobs:
             !out/cadence-go-server
             !out/cadence-cli
             !out/frontend-gate-driver
+            !out/history-repl-driver
             !out/gate/run/**
           retention-days: 3

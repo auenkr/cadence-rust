@@ -139,7 +139,7 @@ impl TypedMutableState {
         attributes: &ScheduleActivityTaskDecisionAttributes,
         target_domain_id: &str,
     ) -> Result<(HistoryEvent, ActivityInfo)> {
-        let op = "add-activity-task-scheduled-event";
+        let op = "add-activitytask-scheduled-event";
         self.check_mutability()?;
         if self.get_activity_by_activity_id(&attributes.activity_id).is_some() {
             return Err(self.create_caller_error(op));
@@ -321,7 +321,7 @@ impl TypedMutableState {
         started_event_id: i64,
         request: &RespondActivityTaskCompletedRequest,
     ) -> Result<HistoryEvent> {
-        let op = "add-activity-task-completed-event";
+        let op = "add-activitytask-completed-event";
         self.check_mutability()?;
         match self.get_activity_info(schedule_event_id) {
             Some(ai) if ai.started_id == started_event_id => {}
@@ -356,7 +356,7 @@ impl TypedMutableState {
         started_event_id: i64,
         request: &RespondActivityTaskFailedRequest,
     ) -> Result<HistoryEvent> {
-        let op = "add-activity-task-failed-event";
+        let op = "add-activitytask-failed-event";
         self.check_mutability()?;
         match self.get_activity_info(schedule_event_id) {
             Some(ai) if ai.started_id == started_event_id => {}
@@ -394,7 +394,7 @@ impl TypedMutableState {
         timeout_type: TimeoutType,
         last_heartbeat_details: Vec<u8>,
     ) -> Result<HistoryEvent> {
-        let op = "add-activity-task-timed-out-event";
+        let op = "add-activitytask-timed-event";
         self.check_mutability()?;
         let ai = match self.get_activity_info(schedule_event_id) {
             Some(ai)
@@ -440,7 +440,7 @@ impl TypedMutableState {
         decision_completed_event_id: i64,
         activity_id: &str,
     ) -> Result<(HistoryEvent, ActivityInfo)> {
-        let op = "add-activity-task-cancel-requested-event";
+        let op = "add-activitytask-cancel-requested-event";
         self.check_mutability()?;
         // The event is added even when the activity is not pending (Go).
         let event = self.add_history_event(timestamp_unix_nanos, EventType::ActivityTaskCancelRequested, |e| {
@@ -506,7 +506,7 @@ impl TypedMutableState {
         details: Vec<u8>,
         identity: &str,
     ) -> Result<HistoryEvent> {
-        let op = "add-activity-task-canceled-event";
+        let op = "add-activitytask-canceled-event";
         self.check_mutability()?;
         match self.get_activity_info(schedule_event_id) {
             Some(ai) if ai.started_id == started_event_id && ai.cancel_requested => {}

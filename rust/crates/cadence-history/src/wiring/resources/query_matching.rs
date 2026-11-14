@@ -48,8 +48,19 @@ impl QueryMatchingClient for GrpcQueryMatchingClient {
             task_list: task_list.cloned().map(cadence_proto::convert::task_list_out),
             forwarded_from: String::new(),
         };
+        // Go's matching client goes through yarpc: the target (Go) Matching rejects a call without
+        // service/caller/encoding headers or a deadline ("missing service name, caller name, encoding").
+        // Go timeout wrapper: createContext(ctx, c.timeout) with the matching client timeout (60s).
+        let mut grpc_request = tonic::Request::new(proto);
+        {
+            let metadata = grpc_request.metadata_mut();
+            metadata.insert("rpc-service", tonic::metadata::MetadataValue::from_static("cadence-matching"));
+            metadata.insert("rpc-caller", tonic::metadata::MetadataValue::from_static("cadence-history"));
+            metadata.insert("rpc-encoding", tonic::metadata::MetadataValue::from_static("proto"));
+        }
+        grpc_request.set_timeout(std::time::Duration::from_secs(60));
         let resp = client
-            .query_workflow(proto)
+            .query_workflow(grpc_request)
             .await
             .map_err(|s| {
                 HistoryError::Cadence(Box::new(cadence_service_core::frontend_remote_grpc::error_from_status(&s)))

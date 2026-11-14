@@ -32,7 +32,8 @@ macro_rules! cadence_enum {
         }
         impl Serialize for $name {
             fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-                if GO_JSON_ENUMS.with(std::cell::Cell::get) {
+                // Go `types.CronOverlapPolicy` has no MarshalText, so Go JSON encodes it as an integer.
+                if GO_JSON_ENUMS.with(std::cell::Cell::get) && stringify!($name) != "CronOverlapPolicy" {
                     s.serialize_str(self.as_str())
                 } else {
                     s.serialize_i32(*self as i32)

@@ -134,7 +134,7 @@ impl TypedMutableState {
         initiated_id: i64,
         header: Option<Header>,
     ) -> Result<HistoryEvent> {
-        let op = "add-child-workflow-started-event";
+        let op = "add-childworkflow-started-event";
         self.check_mutability()?;
         match self.get_child_execution_info(initiated_id) {
             Some(ci) if ci.started_id == EMPTY_EVENT_ID => {}
@@ -178,7 +178,7 @@ impl TypedMutableState {
         cause: ChildWorkflowExecutionFailedCause,
         initiated_attributes: &StartChildWorkflowExecutionInitiatedEventAttributes,
     ) -> Result<HistoryEvent> {
-        let op = "add-start-child-workflow-failed-event";
+        let op = "add-childworkflow-initiation-failed-event";
         self.check_mutability()?;
         match self.get_child_execution_info(initiated_id) {
             Some(ci) if ci.started_id == EMPTY_EVENT_ID => {}
@@ -238,7 +238,7 @@ impl TypedMutableState {
         attributes: &WorkflowExecutionCompletedEventAttributes,
     ) -> Result<HistoryEvent> {
         let (init, started, workflow_type) =
-            self.child_terminal_prologue("add-child-workflow-completed-event", initiated_id)?;
+            self.child_terminal_prologue("add-childworkflow-completed-event", initiated_id)?;
         let event = self.add_history_event(timestamp_unix_nanos, EventType::ChildWorkflowExecutionCompleted, |e| {
             e.child_workflow_execution_completed_event_attributes =
                 Some(ChildWorkflowExecutionCompletedEventAttributes {
@@ -272,7 +272,7 @@ impl TypedMutableState {
         attributes: &WorkflowExecutionFailedEventAttributes,
     ) -> Result<HistoryEvent> {
         let (init, started, workflow_type) =
-            self.child_terminal_prologue("add-child-workflow-failed-event", initiated_id)?;
+            self.child_terminal_prologue("add-childworkflow-failed-event", initiated_id)?;
         let event = self.add_history_event(timestamp_unix_nanos, EventType::ChildWorkflowExecutionFailed, |e| {
             e.child_workflow_execution_failed_event_attributes = Some(ChildWorkflowExecutionFailedEventAttributes {
                 reason: attributes.reason.clone(),
@@ -306,7 +306,7 @@ impl TypedMutableState {
         attributes: &WorkflowExecutionCanceledEventAttributes,
     ) -> Result<HistoryEvent> {
         let (init, started, workflow_type) =
-            self.child_terminal_prologue("add-child-workflow-canceled-event", initiated_id)?;
+            self.child_terminal_prologue("add-childworkflow-canceled-event", initiated_id)?;
         let event = self.add_history_event(timestamp_unix_nanos, EventType::ChildWorkflowExecutionCanceled, |e| {
             e.child_workflow_execution_canceled_event_attributes =
                 Some(ChildWorkflowExecutionCanceledEventAttributes {
@@ -340,7 +340,7 @@ impl TypedMutableState {
         _attributes: &WorkflowExecutionTerminatedEventAttributes,
     ) -> Result<HistoryEvent> {
         let (init, started, workflow_type) =
-            self.child_terminal_prologue("add-child-workflow-terminated-event", initiated_id)?;
+            self.child_terminal_prologue("add-childworkflow-terminated-event", initiated_id)?;
         let event = self.add_history_event(
             timestamp_unix_nanos,
             EventType::ChildWorkflowExecutionTerminated,
@@ -377,7 +377,7 @@ impl TypedMutableState {
         attributes: &WorkflowExecutionTimedOutEventAttributes,
     ) -> Result<HistoryEvent> {
         let (init, started, workflow_type) =
-            self.child_terminal_prologue("add-child-workflow-timed-out-event", initiated_id)?;
+            self.child_terminal_prologue("add-childworkflow-timedout-event", initiated_id)?;
         let event = self.add_history_event(timestamp_unix_nanos, EventType::ChildWorkflowExecutionTimedOut, |e| {
             e.child_workflow_execution_timed_out_event_attributes =
                 Some(ChildWorkflowExecutionTimedOutEventAttributes {

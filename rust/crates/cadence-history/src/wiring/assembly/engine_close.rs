@@ -331,6 +331,10 @@ impl EngineMutableState {
 
     /// Go `canReplicateEvents`: multi-cluster (global, >1 cluster) domain and
     /// `EnableReplicationTaskGeneration(domainID, workflowID)`.
+    pub(super) fn can_replicate_events_pub(&self, workflow_id: &str) -> bool {
+        self.can_replicate_events(workflow_id)
+    }
+
     fn can_replicate_events(&self, workflow_id: &str) -> bool {
         let Some(policy) = &self.params.close_policy else { return false };
         self.domain.is_global_domain

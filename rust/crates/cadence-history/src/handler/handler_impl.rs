@@ -269,7 +269,11 @@ impl Handler for HandlerImpl {
     async fn describe_mutable_state(&self, request: Option<&DescribeMutableStateRequest>) -> HResult<DescribeMutableStateResponse> {
         let r = nil(request)?;
         self.check_rate()?;
-        self.engine(wf_id(&r.execution)).await?.describe_mutable_state(r).await
+        let res = self.engine(wf_id(&r.execution)).await?.describe_mutable_state(r).await;
+        if let Err(e) = &res {
+            tracing::warn!(domain_id = %r.domain_uuid, workflow_id = wf_id(&r.execution), error = %e, "DescribeMutableState failed");
+        }
+        res
     }
 
     async fn describe_queue(&self, request: Option<&adm::DescribeQueueRequest>) -> HResult<adm::DescribeQueueResponse> {
