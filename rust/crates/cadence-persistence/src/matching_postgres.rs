@@ -1470,7 +1470,9 @@ mod tests {
     #[ignore = "requires CADENCE_POSTGRES_POOL_TEST_DSN; exercised by rust-ci"]
     fn postgres_healthy_connection_return_wakes_waiter() {
         let options: Config = std::env::var("CADENCE_POSTGRES_POOL_TEST_DSN")
-            .expect("PostgreSQL pool test DSN").parse().unwrap();
+            .expect("PostgreSQL pool test DSN")
+            .parse()
+            .unwrap();
         let pool = PostgresConnectionPool::new(options, None, 1, 1, None);
         let lease = pool.checkout().unwrap();
         let waiting_pool = pool.clone();
@@ -1480,14 +1482,23 @@ mod tests {
             // cannot return before this waiter is registered on the condvar.
             let state = waiting_pool.state.lock().unwrap();
             ready.send(()).unwrap();
-            let (state, timeout) = waiting_pool.available.wait_timeout_while(
-                state, Duration::from_secs(2), |state| state.idle.is_empty(),
-            ).unwrap();
-            assert!(!timeout.timed_out(), "healthy return did not wake the pool waiter");
+            let (state, timeout) = waiting_pool
+                .available
+                .wait_timeout_while(state, Duration::from_secs(2), |state| state.idle.is_empty())
+                .unwrap();
+            assert!(
+                !timeout.timed_out(),
+                "healthy return did not wake the pool waiter"
+            );
             assert_eq!(state.idle.len(), 1);
             drop(state);
-            let mut reused = waiting_pool.checkout_with_timeout(Duration::from_secs(1)).unwrap();
-            assert_eq!(reused.query_one("SELECT 1::INT", &[]).unwrap().get::<_, i32>(0), 1);
+            let mut reused = waiting_pool
+                .checkout_with_timeout(Duration::from_secs(1))
+                .unwrap();
+            assert_eq!(
+                reused.query_one("SELECT 1::INT", &[]).unwrap().get::<_, i32>(0),
+                1
+            );
         });
         waiting.recv_timeout(Duration::from_secs(2)).unwrap();
         drop(lease);
