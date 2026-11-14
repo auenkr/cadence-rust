@@ -50,3 +50,13 @@ Targeted CI 43613537757 **SUCCESS**, including
 Compact build/test evidence saved in memory/evidence/fe-restart-loss-20261114/.
 Full fresh-target workspace CI dispatched at documentation head 12e0f53d5:
 https://github.com/auenkr/cadence-rust/actions/runs/43614446974 (pending).
+
+Full fresh-target CI 43614446974 **SUCCESS** at
+12e0f53d504e177041088b4ef3ff5efae5cf9d2c: formatting, workspace Clippy then workspace
+tests, PostgreSQL wakeup and live Go/Rust metric parity. Source identical to
+286ef1e3a; subsequent commits only record evidence.
+
+Soak attempt 1 dispatched with defaults (70 minutes, 10 workflows/s,
+lanes go-baseline,rust):
+https://github.com/auenkr/cadence-rust/actions/runs/43615529134,
+head 4e014ea994ffdc0e5ec957dcd2a1df5d13845ce9. Pending. No second soak started.
