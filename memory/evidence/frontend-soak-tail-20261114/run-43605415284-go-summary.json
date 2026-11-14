@@ -1,0 +1,55 @@
+{
+  "label": "go-baseline",
+  "samples": 70,
+  "duration_s": 4146,
+  "restart_at_s": 2100,
+  "started": 42000,
+  "completed": 42000,
+  "failed": 0,
+  "in_flight_at_end": 0,
+  "fail_stage_counts": {},
+  "fail_examples": [],
+  "query_init_attempts": 28473,
+  "query_init_workflows": 21089,
+  "retried_calls": 28473,
+  "e2e_ms": {
+    "p50": 3090,
+    "p95": 4096,
+    "p99": 4120,
+    "max": 13919
+  },
+  "query_ms": {
+    "p50": 12,
+    "p95": 34,
+    "p99": 46
+  },
+  "start_ms": {
+    "p50": 9,
+    "p95": 14,
+    "p99": 21
+  },
+  "slopes": {
+    "window_s": [
+      1146,
+      4146
+    ],
+    "frontend_window_s": [
+      2400,
+      4146
+    ],
+    "fe_rss_mb_per_h": 5.452343649506142,
+    "fe_fds_per_h": 0.17345902881822245,
+    "mt_rss_mb_per_h": 1.7365300692385952,
+    "mt_fds_per_h": -0.040711498631958
+  },
+  "peak": {
+    "fe_rss_mb": 116.7,
+    "fe_fds": 27,
+    "mt_rss_mb": 110.4,
+    "mt_fds": 26,
+    "load1": 9.34033203125
+  },
+  "panic_in_logs": false,
+  "service_died_steps": [],
+  "failed_steps": []
+}

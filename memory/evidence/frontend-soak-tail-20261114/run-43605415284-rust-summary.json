@@ -1,0 +1,61 @@
+{
+  "label": "rust",
+  "samples": 70,
+  "duration_s": 4145,
+  "restart_at_s": 2100,
+  "started": 42000,
+  "completed": 41999,
+  "failed": 1,
+  "in_flight_at_end": 0,
+  "fail_stage_counts": {
+    "query": 1
+  },
+  "fail_examples": [
+    "FAIL fe-soak-97dca37d-f021-46e1-a004-7656d84bf9e2-0020989 query query state \"init\""
+  ],
+  "query_init_attempts": 29644,
+  "query_init_workflows": 21080,
+  "retried_calls": 29644,
+  "e2e_ms": {
+    "p50": 3065,
+    "p95": 4070,
+    "p99": 4160,
+    "max": 8075
+  },
+  "query_ms": {
+    "p50": 9,
+    "p95": 20,
+    "p99": 30
+  },
+  "start_ms": {
+    "p50": 6,
+    "p95": 12,
+    "p99": 98
+  },
+  "slopes": {
+    "window_s": [
+      1145,
+      4145
+    ],
+    "frontend_window_s": [
+      2400,
+      4145
+    ],
+    "fe_rss_mb_per_h": 7.990574692027902,
+    "fe_fds_per_h": 0.5069229446518205,
+    "mt_rss_mb_per_h": 6.002274492220468,
+    "mt_fds_per_h": -0.051734263453996725
+  },
+  "peak": {
+    "fe_rss_mb": 83.9,
+    "fe_fds": 121,
+    "mt_rss_mb": 83.0,
+    "mt_fds": 124,
+    "load1": 6.62841796875
+  },
+  "panic_in_logs": false,
+  "service_died_steps": [],
+  "failed_steps": [
+    "soak-driver-exit"
+  ]
+}

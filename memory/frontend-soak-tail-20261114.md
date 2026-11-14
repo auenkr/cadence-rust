@@ -50,3 +50,10 @@ Run 43605415284 completed its fresh build and started both lanes at 14:44 UTC. I
 
 ### Final-attempt wait checkpoint (15:30 UTC)
 Run 43605415284 remains in progress after the scheduled midpoint restart. No code changes or extra runs. Waiting in-turn for the full second verdict and binary identity; measured attempt 1 remains FAIL solely on mt RSS.
+
+### Measured attempt 2 / final verdict: FAIL (43605415284)
+- https://github.com/auenkr/cadence-rust/actions/runs/43605415284 — full head 3111896c25423f38af1cc5b88c1c31beb10edd3c, workflow SUCCESS but **RUST OVERALL: FAIL**. Default 70 min/rate 10, Go baseline + Rust FE/MT with Go History/Worker. Rust binary SHA256 9dd4a5f4d4059746480ecc30aa2f81f1c00c100fe620f8d7fd33b3ab01931730.
+- Original three failing criteria now PASS: mt RSS 6.00 vs Go 1.74 MB/h (within Go+5); start p95 12 vs 14 ms; query p99 30 vs 46 ms. RSS still grows; passing the relative criterion is not evidence of zero leakage.
+- Two other criteria FAIL: completed 41999/42000, one query-stage failure; start p99 98 vs Go 21 ms. E2e p95 4070 vs 4096 ms, zero panics/crashes, and all remaining criteria PASS.
+- Failed workflow fe-soak-97dca37d-f021-46e1-a004-7656d84bf9e2-0020989 kept returning query state "init". SDK worker reported an unhandled wake signal at 15:21:13Z. Harness diagnostic history shows ActivityTaskTimedOut START_TO_CLOSE followed by WorkflowExecutionFailed cadenceInternal:Timeout START_TO_CLOSE. This is near the midpoint Frontend restart; available evidence does not prove the exact transport/completion loss mechanism. Preserve it as an unresolved restart/recovery issue, not a harmless query percentile fluctuation. Driver failure excerpt and diagnostic history are committed.
+- Both allowed measured attempts have now finished; both verdicts FAIL. No third run, threshold changes, master merge or branch deletion. Source fixes and unit tests passed full fresh-target CI, but full soak acceptance is NOT achieved. Residual work: investigate restart-time activity completion/recovery and start p99 variability; further RSS profiling may still be needed.
