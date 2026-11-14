@@ -1,5 +1,6 @@
-//! One-shot outbound TChannel v2 JSON calls, compatible with tchannel-go v1.34.4.
-//! A call owns its TCP connection; dropping its future closes the socket. TChannel CANCEL
+//! Outbound TChannel v2 calls, compatible with tchannel-go v1.34.4.
+//! JSON calls own a one-shot TCP connection; Thrift calls reuse pooled idle
+//! connections (one in-flight call per connection). Dropping a call future closes its socket. TChannel CANCEL
 //! frames are not sent, so remote cancellation depends on peer disconnect handling.
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value;
@@ -193,6 +194,69 @@ fn parse_response_frames(frames: Vec<(u8, u32, Vec<u8>)>) -> Result<(bool, [Vec<
     bail!("TChannel response missing final fragment")
 }
 
+const IDLE_TTL: Duration = Duration::from_secs(30);
+const MAX_IDLE_PER_ADDR: usize = 64;
+type IdlePool = std::sync::Mutex<HashMap<String, Vec<(std::time::Instant, TcpStream)>>>;
+fn idle_pool() -> &'static IdlePool {
+    static POOL: std::sync::OnceLock<IdlePool> = std::sync::OnceLock::new();
+    POOL.get_or_init(Default::default)
+}
+
+/// Pop a still-healthy idle connection (Go tchannel keeps one long-lived
+/// connection per peer instead of dialing per call). A connection that is
+/// readable while idle was closed by the peer (or sent junk) and is dropped.
+fn take_idle(addr: &str) -> Option<TcpStream> {
+    let mut pool = idle_pool().lock().unwrap_or_else(|e| e.into_inner());
+    let list = pool.get_mut(addr)?;
+    while let Some((at, s)) = list.pop() {
+        if at.elapsed() > IDLE_TTL {
+            continue;
+        }
+        let mut b = [0u8; 1];
+        if matches!(s.try_read(&mut b), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock) {
+            return Some(s);
+        }
+    }
+    None
+}
+
+fn put_idle(addr: &str, s: TcpStream) {
+    let mut pool = idle_pool().lock().unwrap_or_else(|e| e.into_inner());
+    let list = pool.entry(addr.to_string()).or_default();
+    list.retain(|(at, _)| at.elapsed() <= IDLE_TTL);
+    if list.len() < MAX_IDLE_PER_ADDR {
+        list.push((std::time::Instant::now(), s));
+    }
+}
+
+async fn connect_and_init(addr: &str) -> Result<TcpStream> {
+    let mut s = TcpStream::connect(addr).await?;
+    s.set_nodelay(true)?;
+    let mut init = 2u16.to_be_bytes().to_vec();
+    init.extend(headers16(&[
+        ("host_port", "0.0.0.0:0"),
+        ("process_name", "cadence-rust-history-client"),
+    ])?);
+    write_frame(&mut s, 1, 1, &init).await?;
+    let (kind, init_id, payload) = read_frame(&mut s).await?;
+    if kind != 2 || init_id != 1 || payload.len() < 4 {
+        bail!("invalid TChannel init response")
+    }
+    if u16::from_be_bytes([payload[0], payload[1]]) != 2 {
+        bail!("unsupported TChannel init response version")
+    }
+    let mut init_pos = 2;
+    let header_count = get16(&payload, &mut init_pos)?;
+    for _ in 0..header_count {
+        let _ = read_string(&payload, &mut init_pos)?;
+        let _ = read_string(&payload, &mut init_pos)?;
+    }
+    if init_pos != payload.len() {
+        bail!("trailing TChannel init response bytes")
+    }
+    Ok(s)
+}
+
 /// Make one native TChannel/Thrift unary call. Unlike `call`, this sends
 /// strict Thrift bytes in the third call argument and binary YARPC metadata
 /// in the second call argument; no JSON serialization or newline framing is
@@ -208,30 +272,10 @@ pub async fn call_thrift(
 ) -> std::result::Result<ThriftResponse, JsonCallError> {
     let started_at = tokio::time::Instant::now();
     let work = async {
-        let mut s = TcpStream::connect(addr).await?;
-        s.set_nodelay(true)?;
-        let mut init = 2u16.to_be_bytes().to_vec();
-        init.extend(headers16(&[
-            ("host_port", "0.0.0.0:0"),
-            ("process_name", "cadence-rust-history-client"),
-        ])?);
-        write_frame(&mut s, 1, 1, &init).await?;
-        let (kind, init_id, payload) = read_frame(&mut s).await?;
-        if kind != 2 || init_id != 1 || payload.len() < 4 {
-            bail!("invalid TChannel init response")
-        }
-        if u16::from_be_bytes([payload[0], payload[1]]) != 2 {
-            bail!("unsupported TChannel init response version")
-        }
-        let mut init_pos = 2;
-        let header_count = get16(&payload, &mut init_pos)?;
-        for _ in 0..header_count {
-            let _ = read_string(&payload, &mut init_pos)?;
-            let _ = read_string(&payload, &mut init_pos)?;
-        }
-        if init_pos != payload.len() {
-            bail!("trailing TChannel init response bytes")
-        }
+        let mut s = match take_idle(addr) {
+            Some(s) => s,
+            None => connect_and_init(addr).await?,
+        };
 
         let encoded_headers: Vec<_> = headers
             .iter()
@@ -320,6 +364,8 @@ pub async fn call_thrift(
         }
         let (application_error, args) = parse_response_frames(frames)?;
         let headers = decode_headers16(&args[1])?;
+        // Response fully read: the connection is idle and reusable.
+        put_idle(addr, s);
         Ok(ThriftResponse {
             headers,
             body: args[2].clone(),
