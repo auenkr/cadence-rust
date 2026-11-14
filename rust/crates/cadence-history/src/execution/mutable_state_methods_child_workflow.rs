@@ -71,7 +71,11 @@ impl TypedMutableState {
                         execution_start_to_close_timeout_seconds: attributes
                             .execution_start_to_close_timeout_seconds,
                         task_start_to_close_timeout_seconds: attributes.task_start_to_close_timeout_seconds,
-                        parent_close_policy: attributes.parent_close_policy,
+                        // Go: GetParentClosePolicy().Ptr() (unset -> ABANDON).
+                        parent_close_policy: Some(
+                            attributes.parent_close_policy.unwrap_or(cadence_api::enums::ParentClosePolicy::Abandon),
+                        ),
+                        cron_overlap_policy: attributes.cron_overlap_policy,
                         control: attributes.control.clone(),
                         decision_task_completed_event_id: decision_completed_event_id,
                         workflow_id_reuse_policy: attributes.workflow_id_reuse_policy,
@@ -399,5 +403,23 @@ impl TypedMutableState {
             return internal_err("ChildWorkflowExecutionTimedOut event is missing attributes");
         };
         self.delete_pending_child_execution(a.initiated_event_id)
+    }
+}
+
+#[cfg(test)]
+mod child_initiated_parity_tests {
+    use super::*;
+
+    #[test]
+    fn initiated_event_defaults_parent_close_policy_to_abandon() {
+        let mut s = TypedMutableState::new();
+        s.execution_info.state = 1;
+        let attrs = StartChildWorkflowExecutionDecisionAttributes::default();
+        let (event, _) = s
+            .add_start_child_workflow_execution_initiated_event(1, 4, "req", &attrs, "parent", "cid")
+            .unwrap();
+        let a = event.start_child_workflow_execution_initiated_event_attributes.unwrap();
+        assert_eq!(a.parent_close_policy, Some(cadence_api::enums::ParentClosePolicy::Abandon));
+        assert_eq!(a.domain, "parent");
     }
 }
