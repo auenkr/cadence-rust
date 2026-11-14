@@ -21,7 +21,7 @@ use cadence_service_core::admin::DynamicConfigOverlay;
 
 #[derive(Debug, Clone)]
 pub enum AdminError {
-    History(tonic::Status),
+    History(Box<tonic::Status>),
     BadRequest(BadRequestError),
     EntityNotExists(EntityNotExistsError),
     Internal(InternalServiceError),

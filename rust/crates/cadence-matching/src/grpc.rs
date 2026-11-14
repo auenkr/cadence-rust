@@ -2285,21 +2285,26 @@ impl p::worker_api_server::WorkerApi for Frontend {
         &self,
         request: tonic::Request<p::RespondActivityTaskCompletedByIdRequest>,
     ) -> Result<Response<p::RespondActivityTaskCompletedByIdResponse>, Status> {
-        if !self.state.workflow_api.as_ref().is_some_and(|api| api.serves("RespondActivityTaskCompletedByID")) {
-        let r = request.into_inner();
-        let task_token = self.activity_token(&r.domain, r.workflow_execution, &r.activity_id)?;
-        p::worker_api_server::WorkerApi::respond_activity_task_completed(
-            self,
-            tonic::Request::new(p::RespondActivityTaskCompletedRequest {
-                task_token,
-                result: r.result,
-                identity: r.identity,
-            }),
-        )
-        .await?;
-        return Ok(Response::new(
-            p::RespondActivityTaskCompletedByIdResponse {},
-        ));
+        if !self
+            .state
+            .workflow_api
+            .as_ref()
+            .is_some_and(|api| api.serves("RespondActivityTaskCompletedByID"))
+        {
+            let r = request.into_inner();
+            let task_token = self.activity_token(&r.domain, r.workflow_execution, &r.activity_id)?;
+            p::worker_api_server::WorkerApi::respond_activity_task_completed(
+                self,
+                tonic::Request::new(p::RespondActivityTaskCompletedRequest {
+                    task_token,
+                    result: r.result,
+                    identity: r.identity,
+                }),
+            )
+            .await?;
+            return Ok(Response::new(
+                p::RespondActivityTaskCompletedByIdResponse {},
+            ));
         }
         let r = request.into_inner();
         let execution = r.workflow_execution.unwrap_or_default();
@@ -2326,20 +2331,25 @@ impl p::worker_api_server::WorkerApi for Frontend {
         &self,
         request: tonic::Request<p::RespondActivityTaskFailedByIdRequest>,
     ) -> Result<Response<p::RespondActivityTaskFailedByIdResponse>, Status> {
-        if !self.state.workflow_api.as_ref().is_some_and(|api| api.serves("RespondActivityTaskFailedByID")) {
-        let r = request.into_inner();
-        let task_token = self.activity_token(&r.domain, r.workflow_execution, &r.activity_id)?;
-        p::worker_api_server::WorkerApi::respond_activity_task_failed(
-            self,
-            tonic::Request::new(p::RespondActivityTaskFailedRequest {
-                task_token,
-                failure: r.failure,
-                identity: r.identity,
-                heartbeat_details: r.heartbeat_details,
-            }),
-        )
-        .await?;
-        return Ok(Response::new(p::RespondActivityTaskFailedByIdResponse {}));
+        if !self
+            .state
+            .workflow_api
+            .as_ref()
+            .is_some_and(|api| api.serves("RespondActivityTaskFailedByID"))
+        {
+            let r = request.into_inner();
+            let task_token = self.activity_token(&r.domain, r.workflow_execution, &r.activity_id)?;
+            p::worker_api_server::WorkerApi::respond_activity_task_failed(
+                self,
+                tonic::Request::new(p::RespondActivityTaskFailedRequest {
+                    task_token,
+                    failure: r.failure,
+                    identity: r.identity,
+                    heartbeat_details: r.heartbeat_details,
+                }),
+            )
+            .await?;
+            return Ok(Response::new(p::RespondActivityTaskFailedByIdResponse {}));
         }
         let r = request.into_inner();
         let (reason, details, failure_options) = cv::failure_in(r.failure)?;
@@ -2368,19 +2378,24 @@ impl p::worker_api_server::WorkerApi for Frontend {
         &self,
         request: tonic::Request<p::RespondActivityTaskCanceledByIdRequest>,
     ) -> Result<Response<p::RespondActivityTaskCanceledByIdResponse>, Status> {
-        if !self.state.workflow_api.as_ref().is_some_and(|api| api.serves("RespondActivityTaskCanceledByID")) {
-        let r = request.into_inner();
-        let task_token = self.activity_token(&r.domain, r.workflow_execution, &r.activity_id)?;
-        p::worker_api_server::WorkerApi::respond_activity_task_canceled(
-            self,
-            tonic::Request::new(p::RespondActivityTaskCanceledRequest {
-                task_token,
-                details: r.details,
-                identity: r.identity,
-            }),
-        )
-        .await?;
-        return Ok(Response::new(p::RespondActivityTaskCanceledByIdResponse {}));
+        if !self
+            .state
+            .workflow_api
+            .as_ref()
+            .is_some_and(|api| api.serves("RespondActivityTaskCanceledByID"))
+        {
+            let r = request.into_inner();
+            let task_token = self.activity_token(&r.domain, r.workflow_execution, &r.activity_id)?;
+            p::worker_api_server::WorkerApi::respond_activity_task_canceled(
+                self,
+                tonic::Request::new(p::RespondActivityTaskCanceledRequest {
+                    task_token,
+                    details: r.details,
+                    identity: r.identity,
+                }),
+            )
+            .await?;
+            return Ok(Response::new(p::RespondActivityTaskCanceledByIdResponse {}));
         }
         let r = request.into_inner();
         let execution = r.workflow_execution.unwrap_or_default();
@@ -2405,21 +2420,26 @@ impl p::worker_api_server::WorkerApi for Frontend {
         &self,
         request: tonic::Request<p::RecordActivityTaskHeartbeatByIdRequest>,
     ) -> Result<Response<p::RecordActivityTaskHeartbeatByIdResponse>, Status> {
-        if !self.state.workflow_api.as_ref().is_some_and(|api| api.serves("RecordActivityTaskHeartbeatByID")) {
-        let r = request.into_inner();
-        let task_token = self.activity_token(&r.domain, r.workflow_execution, &r.activity_id)?;
-        let v = p::worker_api_server::WorkerApi::record_activity_task_heartbeat(
-            self,
-            tonic::Request::new(p::RecordActivityTaskHeartbeatRequest {
-                task_token,
-                details: r.details,
-                identity: r.identity,
-            }),
-        )
-        .await?;
-        return Ok(Response::new(p::RecordActivityTaskHeartbeatByIdResponse {
-            cancel_requested: v.into_inner().cancel_requested,
-        }));
+        if !self
+            .state
+            .workflow_api
+            .as_ref()
+            .is_some_and(|api| api.serves("RecordActivityTaskHeartbeatByID"))
+        {
+            let r = request.into_inner();
+            let task_token = self.activity_token(&r.domain, r.workflow_execution, &r.activity_id)?;
+            let v = p::worker_api_server::WorkerApi::record_activity_task_heartbeat(
+                self,
+                tonic::Request::new(p::RecordActivityTaskHeartbeatRequest {
+                    task_token,
+                    details: r.details,
+                    identity: r.identity,
+                }),
+            )
+            .await?;
+            return Ok(Response::new(p::RecordActivityTaskHeartbeatByIdResponse {
+                cancel_requested: v.into_inner().cancel_requested,
+            }));
         }
         let r = request.into_inner();
         let execution = r.workflow_execution.unwrap_or_default();

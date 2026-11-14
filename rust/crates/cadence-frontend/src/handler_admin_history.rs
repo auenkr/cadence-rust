@@ -26,7 +26,7 @@ fn bad(message: &str) -> AdminError {
 }
 
 fn history_error(status: tonic::Status) -> AdminError {
-    AdminError::History(status)
+    AdminError::History(Box::new(status))
 }
 
 /// Go `GetHistoryClient()` delegation target for Admin.
