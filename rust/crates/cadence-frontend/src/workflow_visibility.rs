@@ -273,6 +273,11 @@ impl ProductionBackend {
         self.visibility.as_ref().ok_or_else(not_supported)
     }
 
+    pub fn with_list_sampler(mut self, sampler: Arc<ListSampler>) -> Self {
+        self.list_sampler = Some(sampler);
+        self
+    }
+
     /// `ListOpenWorkflowExecutions` / `ListClosedWorkflowExecutions`.
     pub(crate) async fn list_visibility(
         &self,
@@ -283,6 +288,10 @@ impl ProductionBackend {
             return self.es_open_closed(request, closed).await;
         }
         let store = self.visibility_store()?.clone();
+        if let Some(sampler) = &self.list_sampler {
+            let domain = str_field(request, "domain").unwrap_or_default();
+            sampler.try_consume(&domain)?;
+        }
         let close_status = match request.get("status") {
             Some(v) if !v.is_null() => {
                 let status: WorkflowExecutionCloseStatus = serde_json::from_value(v.clone())
@@ -369,5 +378,63 @@ mod read_store_tests {
         // Unavailable stores fall back to DB visibility.
         assert!(!read_store_selects_es("pinot"));
         assert!(!read_store_selects_es(""));
+    }
+}
+
+/// Go `persistence/wrappers/sampled` list limiter: when
+/// `system.enableVisibilitySampling` is on, each domain gets a token bucket
+/// of `frontend.visibilityListMaxQPS`; an empty bucket yields
+/// `ServiceBusyError("Persistence Max QPS Reached for List Operations.")`.
+pub struct ListSampler {
+    enabled: Arc<dyn Fn() -> bool + Send + Sync>,
+    qps: Arc<dyn Fn(&str) -> i64 + Send + Sync>,
+    buckets: std::sync::Mutex<std::collections::HashMap<String, (f64, std::time::Instant)>>,
+}
+
+impl ListSampler {
+    pub fn new(
+        enabled: Arc<dyn Fn() -> bool + Send + Sync>,
+        qps: Arc<dyn Fn(&str) -> i64 + Send + Sync>,
+    ) -> Self {
+        Self { enabled, qps, buckets: Default::default() }
+    }
+
+    pub fn try_consume(&self, domain: &str) -> Result<(), CadenceError> {
+        if !(self.enabled)() {
+            return Ok(());
+        }
+        let rate = (self.qps)(domain).max(0) as f64;
+        let burst = rate.max(1.0);
+        let now = std::time::Instant::now();
+        let mut map = self.buckets.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = map.entry(domain.to_string()).or_insert((burst, now));
+        let elapsed = now.duration_since(entry.1).as_secs_f64();
+        entry.0 = (entry.0 + elapsed * rate).min(burst);
+        entry.1 = now;
+        if entry.0 >= 1.0 {
+            entry.0 -= 1.0;
+            Ok(())
+        } else {
+            Err(CadenceError::ServiceBusy(
+                cadence_api::errors::ServiceBusyError::new(
+                    "Persistence Max QPS Reached for List Operations.",
+                ),
+            ))
+        }
+    }
+}
+
+#[cfg(test)]
+mod solfix16_tests {
+    use super::*;
+
+    #[test]
+    fn list_sampler_limits_per_domain_when_enabled() {
+        let s = ListSampler::new(Arc::new(|| true), Arc::new(|_| 1));
+        assert!(s.try_consume("a").is_ok());
+        assert!(matches!(s.try_consume("a"), Err(CadenceError::ServiceBusy(_))));
+        assert!(s.try_consume("b").is_ok());
+        let off = ListSampler::new(Arc::new(|| false), Arc::new(|_| 0));
+        assert!(off.try_consume("a").is_ok());
     }
 }

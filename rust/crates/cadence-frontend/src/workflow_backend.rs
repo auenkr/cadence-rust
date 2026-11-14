@@ -48,6 +48,7 @@ pub struct ProductionBackend {
     pub(crate) visibility:
         Option<std::sync::Arc<dyn cadence_persistence::visibility_reader::VisibilityStore>>,
     pub(crate) es: Option<crate::workflow_visibility::EsBinding>,
+    pub(crate) list_sampler: Option<std::sync::Arc<crate::workflow_visibility::ListSampler>>,
     header_rules: std::sync::Arc<Vec<cadence_service_core::header_forwarding::HeaderRule>>,
     pub(crate) history_page_size:
         Option<std::sync::Arc<dyn crate::handler_workflow::HistoryPageSizePolicy>>,
@@ -220,6 +221,7 @@ impl ProductionBackend {
             history_page_size: None,
             visibility: None,
             es: None,
+            list_sampler: None,
             domains: None,
             header_rules: Default::default(),
         }
@@ -377,7 +379,7 @@ impl ProductionBackend {
                 &[],
             ),
             &writer.into_bytes(),
-            timeout,
+            cadence_service_core::header_forwarding::clamp_to_inbound_deadline(timeout),
         )
         .await;
         eprintln!(
@@ -826,11 +828,14 @@ impl cadence_service_core::workflow_api::WorkflowApi for HandlerApi {
                 ..Default::default()
             };
             let inbound = ctx.headers.clone();
-            cadence_service_core::header_forwarding::INBOUND_HEADERS
+            cadence_service_core::header_forwarding::INBOUND_DEADLINE
                 .scope(
-                    inbound,
-                    self.handler
-                        .dispatch_with_metadata(operation, request, &caller),
+                    ctx.deadline,
+                    cadence_service_core::header_forwarding::INBOUND_HEADERS.scope(
+                        inbound,
+                        self.handler
+                            .dispatch_with_metadata(operation, request, &caller),
+                    ),
                 )
                 .await
         })
@@ -1104,6 +1109,32 @@ pub fn build_workflow_api(
     }
     if let Some(store) = ctx.state.visibility_store.clone() {
         backend = backend.with_visibility_store(store);
+        let (o1, o2) = (
+            ctx.state.admin.dynamic_config.clone(),
+            ctx.state.admin.dynamic_config.clone(),
+        );
+        backend = backend.with_list_sampler(std::sync::Arc::new(
+            crate::workflow_visibility::ListSampler::new(
+                std::sync::Arc::new(move || {
+                    o1.lock().is_ok_and(|o| {
+                        cadence_persistence::dynamic_config::boolean(
+                            o.property_values("system.enableVisibilitySampling"),
+                            None,
+                            false,
+                        )
+                    })
+                }),
+                std::sync::Arc::new(move |d: &str| {
+                    o2.lock().map_or(10, |o| {
+                        cadence_persistence::dynamic_config::integer(
+                            o.property_values("frontend.visibilityListMaxQPS"),
+                            Some(d),
+                            10,
+                        )
+                    })
+                }),
+            ),
+        ));
     }
     match cadence_service_core::es_mapping::search_client_from_persistence(&ctx.config.persistence)
     {
