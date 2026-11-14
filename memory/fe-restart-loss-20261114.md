@@ -23,3 +23,24 @@ frames. This repairs a proven loss mechanism but does not by itself prove the
 specific original workflow hit it. Frontend latency tuning is untouched.
 
 Validation pending. No local Cargo, Go or Docker commands run.
+
+## Original artifact follow-up and shutdown audit
+
+Downloaded soak-rust artifact to /mnt/storage/service/tmp/fe-restart-loss/original
+(TMPDIR relocated after /tmp download hit quota; no build/test executed).
+SDK worker has one DecisionWorker EntityNotExists at 15:20:16, no activity report
+failure. Go History logs ActivityTaskTimedOut at 15:21:13.336 for the lost workflow,
+placing its start at 15:20:13.336, approximately the restart instant. Thus a lost
+started-poll response is consistent with the evidence; the original logs lack
+frame-level diagnostics and cannot prove the byte-framing race occurred.
+
+Go frontend Service.Stop (service.go:319) marks unhealthy, waits discovery, stops
+admission/limiters, then drains for min(1 second, configured duration). Rust launcher
+uses the same sequence (matching/src/launcher.rs:2489), and WorkflowHandler returns
+InternalServiceError("Shutting down") during admission shutdown, which Go SDK's
+service transient retry handles. SDK reportActivityComplete also retries transport
+failures. Neither sequence executes for the soak's SIGKILL. No change to admission,
+retry policy, workflow activity options, or latency tuning is justified here.
+
+Targeted CI: https://github.com/auenkr/cadence-rust/actions/runs/43613537757,
+head 286ef1e3a (pending).
