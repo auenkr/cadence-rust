@@ -94,7 +94,7 @@ if args.es_url:
     dyn = dyn.replace('value: "db"', 'value: "es"')
 # development.yaml already sets system.minRetentionDays=0 and system.workflowDeletionJitterRange=1 (retention-0 archival scenario).
 (work / 'dynamic-config.yaml').write_text(dyn)
-(work / 'rust-dynamic-config.yaml').write_text(dyn + f'\nsystem.enableGRPCOutbound:\n  - value: {str(args.rust_outbound == "grpc").lower()}\nfrontend.sendRawWorkflowHistory:\n  - value: true\n')
+(work / 'rust-dynamic-config.yaml').write_text(dyn + f'\nsystem.enableGRPCOutbound:\n  - value: {str(args.rust_outbound == "grpc").lower()}\nfrontend.sendRawWorkflowHistory:\n  - value: true\n' + (''.join(f'\n{k}:\n  - value: true\n' for k in ('history.enableTimerQueueV2', 'history.enableTransferQueueV2') if k + ':' not in dyn) if os.environ.get('CADENCE_GATE_QUEUE_V2') == 'true' else ''))
 (work / 'config/base.yaml').write_text((root / 'go/config/base.yaml').read_text())
 seeds = ', '.join(f'"127.0.0.1:{ports[k]}"' for k in ['FRONTEND_PORT', 'HISTORY_PORT', 'WORKER_PORT', 'RUST_MATCHING_PORT'] + (['HISTORY2_PORT'] if args.two_history else []))
 text = (root / 'go/config/development.yaml').read_text()
@@ -113,7 +113,7 @@ def add_s3(cfg):
 def add_gcs(cfg):
     # development.yaml already has gstorage for history only; add it where missing (visibility)
     return re.sub(r'(        dirMode: "0766"\n)(?!      gstorage)', r'\1      gstorage:\n        credentialsPath: ""\n', cfg) if args.gcs_endpoint else cfg
-text = add_gcs(add_s3(text))
+text = add_s3(add_gcs(text))
 text = text.rstrip('\n') + '\n' + async_yaml
 (work / 'config/development.yaml').write_text(text)
 if args.two_history:
@@ -178,7 +178,7 @@ rt = rt.replace('localhost:7833', f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}')
 rt = rt.replace('/tmp/cadence_archival/development', str(work / 'history-archive'))
 rt = rt.replace('/tmp/cadence_vis_archival/development', str(work / 'visibility-archive'))
 rt = rt.replace('/tmp/blobstore', str(work / 'blobstore'))
-rt = add_gcs(add_s3(rt))
+rt = add_s3(add_gcs(rt))
 _ms = socket.socket(); _ms.bind(('127.0.0.1', 0)); prom_port = _ms.getsockname()[1]; _ms.close()
 rt, n = re.subn(r'(?m)^(  frontend:\n(?:.*\n)*?    metrics:\n)      statsd:\n        hostPort: "127.0.0.1:8125"\n        prefix: "cadence"\n',
                 lambda m: m.group(1) + f'      prometheus:\n        timerType: histogram\n        listenAddress: "127.0.0.1:{prom_port}"\n', rt, count=1)
@@ -440,6 +440,64 @@ try:
                 r = subprocess.run([rd, 'visibility', args.s3_endpoint, rs_vis, dom_id, f"WorkflowTypeName = '{wtype}'"], capture_output=True, text=True, timeout=60)
                 (work / 'rs3-go-reader-visibility.log').write_text(r.stdout + r.stderr)
                 record('rs3-go-reads-rust-visibility', r.returncode == 0 and all(w in r.stdout for w in vis_runs), r.stdout + r.stderr)
+        if args.gcs_endpoint:
+            # ---- Rust History GCS (gstorage) archival against fake-gcs-server: Rust History archives at close, retention 0
+            # deletes the run, Rust Frontend serves history and visibility from the archive.
+            def gcs_rc(method, path, body=b''):
+                rq = urllib.request.Request(args.gcs_endpoint + path, data=body or None, method=method, headers={'Content-Type': 'application/json'})
+                try:
+                    with urllib.request.urlopen(rq, timeout=30) as rr:
+                        return rr.status, rr.read().decode()
+                except urllib.error.HTTPError as e:
+                    return e.code, e.read().decode()
+            gb = args.gcs_bucket
+            st, body = gcs_rc('POST', '/storage/v1/b?project=cadence-gate', json.dumps({'name': gb}).encode())
+            record('rgcs-create-bucket', st == 200, f'{st} {body}')
+            rg_hist, rg_vis = f'gs://{gb}/rust-history', f'gs://{gb}/rust-visibility'
+            dom_rg = 'rgcs-gate-' + secrets.token_hex(3)
+            cli_rg = lambda *a: [*cli_t, '--domain', dom_rg, *a]
+            run('rgcs-register-domain', cli_rg('domain', 'register', '--retention', '0', '--history_archival_status', 'enabled', '--history_uri', rg_hist,
+                                               '--visibility_archival_status', 'enabled', '--visibility_uri', rg_vis))
+            time.sleep(12)
+            d = subprocess.run(cli_rg('domain', 'describe'), capture_output=True, text=True, timeout=60)
+            (work / 'rgcs-describe-domain.log').write_text(d.stdout + d.stderr)
+            record('rgcs-describe-domain', d.returncode == 0 and rg_hist in d.stdout and rg_vis in d.stdout, d.stdout + d.stderr)
+            gruns = {}
+            for i in range(3):
+                wid = f'rgcs-wf-{secrets.token_hex(3)}'
+                r = subprocess.run(cli_rg('workflow', 'start', '--tl', 'rgcs-gate-tl', '--wt', 'RgcsGateType', '--wid', wid, '--et', '600', '--dt', '10'), capture_output=True, text=True, timeout=60)
+                rm = re.search(r'run Id:\s*(\S+)', r.stdout)
+                record(f'rgcs-start-{i}', r.returncode == 0 and rm is not None, r.stdout + r.stderr)
+                if rm:
+                    gruns[wid] = rm.group(1)
+                    run(f'rgcs-terminate-{i}', cli_rg('workflow', 'terminate', '--wid', wid, '--rid', rm.group(1), '--reason', 'rgcs-gate'))
+            hnames, vnames = [], []
+            for _ in range(36):
+                st, listing = gcs_rc('GET', f'/storage/v1/b/{gb}/o?prefix=' + urllib.parse.quote('rust-history/', safe=''))
+                hnames = [o['name'] for o in json.loads(listing).get('items', [])] if st == 200 else []
+                st, listing = gcs_rc('GET', f'/storage/v1/b/{gb}/o?prefix=' + urllib.parse.quote('rust-visibility/', safe=''))
+                vnames = [o['name'] for o in json.loads(listing).get('items', [])] if st == 200 else []
+                if len(hnames) >= len(gruns) > 0 and len(vnames) >= 2:
+                    break
+                time.sleep(5)
+            (work / 'rgcs-objects.log').write_text(json.dumps({'history': hnames, 'visibility': vnames}, indent=1))
+            record('rgcs-rust-wrote-history-objects', len(gruns) > 0 and len(hnames) >= len(gruns), '\n'.join(hnames[:10]))
+            record('rgcs-rust-wrote-visibility-objects', len(vnames) >= 2, '\n'.join(vnames[:10]))
+            gone_g = {}
+            for wid, rid in gruns.items():
+                for _ in range(40):
+                    r = subprocess.run(cli_rg('workflow', 'describe', '--wid', wid, '--rid', rid), capture_output=True, text=True, timeout=60)
+                    if r.returncode != 0:
+                        gone_g[wid] = True
+                        break
+                    time.sleep(5)
+            record('rgcs-retention-deleted-from-persistence', len(gone_g) == len(gruns) > 0, str(gone_g))
+            for tag, cli in (('tchannel', cli_t), ('grpc', cli_g)):
+                for wid, rid in gruns.items():
+                    out_f = work / f'rgcs-history-{tag}-{wid}.json'
+                    r = subprocess.run([*cli, '--domain', dom_rg, 'workflow', 'show', '--wid', wid, '--rid', rid, '--output_filename', str(out_f)], capture_output=True, text=True, timeout=60)
+                    exported = out_f.read_text() if out_f.exists() else ''
+                    record(f'rgcs-frontend-archived-history-{tag}-{wid}', 'WorkflowExecutionStarted' in exported and 'WorkflowExecutionTerminated' in exported, exported[-500:] + r.stdout + r.stderr)
         raise SystemExit(0)
     dom_t, dom_g = 'fe-gate-t-' + secrets.token_hex(3), 'fe-gate-g-' + secrets.token_hex(3)
     run('cli-register-domain-tchannel', [*cli_t, '--domain', dom_t, 'domain', 'register', '--retention', '1'])
