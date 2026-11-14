@@ -105,7 +105,7 @@ fn start_child_workflow_execution_decision_attributes(v:tasks::StartChildWorkflo
         memo: v.memo.map(memo),
         search_attributes: v.search_attributes.map(search_attributes),
         cron_overlap_policy: v.cron_overlap_policy.map_or(0,|e|e as i32+1),
-        ..Default::default()
+        active_cluster_selection_policy: v.active_cluster_selection_policy.map(selection_policy_out),
     }
 }
 fn signal_external_workflow_execution_decision_attributes(v:tasks::SignalExternalWorkflowExecutionDecisionAttributes) -> p::SignalExternalWorkflowExecutionDecisionAttributes {

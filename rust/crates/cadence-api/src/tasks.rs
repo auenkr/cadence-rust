@@ -1393,6 +1393,12 @@ pub struct StartChildWorkflowExecutionDecisionAttributes {
         skip_serializing_if = "Option::is_none"
     )]
     pub cron_overlap_policy: Option<CronOverlapPolicy>,
+    #[serde(
+        rename = "activeClusterSelectionPolicy",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub active_cluster_selection_policy: Option<crate::types::ActiveClusterSelectionPolicy>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1707,6 +1713,12 @@ pub struct StartChildWorkflowExecutionInitiatedEventAttributes {
         skip_serializing_if = "Option::is_none"
     )]
     pub cron_overlap_policy: Option<CronOverlapPolicy>,
+    #[serde(
+        rename = "activeClusterSelectionPolicy",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub active_cluster_selection_policy: Option<crate::types::ActiveClusterSelectionPolicy>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
