@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Watch one benchmark directly and retain only compact evidence after CI ends."""
+"""Watch one benchmark directly and save compact results locally after CI ends."""
 import argparse
 import json
 from pathlib import Path
@@ -37,9 +37,5 @@ try:
 except subprocess.CalledProcessError as error:
     result['artifact_error']=str(error)
 save(result)
-subprocess.run(['git','add',str(out)],cwd=repository,check=True)
-if subprocess.run(['git','diff','--cached','--quiet'],cwd=repository).returncode:
-    subprocess.run(['git','commit','-m',f'Retain compact {a.service} benchmark {a.run_id} evidence'],cwd=repository,check=True)
-    subprocess.run(['git','push','origin','HEAD'],cwd=repository,check=True)
 print(json.dumps(result,indent=2),flush=True)
 raise SystemExit(0 if result['conclusion']=='success' and 'artifact_error' not in result else 1)

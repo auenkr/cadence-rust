@@ -1,9 +1,0 @@
-{
-  "run_id": 43480575061,
-  "phase": "first all-Go arm, before SDK load",
-  "worker_error": "Failed to update domain metadata. <>1 rows affected.",
-  "worker_fatal": "failed to register system domain",
-  "harness_error": "docker inspect received empty container ID because exited Worker was omitted by compose ps",
-  "remediation": "register benchmark domain before starting system Worker; inspect exited containers and report explicit state",
-  "validation": "10 Python harness tests passed; CI rerun required"
-}

@@ -81,13 +81,13 @@ gh workflow run sdk-matching-benchmark.yml --ref t3/matching-benchmark-harness \
   -f rate=5 -f warmup=10 -f duration=30 -f repetitions=1 -f repetition_offset=0
 ```
 
-Artifacts contain `Benchmark/evidence/run/` contents. Retain compact real evidence
-here before the artifacts expire, with run URL, tested head and conclusion.
-`compact_evidence.py` retains reports, correctness counts, hashes, commands,
-exit codes and exact configurations. It drops raw ledgers, time series, verbose
-logs, container inventories and unrelated oracle fixtures. Raw evidence expires
-with the CI artifacts; archive it separately before expiry for any important
-performance claim. Compact summaries cannot reconstruct raw percentiles.
+Generated binaries (`bin/`) and all run output (`evidence/`) are ignored by Git.
+Keep only the harness source, SDK dependency locks, scenarios, configuration and
+workflow definitions in the repository. Logs, ledgers, resource samples, reports,
+provenance and watcher state remain local or in three-day CI artifacts.
+`compact_evidence.py` can export smaller local summaries for review; the watcher
+never commits or pushes generated files. Archive artifacts outside Git before
+expiry when longer retention is needed.
 `ci.sh` records its final exit even on error. `run.py` records subprocess commands,
 exits and logs and always tears down database/service containers. It alternates
 Go/Rust order by repetition index. Use odd offsets to start with Rust.
@@ -126,23 +126,22 @@ No speedup claim is enabled by this initial report. Before performance conclusio
 There are no production-derived sizes, latency SLOs, error budgets or soak duration
 in the request. Choose and record those before enabling capacity comparisons.
 
-## History comparison
+## Select a service
 
-The first History comparison uses migrated source commit
-`c1bbd3ae71c84a71d5a226a70b0d8b71d021cb5b` from `history-admingate`.
-It uses the same 5 starts/s, 1 KiB payload, 10 ms activity, 10-second warmup and
-30-second measured window as the initial Matching smoke, with **three** alternating
-fresh-database pairs. This is still a short pipeline benchmark, not the full
-10-minute/30-minute performance protocol.
+Run the same workload against a pinned migrated source commit, replacing only
+one service in the Rust arm:
 
 ```sh
-gh workflow run frontend-matching-benchmark.yml --ref t3/matching-benchmark-harness \
+gh workflow run frontend-matching-benchmark.yml --ref <benchmark-branch> \
   -f sdk_openloop=true -f service=history -f sdk_repetitions=3 \
-  -f source_ref=c1bbd3ae71c84a71d5a226a70b0d8b71d021cb5b
+  -f source_ref=<source-commit>
 ```
 
-The service suite dispatches History, Frontend and Matching on independent standard
-Actions runners in parallel. Workflow concurrency groups include the service, so
-dispatching Frontend does not cancel History. Each job retains its 90-minute limit
-and runs its Go/Rust arms sequentially on the same runner. Evidence collection is
-serialized locally to avoid Git commit races.
+Use `service=matching`, `service=frontend` or `service=history`. Separate service
+runs can run in parallel; workflow concurrency groups include the service.
+Each job runs its Go/Rust arms sequentially on the same runner.
+To watch and download compact local results:
+
+```sh
+python3 Benchmark/watch-benchmark.py <run-id> --service history
+```
