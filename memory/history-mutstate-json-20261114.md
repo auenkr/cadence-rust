@@ -39,3 +39,22 @@ complete. The cross-cluster raw gate also demonstrates that branch tokens are
 cluster-specific, so its direct equality condition cannot pass while comparing
 these two distinct persistence branches, even though token encoding is
 compatible.
+
+## Implementation follow-up
+
+- Restored normalization only for exact `BranchToken`; all other version-history
+  keys, indices, items and values are compared without normalization.
+- Normalization-only MySQL repl gate:
+  https://github.com/auenkr/cadence-rust/actions/runs/43588255295
+  Head `281dba321`, conclusion `success`; log explicitly contains
+  `GATE SUMMARY failed: []`.
+  Rust History SHA256 `6731948df93d6ada363fcadb1bcdf3f6630699f9c7553adb99843cdbd9c2eb2d`.
+- Added output-only serde persistence structs, in Go declaration order, for the
+  complete mutable state and its execution/activity/timer/child/cancel/signal/
+  semaphore/version-history/replication/checksum records. The nested API view
+  follows Go's json tags with a checked-in field schema; transport serializers
+  are unchanged. Added hand-built full JSON and focused binary/time/tag fixtures.
+- First full-shape History CI:
+  https://github.com/auenkr/cadence-rust/actions/runs/43588548302
+  Head `ec4f37b24`, conclusion `failure`: the default trait method needed a
+  qualified HistoryError import. Fixed before the next CI dispatch.

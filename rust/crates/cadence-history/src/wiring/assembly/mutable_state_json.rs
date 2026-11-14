@@ -51,11 +51,16 @@ fn blob_api<T: FromThrift + Serialize>(blob: Option<&pc::DataBlob>, name: &'stat
 #[derive(Default, Serialize)]
 #[allow(non_snake_case)]
 struct WorkflowMutableState {
+    #[serde(serialize_with = "int_map")]
     ActivityInfos: Option<BTreeMap<i64, Option<ActivityInfo>>>,
     TimerInfos: Option<BTreeMap<String, Option<TimerInfo>>>,
+    #[serde(serialize_with = "int_map")]
     ChildExecutionInfos: Option<BTreeMap<i64, Option<ChildExecutionInfo>>>,
+    #[serde(serialize_with = "int_map")]
     RequestCancelInfos: Option<BTreeMap<i64, Option<RequestCancelInfo>>>,
+    #[serde(serialize_with = "int_map")]
     SignalInfos: Option<BTreeMap<i64, Option<SignalInfo>>>,
+    #[serde(serialize_with = "int_map")]
     SemaphoreInfos: Option<BTreeMap<i64, Option<SemaphoreInfo>>>,
     SignalRequestedIDs: Option<BTreeMap<String, BTreeMap<String, String>>>,
     ExecutionInfo: Option<WorkflowExecutionInfo>,
@@ -484,7 +489,8 @@ impl EngineMutableState {
             Checksum: self.snapshot.checksum.as_ref().map(|b| serde_json::from_slice(&b.data))
                 .transpose().map_err(|e| HistoryError::internal(e.to_string()))?.unwrap_or_default(),
         };
-        serde_json::to_string(&state).map_err(|e| HistoryError::internal(e.to_string()))
+        serde_json::to_string(&state).map(|s| s.replace('&', "\\u0026").replace('<', "\\u003c").replace('>', "\\u003e").replace('\u2028', "\\u2028").replace('\u2029', "\\u2029"))
+            .map_err(|e| HistoryError::internal(e.to_string()))
     }
 }
 
@@ -610,5 +616,13 @@ mod tests {
             "workflowExecutionSignaledEventAttributes": { "signalName": "signal", "input": [1,2,255], "identity": "" }
         }) };
         assert_eq!(serde_json::to_string(&input).unwrap(), r#"{"eventId":7,"timestamp":0,"workflowExecutionSignaledEventAttributes":{"signalName":"signal","input":"AQL/"}}"#);
+    }
+}
+
+// encoding/json orders integer map keys by their decimal string, not numerically.
+fn int_map<S: serde::Serializer, T: Serialize>(value: &Option<BTreeMap<i64, T>>, serializer: S) -> Result<S::Ok, S::Error> {
+    match value {
+        None => serializer.serialize_none(),
+        Some(map) => map.iter().map(|(key, value)| (key.to_string(), value)).collect::<BTreeMap<_, _>>().serialize(serializer),
     }
 }
