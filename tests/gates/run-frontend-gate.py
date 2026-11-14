@@ -113,7 +113,7 @@ def add_s3(cfg):
 def add_gcs(cfg):
     # development.yaml already has gstorage for history only; add it where missing (visibility)
     return re.sub(r'(        dirMode: "0766"\n)(?!      gstorage)', r'\1      gstorage:\n        credentialsPath: ""\n', cfg) if args.gcs_endpoint else cfg
-text = add_gcs(add_s3(text))
+text = add_s3(add_gcs(text))
 text = text.rstrip('\n') + '\n' + async_yaml
 (work / 'config/development.yaml').write_text(text)
 if args.two_history:
@@ -178,7 +178,7 @@ rt = rt.replace('localhost:7833', f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}')
 rt = rt.replace('/tmp/cadence_archival/development', str(work / 'history-archive'))
 rt = rt.replace('/tmp/cadence_vis_archival/development', str(work / 'visibility-archive'))
 rt = rt.replace('/tmp/blobstore', str(work / 'blobstore'))
-rt = add_gcs(add_s3(rt))
+rt = add_s3(add_gcs(rt))
 _ms = socket.socket(); _ms.bind(('127.0.0.1', 0)); prom_port = _ms.getsockname()[1]; _ms.close()
 rt, n = re.subn(r'(?m)^(  frontend:\n(?:.*\n)*?    metrics:\n)      statsd:\n        hostPort: "127.0.0.1:8125"\n        prefix: "cadence"\n',
                 lambda m: m.group(1) + f'      prometheus:\n        timerType: histogram\n        listenAddress: "127.0.0.1:{prom_port}"\n', rt, count=1)
