@@ -114,3 +114,25 @@ mutable-state object, so its pass does not close this limitation.
 - Replacement fresh History CI:
   https://github.com/auenkr/cadence-rust/actions/runs/43591791527
   (head `22c54c847`, pending when recorded).
+
+## Final evidence
+
+- **History CI: success**
+  https://github.com/auenkr/cadence-rust/actions/runs/43591791527
+  Head `22c54c847377f9d8f83e563a3b8fbca13ac90d28`.
+  Fresh uncached dedicated target, clippy followed by History tests:
+  **917 passed, 0 failed**, including all five mutable-state JSON fixtures.
+  Command: `gh workflow run rust-ci.yml --ref history-mutstate-json -f package=cadence-history -f clean_target=true`.
+- **Final MySQL replication gate: success**
+  https://github.com/auenkr/cadence-rust/actions/runs/43592469144
+  Head `26a23ba784e9950a0668646e46aa139866c99986` (documentation-only
+  changes after the tested code head above).
+  Log explicitly shows `GATE SUMMARY failed: []`.
+  Rust History SHA256:
+  `c19947c6548c5c599325353f0c554eed2099a2a3e88a584555d55194fdb424f8`.
+  Command: `gh workflow run frontend-mixed-gate.yml --ref history-mutstate-json -f database=mysql -f repl_rust_cluster=A -f kafka=false`.
+- Only exact `BranchToken` keys are removed from version-history comparisons;
+  index, field names and item EventID/Version values remain raw.
+- All Cargo/Go/Docker validation ran on GitHub Actions. No such commands ran
+  locally. No branches were merged or deleted.
+- The user-approved nil/empty presence limitation remains documented above.
