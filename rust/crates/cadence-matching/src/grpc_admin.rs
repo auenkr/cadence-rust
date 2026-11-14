@@ -997,12 +997,18 @@ impl a::admin_api_server::AdminApi for Admin {
             0 => return Err(Status::invalid_argument("Queue type is not set.")),
             1 => {}
             2 => {
+                let response = crate::admin::read_domain_dlq_messages(&self.frontend.state,
+                    cadence_api::admin::ReadDLQMessagesRequest {
+                        dlq_type: Some(cadence_api::enums::DLQType::Domain),
+                        inclusive_end_message_id: r.inclusive_end_message_id,
+                        maximum_page_size: r.page_size, next_page_token: r.next_page_token,
+                        ..Default::default()
+                    }).map_err(Status::internal)?;
                 return Ok(Response::new(a::ReadDlqMessagesResponse {
-                    r#type: r.r#type,
-                    replication_tasks: vec![],
-                    replication_tasks_info: vec![],
-                    next_page_token: vec![],
-                }))
+                    r#type: 0,
+                    replication_tasks: cadence_service_core::replication_convert::replication_tasks_out(response.replication_tasks),
+                    replication_tasks_info: vec![], next_page_token: response.next_page_token,
+                }));
             }
             _ => return Err(Status::invalid_argument("The DLQ type is not supported.")),
         }
@@ -1038,7 +1044,14 @@ impl a::admin_api_server::AdminApi for Admin {
         match r.r#type {
             0 => return Err(Status::invalid_argument("Queue type is not set.")),
             1 => {}
-            2 => return Ok(Response::new(a::PurgeDlqMessagesResponse {})),
+            2 => {
+                crate::admin::purge_domain_dlq_messages(&self.frontend.state,
+                    cadence_api::admin::PurgeDLQMessagesRequest {
+                        dlq_type: Some(cadence_api::enums::DLQType::Domain),
+                        inclusive_end_message_id: r.inclusive_end_message_id, ..Default::default()
+                    }).map_err(Status::internal)?;
+                return Ok(Response::new(a::PurgeDlqMessagesResponse {}));
+            }
             _ => return Err(Status::invalid_argument("The DLQ type is not supported.")),
         }
         let mut history = self.history_client_for_shard(r.shard_id)?;
@@ -1066,9 +1079,14 @@ impl a::admin_api_server::AdminApi for Admin {
             0 => return Err(Status::invalid_argument("Queue type is not set.")),
             1 => {}
             2 => {
-                return Ok(Response::new(a::MergeDlqMessagesResponse {
-                    next_page_token: vec![],
-                }))
+                let response = crate::admin::merge_domain_dlq_messages(&self.frontend.state,
+                    cadence_api::admin::MergeDLQMessagesRequest {
+                        dlq_type: Some(cadence_api::enums::DLQType::Domain),
+                        inclusive_end_message_id: r.inclusive_end_message_id,
+                        maximum_page_size: r.page_size, next_page_token: r.next_page_token,
+                        ..Default::default()
+                    }).map_err(Status::internal)?;
+                return Ok(Response::new(a::MergeDlqMessagesResponse { next_page_token: response.next_page_token }));
             }
             _ => return Err(Status::invalid_argument("The DLQ type is not supported.")),
         }
@@ -1309,5 +1327,54 @@ mod fix_fe_admin_tests {
             (Some(3), Some(11), Some(9), Some(12))
         );
         assert_eq!((input.workflow_id.as_str(), input.run_id.as_str()), ("w", "r"));
+    }
+}
+
+#[cfg(test)]
+mod domain_dlq_handler_tests {
+    use super::*;
+    use cadence_proto::admin::admin_api_server::AdminApi as _;
+    use cadence_persistence::matching_domain_metadata::{DomainMetadataPersistence, DomainReplicationDlqMessage, MatchingDomainMetadata};
+    use cadence_thrift::{ToThrift, value::{Struct, Value}};
+    use std::sync::{Arc, Mutex};
+    #[derive(Debug, Default)]
+    struct Queue { deletes: Mutex<Vec<(i64,i64)>>, reads: Mutex<Vec<(i64,i64,usize)>> }
+    impl DomainMetadataPersistence for Queue {
+        fn metadata_version(&self) -> Result<i64,String> { Ok(0) }
+        fn create_domain(&self, _: &MatchingDomainMetadata, _: i64) -> Result<(),String> { Ok(()) }
+        fn update_domain(&self, _: &MatchingDomainMetadata, _: i64) -> Result<(),String> { Ok(()) }
+        fn delete_domain(&self, _: &str) -> Result<(),String> { Ok(()) }
+        fn get_domain_replication_dlq_ack_levels(&self) -> Result<std::collections::HashMap<String,i64>,String> { Ok(std::collections::HashMap::from([("domainReplication".into(), -1)])) }
+        fn update_domain_replication_dlq_ack_level(&self, _: String, _: i64) -> Result<(),String> { Ok(()) }
+        fn delete_domain_replication_dlq_range(&self, first: i64, last: i64) -> Result<(),String> { self.deletes.lock().unwrap().push((first,last)); Ok(()) }
+        fn read_domain_replication_dlq(&self, first: i64, last: i64, count: usize) -> Result<Vec<DomainReplicationDlqMessage>,String> {
+            self.reads.lock().unwrap().push((first,last,count));
+            let mut writer = cadence_thrift::protocol::Writer::new();
+            cadence_thrift::value::write_struct(&mut writer, &cadence_api::types::ReplicationTask { source_task_id: Some(999), ..Default::default() }.to_thrift());
+            let payload = writer.into_bytes();
+            Ok((0..2).filter(|id| *id > first && *id <= last).take(count).map(|id| DomainReplicationDlqMessage { id, payload: payload.clone() }).collect())
+        }
+    }
+    #[tokio::test]
+    async fn domain_dlq_grpc_and_thrift_use_persistence_and_propagate_merge_errors() {
+        let queue = Arc::new(Queue::default());
+        let state = crate::handlers::AppState { domain_metadata_persistence: Some(queue.clone()), ..Default::default() };
+        let admin = Admin { frontend: Frontend { state: state.clone() } };
+        let read = admin.read_dlq_messages(Request::new(a::ReadDlqMessagesRequest { r#type: 2, page_size: 1, inclusive_end_message_id: Some(1), ..Default::default() })).await.unwrap().into_inner();
+        assert_eq!(read.replication_tasks.len(), 1);
+        assert_eq!(read.replication_tasks[0].source_task_id, 0);
+        assert_eq!(read.next_page_token, 0_i64.to_le_bytes());
+        let second = admin.read_dlq_messages(Request::new(a::ReadDlqMessagesRequest { r#type: 2, page_size: 1, next_page_token: read.next_page_token, ..Default::default() })).await.unwrap().into_inner();
+        assert_eq!(second.replication_tasks[0].source_task_id, 1);
+        let req = cadence_api::admin::ReadDLQMessagesRequest { dlq_type: Some(cadence_api::enums::DLQType::Domain), maximum_page_size: 1, ..Default::default() };
+        let (reply, error) = crate::yarpc::dispatch(&state, "AdminService::ReadDLQMessages", &Struct { fields: vec![(1, Value::Struct(req.to_thrift()))] }, std::time::Instant::now()+std::time::Duration::from_secs(5)).await.unwrap();
+        assert!(error.is_none());
+        assert!(reply.get(0).is_some());
+        admin.purge_dlq_messages(Request::new(a::PurgeDlqMessagesRequest { r#type: 2, inclusive_end_message_id: Some(1), ..Default::default() })).await.unwrap();
+        assert_eq!(*queue.deletes.lock().unwrap(), vec![(-1,1)]);
+        let error = admin.merge_dlq_messages(Request::new(a::MergeDlqMessagesRequest { r#type: 2, page_size: 1, ..Default::default() })).await.unwrap_err();
+        assert_eq!(error.code(), tonic::Code::Internal);
+        assert_eq!(error.message(), "Encounter non domain replication task in domain replication queue.");
+        assert_eq!(queue.reads.lock().unwrap()[0], (-1,1,1));
     }
 }

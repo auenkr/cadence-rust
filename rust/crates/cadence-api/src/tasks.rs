@@ -261,6 +261,8 @@ pub struct Decision {
         skip_serializing_if = "Option::is_none"
     )]
     pub acquire_semaphore_decision_attributes: Option<AcquireSemaphoreDecisionAttributes>,
+    #[serde(rename = "releaseSemaphoreDecisionAttributes", default, skip_serializing_if = "Option::is_none")]
+    pub release_semaphore_decision_attributes: Option<ReleaseSemaphoreDecisionAttributes>,
 }
 
 /// shared.thrift `AcquireSemaphoreDecisionAttributes`.
@@ -2625,4 +2627,11 @@ pub struct ChildWorkflowExecutionTimedOutEventAttributes {
     pub initiated_event_id: i64,
     #[serde(rename = "startedEventId", default)]
     pub started_event_id: i64,
+}
+
+/// shared.thrift `ReleaseSemaphoreDecisionAttributes`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReleaseSemaphoreDecisionAttributes {
+    #[serde(rename = "initiatedEventId", default, skip_serializing_if = "Option::is_none")]
+    pub initiated_event_id: Option<i64>,
 }

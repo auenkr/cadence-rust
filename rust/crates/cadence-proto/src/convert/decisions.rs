@@ -281,10 +281,11 @@ pub fn decision(v: p::Decision) -> Result<tasks::Decision, Status> {
                     wait_timeout_seconds: seconds(v.wait_timeout)?,
                 });
         }
-        _ => {
-            return Err(Status::unimplemented(
-                "This decision type has not been ported.",
-            ))
+        p::decision::Attributes::ReleaseSemaphoreDecisionAttributes(v) => {
+            result.decision_type = Some(e::DecisionType::ReleaseSemaphore);
+            result.release_semaphore_decision_attributes = Some(tasks::ReleaseSemaphoreDecisionAttributes {
+                initiated_event_id: Some(v.initiated_event_id),
+            });
         }
     }
     Ok(result)

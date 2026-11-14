@@ -301,8 +301,8 @@ impl ExecutionRecord {
         WorkflowExecutionInfo {
             execution: Some(self.execution.clone()),
             workflow_type: Some(self.workflow_type.clone()),
-            start_time: Some(self.start_time_millis),
-            close_time: self.close_time_millis,
+            start_time: Some(self.start_time_millis.saturating_mul(1_000_000)),
+            close_time: self.close_time_millis.map(|ms| ms.saturating_mul(1_000_000)),
             close_status: self.close_status,
             history_length: self.history.len() as i64,
             memo: self.memo.clone(),
@@ -316,12 +316,12 @@ impl ExecutionRecord {
                 .as_ref()
                 .map(|p| WorkflowExecution::new(&p.workflow_id, &p.run_id)),
             parent_initiated_id: self.parent.as_ref().map(|p| p.initiated_event_id),
-            execution_time: Some(self.start_time_millis),
+            execution_time: Some(self.start_time_millis.saturating_mul(1_000_000)),
             is_cron: cron_schedule.as_ref().is_some_and(|s| !s.is_empty()),
             cron_schedule,
             cron_overlap_policy: started.and_then(|s| s.cron_overlap_policy),
             partition_config: started.and_then(|s| s.partition_config.clone()),
-            update_time: self.history.last().and_then(|e| e.timestamp),
+            update_time: self.history.last().and_then(|e| e.timestamp).map(|ms| ms.saturating_mul(1_000_000)),
             execution_status: Some(
                 self.close_status
                     .and_then(|s| {

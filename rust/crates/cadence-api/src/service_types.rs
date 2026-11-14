@@ -397,6 +397,7 @@ pub struct WorkflowExecutionConfiguration {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// All timestamp fields use Unix nanoseconds (matching Cadence wire types).
 pub struct WorkflowExecutionInfo {
     #[serde(rename = "execution", default, skip_serializing_if = "Option::is_none")]
     pub execution: Option<WorkflowExecution>,

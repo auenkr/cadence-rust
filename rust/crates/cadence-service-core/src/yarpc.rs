@@ -827,50 +827,8 @@ async fn handle_read_dlq_messages(state: &AppState, body: &Struct) -> HandlerRes
             .map_err(proxy_app_error);
     }
     require_domain_dlq_type(request.dlq_type)?;
-    let persistence = state.domain_metadata_persistence.as_ref().ok_or_else(|| {
-        AppError::internal(
-            "domain replication DLQ is unavailable for this persistence backend".to_string(),
-        )
-    })?;
-    let ack_levels = persistence
-        .get_domain_replication_dlq_ack_levels()
-        .map_err(AppError::internal)?;
-    let ack_level = ack_levels.get("domainReplication").copied().unwrap_or(-1);
-    let first_message_id = crate::admin::decode_domain_dlq_page_token(&request.next_page_token)
-        .map_err(AppError::internal)?
-        .unwrap_or(ack_level);
-    let end_message_id = request.inclusive_end_message_id.unwrap_or(i64::MAX - 1);
-    let page_size = crate::admin::read_dlq_page_size(request.maximum_page_size);
-    let rows = persistence
-        .read_domain_replication_dlq(first_message_id, end_message_id, page_size)
-        .map_err(AppError::internal)?;
-    let mut tasks = Vec::with_capacity(rows.len());
-    for row in &rows {
-        let thrift = cadence_thrift::value::read_struct(
-            &mut cadence_thrift::protocol::Reader::new(&row.payload),
-        )
-        .map_err(|error| AppError::internal(error.to_string()))?;
-        let mut task =
-            <cadence_api::types::ReplicationTask as cadence_thrift::FromThrift>::from_thrift(
-                &thrift,
-            )
-            .map_err(|error| AppError::internal(error.to_string()))?;
-        task.source_task_id = Some(row.id);
-        tasks.push(task);
-    }
-    let next_page_token = if rows.len() >= page_size {
-        crate::admin::encode_domain_dlq_page_token(
-            rows.last().map_or(first_message_id, |row| row.id),
-        )
-    } else {
-        Vec::new()
-    };
-    Ok(wrap_success(&cadence_api::admin::ReadDLQMessagesResponse {
-        dlq_type: None,
-        replication_tasks: tasks,
-        replication_tasks_info: Vec::new(),
-        next_page_token,
-    }))
+    crate::admin::read_domain_dlq_messages(state, request)
+        .map(|response| wrap_success(&response)).map_err(AppError::internal)
 }
 
 async fn handle_purge_dlq_messages(state: &AppState, body: &Struct) -> HandlerResult {
@@ -883,25 +841,8 @@ async fn handle_purge_dlq_messages(state: &AppState, body: &Struct) -> HandlerRe
             .map_err(proxy_app_error);
     }
     require_domain_dlq_type(request.dlq_type)?;
-    let persistence = state.domain_metadata_persistence.as_ref().ok_or_else(|| {
-        AppError::internal(
-            "domain replication DLQ is unavailable for this persistence backend".to_string(),
-        )
-    })?;
-    let end_message_id = request.inclusive_end_message_id.unwrap_or(i64::MAX - 1);
-    let ack_levels = persistence
-        .get_domain_replication_dlq_ack_levels()
-        .map_err(AppError::internal)?;
-    let ack_level = ack_levels.get("domainReplication").copied().unwrap_or(-1);
-    persistence
-        .delete_domain_replication_dlq_range(ack_level, end_message_id)
-        .map_err(AppError::internal)?;
-    // Go logs and ignores an ack metadata update failure after the delete.
-    let _ = persistence
-        .update_domain_replication_dlq_ack_level("domainReplication".to_string(), end_message_id);
-    Ok(wrap_success(
-        &cadence_api::admin::PurgeDLQMessagesResponse {},
-    ))
+    crate::admin::purge_domain_dlq_messages(state, request)
+        .map(|response| wrap_success(&response)).map_err(AppError::internal)
 }
 
 async fn handle_get_cross_cluster_tasks(state: &AppState, body: &Struct) -> HandlerResult {

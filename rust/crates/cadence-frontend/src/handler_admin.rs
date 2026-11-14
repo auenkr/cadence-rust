@@ -19,8 +19,9 @@ use cadence_api::{
 };
 use cadence_service_core::admin::DynamicConfigOverlay;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum AdminError {
+    History(tonic::Status),
     BadRequest(BadRequestError),
     EntityNotExists(EntityNotExistsError),
     Internal(InternalServiceError),
@@ -29,6 +30,7 @@ pub enum AdminError {
 impl std::fmt::Display for AdminError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::History(e) => std::fmt::Display::fmt(e, f),
             Self::BadRequest(e) => std::fmt::Display::fmt(e, f),
             Self::EntityNotExists(e) => std::fmt::Display::fmt(e, f),
             Self::Internal(e) => std::fmt::Display::fmt(e, f),

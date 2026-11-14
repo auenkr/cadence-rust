@@ -2293,15 +2293,15 @@ impl FromThrift for WorkflowExecutionInfo {
         Ok(Self {
             execution: s.opt_struct(10)?,
             workflow_type: s.opt_struct(20)?,
-            start_time: s.opt_i64(30)?.map(|n| n / 1_000_000),
-            close_time: s.opt_i64(40)?.map(|n| n / 1_000_000),
+            start_time: s.opt_i64(30)?,
+            close_time: s.opt_i64(40)?,
             close_status: s.opt_enum(50)?,
             history_length: s.opt_i64(60)?.unwrap_or(0),
             memo: s.opt_struct(100)?,
             parent_domain: s.opt_string(71)?,
             parent_initiated_id: s.opt_i64(72)?,
             parent_execution: s.opt_struct(80)?,
-            execution_time: s.opt_i64(90)?.map(|n| n / 1_000_000),
+            execution_time: s.opt_i64(90)?,
             search_attributes: s.opt_struct(101)?,
             task_list: s.opt_struct(121)?.or_else(|| {
                 s.opt_string(120).ok().flatten().map(|name| TaskList {
@@ -2310,12 +2310,12 @@ impl FromThrift for WorkflowExecutionInfo {
                 })
             }),
             is_cron: s.opt_bool(130)?.unwrap_or_default(),
-            update_time: s.opt_i64(140)?.map(|n| n / 1_000_000),
+            update_time: s.opt_i64(140)?,
             partition_config: s.opt_map_str(150)?,
             cron_overlap_policy: s.opt_enum(160)?,
             cron_schedule: s.opt_string(180)?,
             execution_status: s.opt_enum(190)?,
-            scheduled_execution_time: s.opt_i64(200)?.map(|n| n / 1_000_000),
+            scheduled_execution_time: s.opt_i64(200)?,
             parent_domain_id: s.opt_string(70)?,
             auto_reset_points: s.opt_struct(110)?,
             active_cluster_selection_policy: s.opt_struct(170)?,
@@ -2328,8 +2328,8 @@ impl ToThrift for WorkflowExecutionInfo {
         let mut f = Fields::new();
         f.ostruct(10, self.execution.as_ref());
         f.ostruct(20, self.workflow_type.as_ref());
-        f.oi64(30, millis_to_nanos(self.start_time));
-        f.oi64(40, millis_to_nanos(self.close_time));
+        f.oi64(30, self.start_time);
+        f.oi64(40, self.close_time);
         f.oenum(50, self.close_status);
         if self.history_length != 0 {
             f.fields.push((60, Value::I64(self.history_length)));
@@ -2339,19 +2339,19 @@ impl ToThrift for WorkflowExecutionInfo {
         f.ostr(71, &self.parent_domain);
         f.oi64(72, self.parent_initiated_id);
         f.ostruct(80, self.parent_execution.as_ref());
-        f.oi64(90, millis_to_nanos(self.execution_time));
+        f.oi64(90, self.execution_time);
         f.ostruct(101, self.search_attributes.as_ref());
         f.ostruct(110, self.auto_reset_points.as_ref());
         f.ostr(120, &self.task_list.as_ref().map(|t| t.name.clone()));
         f.ostruct(121, self.task_list.as_ref());
         f.obool(130, self.is_cron);
-        f.oi64(140, millis_to_nanos(self.update_time));
+        f.oi64(140, self.update_time);
         f.omap_str_str(150, &self.partition_config);
         f.oenum(160, self.cron_overlap_policy);
         f.ostr(180, &self.cron_schedule);
         f.ostruct(170, self.active_cluster_selection_policy.as_ref());
         f.oenum(190, self.execution_status);
-        f.oi64(200, millis_to_nanos(self.scheduled_execution_time));
+        f.oi64(200, self.scheduled_execution_time);
         f.finish()
     }
 }
@@ -5181,6 +5181,7 @@ impl FromThrift for Decision {
             signal_external_workflow_execution_decision_attributes: s.opt_struct(110)?,
             upsert_workflow_search_attributes_decision_attributes: s.opt_struct(120)?,
             acquire_semaphore_decision_attributes: s.opt_struct(130)?,
+            release_semaphore_decision_attributes: s.opt_struct(140)?,
         })
     }
 }
@@ -5237,6 +5238,7 @@ impl ToThrift for Decision {
                 .as_ref(),
         );
         f.ostruct(130, self.acquire_semaphore_decision_attributes.as_ref());
+        f.ostruct(140, self.release_semaphore_decision_attributes.as_ref());
         f.finish()
     }
 }
@@ -8391,5 +8393,18 @@ mod timeout_wire_tests {
         let wire = f.finish();
         assert_eq!(RemoveTaskRequest::from_thrift(&wire).unwrap().task_type, Some(2));
         assert_eq!(task_type_from_go_thrift(None), None);
+    }
+}
+
+impl FromThrift for ReleaseSemaphoreDecisionAttributes {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self { initiated_event_id: s.opt_i64(10)? })
+    }
+}
+impl ToThrift for ReleaseSemaphoreDecisionAttributes {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oi64(10, self.initiated_event_id);
+        f.finish()
     }
 }

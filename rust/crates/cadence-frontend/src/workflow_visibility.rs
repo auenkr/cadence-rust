@@ -371,3 +371,58 @@ mod read_store_tests {
         assert!(!read_store_selects_es(""));
     }
 }
+
+#[cfg(test)]
+mod timestamp_handler_tests {
+    use super::*;
+    use cadence_service_core::workflow_api::{ApiFuture, CallerContext, WorkflowApi};
+    use cadence_thrift::{FromThrift, ToThrift};
+
+    #[derive(Debug)]
+    struct Rows;
+    impl VisibilityStore for Rows {
+        fn select(&self, filter: &VisibilityFilter) -> Result<Vec<VisibilityRow>, VisibilityError> {
+            Ok(vec![VisibilityRow {
+                workflow_id: "workflow".into(), run_id: "run".into(),
+                start_time_us: 1_700_000_000_123_456,
+                execution_time_us: 1_700_000_001_234_567,
+                close_time_us: filter.closed.then_some(1_700_000_002_345_678),
+                close_status: filter.closed.then_some(0), ..Default::default()
+            }])
+        }
+        fn get_closed(&self, _: &str, _: &str) -> Result<Option<VisibilityRow>, VisibilityError> { Ok(None) }
+    }
+    struct Domains;
+    impl crate::handler_workflow::WorkflowDomainLookup for Domains {
+        fn domain_id(&self, _: &str) -> Result<String, CadenceError> { Ok("domain-id".into()) }
+    }
+    struct Api(crate::handler_workflow::Handler<ProductionBackend>);
+    impl std::fmt::Debug for Api {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str("visibility test API") }
+    }
+    impl WorkflowApi for Api {
+        fn serves(&self, operation: &str) -> bool { matches!(operation, "ListOpenWorkflowExecutions" | "ListClosedWorkflowExecutions") }
+        fn call<'a>(&'a self, operation: &'a str, request: serde_json::Value, _: CallerContext) -> ApiFuture<'a> {
+            Box::pin(self.0.dispatch(operation, request))
+        }
+    }
+    #[tokio::test]
+    async fn thrift_list_handler_returns_exact_nanosecond_timestamps() {
+        use cadence_thrift::value::{Struct, Value};
+        let handler = crate::handler_workflow::Handler::new(ProductionBackend::new("127.0.0.1:1".into(), "127.0.0.1:2".into()).with_visibility_store(Arc::new(Rows))).with_domain_lookup(Arc::new(Domains));
+        let state = cadence_service_core::handlers::AppState { workflow_api: Some(Arc::new(Api(handler))), ..Default::default() };
+        for closed in [false, true] {
+            let request = st::ListOpenWorkflowExecutionsRequest { domain: "domain".into(), maximum_page_size: 10, start_time_filter: Some(st::StartTimeFilter { earliest_time: Some(1), latest_time: Some(i64::MAX) }), ..Default::default() };
+            let body = Struct { fields: vec![(1, Value::Struct(request.to_thrift()))] };
+            let operation = if closed { "WorkflowService::ListClosedWorkflowExecutions" } else { "WorkflowService::ListOpenWorkflowExecutions" };
+            let (reply, error) = cadence_service_core::yarpc::dispatch(&state, operation, &body, std::time::Instant::now() + std::time::Duration::from_secs(5)).await.unwrap();
+            assert!(error.is_none(), "{error:?}");
+            let Some(Value::Struct(response)) = reply.get(0) else { panic!("missing response") };
+            let response = st::ListOpenWorkflowExecutionsResponse::from_thrift(response).unwrap();
+            let info = &response.executions[0];
+            assert_eq!(info.start_time, Some(1_700_000_000_123_456_000));
+            assert_eq!(info.execution_time, Some(1_700_000_001_234_567_000));
+            assert_eq!(info.close_time, closed.then_some(1_700_000_002_345_678_000));
+        }
+    }
+}
