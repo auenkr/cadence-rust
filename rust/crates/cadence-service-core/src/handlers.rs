@@ -3186,6 +3186,26 @@ mod frontend_drain_tests {
     }
 
     #[test]
+    fn domain_policy_reads_file_based_failover_cooldown() {
+        let path = std::env::temp_dir().join(format!(
+            "cadence-domain-policy-cooldown-{}.yaml",
+            std::process::id()
+        ));
+        std::fs::write(
+            &path,
+            "frontend.failoverCoolDown:\n  - value: 2s\n    constraints:\n      domainName: payments\n  - value: 1s\n",
+        )
+        .unwrap();
+        let state = AppState::default();
+        *state.admin.dynamic_config.lock().unwrap() =
+            crate::admin::DynamicConfigOverlay::from_file(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+
+        assert_eq!(state.domain_policy("payments").cooldown_nanos, 2_000_000_000);
+        assert_eq!(state.domain_policy("billing").cooldown_nanos, 1_000_000_000);
+    }
+
+    #[test]
     fn scheduler_gate_reads_domain_filtered_dynamic_config_updates() {
         use cadence_api::{
             admin::{DynamicConfigFilter, DynamicConfigValue},
