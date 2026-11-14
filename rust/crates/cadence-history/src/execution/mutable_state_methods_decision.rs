@@ -8,8 +8,8 @@
 //! * Go `timeSource.Now()` and config lookups are carried in [`DecisionEnv`].
 //! * Task generation is wired via `run_task_generator` (tasks land in `transfer_tasks`/`timer_tasks`).
 //! * Logging / metrics go through `tracing` and `TaskGenEnv::metrics`.
-//! * `insertWorkflowRequest` stores only the request id (type/version are not
-//!   representable in the Rust `WorkflowRequest` yet).
+//! * Reset `insertWorkflowRequest` is gated by `EnableStrongIdempotency` and
+//!   records its request id, type, and version.
 //! * Auto reset points are returned in `DecisionEnv::auto_reset_points` and also
 //!   encoded (thriftrw) into `WorkflowExecutionInfo.auto_reset_points`.
 //!
@@ -263,12 +263,21 @@ impl TypedMutableState {
         }
     }
 
-    /// Go `insertWorkflowRequest` for reset requests (only the id is kept).
+    /// Go `insertWorkflowRequest` for reset requests.
     fn insert_reset_workflow_request(&mut self, request_id: &str, version: i64) {
+        if !self.task_gen_env.enable_strong_idempotency || request_id.is_empty() {
+            return;
+        }
+        let request_type = cadence_persistence::history_contract::WORKFLOW_REQUEST_TYPE_RESET;
+        if self.insert_workflow_requests.iter().any(|r| {
+            r.request_id == request_id && r.version == version && r.request_type == request_type
+        }) {
+            return;
+        }
         self.insert_workflow_requests.push(WorkflowRequest {
             request_id: request_id.to_string(),
             version,
-            request_type: cadence_persistence::history_contract::WORKFLOW_REQUEST_TYPE_RESET,
+            request_type,
             data: Default::default(),
         });
     }
@@ -1109,6 +1118,28 @@ mod decision_tests {
         env.decision_retry_critical_attempts = 10;
         ms.fail_decision(&env, true);
         assert!(rec.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn reset_workflow_request_matches_go_strong_idempotency_gate() {
+        let mut ms = TypedMutableState::new();
+        ms.insert_reset_workflow_request("reset-id", 17);
+        assert!(ms.insert_workflow_requests.is_empty());
+
+        ms.task_gen_env.enable_strong_idempotency = true;
+        ms.insert_reset_workflow_request("", 17);
+        assert!(ms.insert_workflow_requests.is_empty());
+
+        ms.insert_reset_workflow_request("reset-id", 17);
+        ms.insert_reset_workflow_request("reset-id", 17);
+        assert_eq!(ms.insert_workflow_requests.len(), 1);
+        let request = &ms.insert_workflow_requests[0];
+        assert_eq!(request.request_id, "reset-id");
+        assert_eq!(request.version, 17);
+        assert_eq!(
+            request.request_type,
+            cadence_persistence::history_contract::WORKFLOW_REQUEST_TYPE_RESET
+        );
     }
 
     #[test]

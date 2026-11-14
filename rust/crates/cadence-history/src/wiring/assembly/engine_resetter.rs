@@ -349,6 +349,9 @@ impl EngineWorkflowResetter {
             .as_any_mut()
             .and_then(|a| a.downcast_mut::<OwnedNdcMutableState>())
             .ok_or_else(|| HistoryError::internal("workflow resetter: rebuilt state is not the typed state"))?;
+        let domain_name = core.domains.get_domain_name(&request.domain_id)?;
+        owned.typed_mut().task_gen_env.enable_strong_idempotency =
+            (core.enable_strong_idempotency)(&domain_name);
         owned.typed_mut().history_size = size;
 
         let mut env = DecisionEnv { now_nanos: now, ..Default::default() };
@@ -381,10 +384,6 @@ impl EngineWorkflowResetter {
             )
             .map_err(reset_err)?;
         }
-        // Go insertWorkflowRequest only records requests when
-        // EnableStrongIdempotency is on (default off); drop un-encoded ones.
-        owned.typed_mut().insert_workflow_requests.clear();
-
         let (snapshot, mut batches) = owned
             .close_transaction_as_snapshot(now, TransactionPolicy::Active)
             .map_err(ndc_err)?;
