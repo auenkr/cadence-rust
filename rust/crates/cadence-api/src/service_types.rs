@@ -1434,15 +1434,13 @@ pub struct HistoryEvent {
         default,
         skip_serializing_if = "Option::is_none"
     )]
-    pub semaphore_acquired_event_attributes:
-        Option<crate::tasks::SemaphoreAcquiredEventAttributes>,
+    pub semaphore_acquired_event_attributes: Option<crate::tasks::SemaphoreAcquiredEventAttributes>,
     #[serde(
         rename = "semaphoreReleasedEventAttributes",
         default,
         skip_serializing_if = "Option::is_none"
     )]
-    pub semaphore_released_event_attributes:
-        Option<crate::tasks::SemaphoreReleasedEventAttributes>,
+    pub semaphore_released_event_attributes: Option<crate::tasks::SemaphoreReleasedEventAttributes>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

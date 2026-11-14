@@ -70,7 +70,11 @@ pub struct ScheduleActivityTaskDecisionAttributes {
     pub retry_policy: Option<RetryPolicy>,
     #[serde(rename = "header", default, skip_serializing_if = "Option::is_none")]
     pub header: Option<Header>,
-    #[serde(rename = "requestLocalDispatch", default, skip_serializing_if = "std::ops::Not::not")]
+    #[serde(
+        rename = "requestLocalDispatch",
+        default,
+        skip_serializing_if = "std::ops::Not::not"
+    )]
     pub request_local_dispatch: bool,
 }
 
@@ -261,14 +265,22 @@ pub struct Decision {
         skip_serializing_if = "Option::is_none"
     )]
     pub acquire_semaphore_decision_attributes: Option<AcquireSemaphoreDecisionAttributes>,
-    #[serde(rename = "releaseSemaphoreDecisionAttributes", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "releaseSemaphoreDecisionAttributes",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub release_semaphore_decision_attributes: Option<ReleaseSemaphoreDecisionAttributes>,
 }
 
 /// shared.thrift `AcquireSemaphoreDecisionAttributes`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AcquireSemaphoreDecisionAttributes {
-    #[serde(rename = "semaphoreName", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "semaphoreName",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub semaphore_name: String,
     #[serde(
         rename = "waitTimeoutSeconds",
@@ -439,16 +451,25 @@ pub struct RespondDecisionTaskCompletedResponse {
         default,
         skip_serializing_if = "std::collections::HashMap::is_empty"
     )]
-    pub activities_to_dispatch_locally: std::collections::HashMap<String, ActivityLocalDispatchInfo>,
+    pub activities_to_dispatch_locally:
+        std::collections::HashMap<String, ActivityLocalDispatchInfo>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActivityLocalDispatchInfo {
     #[serde(rename = "activityId", default)]
     pub activity_id: String,
-    #[serde(rename = "scheduledTimestamp", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "scheduledTimestamp",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub scheduled_timestamp: Option<i64>,
-    #[serde(rename = "startedTimestamp", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "startedTimestamp",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub started_timestamp: Option<i64>,
     #[serde(
         rename = "scheduledTimestampOfThisAttempt",
@@ -1154,13 +1175,21 @@ pub struct DecisionTaskFailedEventAttributes {
         skip_serializing_if = "String::is_empty"
     )]
     pub binary_checksum: String,
-    #[serde(rename = "baseRunId", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "baseRunId",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub base_run_id: String,
     #[serde(rename = "newRunId", default, skip_serializing_if = "String::is_empty")]
     pub new_run_id: String,
     #[serde(rename = "forkEventVersion", default)]
     pub fork_event_version: i64,
-    #[serde(rename = "requestId", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "requestId",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub request_id: String,
 }
 
@@ -1570,7 +1599,11 @@ pub struct WorkflowExecutionContinuedAsNewEventAttributes {
 /// shared.thrift `RequestCancelActivityTaskFailedEventAttributes`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RequestCancelActivityTaskFailedEventAttributes {
-    #[serde(rename = "activityId", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "activityId",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub activity_id: String,
     #[serde(rename = "cause", default, skip_serializing_if = "String::is_empty")]
     pub cause: String,
@@ -1581,9 +1614,17 @@ pub struct RequestCancelActivityTaskFailedEventAttributes {
 /// shared.thrift `SemaphoreAcquireInitiatedEventAttributes`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SemaphoreAcquireInitiatedEventAttributes {
-    #[serde(rename = "semaphoreName", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "semaphoreName",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub semaphore_name: String,
-    #[serde(rename = "waitTimeoutSeconds", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "waitTimeoutSeconds",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub wait_timeout_seconds: Option<i32>,
     #[serde(rename = "decisionTaskCompletedEventId", default)]
     pub decision_task_completed_event_id: i64,
@@ -1925,7 +1966,11 @@ pub struct SignalExternalWorkflowExecutionInitiatedEventAttributes {
         deserialize_with = "crate::b64::deserialize_bytes"
     )]
     pub control: Vec<u8>,
-    #[serde(rename = "childWorkflowOnly", default, skip_serializing_if = "std::ops::Not::not")]
+    #[serde(
+        rename = "childWorkflowOnly",
+        default,
+        skip_serializing_if = "std::ops::Not::not"
+    )]
     pub child_workflow_only: bool,
 }
 
@@ -2632,6 +2677,10 @@ pub struct ChildWorkflowExecutionTimedOutEventAttributes {
 /// shared.thrift `ReleaseSemaphoreDecisionAttributes`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReleaseSemaphoreDecisionAttributes {
-    #[serde(rename = "initiatedEventId", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "initiatedEventId",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub initiated_event_id: Option<i64>,
 }

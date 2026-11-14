@@ -357,9 +357,7 @@ pub fn auto_config_hint_in(v: p::AutoConfigHint) -> t::AutoConfigHint {
     }
 }
 /// Go `proto.ToActiveClusterSelectionPolicy`.
-pub fn selection_policy_in(
-    v: p::ActiveClusterSelectionPolicy,
-) -> t::ActiveClusterSelectionPolicy {
+pub fn selection_policy_in(v: p::ActiveClusterSelectionPolicy) -> t::ActiveClusterSelectionPolicy {
     t::ActiveClusterSelectionPolicy {
         cluster_attribute: v.cluster_attribute.map(|a| t::ClusterAttribute {
             scope: a.scope,
@@ -368,9 +366,7 @@ pub fn selection_policy_in(
     }
 }
 /// Go `proto.FromActiveClusterSelectionPolicy`.
-pub fn selection_policy_out(
-    v: t::ActiveClusterSelectionPolicy,
-) -> p::ActiveClusterSelectionPolicy {
+pub fn selection_policy_out(v: t::ActiveClusterSelectionPolicy) -> p::ActiveClusterSelectionPolicy {
     p::ActiveClusterSelectionPolicy {
         cluster_attribute: v.cluster_attribute.map(|a| p::ClusterAttribute {
             scope: a.scope,
@@ -462,7 +458,11 @@ pub fn start(
 /// Go `proto.FromStartWorkflowExecutionRequest` (inverse of [`start`]).
 pub fn start_out(v: t::StartWorkflowExecutionRequest) -> p::StartWorkflowExecutionRequest {
     let payloads = |m: Option<std::collections::HashMap<String, Vec<u8>>>| {
-        m.map(|m| m.into_iter().map(|(k, v)| (k, p::Payload { data: v })).collect())
+        m.map(|m| {
+            m.into_iter()
+                .map(|(k, v)| (k, p::Payload { data: v }))
+                .collect()
+        })
     };
     p::StartWorkflowExecutionRequest {
         domain: v.domain,

@@ -340,7 +340,9 @@ fn hook_operation(
     };
     let op = match (method.as_str(), route) {
         ("POST", "/api/v1/workflows/start-async") => "StartWorkflowExecutionAsync",
-        ("POST", "/api/v1/workflows/signal-with-start-async") => "SignalWithStartWorkflowExecutionAsync",
+        ("POST", "/api/v1/workflows/signal-with-start-async") => {
+            "SignalWithStartWorkflowExecutionAsync"
+        }
         ("POST", "/api/v1/workflows/start") => "StartWorkflowExecution",
         ("POST", "/api/v1/workflows/signal-with-start") => "SignalWithStartWorkflowExecution",
         ("POST", "/api/v1/workflows/history") => "GetWorkflowExecutionHistory",
@@ -361,10 +363,16 @@ fn hook_operation(
         ("POST", "/api/v1/tasklists/describe") => "DescribeTaskList",
         ("POST", "/api/v1/tasklists/by-domain") => "GetTaskListsByDomain",
         ("POST", "/api/v1/tasklists/partitions") => "ListTaskListPartitions",
-        ("POST", "/api/v1/tasks/respond-activity-complete-by-id") => "RespondActivityTaskCompletedByID",
+        ("POST", "/api/v1/tasks/respond-activity-complete-by-id") => {
+            "RespondActivityTaskCompletedByID"
+        }
         ("POST", "/api/v1/tasks/respond-activity-failed-by-id") => "RespondActivityTaskFailedByID",
-        ("POST", "/api/v1/tasks/respond-activity-canceled-by-id") => "RespondActivityTaskCanceledByID",
-        ("POST", "/api/v1/tasks/record-activity-heartbeat-by-id") => "RecordActivityTaskHeartbeatByID",
+        ("POST", "/api/v1/tasks/respond-activity-canceled-by-id") => {
+            "RespondActivityTaskCanceledByID"
+        }
+        ("POST", "/api/v1/tasks/record-activity-heartbeat-by-id") => {
+            "RecordActivityTaskHeartbeatByID"
+        }
         ("POST", "/api/v1/tasks/reset-sticky") => "ResetStickyTaskList",
         ("POST", "/api/v1/tasks/poll-decision") => "PollForDecisionTask",
         ("POST", "/api/v1/tasks/poll-activity") => "PollForActivityTask",
@@ -574,7 +582,10 @@ impl Frontend {
                         deadline,
                         headers: caller_headers,
                     };
-                    let value = api.call(operation, request, ctx).await.map_err(|error| status_from_cadence_error(&error))?;
+                    let value = api
+                        .call(operation, request, ctx)
+                        .await
+                        .map_err(|error| status_from_cadence_error(&error))?;
                     return serde_json::from_value(value)
                         .map_err(|e| Status::internal(e.to_string()));
                 }
@@ -1208,8 +1219,13 @@ impl p::workflow_api_server::WorkflowApi for Frontend {
             .map(cv::start)
             .transpose()?
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
-        let _: serde_json::Value = self.call(Method::POST, "/api/v1/workflows/start-async",
-            &serde_json::json!({"request": inner})).await?;
+        let _: serde_json::Value = self
+            .call(
+                Method::POST,
+                "/api/v1/workflows/start-async",
+                &serde_json::json!({"request": inner}),
+            )
+            .await?;
         Ok(Response::new(p::StartWorkflowExecutionAsyncResponse {}))
     }
     async fn signal_with_start_workflow_execution_async(
@@ -1253,8 +1269,15 @@ impl p::workflow_api_server::WorkflowApi for Frontend {
             control: inner_proto.control,
             active_cluster_selection_policy: start.active_cluster_selection_policy,
         };
-        let _: serde_json::Value = self.call(Method::POST, "/api/v1/workflows/signal-with-start-async",
-            &st::SignalWithStartWorkflowExecutionAsyncRequest { request: Some(input) }).await?;
+        let _: serde_json::Value = self
+            .call(
+                Method::POST,
+                "/api/v1/workflows/signal-with-start-async",
+                &st::SignalWithStartWorkflowExecutionAsyncRequest {
+                    request: Some(input),
+                },
+            )
+            .await?;
         Ok(Response::new(
             p::SignalWithStartWorkflowExecutionAsyncResponse {},
         ))
@@ -1964,7 +1987,12 @@ impl p::visibility_api_server::VisibilityApi for Frontend {
         &self,
         request: tonic::Request<p::ListWorkflowExecutionsRequest>,
     ) -> Result<Response<p::ListWorkflowExecutionsResponse>, Status> {
-        if self.state.workflow_api.as_ref().is_some_and(|api| api.serves("ListWorkflowExecutions")) {
+        if self
+            .state
+            .workflow_api
+            .as_ref()
+            .is_some_and(|api| api.serves("ListWorkflowExecutions"))
+        {
             let r = request.get_ref();
             let input = st::ListWorkflowExecutionsRequest {
                 domain: r.domain.clone(),
@@ -2161,7 +2189,12 @@ impl p::visibility_api_server::VisibilityApi for Frontend {
         &self,
         request: tonic::Request<p::ScanWorkflowExecutionsRequest>,
     ) -> Result<Response<p::ScanWorkflowExecutionsResponse>, Status> {
-        if self.state.workflow_api.as_ref().is_some_and(|api| api.serves("ScanWorkflowExecutions")) {
+        if self
+            .state
+            .workflow_api
+            .as_ref()
+            .is_some_and(|api| api.serves("ScanWorkflowExecutions"))
+        {
             let r = request.get_ref();
             let input = st::ListWorkflowExecutionsRequest {
                 domain: r.domain.clone(),
@@ -2190,7 +2223,12 @@ impl p::visibility_api_server::VisibilityApi for Frontend {
         &self,
         request: tonic::Request<p::CountWorkflowExecutionsRequest>,
     ) -> Result<Response<p::CountWorkflowExecutionsResponse>, Status> {
-        if self.state.workflow_api.as_ref().is_some_and(|api| api.serves("CountWorkflowExecutions")) {
+        if self
+            .state
+            .workflow_api
+            .as_ref()
+            .is_some_and(|api| api.serves("CountWorkflowExecutions"))
+        {
             let r = request.get_ref();
             let input = st::CountWorkflowExecutionsRequest {
                 domain: r.domain.clone(),
@@ -2199,7 +2237,9 @@ impl p::visibility_api_server::VisibilityApi for Frontend {
             let v: st::CountWorkflowExecutionsResponse = self
                 .call_with_headers(Method::POST, "/api/v1/workflows/count-all", &input, &[])
                 .await?;
-            return Ok(Response::new(p::CountWorkflowExecutionsResponse { count: v.count }));
+            return Ok(Response::new(p::CountWorkflowExecutionsResponse {
+                count: v.count,
+            }));
         }
         let r = request.into_inner();
         let mut all = self.visible(&r.domain, None)?;
@@ -2264,10 +2304,20 @@ impl p::worker_api_server::WorkerApi for Frontend {
         let r = request.into_inner();
         let execution = r.workflow_execution.unwrap_or_default();
         let input = cadence_api::tasks::RespondActivityTaskCompletedByIDRequest {
-            domain: r.domain, workflow_id: execution.workflow_id, run_id: execution.run_id,
-            activity_id: r.activity_id, identity: r.identity, result: cv::data(r.result),
+            domain: r.domain,
+            workflow_id: execution.workflow_id,
+            run_id: execution.run_id,
+            activity_id: r.activity_id,
+            identity: r.identity,
+            result: cv::data(r.result),
         };
-        let _: serde_json::Value = self.call(Method::POST, "/api/v1/tasks/respond-activity-complete-by-id", &input).await?;
+        let _: serde_json::Value = self
+            .call(
+                Method::POST,
+                "/api/v1/tasks/respond-activity-complete-by-id",
+                &input,
+            )
+            .await?;
         Ok(Response::new(
             p::RespondActivityTaskCompletedByIdResponse {},
         ))
@@ -2295,10 +2345,23 @@ impl p::worker_api_server::WorkerApi for Frontend {
         let (reason, details, failure_options) = cv::failure_in(r.failure)?;
         let execution = r.workflow_execution.unwrap_or_default();
         let input = cadence_api::tasks::RespondActivityTaskFailedByIDRequest {
-            domain: r.domain, workflow_id: execution.workflow_id, run_id: execution.run_id,
-            activity_id: r.activity_id, identity: r.identity, reason, details, failure_options, heartbeat_details: cv::data(r.heartbeat_details),
+            domain: r.domain,
+            workflow_id: execution.workflow_id,
+            run_id: execution.run_id,
+            activity_id: r.activity_id,
+            identity: r.identity,
+            reason,
+            details,
+            failure_options,
+            heartbeat_details: cv::data(r.heartbeat_details),
         };
-        let _: serde_json::Value = self.call(Method::POST, "/api/v1/tasks/respond-activity-failed-by-id", &input).await?;
+        let _: serde_json::Value = self
+            .call(
+                Method::POST,
+                "/api/v1/tasks/respond-activity-failed-by-id",
+                &input,
+            )
+            .await?;
         Ok(Response::new(p::RespondActivityTaskFailedByIdResponse {}))
     }
     async fn respond_activity_task_canceled_by_id(
@@ -2322,10 +2385,20 @@ impl p::worker_api_server::WorkerApi for Frontend {
         let r = request.into_inner();
         let execution = r.workflow_execution.unwrap_or_default();
         let input = cadence_api::tasks::RespondActivityTaskCanceledByIDRequest {
-            domain: r.domain, workflow_id: execution.workflow_id, run_id: execution.run_id,
-            activity_id: r.activity_id, identity: r.identity, details: cv::data(r.details),
+            domain: r.domain,
+            workflow_id: execution.workflow_id,
+            run_id: execution.run_id,
+            activity_id: r.activity_id,
+            identity: r.identity,
+            details: cv::data(r.details),
         };
-        let _: serde_json::Value = self.call(Method::POST, "/api/v1/tasks/respond-activity-canceled-by-id", &input).await?;
+        let _: serde_json::Value = self
+            .call(
+                Method::POST,
+                "/api/v1/tasks/respond-activity-canceled-by-id",
+                &input,
+            )
+            .await?;
         Ok(Response::new(p::RespondActivityTaskCanceledByIdResponse {}))
     }
     async fn record_activity_task_heartbeat_by_id(
@@ -2351,10 +2424,20 @@ impl p::worker_api_server::WorkerApi for Frontend {
         let r = request.into_inner();
         let execution = r.workflow_execution.unwrap_or_default();
         let input = cadence_api::tasks::RecordActivityTaskHeartbeatByIDRequest {
-            domain: r.domain, workflow_id: execution.workflow_id, run_id: execution.run_id,
-            activity_id: r.activity_id, identity: r.identity, details: cv::data(r.details),
+            domain: r.domain,
+            workflow_id: execution.workflow_id,
+            run_id: execution.run_id,
+            activity_id: r.activity_id,
+            identity: r.identity,
+            details: cv::data(r.details),
         };
-        let v: cadence_api::tasks::RecordActivityTaskHeartbeatResponse = self.call(Method::POST, "/api/v1/tasks/record-activity-heartbeat-by-id", &input).await?;
+        let v: cadence_api::tasks::RecordActivityTaskHeartbeatResponse = self
+            .call(
+                Method::POST,
+                "/api/v1/tasks/record-activity-heartbeat-by-id",
+                &input,
+            )
+            .await?;
         Ok(Response::new(p::RecordActivityTaskHeartbeatByIdResponse {
             cancel_requested: v.cancel_requested,
         }))
@@ -2826,9 +2909,12 @@ mod workflow_hook_tests {
                 "StartWorkflowExecution"
                     | "SignalWithStartWorkflowExecution"
                     | "GetWorkflowExecutionHistory"
-                    | "StartWorkflowExecutionAsync" | "SignalWithStartWorkflowExecutionAsync"
-                    | "RespondActivityTaskCompletedByID" | "RespondActivityTaskFailedByID"
-                    | "RespondActivityTaskCanceledByID" | "RecordActivityTaskHeartbeatByID"
+                    | "StartWorkflowExecutionAsync"
+                    | "SignalWithStartWorkflowExecutionAsync"
+                    | "RespondActivityTaskCompletedByID"
+                    | "RespondActivityTaskFailedByID"
+                    | "RespondActivityTaskCanceledByID"
+                    | "RecordActivityTaskHeartbeatByID"
                     | "RespondDecisionTaskCompleted"
             )
         }
@@ -3071,24 +3157,51 @@ mod cadence_error_status_tests {
 
 #[cfg(test)]
 mod p1_handler_tests {
-    use super::*;
     use super::workflow_hook_tests::*;
-    use cadence_proto::api::{workflow_api_server::WorkflowApi as _, worker_api_server::WorkerApi as _};
+    use super::*;
+    use cadence_proto::api::{
+        worker_api_server::WorkerApi as _, workflow_api_server::WorkflowApi as _,
+    };
     use std::sync::{Arc, Mutex};
 
     #[tokio::test]
     async fn async_starts_publish_through_original_hook_with_context_and_errors() {
         for error in [false, true] {
-            let api = Arc::new(RecordingApi { calls: Mutex::new(vec![]), result: serde_json::json!({}), error });
+            let api = Arc::new(RecordingApi {
+                calls: Mutex::new(vec![]),
+                result: serde_json::json!({}),
+                error,
+            });
             let fe = frontend(api.clone());
-            let headers = std::collections::HashMap::from([("cadence-client-library-version".into(), "1.7.0".into())]);
+            let headers = std::collections::HashMap::from([(
+                "cadence-client-library-version".into(),
+                "1.7.0".into(),
+            )]);
             let deadline = Some(std::time::Instant::now() + std::time::Duration::from_secs(10));
-            GRPC_CALLER.scope((headers.clone(), deadline), async {
-                let result = fe.start_workflow_execution_async(tonic::Request::new(p::StartWorkflowExecutionAsyncRequest { request: Some(valid_start_request()) })).await;
-                assert_eq!(result.is_err(), error);
-                let result = fe.signal_with_start_workflow_execution_async(tonic::Request::new(p::SignalWithStartWorkflowExecutionAsyncRequest { request: Some(p::SignalWithStartWorkflowExecutionRequest { start_request: Some(valid_start_request()), signal_name: "signal".into(), ..Default::default() }) })).await;
-                assert_eq!(result.is_err(), error);
-            }).await;
+            GRPC_CALLER
+                .scope((headers.clone(), deadline), async {
+                    let result = fe
+                        .start_workflow_execution_async(tonic::Request::new(
+                            p::StartWorkflowExecutionAsyncRequest {
+                                request: Some(valid_start_request()),
+                            },
+                        ))
+                        .await;
+                    assert_eq!(result.is_err(), error);
+                    let result = fe
+                        .signal_with_start_workflow_execution_async(tonic::Request::new(
+                            p::SignalWithStartWorkflowExecutionAsyncRequest {
+                                request: Some(p::SignalWithStartWorkflowExecutionRequest {
+                                    start_request: Some(valid_start_request()),
+                                    signal_name: "signal".into(),
+                                    ..Default::default()
+                                }),
+                            },
+                        ))
+                        .await;
+                    assert_eq!(result.is_err(), error);
+                })
+                .await;
             let calls = api.calls.lock().unwrap();
             assert_eq!(calls.len(), 2);
             assert_eq!(calls[0].0, "StartWorkflowExecutionAsync");
@@ -3104,16 +3217,72 @@ mod p1_handler_tests {
 
     #[tokio::test]
     async fn by_id_operations_reach_history_hook_without_local_activity() {
-        let api = Arc::new(RecordingApi { calls: Mutex::new(vec![]), result: serde_json::json!({"cancelRequested": true}), error: false });
+        let api = Arc::new(RecordingApi {
+            calls: Mutex::new(vec![]),
+            result: serde_json::json!({"cancelRequested": true}),
+            error: false,
+        });
         let fe = frontend(api.clone());
-        let execution = Some(p::WorkflowExecution { workflow_id: "remote-workflow".into(), run_id: "remote-run".into() });
-        fe.respond_activity_task_completed_by_id(tonic::Request::new(p::RespondActivityTaskCompletedByIdRequest { domain: "remote-domain".into(), workflow_execution: execution.clone(), activity_id: "activity".into(), result: Some(p::Payload { data: vec![1,2], ..Default::default() }), ..Default::default() })).await.unwrap();
-        fe.respond_activity_task_failed_by_id(tonic::Request::new(p::RespondActivityTaskFailedByIdRequest { domain: "remote-domain".into(), workflow_execution: execution.clone(), activity_id: "activity".into(), ..Default::default() })).await.unwrap();
-        fe.respond_activity_task_canceled_by_id(tonic::Request::new(p::RespondActivityTaskCanceledByIdRequest { domain: "remote-domain".into(), workflow_execution: execution.clone(), activity_id: "activity".into(), ..Default::default() })).await.unwrap();
-        let response = fe.record_activity_task_heartbeat_by_id(tonic::Request::new(p::RecordActivityTaskHeartbeatByIdRequest { domain: "remote-domain".into(), workflow_execution: execution, activity_id: "activity".into(), ..Default::default() })).await.unwrap();
+        let execution = Some(p::WorkflowExecution {
+            workflow_id: "remote-workflow".into(),
+            run_id: "remote-run".into(),
+        });
+        fe.respond_activity_task_completed_by_id(tonic::Request::new(
+            p::RespondActivityTaskCompletedByIdRequest {
+                domain: "remote-domain".into(),
+                workflow_execution: execution.clone(),
+                activity_id: "activity".into(),
+                result: Some(p::Payload {
+                    data: vec![1, 2],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap();
+        fe.respond_activity_task_failed_by_id(tonic::Request::new(
+            p::RespondActivityTaskFailedByIdRequest {
+                domain: "remote-domain".into(),
+                workflow_execution: execution.clone(),
+                activity_id: "activity".into(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap();
+        fe.respond_activity_task_canceled_by_id(tonic::Request::new(
+            p::RespondActivityTaskCanceledByIdRequest {
+                domain: "remote-domain".into(),
+                workflow_execution: execution.clone(),
+                activity_id: "activity".into(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap();
+        let response = fe
+            .record_activity_task_heartbeat_by_id(tonic::Request::new(
+                p::RecordActivityTaskHeartbeatByIdRequest {
+                    domain: "remote-domain".into(),
+                    workflow_execution: execution,
+                    activity_id: "activity".into(),
+                    ..Default::default()
+                },
+            ))
+            .await
+            .unwrap();
         assert!(response.into_inner().cancel_requested);
         let calls = api.calls.lock().unwrap();
-        assert_eq!(calls.iter().map(|c| c.0.as_str()).collect::<Vec<_>>(), vec!["RespondActivityTaskCompletedByID", "RespondActivityTaskFailedByID", "RespondActivityTaskCanceledByID", "RecordActivityTaskHeartbeatByID"]);
+        assert_eq!(
+            calls.iter().map(|c| c.0.as_str()).collect::<Vec<_>>(),
+            vec![
+                "RespondActivityTaskCompletedByID",
+                "RespondActivityTaskFailedByID",
+                "RespondActivityTaskCanceledByID",
+                "RecordActivityTaskHeartbeatByID"
+            ]
+        );
         for (_, request, _) in calls.iter() {
             assert_eq!(request["workflowID"], "remote-workflow");
             assert_eq!(request["runID"], "remote-run");
@@ -3125,17 +3294,51 @@ mod p1_handler_tests {
     #[tokio::test]
     async fn release_semaphore_decision_reaches_completion_hook_and_roundtrips_codecs() {
         use cadence_thrift::{FromThrift, ToThrift};
-        let api = Arc::new(RecordingApi { calls: Mutex::new(vec![]), result: serde_json::json!({}), error: false });
+        let api = Arc::new(RecordingApi {
+            calls: Mutex::new(vec![]),
+            result: serde_json::json!({}),
+            error: false,
+        });
         let fe = frontend(api.clone());
-        fe.respond_decision_task_completed(tonic::Request::new(p::RespondDecisionTaskCompletedRequest {
-            task_token: vec![1], decisions: vec![p::Decision { attributes: Some(p::decision::Attributes::ReleaseSemaphoreDecisionAttributes(p::ReleaseSemaphoreDecisionAttributes { initiated_event_id: 123 })) }], ..Default::default()
-        })).await.unwrap();
+        fe.respond_decision_task_completed(tonic::Request::new(
+            p::RespondDecisionTaskCompletedRequest {
+                task_token: vec![1],
+                decisions: vec![p::Decision {
+                    attributes: Some(p::decision::Attributes::ReleaseSemaphoreDecisionAttributes(
+                        p::ReleaseSemaphoreDecisionAttributes {
+                            initiated_event_id: 123,
+                        },
+                    )),
+                }],
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap();
         let calls = api.calls.lock().unwrap();
-        let request: cadence_api::tasks::RespondDecisionTaskCompletedRequest = serde_json::from_value(calls[0].1.clone()).unwrap();
-        let decoded = cadence_api::tasks::RespondDecisionTaskCompletedRequest::from_thrift(&request.to_thrift()).unwrap();
+        let request: cadence_api::tasks::RespondDecisionTaskCompletedRequest =
+            serde_json::from_value(calls[0].1.clone()).unwrap();
+        let decoded = cadence_api::tasks::RespondDecisionTaskCompletedRequest::from_thrift(
+            &request.to_thrift(),
+        )
+        .unwrap();
         let d = decoded.decisions.into_iter().next().unwrap();
-        assert_eq!(d.release_semaphore_decision_attributes.as_ref().unwrap().initiated_event_id, Some(123));
-        assert_eq!(cadence_proto::convert::decisions_out::decision_out(d).unwrap().attributes,
-            Some(p::decision::Attributes::ReleaseSemaphoreDecisionAttributes(p::ReleaseSemaphoreDecisionAttributes { initiated_event_id: 123 })));
+        assert_eq!(
+            d.release_semaphore_decision_attributes
+                .as_ref()
+                .unwrap()
+                .initiated_event_id,
+            Some(123)
+        );
+        assert_eq!(
+            cadence_proto::convert::decisions_out::decision_out(d)
+                .unwrap()
+                .attributes,
+            Some(p::decision::Attributes::ReleaseSemaphoreDecisionAttributes(
+                p::ReleaseSemaphoreDecisionAttributes {
+                    initiated_event_id: 123
+                }
+            ))
+        );
     }
 }

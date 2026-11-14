@@ -302,7 +302,9 @@ impl ExecutionRecord {
             execution: Some(self.execution.clone()),
             workflow_type: Some(self.workflow_type.clone()),
             start_time: Some(self.start_time_millis.saturating_mul(1_000_000)),
-            close_time: self.close_time_millis.map(|ms| ms.saturating_mul(1_000_000)),
+            close_time: self
+                .close_time_millis
+                .map(|ms| ms.saturating_mul(1_000_000)),
             close_status: self.close_status,
             history_length: self.history.len() as i64,
             memo: self.memo.clone(),
@@ -321,7 +323,11 @@ impl ExecutionRecord {
             cron_schedule,
             cron_overlap_policy: started.and_then(|s| s.cron_overlap_policy),
             partition_config: started.and_then(|s| s.partition_config.clone()),
-            update_time: self.history.last().and_then(|e| e.timestamp).map(|ms| ms.saturating_mul(1_000_000)),
+            update_time: self
+                .history
+                .last()
+                .and_then(|e| e.timestamp)
+                .map(|ms| ms.saturating_mul(1_000_000)),
             execution_status: Some(
                 self.close_status
                     .and_then(|s| {

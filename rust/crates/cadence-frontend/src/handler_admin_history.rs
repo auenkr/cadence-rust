@@ -46,7 +46,10 @@ impl HistoryProxy {
         request: Option<h::CloseShardRequest>,
     ) -> Result<h::CloseShardResponse, AdminError> {
         let request = request.ok_or_else(|| bad(ERR_REQUEST_NOT_SET))?;
-        self.history.close_shard(request).await.map_err(history_error)
+        self.history
+            .close_shard(request)
+            .await
+            .map_err(history_error)
     }
 
     /// Go rejects a nil request or nil task type; proto3 enums carry zero for
@@ -56,7 +59,10 @@ impl HistoryProxy {
         request: Option<h::RemoveTaskRequest>,
     ) -> Result<h::RemoveTaskResponse, AdminError> {
         let request = request.ok_or_else(|| bad(ERR_REQUEST_NOT_SET))?;
-        self.history.remove_task(request).await.map_err(history_error)
+        self.history
+            .remove_task(request)
+            .await
+            .map_err(history_error)
     }
 
     pub async fn reset_queue(
@@ -67,7 +73,10 @@ impl HistoryProxy {
         if request.cluster_name.is_empty() {
             return Err(bad(ERR_CLUSTER_NAME_NOT_SET));
         }
-        self.history.reset_queue(request).await.map_err(history_error)
+        self.history
+            .reset_queue(request)
+            .await
+            .map_err(history_error)
     }
 
     pub async fn describe_queue(
@@ -78,7 +87,10 @@ impl HistoryProxy {
         if request.cluster_name.is_empty() {
             return Err(bad(ERR_CLUSTER_NAME_NOT_SET));
         }
-        self.history.describe_queue(request).await.map_err(history_error)
+        self.history
+            .describe_queue(request)
+            .await
+            .map_err(history_error)
     }
 
     pub async fn describe_history_host(
@@ -100,7 +112,10 @@ impl HistoryProxy {
     ) -> Result<h::ReapplyEventsResponse, AdminError> {
         let request = request.ok_or_else(|| bad(ERR_REQUEST_NOT_SET))?;
         validate_reapply_events(&request)?;
-        self.history.reapply_events(request).await.map_err(history_error)
+        self.history
+            .reapply_events(request)
+            .await
+            .map_err(history_error)
     }
 
     pub async fn get_replication_messages(
@@ -277,7 +292,12 @@ mod tests {
 #[cfg(test)]
 mod history_error_passthrough_tests {
     use super::*;
-    use std::{convert::Infallible, future::Future, pin::Pin, task::{Context, Poll}};
+    use std::{
+        convert::Infallible,
+        future::Future,
+        pin::Pin,
+        task::{Context, Poll},
+    };
     use tonic::codegen::{http, Service};
 
     #[derive(Clone)]
@@ -289,7 +309,9 @@ mod history_error_passthrough_tests {
         type Response = http::Response<tonic::body::BoxBody>;
         type Error = Infallible;
         type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
-        fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> { Poll::Ready(Ok(())) }
+        fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
         fn call(&mut self, _: http::Request<tonic::body::BoxBody>) -> Self::Future {
             let status = self.0.clone();
             Box::pin(async move { Ok(status.into_http()) })
@@ -302,15 +324,33 @@ mod history_error_passthrough_tests {
         let addr = listener.local_addr().unwrap();
         // The service name is taken from the generated client, so the test follows
         // the same History path used by the live proxy.
-        let status = tonic::Status::with_details(tonic::Code::NotFound, "history missing", vec![8, 5, 18, 0].into());
+        let status = tonic::Status::with_details(
+            tonic::Code::NotFound,
+            "history missing",
+            vec![8, 5, 18, 0].into(),
+        );
         let expected = status.clone();
         let incoming = tonic::codegen::tokio_stream::wrappers::TcpListenerStream::new(listener);
         let server = tokio::spawn(async move {
-            tonic::transport::Server::builder().add_service(FailingHistory(status)).serve_with_incoming(incoming).await.unwrap();
+            tonic::transport::Server::builder()
+                .add_service(FailingHistory(status))
+                .serve_with_incoming(incoming)
+                .await
+                .unwrap();
         });
-        let channel = tonic::transport::Endpoint::from_shared(format!("http://{addr}")).unwrap().connect().await.unwrap();
+        let channel = tonic::transport::Endpoint::from_shared(format!("http://{addr}"))
+            .unwrap()
+            .connect()
+            .await
+            .unwrap();
         let proxy = HistoryProxy::new(HistoryClient::from_channel(channel, 1024));
-        let AdminError::History(actual) = proxy.close_shard(Some(h::CloseShardRequest::default())).await.unwrap_err() else { panic!("History error was reclassified") };
+        let AdminError::History(actual) = proxy
+            .close_shard(Some(h::CloseShardRequest::default()))
+            .await
+            .unwrap_err()
+        else {
+            panic!("History error was reclassified")
+        };
         assert_eq!(actual.code(), expected.code());
         assert_eq!(actual.message(), expected.message());
         assert_eq!(actual.details(), expected.details());
