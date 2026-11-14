@@ -1,0 +1,22 @@
+[
+  {
+    "step": "rust-frontend-restarted-listening",
+    "ok": true,
+    "detail": "t=2104"
+  },
+  {
+    "step": "diag-tasklist-decision",
+    "ok": true,
+    "detail": "\u001b[94m                                      DECISION POLLER IDENTITY                                      \u001b[0m | \u001b[94m  LAST ACCESS TIME  \u001b[0m  \n  3259@runnervmccnms@fe-soak-97dca37d-f021-46e1-a004-7656d84bf9e2@a18f4d9b-a124-4fc7-b673-951a65bb8887 | 2026-11-14T15:55:16Z"
+  },
+  {
+    "step": "diag-tasklist-activity",
+    "ok": true,
+    "detail": "\u001b[94m                                      ACTIVITY POLLER IDENTITY                                      \u001b[0m | \u001b[94m  LAST ACCESS TIME  \u001b[0m  \n  3259@runnervmccnms@fe-soak-97dca37d-f021-46e1-a004-7656d84bf9e2@a18f4d9b-a124-4fc7-b673-951a65bb8887 | 2026-11-14T15:55:16Z"
+  },
+  {
+    "step": "diag-workflow-show",
+    "ok": true,
+    "detail": "                                                \n  15  DecisionTaskCompleted      {ExecutionContext:[], ScheduledEventID:13, StartedEventID:14,                                                   \n                                 Identity:3259@runnervmccnms@fe-soak-97dca37d-f021-46e1-a004-7656d84bf9e2@a18f4d9b-a124-4fc7-b673-951a65bb8887,  \n                                 BinaryChecksum:2f2fe6988d87b1958818033051987ef7}                                                                \n  16  ActivityTaskTimedOut       {Details:[], ScheduledEventID:10,                                                                               \n                                 StartedEventID:11,                                                                                              \n                                 TimeoutType:START_TO_CLOSE,                                                                                     \n                                 LastFailureDetails:[],                                                                                          \n                                 LastFailureOptions:{FailureCategory:Standard,                                                                   \n                                 NextRetryIntervalSeconds:0}}                                                                                    \n  17  DecisionTaskScheduled      {TaskList:{Name:fe-soak-97dca37d-f021-46e1-a004-7656d84bf9e2},                                                  \n                                 StartToCloseTimeoutSeconds:10, Attempt:0}                                                                       \n  18  DecisionTaskStarted        {ScheduledEventID:17,                                                                                           \n                                 Identity:3259@runnervmccnms@fe-soak-97dca37d-f021-46e1-a004-7656d84bf9e2@a18f4d9b-a124-4fc7-b673-951a65bb8887,  \n                                 RequestID:253df53c-e63a-4e1a-a2f8-baaf41426102}                                                                 \n  19  DecisionTaskCompleted      {ExecutionContext:[], ScheduledEventID:17, StartedEventID:18,                                                   \n                                 Identity:3259@runnervmccnms@fe-soak-97dca37d-f021-46e1-a004-7656d84bf9e2@a18f4d9b-a124-4fc7-b673-951a65bb8887,  \n                                 BinaryChecksum:2f2fe6988d87b1958818033051987ef7}                                                                \n  20  WorkflowExecutionFailed    {Reason:cadenceInternal:Timeout                                                                                 \n                                 START_TO_CLOSE, Details:[],                                                                                     \n                                 DecisionTaskCompletedEventID:19}                                                                                \nHistory Source: Default Storage"
+  }
+]

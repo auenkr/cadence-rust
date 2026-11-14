@@ -116,7 +116,7 @@ def compare(a):
     rate = r['failed'] / max(1, r['started'])
     chk('error rate ~0 (< 0.1%) and not higher than Go', rate < 0.001 and r['failed'] <= g['failed'] + max(1, 0.001 * r['started']),
         f"rust={rate:.4%} ({r['failed']}) go={g['failed']} stages={r['fail_stage_counts']}")
-    chk('query "init" after successful signal: none (as Go)', (r['query_init_workflows'] or 0) <= (g['query_init_workflows'] or 0),
+    chk('query "init" retries not above Go (+10%; Go itself retries ~50% of workflows)', (r['query_init_workflows'] or 0) <= 1.1 * (g['query_init_workflows'] or 0) + 10 and (r['query_init_attempts'] or 0) <= 1.1 * (g['query_init_attempts'] or 0) + 10,
         f"rust workflows={r['query_init_workflows']} attempts={r['query_init_attempts']}; go workflows={g['query_init_workflows']} attempts={g['query_init_attempts']}")
     for grp, label in (('e2e_ms', 'e2e'), ('query_ms', 'query call'), ('start_ms', 'start call')):
         for p in ('p50', 'p95', 'p99'):

@@ -161,20 +161,26 @@ impl EmaQpsTracker {
 
     /// Go `ReportCounter`: one arrival with no isolation group.
     pub fn report_counter(&self, amount: i64) {
+        let mut state = self.lock();
         let bucket = self.bucket();
-        self.lock().root.add(bucket, amount);
+        // Go folds on a ticker even when nobody reads QPS. Fold completed
+        // windows here too, so write-only queues retain only the open bucket.
+        state.root.fold_up_to(bucket - 1, self.exp, self.seconds());
+        state.root.add(bucket, amount);
     }
 
     /// Go `ReportGroup`: counts toward the root and toward the group.
     pub fn report_group(&self, group: &str, amount: i64) {
-        let bucket = self.bucket();
         let mut state = self.lock();
+        let bucket = self.bucket();
+        state.root.fold_up_to(bucket - 1, self.exp, self.seconds());
         state.root.add(bucket, amount);
-        state
+        let accumulator = state
             .groups
             .entry(group.to_string())
-            .or_insert_with(|| Accumulator::starting_at(bucket))
-            .add(bucket, amount);
+            .or_insert_with(|| Accumulator::starting_at(bucket));
+        accumulator.fold_up_to(bucket - 1, self.exp, self.seconds());
+        accumulator.add(bucket, amount);
     }
 
     /// Fold the buckets the clock has completed, as the ticker would have. The
@@ -231,6 +237,28 @@ mod tests {
     fn mocked(now: &Arc<AtomicI64>) -> Clock {
         let now = now.clone();
         Arc::new(move || now.load(Ordering::SeqCst))
+    }
+
+    #[test]
+    fn write_only_traffic_keeps_one_pending_window() {
+        let now = Arc::new(AtomicI64::new(0));
+        let clock_now = now.clone();
+        let tracker = EmaQpsTracker::new(
+            0.5,
+            Duration::from_secs(1),
+            Arc::new(move || clock_now.load(Ordering::SeqCst)),
+        );
+        for bucket in 0..10_000 {
+            now.store(bucket * 1_000_000_000, Ordering::SeqCst);
+            tracker.report_counter(3);
+            tracker.report_group("group", 7);
+            let state = tracker.lock();
+            assert_eq!(state.root.pending.len(), 1);
+            assert_eq!(state.groups.values().next().unwrap().pending.len(), 1);
+        }
+        now.store(10_000_000_000_000, Ordering::SeqCst);
+        close(10.0, tracker.qps());
+        close(7.0, tracker.group_qps("group"));
     }
 
     fn close(expected: f64, actual: f64) {
