@@ -170,7 +170,6 @@ pub fn mutation_to_persistence(
             retry_last_failure_details: info.last_failure_details.clone(), retry_last_retry_interval_seconds: info.last_retry_interval_seconds,
             retry_last_failure_category: info.last_failure_category,
             task_list_kind: info.task_list_kind,
-            ..Default::default()
         };
         // Persistence-only scheduled/started event blobs, encodings, task-list kind and failure category survive updates.
         let old = find_activity(id);
