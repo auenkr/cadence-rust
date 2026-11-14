@@ -16,6 +16,7 @@ CONTAINER="cadence-rust-gate-$RUN_ID"
 mkdir -p "$ARTIFACTS"
 STARTED=0
 KAFKA_CONTAINER=""
+KAFKA_JAAS_FILE=""
 KAFKA_PORT=${CADENCE_KAFKA_PORT:-19092}
 KAFKA_IMAGE=${CADENCE_KAFKA_IMAGE:-apache/kafka:3.8.0}
 KAFKA_TOPIC=${CADENCE_KAFKA_TOPIC:-cadence-async-gate}
@@ -32,6 +33,7 @@ cleanup() {
     docker logs "$KAFKA_CONTAINER" > "$ARTIFACTS/kafka-container.log" 2>&1 || true
     docker rm --force "$KAFKA_CONTAINER" > "$ARTIFACTS/kafka-container-cleanup.txt" 2>&1 || true
   fi
+  if [[ -n "$KAFKA_JAAS_FILE" ]]; then rm -f "$KAFKA_JAAS_FILE"; fi
   if (( STARTED )); then
     docker exec "$CONTAINER" mysql -uroot -p"$PASSWORD" -h127.0.0.1 --force -e \
       "SELECT shard_id, HEX(id) id_hex, name, is_global, data_encoding, LENGTH(data) data_len, HEX(LEFT(data,24)) data_head FROM cadence.domains; SELECT * FROM cadence.domain_metadata; SELECT HEX(domain_id) d, name, task_type, range_id FROM cadence.task_lists; SELECT HEX(domain_id) d, task_list_name, task_type, task_id FROM cadence.tasks LIMIT 50; SELECT shard_id, HEX(domain_id) d, workflow_id, HEX(run_id) r FROM cadence.executions LIMIT 20; SELECT shard_id, task_id, LENGTH(data) FROM cadence.transfer_tasks LIMIT 30; SELECT shard_id, HEX(tree_id) t, HEX(branch_id) b, node_id, txn_id FROM cadence.history_node LIMIT 40; SELECT workflow_id, close_status FROM cadence_visibility.executions_visibility LIMIT 20;" \
@@ -57,18 +59,48 @@ docker exec "$CONTAINER" mysql -uroot -p"$PASSWORD" -h127.0.0.1 \
   -e 'CREATE DATABASE IF NOT EXISTS cadence; CREATE DATABASE IF NOT EXISTS cadence_visibility;' || exit 5
 KAFKA_ARGS=()
 if [[ "${CADENCE_GATE_KAFKA:-}" == "true" || "${CADENCE_GATE_KAFKA:-}" == "1" ]]; then
-  # Single-node KRaft broker, plaintext, advertised on the published host port (async workflow queue).
+  # Single-node KRaft broker. The authenticated lane exposes SASL/PLAIN externally
+  # while keeping the broker's internal listener plaintext for admin/topic setup.
   KAFKA_CONTAINER="cadence-rust-gate-kafka-$RUN_ID"
+  if [[ "${CADENCE_GATE_KAFKA_AUTH:-false}" == "true" ]]; then
+    KAFKA_LISTENERS="SASL_PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,INTERNAL://0.0.0.0:9094"
+    KAFKA_ADVERTISED="SASL_PLAINTEXT://127.0.0.1:${KAFKA_PORT},INTERNAL://localhost:9094"
+    KAFKA_PROTOCOLS="CONTROLLER:PLAINTEXT,SASL_PLAINTEXT:SASL_PLAINTEXT,INTERNAL:PLAINTEXT"
+  else
+    KAFKA_LISTENERS="PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,INTERNAL://0.0.0.0:9094"
+    KAFKA_ADVERTISED="PLAINTEXT://127.0.0.1:${KAFKA_PORT},INTERNAL://localhost:9094"
+    KAFKA_PROTOCOLS="CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT"
+  fi
+  KAFKA_AUTH_ARGS=()
+  if [[ "${CADENCE_GATE_KAFKA_AUTH:-false}" == "true" ]]; then
+    KAFKA_JAAS_FILE=$(mktemp)
+    cat > "$KAFKA_JAAS_FILE" <<'JAAS'
+KafkaServer {
+  org.apache.kafka.common.security.plain.PlainLoginModule required
+  username="cadence"
+  password="cadence-password"
+  user_cadence="cadence-password";
+};
+JAAS
+    chmod 644 "$KAFKA_JAAS_FILE"
+    KAFKA_AUTH_ARGS+=(
+      --volume "$KAFKA_JAAS_FILE:/etc/kafka/kafka_server_jaas.conf:ro"
+      --env KAFKA_OPTS=-Djava.security.auth.login.config=/etc/kafka/kafka_server_jaas.conf
+      --env KAFKA_SASL_ENABLED_MECHANISMS=PLAIN
+      --env KAFKA_LISTENER_NAME_SASL_PLAINTEXT_SASL_ENABLED_MECHANISMS=PLAIN
+    )
+  fi
   docker run --detach --name "$KAFKA_CONTAINER" --label "cadence-rust-gate-run=$RUN_ID" \
     --memory 1g --memory-swap 1g --cpus 1 --pids-limit 2048 \
     --publish "127.0.0.1:${KAFKA_PORT}:9092" \
     --env KAFKA_NODE_ID=1 --env KAFKA_PROCESS_ROLES=broker,controller \
-    --env KAFKA_LISTENERS=PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,INTERNAL://0.0.0.0:9094 \
-    --env KAFKA_ADVERTISED_LISTENERS="PLAINTEXT://127.0.0.1:${KAFKA_PORT},INTERNAL://localhost:9094" \
+    --env KAFKA_LISTENERS="$KAFKA_LISTENERS" \
+    --env KAFKA_ADVERTISED_LISTENERS="$KAFKA_ADVERTISED" \
     --env KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER \
-    --env KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT \
+    --env KAFKA_LISTENER_SECURITY_PROTOCOL_MAP="$KAFKA_PROTOCOLS" \
     --env KAFKA_INTER_BROKER_LISTENER_NAME=INTERNAL \
     --env KAFKA_CONTROLLER_QUORUM_VOTERS=1@localhost:9093 \
+    "${KAFKA_AUTH_ARGS[@]}" \
     --env KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1 --env KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1 \
     --env KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1 --env KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=0 \
     --env KAFKA_AUTO_CREATE_TOPICS_ENABLE=false --env KAFKA_HEAP_OPTS="-Xms512m -Xmx512m" \

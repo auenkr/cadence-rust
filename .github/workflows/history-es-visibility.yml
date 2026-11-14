@@ -12,9 +12,13 @@ on:
         description: Kill and restart a Rust History host during SDK traffic
         type: boolean
         default: false
+      kafka_auth:
+        description: Require SASL/PLAIN authentication for Kafka producer and consumer
+        type: boolean
+        default: false
 
 concurrency:
-  group: history-es-${{ github.ref }}-${{ inputs.es_flavor }}-${{ github.run_id }}
+  group: history-es-${{ github.ref }}-${{ inputs.es_flavor }}-kafka-auth-${{ inputs.kafka_auth }}-${{ github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -60,6 +64,7 @@ jobs:
       - name: ES advanced visibility with Rust History
         env:
           CADENCE_GATE_KAFKA: "true"
+          CADENCE_GATE_KAFKA_AUTH: ${{ inputs.kafka_auth }}
           CADENCE_GATE_ES: "true"
           CADENCE_GATE_ES_FLAVOR: ${{ inputs.es_flavor }}
           CADENCE_GATE_TWO_HISTORY: ${{ inputs.two_history }}
@@ -82,7 +87,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: history-es-visibility-${{ inputs.es_flavor }}
+          name: history-es-visibility-${{ inputs.es_flavor }}-kafka-auth-${{ inputs.kafka_auth }}
           retention-days: 3
           path: |
             out/
