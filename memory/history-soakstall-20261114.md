@@ -167,3 +167,5 @@ https://github.com/auenkr/cadence-rust/actions/runs/43555072334 — running.
 The repository's automatic rust-check push workflow ran on the first pushes;
 it was disabled through gh to keep subsequent validation within the explicitly
 requested workflow set. No local Cargo/Go/Docker commands were executed.
+
+Compaction checkpoint: diagnostic run 43554242022 failed with 4797/4800 completed, p50 4124ms; both RSS guards passed. Fresh History CI 43555072334 succeeded (901 tests). Cancellation regression on 56a415667 is running in 43557514557; suspected abandoned cache lease retains uncommitted parent mutations. No claim of root cause confirmation yet.
