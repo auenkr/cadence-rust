@@ -58,3 +58,10 @@ https://github.com/auenkr/cadence-rust/actions/runs/43648251008 passed at
 `917c5829d904ff6c7070577767c1806c7a193220` (clippy/test exits 0).
 This cached automatic run is interim coverage, not final fresh-target evidence.
 No second soak, runtime fix, or leak-free claim. Dashboard updated.
+
+## 23:27 UTC checkpoint
+
+Profile soak 43647363855 still has both Go baseline and Rust lane jobs active
+in their Soak steps (~53 minutes since lane step start). No early exit or
+uploaded lane reports yet. One measured soak has been started; two slots remain.
+No further code changes, local builds, tests, or runtime processes.
