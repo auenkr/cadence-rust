@@ -6,7 +6,7 @@ keeps its error text, so Rust Frontend gaps are reported precisely instead of ab
 Usage: run-frontend-soak.py --out DIR --rust-binary P --go-server P --go-cli P --driver P --rust-root DIR
 MySQL comes from CADENCE_MYSQL_{ADDR,USER,PASSWORD} (databases cadence and cadence_visibility exist).
 """
-import argparse, concurrent.futures, json, os, re, secrets, signal, socket, subprocess, sys, time
+import argparse, concurrent.futures, json, os, re, secrets, shlex, signal, socket, subprocess, sys, time
 from pathlib import Path
 
 ap = argparse.ArgumentParser()
@@ -14,6 +14,7 @@ ap.add_argument('--database', choices=['mysql', 'postgres', 'cassandra'], defaul
 ap.add_argument('--out', type=Path, required=True)
 ap.add_argument('--mode', choices=['go', 'rust', 'rust-fe', 'rust-mt'], default='rust', help='go: all-Go baseline; rust: Rust Frontend+Matching, Go History/Worker; rust-fe: Rust Frontend + Go Matching; rust-mt: Go Frontend + Rust Matching')
 ap.add_argument('--rust-binary', type=Path, default=Path('/nonexistent-rust-binary'))
+ap.add_argument('--rust-matching-env', default='', help='allowlisted MALLOC_* assignments for the Rust Matching process')
 ap.add_argument('--go-server', type=Path, required=True)
 ap.add_argument('--go-cli', type=Path, required=True)
 ap.add_argument('--driver', type=Path, required=True)
@@ -252,6 +253,12 @@ MT = 'rust-matching' if RUST_MT else 'go-matching'
 rust_matching = lambda: [args.rust_binary, 'start', '--config', work / 'rust.yaml', '--root', work, '--services', 'matching', '--port', '0',
     '--history-grpc-port', ports['HISTORY_PORT_GRPC'], '--matching-grpc-port', ports['RUST_MATCHING_PORT_GRPC'],
     '--matching-tchannel-port', ports['RUST_MATCHING_PORT'], '--data-dir', work / 'rust-matching-data']
+rust_matching_env = dict(os.environ)
+for assignment in shlex.split(args.rust_matching_env):
+    key, sep, value = assignment.partition('=')
+    if not sep or key not in {'MALLOC_ARENA_MAX', 'MALLOC_TRIM_THRESHOLD_'} or not value.isdigit():
+        ap.error(f'invalid --rust-matching-env assignment: {assignment!r}')
+    rust_matching_env[key] = value
 rust_frontend = lambda: [args.rust_binary, 'start', '--config', work / 'rust.yaml', '--root', work, '--services', 'frontend',
     '--history-grpc-port', ports['HISTORY_PORT_GRPC'], '--data-dir', work / 'rust-frontend-data']
 frontend_env = {
@@ -283,7 +290,7 @@ try:
             raise SystemExit(1)
     # Matching opens gRPC only after Ringpop bootstrap. Launch its Frontend
     # seed before waiting for Matching readiness so both can join the ring.
-    start(MT, (rust_matching if RUST_MT else go_matching)())
+    start(MT, (rust_matching if RUST_MT else go_matching)(), env=rust_matching_env if RUST_MT else None)
     start(FE, frontend_cmd(), env=frontend_env)
     mt_port = ports['RUST_MATCHING_PORT_GRPC'] if RUST_MT else ports['MATCHING_PORT_GRPC']
     matching_ready = wait_port(mt_port, 120, MT)
