@@ -83,6 +83,7 @@ impl<S: TaskGeneratorState> MutableStateTaskGenerator<'_, S> {
         let retention = self.state.retention_days()?.unwrap_or(1);
         let mut duration = i64::from(retention) * 24 * 60 * 60 * 1_000_000_000;
         if jitter_range > 1 { duration += self.state.random_below(i64::from(jitter_range) * 60) * 1_000_000_000; }
+        tracing::warn!(retention, duration, event_ts = event.timestamp.unwrap_or_default(), version = event.version, "DIAG generate DeleteHistoryEvent");
         let task = self.task(event.version, Some(event.timestamp.unwrap_or_default() + duration), info.task_list, TaskKind::DeleteHistoryEvent);
         self.state.add_timer_task(task);
         Ok(())
