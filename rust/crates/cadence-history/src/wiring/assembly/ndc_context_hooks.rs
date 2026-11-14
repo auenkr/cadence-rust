@@ -42,6 +42,27 @@ const TIMER: HistoryTaskCategory = HistoryTaskCategory { category_type: 2, categ
 const REPLICATION: HistoryTaskCategory = HistoryTaskCategory { category_type: 1, category_id: 3 };
 const CLOSE_STATUS_CONTINUED_AS_NEW: i32 = crate::execution::mutable_state_methods_common::CLOSE_STATUS_CONTINUED_AS_NEW;
 
+/// The timer blob does not carry the visibility timestamp (Go keeps it on the row),
+/// so `timer_task_from_struct` returns 0; restore it from the outer task.
+fn with_row_visibility(mut t: cadence_persistence::history_contract::TimerTask, visibility: i64) -> cadence_persistence::history_contract::TimerTask {
+    t.visibility_timestamp_unix_nanos = visibility;
+    t
+}
+
+#[cfg(test)]
+mod timer_visibility_tests {
+    use super::*;
+
+    #[test]
+    fn timer_visibility_timestamp_is_preserved_from_row() {
+        let blob = timer_task_to_struct(&Default::default()).unwrap();
+        let decoded = timer_task_from_struct(&blob).unwrap();
+        assert_eq!(decoded.visibility_timestamp_unix_nanos, 0);
+        let fixed = with_row_visibility(decoded, 1_700_000_000_123);
+        assert_eq!(fixed.visibility_timestamp_unix_nanos, 1_700_000_000_123);
+    }
+}
+
 pub(super) fn ndc_err(err: NdcError) -> HistoryError {
     match err {
         NdcError::EntityNotExists(m) => HistoryError::entity_not_exists(m),
@@ -294,10 +315,8 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
             let mut decoded = Vec::with_capacity(list.len());
             for task in list.iter() {
                 let s = Encoding::ThriftRW.decode(&task.data.data).map_err(|e| internal(e.to_string()))?;
-                let mut t = timer_task_from_struct(&s).map_err(|e| internal(e.to_string()))?;
-                // The blob does not carry the visibility timestamp (Go keeps it on the row).
-                t.visibility_timestamp_unix_nanos = task.visibility_timestamp_unix_nanos;
-                decoded.push(t);
+                let t = timer_task_from_struct(&s).map_err(|e| internal(e.to_string()))?;
+                decoded.push(with_row_visibility(t, task.visibility_timestamp_unix_nanos));
             }
             let mut slots: Vec<(i64, i64)> = decoded.iter().map(|t| (0, t.visibility_timestamp_unix_nanos)).collect();
             shard.allocate_timer_ids(&self.core.current_cluster, &mut slots).map_err(shard_err(shard.shard_id()))?;

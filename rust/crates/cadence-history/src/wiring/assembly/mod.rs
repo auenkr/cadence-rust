@@ -8,6 +8,7 @@ pub mod controller;
 pub mod engine_cache;
 pub mod engine_checksum;
 pub mod engine_close;
+pub mod engine_failover;
 pub mod engine_continue;
 pub mod engine_decision;
 pub mod engine_decision_ops;
