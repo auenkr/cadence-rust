@@ -414,6 +414,7 @@ mod child_initiated_parity_tests {
     fn initiated_event_defaults_parent_close_policy_to_abandon() {
         let mut s = TypedMutableState::new();
         s.execution_info.state = 1;
+        s.execution_info.decision_started_id = 3;
         let attrs = StartChildWorkflowExecutionDecisionAttributes::default();
         let (event, _) = s
             .add_start_child_workflow_execution_initiated_event(1, 4, "req", &attrs, "parent", "cid")
