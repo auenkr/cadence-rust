@@ -630,6 +630,37 @@ mod evict_tests {
 
 }
 
+/// Owns the workflow lock until explicit release or cancellation. A dropped
+/// operation may have changed mutable state without committing it; discard that
+/// state before another operation can acquire the lock.
+struct ExecutionLease {
+    context: Arc<EngineExecutionContext>,
+    guard: Mutex<Option<OwnedMutexGuard<()>>>,
+    force_clear: bool,
+}
+
+impl ExecutionLease {
+    fn release(&self, failed: bool) {
+        let mut slot = self.guard.lock().unwrap();
+        if slot.is_some() {
+            if failed || self.force_clear {
+                self.context.clear();
+            }
+            drop(slot.take());
+        }
+    }
+}
+
+impl Drop for ExecutionLease {
+    fn drop(&mut self) {
+        let slot = self.guard.get_mut().unwrap();
+        if slot.is_some() {
+            self.context.clear();
+            drop(slot.take());
+        }
+    }
+}
+
 /// Go `execution.cacheImpl`: contexts keyed by domain/workflow/run, each guarded
 /// by a lock held until the returned `ReleaseFunc` is called.
 pub struct EngineExecutionCache {
@@ -760,15 +791,14 @@ impl EngineExecutionCache {
             self.cache_scope(scope).inc_counter("CacheMissCounter");
         }
         let guard: OwnedMutexGuard<()> = pin.lock_owned().await;
-        let slot = Mutex::new(Some(guard));
         let context = entry.context.clone();
-        let release_context = context.clone();
+        let lease = ExecutionLease {
+            context: context.clone(),
+            guard: Mutex::new(Some(guard)),
+            force_clear,
+        };
         let release: ReleaseFunc = Arc::new(move |err: Option<&HistoryError>| {
-            if err.is_some() || force_clear {
-                release_context.clear();
-            }
-            // Dropping the guard unlocks the workflow.
-            drop(slot.lock().unwrap().take());
+            lease.release(err.is_some());
         });
         Ok((context, release))
     }
