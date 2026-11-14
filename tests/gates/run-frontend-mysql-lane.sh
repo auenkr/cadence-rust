@@ -86,6 +86,7 @@ JAAS
     KAFKA_AUTH_ARGS+=(
       --volume "$KAFKA_JAAS_FILE:/etc/kafka/kafka_server_jaas.conf:ro"
       --env KAFKA_OPTS=-Djava.security.auth.login.config=/etc/kafka/kafka_server_jaas.conf
+      --env KAFKA_SASL_ENABLED_MECHANISMS=PLAIN
       --env KAFKA_LISTENER_NAME_SASL_PLAINTEXT_SASL_ENABLED_MECHANISMS=PLAIN
     )
   fi
