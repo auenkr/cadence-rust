@@ -1,14 +1,14 @@
 # History soak stall: findings (2026-11-14, branch history-soakstall)
 
-## Current result: result long-poll fixed; full soak acceptance remains red
+## Current result: acceptance soak passes; Cassandra recovery running
 
-Branch `history-pollms-fix` implements the missing direct-engine history
-notification. Fresh CI: Clippy + 890 History tests pass. MySQL/gRPC and
-Cassandra/TChannel two-History mixed gates both report `GATE SUMMARY failed: []`.
-The 20-minute mysql soak confirms e2e p50=4101ms (Go baseline ~4100ms), but
-4794/4800 workflows complete: six restart-window child-completion stalls remain,
-plus first-host RSS growth fails the guard. See implementation evidence below.
-Do not claim all workflows complete or full soak acceptance.
+Branch `history-soak-tail` fixes canceled parent-update cache leases and ignored
+Go cache capacity/TTL. Run43558072143 passes4800/4800 workflows, p50=4111ms
+(Go~4100ms), unchanged RSS guards. MySQL and PostgreSQL restart gates each pass
+4500/4500 and `GATE SUMMARY failed: []`. PostgreSQL also needed healthy pool
+return notification; fresh workspace CI43576413232 passes including its strict
+regression. Cassandra1500s gate43577811696 is running. Details and historical
+failed runs follow; earlier pending notes below describe those checkpoints.
 
 ## Original result before the fix: NOT fixed; narrowed to result long-poll
 

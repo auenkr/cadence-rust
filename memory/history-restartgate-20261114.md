@@ -31,7 +31,7 @@ Identical signature to the known soak stall (memory/history-soak-20261113.md): o
 owned by worker `history-soakstall` (origin/history-soakstall) and was NOT fixed here. The postgres SIGTERM hang is likely a consequence (shutdown blocked on
 retrying stuck tasks) but is not proven; recheck after the soak stall fix.
 
-## Next
+## Original next steps (superseded by follow-up below)
 Rebase on master once history-soakstall is merged, re-run `git push` on this branch (or dispatch after the workflow reaches master) for mysql/postgres/cassandra and
 fill in pass results. A pass needs success conclusion and `GATE SUMMARY failed: []`. Scenario pass evidence is therefore still outstanding.
 
@@ -114,3 +114,5 @@ PostgreSQL all52 assertions pass, including both graceful restarts (no deadline
 relaxation). p50=4108ms. This confirms the missing healthy-return wakeup caused
 the live process shutdown hang. Earlier isolated child activity timeout did not
 recur. Compact source/binary-SHA and gate evidence: restart-postgres-fixed/.
+
+Checkpoint 2026-11-14T09:17Z: Cassandra43577811696 fresh release build passed;1500s fault/load phase began09:06:53Z and is still running. No source changes since passing workspace run43576413232.
