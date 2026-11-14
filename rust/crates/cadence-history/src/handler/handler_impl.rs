@@ -317,14 +317,26 @@ impl Handler for HandlerImpl {
     }
 
     async fn get_dlq_replication_messages(&self, request: Option<&adm::GetDLQReplicationMessagesRequest>) -> HResult<adm::GetDLQReplicationMessagesResponse> {
-        let r = nil(request)?;
+        // Go: only the shutting-down check; nil request == no task infos.
         self.check_shutdown()?;
-        self.check_rate()?;
-        let Some(first) = r.task_infos.first() else {
-            return Ok(adm::GetDLQReplicationMessagesResponse::default());
-        };
-        let e = self.engine(&first.workflow_id).await?;
-        let tasks = e.get_dlq_replication_messages(&r.task_infos).await?;
+        let infos: &[adm::ReplicationTaskInfo] = request.map(|r| r.task_infos.as_slice()).unwrap_or(&[]);
+        let tasks = gather_dlq_replication_tasks(infos, |group| async move {
+            let engine = match self.engine(&group[0].workflow_id).await {
+                Ok(e) => e,
+                Err(err) => {
+                    tracing::warn!(error = %err, "History engine not found for workflow ID.");
+                    return None;
+                }
+            };
+            match engine.get_dlq_replication_messages(&group).await {
+                Ok(tasks) => Some(tasks),
+                Err(err) => {
+                    tracing::error!(error = %err, "Failed to get dlq replication tasks.");
+                    None
+                }
+            }
+        })
+        .await;
         Ok(adm::GetDLQReplicationMessagesResponse { replication_tasks: Some(tasks) })
     }
 
@@ -681,6 +693,24 @@ impl Handler for HandlerImpl {
     }
 }
 
+/// Go `GetDLQReplicationMessages`: batch infos per (domain, workflow, run),
+/// run each batch independently; a failed batch (`None`) is skipped.
+async fn gather_dlq_replication_tasks<F, Fut>(infos: &[adm::ReplicationTaskInfo], f: F) -> Vec<cadence_api::types::ReplicationTask>
+where
+    F: Fn(Vec<adm::ReplicationTaskInfo>) -> Fut,
+    Fut: std::future::Future<Output = Option<Vec<cadence_api::types::ReplicationTask>>>,
+{
+    let mut groups: Vec<((String, String, String), Vec<adm::ReplicationTaskInfo>)> = Vec::new();
+    for info in infos {
+        let key = (info.domain_id.clone(), info.workflow_id.clone(), info.run_id.clone());
+        match groups.iter_mut().find(|(k, _)| *k == key) {
+            Some((_, v)) => v.push(info.clone()),
+            None => groups.push((key, vec![info.clone()])),
+        }
+    }
+    futures_util::future::join_all(groups.into_iter().map(|(_, g)| f(g))).await.into_iter().flatten().flatten().collect()
+}
+
 #[cfg(test)]
 mod start_handler_tests {
     use super::*;
@@ -734,5 +764,23 @@ mod start_handler_tests {
             run_id: "run".into(),
         }));
         assert!(!signal_with_start_retryable(&HistoryError::internal("unrelated")));
+    }
+
+    #[tokio::test]
+    async fn dlq_replication_messages_skip_failed_batches() {
+        let mk = |wf: &str, t: i16| adm::ReplicationTaskInfo { workflow_id: wf.into(), task_type: t, ..Default::default() };
+        let infos = [mk("a", 9), mk("b", 0), mk("a", 9)];
+        let calls = std::sync::Mutex::new(Vec::new());
+        let out = gather_dlq_replication_tasks(&infos, |g| {
+            calls.lock().unwrap().push((g[0].workflow_id.clone(), g.len()));
+            let ok = g[0].workflow_id == "b";
+            async move { if ok { Some(vec![Default::default()]) } else { None } }
+        })
+        .await;
+        assert_eq!(out.len(), 1);
+        let mut c = calls.into_inner().unwrap();
+        c.sort();
+        assert_eq!(c, vec![("a".to_string(), 2), ("b".to_string(), 1)]);
+        assert!(gather_dlq_replication_tasks(&[], |_| async { None }).await.is_empty());
     }
 }

@@ -227,26 +227,39 @@ impl SqlBackend {
     ) -> Result<T, PersistenceError> {
         match &self.0 {
             Backend::MySql(pool) => {
-                let mut conn = pool.checkout().map_err(internal)?;
                 // A connection broken by a DB restart must not return to the pool
-                // (Go database/sql drops connections that report driver.ErrBadConn).
-                let discard = conn.discard_flag();
-                let poison = |error: mysql::Error| {
-                    if error.is_connectivity_error() {
-                        discard.store(true, std::sync::atomic::Ordering::Release);
-                    }
-                    mysql_error(error)
-                };
-                let tx = conn
-                    .start_transaction(mysql::TxOpts::default())
-                    .map_err(poison)?;
-                let mut wrapped = MySqlTx {
-                    tx,
-                    discard: &discard,
-                };
-                let result = run(&mut wrapped)?;
-                wrapped.tx.commit().map_err(poison)?;
-                Ok(result)
+                // (Go database/sql drops connections that report driver.ErrBadConn
+                // and retries BeginTx on another connection, maxBadConnRetries=2,
+                // then once more on a fresh connection). Nothing has executed yet
+                // when START TRANSACTION fails, so retrying is safe.
+                let mut run = Some(run);
+                let mut attempt = 0;
+                loop {
+                    let mut conn = pool.checkout().map_err(internal)?;
+                    let discard = conn.discard_flag();
+                    let poison = |error: mysql::Error| {
+                        if error.is_connectivity_error() {
+                            discard.store(true, std::sync::atomic::Ordering::Release);
+                        }
+                        mysql_error(error)
+                    };
+                    let tx = match conn.start_transaction(mysql::TxOpts::default()) {
+                        Ok(tx) => tx,
+                        Err(error) if error.is_connectivity_error() && attempt < 2 => {
+                            discard.store(true, std::sync::atomic::Ordering::Release);
+                            attempt += 1;
+                            continue;
+                        }
+                        Err(error) => return Err(poison(error)),
+                    };
+                    let mut wrapped = MySqlTx {
+                        tx,
+                        discard: &discard,
+                    };
+                    let result = (run.take().expect("run consumed once"))(&mut wrapped)?;
+                    wrapped.tx.commit().map_err(poison)?;
+                    return Ok(result);
+                }
             }
             Backend::Postgres(pool) => {
                 // The sync client must run outside the tokio runtime context. The
