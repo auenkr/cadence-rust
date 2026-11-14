@@ -159,13 +159,28 @@ under investigation; diagnostic run below has no Rust behavior changes.
 
 | run URL | head | scenario | result |
 |---|---|---|---|
-| https://github.com/auenkr/cadence-rust/actions/runs/43554242022 | 76e7cc97c | mysql 20m diagnostic soak, child history dumps | running |
+| https://github.com/auenkr/cadence-rust/actions/runs/43554242022 | 76e7cc97c | mysql 20m diagnostic soak, child history dumps | FAILURE: 4797/4800, p50 4124ms; both RSS guards pass |
 
 Fresh-target History Clippy/test run on 98a1e1b00 (cache implementation and child
 retry/reload regressions; later real-cache capacity/TTL test added in 521abb079):
-https://github.com/auenkr/cadence-rust/actions/runs/43555072334 — running.
+https://github.com/auenkr/cadence-rust/actions/runs/43555072334 — SUCCESS, 901 tests.
 The repository's automatic rust-check push workflow ran on the first pushes;
 it was disabled through gh to keep subsequent validation within the explicitly
 requested workflow set. No local Cargo/Go/Docker commands were executed.
 
 Compaction checkpoint: diagnostic run 43554242022 failed with 4797/4800 completed, p50 4124ms; both RSS guards passed. Fresh History CI 43555072334 succeeded (901 tests). Cancellation regression on 56a415667 is running in 43557514557; suspected abandoned cache lease retains uncommitted parent mutations. No claim of root cause confirmation yet.
+
+Cancellation safety audit: Go cache.makeReleaseFunc is invoked by deferred release,
+clearing state on an update error/panic before unlocking. Rust's release closure
+previously dropped its owned lock on cancellation without clearing state. A parent
+update removes the pending child before awaiting persistence; cancellation can
+therefore leave an uncommitted removal cached. The retry then returns
+EntityNotExists and processCloseExecution acknowledges the notification. Commit
+e2167b61a introduces a lease whose Drop clears abandoned state before unlock;
+explicit release remains idempotent. Deterministic pre-fix cancellation regression
+is pending in run 43557514557 (head 56a415667). This is a demonstrated code-path
+gap; attribution of the original live stalls awaits regression/runtime results.
+Diagnostic summaries and parent/child histories are retained in
+memory/evidence/history-soak-tail-20261114/diagnostic/.
+
+Pre-fix CI 43557514557 concluded FAILURE: 902 tests passed and only canceled_child_completion_is_retried_from_persisted_parent_state failed with EntityNotExists: Pending child execution not found. This confirms uncommitted cached child removal survives cancellation. Patched soak run: https://github.com/auenkr/cadence-rust/actions/runs/43558072143 (e2167b61a), pending.
