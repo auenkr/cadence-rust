@@ -641,6 +641,14 @@ try:
             if m:
                 record('sdk-' + m.group(1), m.group(2) == 'ok', m.group(3))
         print('ASYNC SDK LOG TAIL\n' + '\n'.join((work / 'sdk-async.log').read_text().splitlines()[-40:]), flush=True)
+        # Diagnostics for async message loss: the Go consumer retries the Frontend call for only 15s
+        # (CreateFrontendServiceRetryPolicy) and then Nacks the message to the DLQ.
+        try:
+            wl = (work / f'{worker_name}.log').read_text(errors='replace').splitlines()
+            hits = [l for l in wl if 'Failed to process message' in l or 'nack message' in l or 'fe-restart' in l and ('rror' in l or 'arn' in l)]
+            print('ASYNC CONSUMER FAILURE LINES (%d)\n' % len(hits) + '\n'.join(h[:600] for h in hits[:40]), flush=True)
+        except Exception as e:
+            print(f'ASYNC CONSUMER DIAG unavailable: {e}', flush=True)
         record('sdk-async-driver-exit', adrv.returncode == 0, f'exit={adrv.returncode}')
         record_services_alive('after-async-sdk')
     if args.es_url:
