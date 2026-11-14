@@ -22,7 +22,7 @@ forces cancellation at every header/payload byte boundary and checks two success
 frames. This repairs a proven loss mechanism but does not by itself prove the
 specific original workflow hit it. Frontend latency tuning is untouched.
 
-Validation pending. No local Cargo, Go or Docker commands run.
+Validation completed successfully (see final verdict below). No local Cargo, Go or Docker commands run.
 
 ## Original artifact follow-up and shutdown audit
 
@@ -43,13 +43,13 @@ failures. Neither sequence executes for the soak's SIGKILL. No change to admissi
 retry policy, workflow activity options, or latency tuning is justified here.
 
 Targeted CI: https://github.com/auenkr/cadence-rust/actions/runs/43613537757,
-head 286ef1e3a (pending).
+head 286ef1e3a (SUCCESS).
 
 Targeted CI 43613537757 **SUCCESS**, including
 `tchannel::tests::interrupted_frame_reads_preserve_header_payload_and_next_frame`.
 Compact build/test evidence saved in memory/evidence/fe-restart-loss-20261114/.
 Full fresh-target workspace CI dispatched at documentation head 12e0f53d5:
-https://github.com/auenkr/cadence-rust/actions/runs/43614446974 (pending).
+https://github.com/auenkr/cadence-rust/actions/runs/43614446974 (SUCCESS).
 
 Full fresh-target CI 43614446974 **SUCCESS** at
 12e0f53d504e177041088b4ef3ff5efae5cf9d2c: formatting, workspace Clippy then workspace
@@ -75,3 +75,36 @@ Rust binary SHA256:
 `e29f01c446d61b25620cb466fc2d6bb6b3c31abaf0e0cf90d8d242bc5770f98b`.
 Both lanes remain in progress after the scheduled midpoint; final restart and
 completion evidence still pending. No second soak dispatched.
+
+## Final verdict: PASS
+
+https://github.com/auenkr/cadence-rust/actions/runs/43615529134 — workflow
+**SUCCESS**, analyzer **RUST OVERALL: PASS**. Default 70 minutes, rate 10,
+go-baseline + rust (Rust Frontend/Matching, Go History/Worker).
+
+- Both lanes: **42000/42000 completed**, failed=0, inflight=0. No restart loss
+  observed. Restart records and final SDK counts are saved with the summaries.
+- Rust lane: no panics/crashes, no failed gate steps. Every analyzer criterion
+  passes, including latency and memory/file-descriptor slopes.
+- Rust e2e p95/p99 4052/4064 ms vs Go 4095/4118; start p95/p99 6/7 ms vs Go
+  14/19; query p99 21 ms vs Go 46. FE RSS slope 0.15 MB/h; Matching 4.19 MB/h.
+- Tested head 4e014ea994ffdc0e5ec957dcd2a1df5d13845ce9; Rust binary SHA256
+  e29f01c446d61b25620cb466fc2d6bb6b3c31abaf0e0cf90d8d242bc5770f98b.
+  Later commits are evidence only. Source fix is commit 286ef1e3a.
+- Exactly **one** measured soak dispatched for this task. No second needed.
+
+Reproduce (all commands dispatch GitHub Actions, no local builds/tests):
+```
+gh workflow run rust-ci.yml --ref fe-restart-loss -f package=cadence-matching
+gh workflow run rust-ci.yml --ref fe-restart-loss -f clean_target=true
+gh workflow run frontend-soak.yml --ref fe-restart-loss
+```
+
+Root cause fixed: cancellation of a partially consumed TChannel frame by the
+multiplexed server select loop. Persistent FrameReader state restores Go's frame
+retention behavior; the regression forces interruptions at every byte boundary.
+The passing mixed soak satisfies the completion/restart acceptance criterion.
+It does not retroactively prove which transport interleaving the original lost
+workflow hit: that run lacked frame-level diagnostics. Hard-kill delivery has an
+inherent response-loss window in Go as well; no workflow retry policy or service
+semantics were changed to hide that window. Frontend latency tuning untouched.
