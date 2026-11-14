@@ -206,6 +206,7 @@ func main() {
 		defer wg.Done()
 		defer atomic.AddInt64(&inflight, -1)
 		t0 := time.Now()
+		marks := []time.Time{t0}
 		fail := func(stage string, err error) {
 			atomic.AddInt64(&failed, 1)
 			fmt.Printf("FAIL %s %s %v\n", id, stage, err)
@@ -226,12 +227,14 @@ func main() {
 			return
 		}
 		atomic.AddInt64(&started, 1)
+		marks = append(marks, time.Now())
 		time.Sleep(time.Duration(1+rand.Intn(4)) * time.Second)
 		if err = retry(func() error { return c.SignalWorkflow(ctx, id, "", "wake", "w-"+id) }); err != nil {
 			fail("signal", err)
 			return
 		}
 		atomic.AddInt64(&signals, 1)
+		marks = append(marks, time.Now())
 		sawInit := false
 		if err = retry(func() error {
 			qs := time.Now()
@@ -273,6 +276,7 @@ func main() {
 			return
 		}
 		atomic.AddInt64(&queries, 1)
+		marks = append(marks, time.Now())
 		if err = retry(func() error { return c.SignalWorkflow(ctx, id, "", "done", "x") }); err != nil {
 			fail("signal-done", err)
 			return
@@ -290,6 +294,7 @@ func main() {
 			fail("result-value", fmt.Errorf("got %q", out))
 			return
 		}
+		marks = append(marks, time.Now())
 		ms := time.Since(t0).Milliseconds()
 		atomic.AddInt64(&completed, 1)
 		if ms > 12000 && atomic.AddInt64(&dumpedOK, 1) <= 3 {
@@ -303,6 +308,9 @@ func main() {
 				fmt.Printf("HISTDUMP %s #%d %v ts=%d\n", id, ev.GetEventId(), ev.GetEventType(), ev.GetTimestamp())
 			}
 			dcancel()
+			for i := 1; i < len(marks); i++ {
+				fmt.Printf("STAGE %s %d %dms\n", id, i, marks[i].Sub(marks[i-1]).Milliseconds())
+			}
 			dumpChain(ctx, c, id)
 		}
 		atomic.AddInt64(&latNs, ms*1e6)
