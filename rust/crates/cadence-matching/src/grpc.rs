@@ -2785,6 +2785,12 @@ where
             .next()
             .unwrap_or_default()
             .to_owned();
+        let caller = request
+            .headers()
+            .get("rpc-caller")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_owned();
         let clone = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, clone);
         Box::pin(async move {
@@ -2792,7 +2798,7 @@ where
                 return inner.call(request).await;
             };
             let sink = api.admin_metrics().expect("checked above");
-            sink.admin_request(&method);
+            sink.admin_request(&method, &caller, "grpc");
             let started = std::time::Instant::now();
             let response = inner.call(request).await?;
             // Unary errors are trailers-only: grpc-status is in the headers.
@@ -2805,6 +2811,8 @@ where
                 .unwrap_or(0);
             sink.admin_finish(
                 &method,
+                &caller,
+                "grpc",
                 started.elapsed(),
                 cadence_service_core::workflow_api::AdminOutcome::from_grpc_code(code),
             );
