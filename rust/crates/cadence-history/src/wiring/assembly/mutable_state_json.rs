@@ -111,7 +111,7 @@ struct WorkflowExecutionInfo {
     CompletionEventBatchID: i64,
     CompletionEvent: Option<ApiJson>,
     TaskList: String,
-    TaskListKind: i64,
+    TaskListKind: String,
     WorkflowTypeName: String,
     WorkflowTimeout: i64,
     DecisionStartToCloseTimeout: i64,
@@ -146,7 +146,7 @@ struct WorkflowExecutionInfo {
     Memo: Option<BTreeMap<String, GoBytes>>,
     SearchAttributes: Option<BTreeMap<String, GoBytes>>,
     PartitionConfig: Option<BTreeMap<String, String>>,
-    ExecutionStatus: i64,
+    ExecutionStatus: String,
     ScheduledExecutionTimestamp: i64,
     Attempt: i64,
     HasRetryPolicy: bool,
@@ -199,7 +199,7 @@ struct ActivityInfo {
     Attempt: i64,
     StartedIdentity: String,
     TaskList: String,
-    TaskListKind: i64,
+    TaskListKind: String,
     HasRetryPolicy: bool,
     InitialInterval: i64,
     #[serde(serialize_with = "go_float")]
@@ -213,7 +213,7 @@ struct ActivityInfo {
     LastFailureReason: String,
     LastWorkerIdentity: String,
     LastFailureDetails: GoBytes,
-    LastFailureCategory: i64,
+    LastFailureCategory: String,
     LastRetryIntervalSeconds: i64,
     LastHeartbeatTimeoutVisibilityInSeconds: i64,
 }
@@ -243,7 +243,7 @@ struct ChildExecutionInfo {
     DomainID: String,
     DomainNameDEPRECATED: String,
     WorkflowTypeName: String,
-    ParentClosePolicy: i64,
+    ParentClosePolicy: String,
 }
 
 #[derive(Default, Serialize)]
@@ -324,6 +324,16 @@ struct Checksum {
     Value: Option<String>,
 }
 
+// Go enum MarshalText is used by encoding/json; CronOverlapPolicy has no
+// MarshalText and remains numeric. Unknown values follow Go's String fallback.
+macro_rules! enum_text {
+    ($ty:path, $value:expr) => {{
+        let value = $value as i32;
+        <$ty>::from_i32(value).map(|v| v.as_str().to_owned())
+            .unwrap_or_else(|| format!("{}({value})", stringify!($ty).rsplit("::").next().unwrap()))
+    }};
+}
+
 fn workflow_execution_info(g: &Inner) -> HResult<WorkflowExecutionInfo> {
     let p = &g.pc_exec;
     Ok(WorkflowExecutionInfo {
@@ -341,7 +351,7 @@ fn workflow_execution_info(g: &Inner) -> HResult<WorkflowExecutionInfo> {
             "HistoryEvent",
         )?,
         TaskList: p.task_list.clone(),
-        TaskListKind: p.task_list_kind as i64,
+        TaskListKind: enum_text!(cadence_api::enums::TaskListKind, p.task_list_kind as i64),
         WorkflowTypeName: p.workflow_type_name.clone(),
         WorkflowTimeout: p.workflow_timeout_nanos / 1_000_000_000,
         DecisionStartToCloseTimeout: p.decision_start_to_close_timeout_nanos / 1_000_000_000,
@@ -379,7 +389,7 @@ fn workflow_execution_info(g: &Inner) -> HResult<WorkflowExecutionInfo> {
         Memo: byte_map(&p.memo),
         SearchAttributes: byte_map(&p.search_attributes),
         PartitionConfig: (!p.partition_config.is_empty()).then(|| p.partition_config.clone()),
-        ExecutionStatus: 0,
+        ExecutionStatus: enum_text!(cadence_api::enums::WorkflowExecutionStatus, 0),
         ScheduledExecutionTimestamp: 0,
         Attempt: p.attempt as i64,
         HasRetryPolicy: p.has_retry_policy,
@@ -435,7 +445,7 @@ fn activity_info(id: i64, p: &pc::ActivityInfo, g: &Inner) -> HResult<ActivityIn
         Attempt: p.attempt as i64,
         StartedIdentity: p.started_identity.clone(),
         TaskList: p.task_list.clone(),
-        TaskListKind: p.task_list_kind as i64,
+        TaskListKind: enum_text!(cadence_api::enums::TaskListKind, p.task_list_kind as i64),
         HasRetryPolicy: p.has_retry_policy,
         InitialInterval: p.retry_initial_interval_seconds as i64,
         BackoffCoefficient: p.retry_backoff_coefficient,
@@ -447,7 +457,7 @@ fn activity_info(id: i64, p: &pc::ActivityInfo, g: &Inner) -> HResult<ActivityIn
         LastFailureReason: p.retry_last_failure_reason.clone(),
         LastWorkerIdentity: p.retry_last_worker_identity.clone(),
         LastFailureDetails: bytes(&p.retry_last_failure_details),
-        LastFailureCategory: p.retry_last_failure_category as i64,
+        LastFailureCategory: enum_text!(cadence_api::enums::FailureCategory, p.retry_last_failure_category as i64),
         LastRetryIntervalSeconds: p.retry_last_retry_interval_seconds as i64,
         LastHeartbeatTimeoutVisibilityInSeconds: p.last_heartbeat_timeout_visibility_in_seconds,
     })
@@ -467,7 +477,7 @@ fn child_execution_info(id: i64, p: &pc::ChildExecutionInfo) -> HResult<ChildExe
         DomainID: p.domain_id.clone(),
         DomainNameDEPRECATED: p.domain_name.clone(),
         WorkflowTypeName: p.workflow_type_name.clone(),
-        ParentClosePolicy: p.parent_close_policy as i64,
+        ParentClosePolicy: enum_text!(cadence_api::enums::ParentClosePolicy, p.parent_close_policy as i64),
     })
 }
 
@@ -636,7 +646,7 @@ struct ApiJson {
 }
 fn api<T: Serialize>(value: &T, kind: &'static str) -> HResult<ApiJson> {
     Ok(ApiJson {
-        value: serde_json::to_value(value).map_err(|e| HistoryError::internal(e.to_string()))?,
+        value: cadence_api::enums::to_go_json_value(value).map_err(|e| HistoryError::internal(e.to_string()))?,
         kind,
     })
 }
@@ -771,7 +781,7 @@ mod tests {
         let state =
             EngineMutableState::from_snapshot(snapshot, Default::default(), 0, Arc::new(|| 0))
                 .unwrap();
-        let expected = r#"{"ActivityInfos":{},"TimerInfos":{},"ChildExecutionInfos":{},"RequestCancelInfos":{},"SignalInfos":{},"SemaphoreInfos":{},"SignalRequestedIDs":{},"ExecutionInfo":{"DomainID":"domain","WorkflowID":"workflow","RunID":"run","FirstExecutionRunID":"","ParentDomainID":"","ParentWorkflowID":"","ParentRunID":"","InitiatedID":0,"CompletionEventBatchID":0,"CompletionEvent":null,"TaskList":"","TaskListKind":0,"WorkflowTypeName":"","WorkflowTimeout":12,"DecisionStartToCloseTimeout":0,"ExecutionContext":"AQL/","State":0,"CloseStatus":0,"LastFirstEventID":0,"LastEventTaskID":0,"NextEventID":0,"LastProcessedEvent":0,"StartTimestamp":"1970-01-01T00:00:01.23456789Z","LastUpdatedTimestamp":"0001-01-01T00:00:00Z","CreateRequestID":"","SignalCount":0,"DecisionVersion":0,"DecisionScheduleID":0,"DecisionStartedID":0,"DecisionRequestID":"","DecisionTimeout":3,"DecisionAttempt":0,"DecisionStartedTimestamp":0,"DecisionScheduledTimestamp":0,"DecisionOriginalScheduledTimestamp":0,"CancelRequested":false,"CancelRequestID":"","StickyTaskList":"","StickyScheduleToStartTimeout":0,"ClientLibraryVersion":"","ClientFeatureVersion":"","ClientImpl":"","AutoResetPoints":null,"Memo":{"empty":""},"SearchAttributes":null,"PartitionConfig":null,"ExecutionStatus":0,"ScheduledExecutionTimestamp":0,"Attempt":0,"HasRetryPolicy":false,"InitialInterval":0,"BackoffCoefficient":0,"JitterCoefficient":0,"MaximumInterval":0,"ExpirationTime":"0001-01-01T00:00:00Z","MaximumAttempts":0,"NonRetriableErrors":null,"BranchToken":null,"IsCron":false,"CronOverlapPolicy":0,"ExpirationSeconds":0,"CronSchedule":"","ActiveClusterSelectionPolicy":null},"ExecutionStats":{"HistorySize":0},"BufferedEvents":[],"VersionHistories":null,"ReplicationState":null,"Checksum":{"Version":0,"Flavor":0,"Value":null}}"#;
+        let expected = r#"{"ActivityInfos":{},"TimerInfos":{},"ChildExecutionInfos":{},"RequestCancelInfos":{},"SignalInfos":{},"SemaphoreInfos":{},"SignalRequestedIDs":{},"ExecutionInfo":{"DomainID":"domain","WorkflowID":"workflow","RunID":"run","FirstExecutionRunID":"","ParentDomainID":"","ParentWorkflowID":"","ParentRunID":"","InitiatedID":0,"CompletionEventBatchID":0,"CompletionEvent":null,"TaskList":"","TaskListKind":"Normal","WorkflowTypeName":"","WorkflowTimeout":12,"DecisionStartToCloseTimeout":0,"ExecutionContext":"AQL/","State":0,"CloseStatus":0,"LastFirstEventID":0,"LastEventTaskID":0,"NextEventID":0,"LastProcessedEvent":0,"StartTimestamp":"1970-01-01T00:00:01.23456789Z","LastUpdatedTimestamp":"0001-01-01T00:00:00Z","CreateRequestID":"","SignalCount":0,"DecisionVersion":0,"DecisionScheduleID":0,"DecisionStartedID":0,"DecisionRequestID":"","DecisionTimeout":3,"DecisionAttempt":0,"DecisionStartedTimestamp":0,"DecisionScheduledTimestamp":0,"DecisionOriginalScheduledTimestamp":0,"CancelRequested":false,"CancelRequestID":"","StickyTaskList":"","StickyScheduleToStartTimeout":0,"ClientLibraryVersion":"","ClientFeatureVersion":"","ClientImpl":"","AutoResetPoints":null,"Memo":{"empty":""},"SearchAttributes":null,"PartitionConfig":null,"ExecutionStatus":"Created","ScheduledExecutionTimestamp":0,"Attempt":0,"HasRetryPolicy":false,"InitialInterval":0,"BackoffCoefficient":0,"JitterCoefficient":0,"MaximumInterval":0,"ExpirationTime":"0001-01-01T00:00:00Z","MaximumAttempts":0,"NonRetriableErrors":null,"BranchToken":null,"IsCron":false,"CronOverlapPolicy":0,"ExpirationSeconds":0,"CronSchedule":"","ActiveClusterSelectionPolicy":null},"ExecutionStats":{"HistorySize":0},"BufferedEvents":[],"VersionHistories":null,"ReplicationState":null,"Checksum":{"Version":0,"Flavor":0,"Value":null}}"#;
         assert_eq!(state.persistence_json().unwrap(), expected);
     }
 
