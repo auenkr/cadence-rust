@@ -303,6 +303,7 @@ func main() {
 				fmt.Printf("HISTDUMP %s #%d %v ts=%d\n", id, ev.GetEventId(), ev.GetEventType(), ev.GetTimestamp())
 			}
 			dcancel()
+			dumpChain(ctx, c, id)
 		}
 		atomic.AddInt64(&latNs, ms*1e6)
 		atomic.AddInt64(&latCount, 1)
@@ -338,5 +339,43 @@ func main() {
 	s := snapshot()
 	if s["started"] != s["completed"] || s["failed"] != 0 || s["started"] != int64(n) {
 		os.Exit(1)
+	}
+}
+
+// dumpChain prints the history of the first run (gen 0) of id and of its child workflows.
+func dumpChain(ctx context.Context, c client.Client, id string) {
+	dctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	prev := ""
+	it := c.GetWorkflowHistory(dctx, id, "", false, 0)
+	if it.HasNext() {
+		if ev, e := it.Next(); e == nil && ev.WorkflowExecutionStartedEventAttributes != nil {
+			prev = ev.WorkflowExecutionStartedEventAttributes.GetContinuedExecutionRunId()
+		}
+	}
+	if prev == "" {
+		return
+	}
+	children := []string{}
+	it = c.GetWorkflowHistory(dctx, id, prev, false, 0)
+	for it.HasNext() {
+		ev, e := it.Next()
+		if e != nil {
+			break
+		}
+		fmt.Printf("HISTDUMP %s-g0 #%d %v ts=%d\n", id, ev.GetEventId(), ev.GetEventType(), ev.GetTimestamp())
+		if a := ev.StartChildWorkflowExecutionInitiatedEventAttributes; a != nil && a.WorkflowId != nil {
+			children = append(children, *a.WorkflowId)
+		}
+	}
+	for _, ch := range children {
+		it = c.GetWorkflowHistory(dctx, ch, "", false, 0)
+		for it.HasNext() {
+			ev, e := it.Next()
+			if e != nil {
+				break
+			}
+			fmt.Printf("HISTDUMP %s-child #%d %v ts=%d\n", id, ev.GetEventId(), ev.GetEventType(), ev.GetTimestamp())
+		}
 	}
 }
