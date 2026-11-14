@@ -254,7 +254,7 @@ impl TypedMutableState {
             .unwrap_or_default();
         let event_id = self.get_next_event_id();
         if event_id != FIRST_EVENT_ID {
-            return Err(self.create_internal_server_error("add-workflow-execution-started-event"));
+            return Err(self.create_internal_server_error("add-workflow-started-event"));
         }
 
         let attrs = build_started_event_attributes(

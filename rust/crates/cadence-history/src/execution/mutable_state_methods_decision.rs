@@ -315,7 +315,7 @@ impl TypedMutableState {
         bypass_task_generation: bool,
         original_scheduled_timestamp: i64,
     ) -> Result<DecisionInfo> {
-        let op = "add-decision-task-scheduled-event";
+        let op = "add-decisiontask-scheduled-event";
         self.check_mutability()?;
         self.task_gen_env.normal_schedule_to_start_timeout_nanos = env.normal_schedule_to_start_timeout_nanos;
         self.task_gen_env.normal_schedule_to_start_max_attempts = env.normal_schedule_to_start_max_attempts;
@@ -443,7 +443,7 @@ impl TypedMutableState {
         task_list_name: &str,
         identity: &str,
     ) -> Result<(Option<HistoryEvent>, DecisionInfo)> {
-        let op = "add-decision-task-started-event";
+        let op = "add-decisiontask-started-event";
         self.check_mutability()?;
         let mut decision = match self.get_decision_info(schedule_event_id) {
             Some(d) if d.started_id == EMPTY_EVENT_ID => d,
@@ -570,7 +570,7 @@ impl TypedMutableState {
         request: &RespondDecisionTaskCompletedRequest,
         max_reset_points: usize,
     ) -> Result<HistoryEvent> {
-        let op = "add-decision-task-completed-event";
+        let op = "add-decisiontask-completed-event";
         self.check_mutability()?;
         let decision = match self.get_decision_info(schedule_event_id) {
             Some(d) if d.started_id == started_event_id => d,
@@ -656,7 +656,7 @@ impl TypedMutableState {
         schedule_event_id: i64,
         started_event_id: i64,
     ) -> Result<HistoryEvent> {
-        let op = "add-decision-task-timed-out-event";
+        let op = "add-decisiontask-timedout-event";
         self.check_mutability()?;
         let dt = match self.get_decision_info(schedule_event_id) {
             Some(d) if d.started_id == started_event_id => d,
@@ -743,7 +743,7 @@ impl TypedMutableState {
         env: &DecisionEnv,
         schedule_event_id: i64,
     ) -> Result<Option<HistoryEvent>> {
-        let op = "add-decision-task-timed-out-event";
+        let op = "add-decisiontask-timedout-event";
         self.check_mutability()?;
         if self.execution_info.decision_schedule_id != schedule_event_id
             || self.execution_info.decision_started_id > 0
@@ -792,7 +792,7 @@ impl TypedMutableState {
         reason: &str,
         reset_request_id: &str,
     ) -> Result<HistoryEvent> {
-        let op = "add-decision-task-timed-out-event";
+        let op = "add-decisiontask-timedout-event";
         self.check_mutability()?;
         if self.execution_info.decision_schedule_id != schedule_event_id {
             return Err(self.create_internal_server_error(op));
@@ -832,7 +832,7 @@ impl TypedMutableState {
         fork_event_version: i64,
         reset_request_id: &str,
     ) -> Result<Option<HistoryEvent>> {
-        let op = "add-decision-task-failed-event";
+        let op = "add-decisiontask-failed-event";
         self.check_mutability()?;
         let attr = DecisionTaskFailedEventAttributes {
             scheduled_event_id: schedule_event_id,
@@ -1003,6 +1003,17 @@ mod decision_tests {
         assert_eq!(names, vec!["b", "c"]);
         let sa: Vec<String> = serde_json::from_slice(&ms.execution_info.search_attributes[BINARY_CHECKSUMS]).unwrap();
         assert_eq!(sa, vec!["b", "c"]);
+    }
+
+    #[test]
+    fn go_action_tag_error_messages() {
+        let mut ms = TypedMutableState::new();
+        ms.execution_info.state = WORKFLOW_STATE_RUNNING;
+        let e = env();
+        let err = ms.add_decision_task_started_event(&e, 99, "r", "tl", "id").unwrap_err();
+        assert!(err.to_string().contains("add-decisiontask-started-event operation failed"), "{err}");
+        let err = ms.add_decision_task_timed_out_event(&e, 99, 100).unwrap_err();
+        assert!(err.to_string().contains("add-decisiontask-timedout-event operation failed"), "{err}");
     }
 
     #[test]
