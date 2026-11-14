@@ -45,6 +45,8 @@ be recorded below after child-completion investigation and fresh Rust tests.
 
 | run URL | head | lane | result |
 |---|---|---|---|
-| pending | pending | mysql | not dispatched |
+| https://github.com/auenkr/cadence-rust/actions/runs/43561066779 | a79cb0741 | mysql,1500s | running |
 | pending | pending | postgres | not dispatched |
 | pending | pending | cassandra | not dispatched |
+
+Soak predecessor now passes all4800 workflows and RSS on e2167b61a (run43558072143). Cancellation-safe cache lease fixes uncommitted child removal retained across RPC deadline cancellation; Go deferred release clears before unlock. MySQL recovery gate dispatched after soak completed.
