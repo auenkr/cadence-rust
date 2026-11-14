@@ -22,6 +22,9 @@ on:
       rate:
         description: Workflows started per second
         default: "4"
+      history_log:
+        description: History RUST_LOG filter
+        default: warn
       go_history:
         description: Baseline lane, History stays Go (use with two_history=true; Go History-2 is restarted)
         type: boolean
@@ -86,7 +89,7 @@ jobs:
           CADENCE_GATE_TWO_HISTORY: ${{ env.TWO_HISTORY }}
           RUST_BACKTRACE: 1
           RUST_LOG: warn
-          HISTORY_RUST_LOG: warn
+          HISTORY_RUST_LOG: ${{ inputs.history_log || 'warn' }}
         run: |
           set +e
           export SOAK_SECONDS=$(( ${{ env.DURATION }} * 60 ))
