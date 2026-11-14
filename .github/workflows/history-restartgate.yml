@@ -54,12 +54,12 @@ jobs:
       - name: Build Rust services in fresh target directory
         run: |
           set +e
-          cargo build --manifest-path rust/Cargo.toml -p cadence-server -p cadence-history > out/cargo-build.log 2>&1
+          cargo build --release --manifest-path rust/Cargo.toml -p cadence-server -p cadence-history > out/cargo-build.log 2>&1
           result=$?
           echo "$result" > out/cargo-build.exit
           tail -40 out/cargo-build.log
           if [ "$result" -ne 0 ]; then exit "$result"; fi
-          sha256sum "$CARGO_TARGET_DIR/debug/cadence-server" "$CARGO_TARGET_DIR/debug/cadence-history" > out/rust-binaries.sha256
+          sha256sum "$CARGO_TARGET_DIR/release/cadence-server" "$CARGO_TARGET_DIR/release/cadence-history" > out/rust-binaries.sha256
           cat out/rust-binaries.sha256
       - name: Build Go Worker, CLI and soak driver
         run: |
@@ -76,8 +76,8 @@ jobs:
           set +e
           export RG_SECONDS='${{ inputs.seconds || '1500' }}'
           tests/gates/run-frontend-${{ matrix.database }}-lane.sh out/gate \
-            --rust-binary "$CARGO_TARGET_DIR/debug/cadence-server" \
-            --rust-history-binary "$CARGO_TARGET_DIR/debug/cadence-history" \
+            --rust-binary "$CARGO_TARGET_DIR/release/cadence-server" \
+            --rust-history-binary "$CARGO_TARGET_DIR/release/cadence-history" \
             --go-server "$GITHUB_WORKSPACE/out/cadence-go-server" \
             --go-cli "$GITHUB_WORKSPACE/out/cadence-cli" \
             --driver "$GITHUB_WORKSPACE/out/history-soak-driver" \
