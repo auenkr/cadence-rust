@@ -1041,7 +1041,7 @@ mod tests {
         let input = vec![completed(5, 6), act_started(5, 0), act_started(5, 0), act_started(5, 1), completed(5, 6)];
         let (out, dups) = reorder_and_filter_duplicate_events(input);
         assert_eq!(dups, 2);
-        let types: Vec<_> = out.iter().map(|e| e.event_type.clone().unwrap()).collect();
+        let types: Vec<_> = out.iter().map(|e| e.event_type.unwrap()).collect();
         assert_eq!(
             types,
             vec![EventType::ActivityTaskStarted, EventType::ActivityTaskStarted, EventType::ActivityTaskCompleted]
