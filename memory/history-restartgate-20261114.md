@@ -100,3 +100,17 @@ mutex destructor panic). Fixed451a974eb restores healthy-return notify_one.
 | https://github.com/auenkr/cadence-rust/actions/runs/43574757454 |e39a06303|clean persistence CI, strict pre-fix regression|expected FAILURE, wakeup deadline assertion|
 | https://github.com/auenkr/cadence-rust/actions/runs/43575377044 |451a974eb|fresh workspace Clippy/tests and strict fixed regression|running|
 | https://github.com/auenkr/cadence-rust/actions/runs/43574115408 |1a952c6f7|fixed postgres1500s recovery|running|
+
+## Fixed PostgreSQL recovery and final workspace result
+
+| run URL | head | lane | result |
+|---|---|---|---|
+| https://github.com/auenkr/cadence-rust/actions/runs/43575377044 |451a974eb|fresh workspace|FAILURE, unrelated 40ms Unleash metrics test split counters across flushes; Clippy passed|
+| https://github.com/auenkr/cadence-rust/actions/runs/43576413232 |df25f4ece|fresh workspace rerun, unchanged Rust|SUCCESS, Clippy then workspace tests, strict PostgreSQL test passes in0.03s|
+| https://github.com/auenkr/cadence-rust/actions/runs/43574115408 |1a952c6f7|postgres1500s recovery, healthy pool wakeup fix|SUCCESS,4500/4500,0failed,GATE SUMMARY failed: []|
+| https://github.com/auenkr/cadence-rust/actions/runs/43577811696 |df25f4ece|cassandra1500s recovery|running|
+
+PostgreSQL all52 assertions pass, including both graceful restarts (no deadline
+relaxation). p50=4108ms. This confirms the missing healthy-return wakeup caused
+the live process shutdown hang. Earlier isolated child activity timeout did not
+recur. Compact source/binary-SHA and gate evidence: restart-postgres-fixed/.
