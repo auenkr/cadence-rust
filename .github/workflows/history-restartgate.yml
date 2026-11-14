@@ -44,7 +44,9 @@ jobs:
             tests/history-soak/go.sum
       - uses: dtolnay/rust-toolchain@stable
       - name: Install probe dependencies
-        run: python3 -m pip install --user grpcio grpcio-tools
+        run: |
+          python3 -m pip install --user grpcio grpcio-tools
+          command -v gdb || (sudo apt-get update -qq && sudo apt-get install -y -qq gdb)
       - name: Validate harness syntax and record source identity
         run: |
           mkdir -p out

@@ -370,6 +370,15 @@ try:
             exited = True
         except subprocess.TimeoutExpired:
             exited = False
+            # Preserve native stacks before the fallback kill. Rust's sync SQL
+            # bridges can keep runtime teardown alive after service.stop returns.
+            with (work / f'shutdown-stacks-{tag}-{name}.log').open('w') as stacks:
+                try:
+                    subprocess.run(['sudo', '-n', 'gdb', '--batch', '-ex', 'set pagination off',
+                                    '-ex', 'thread apply all bt', '-p', str(procs[name].pid)],
+                                   stdout=stacks, stderr=subprocess.STDOUT, timeout=20)
+                except (OSError, subprocess.TimeoutExpired) as err:
+                    stacks.write(str(err))
             kill(name, signal.SIGKILL)
         with log_path.open('rb') as log:
             log.seek(log_offset)

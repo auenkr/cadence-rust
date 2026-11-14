@@ -70,5 +70,7 @@ launcher stage logs and per-restart shutdown log slices now preserve diagnostics
 | run URL | head | lane | result |
 |---|---|---|---|
 | https://github.com/auenkr/cadence-rust/actions/runs/43568009688 |939409f21|clean History Clippy/tests|SUCCESS,903 tests in3.50s; immediate-stop tests now bounded1s|
-| https://github.com/auenkr/cadence-rust/actions/runs/43568012383 |939409f21|postgres1500s rerun|running|
-| https://github.com/auenkr/cadence-rust/actions/runs/43568781798 |939409f21|fresh workspace Clippy/tests|running|
+| https://github.com/auenkr/cadence-rust/actions/runs/43568012383 |939409f21|postgres1500s rerun|FAILURE, one SIGTERM timeout;4499/4500 complete|
+| https://github.com/auenkr/cadence-rust/actions/runs/43568781798 |939409f21|fresh workspace Clippy/tests|SUCCESS|
+
+Diagnostic rerun43568012383 shows both launchers reached History shutdown complete within milliseconds; one process still failed to exit60s later. This rules out task processor stop as the whole live-shutdown cause. The sticky-watch fix remains valid (bounded tests now3.50s vs61s), but native stack capture is needed to distinguish local destructor blocking from Tokio runtime teardown. One workflow child activity timed out around DB pause (history shows ActivityTaskStarted then TimedOut, not missing child notification); preserve that as a separate recovery finding.
