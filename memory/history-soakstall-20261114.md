@@ -1,6 +1,16 @@
 # History soak stall: findings (2026-11-14, branch history-soakstall)
 
-## Result: NOT fixed. Root cause narrowed to the result long-poll, not decisions.
+## Current result: result long-poll fixed; full soak acceptance remains red
+
+Branch `history-pollms-fix` implements the missing direct-engine history
+notification. Fresh CI: Clippy + 890 History tests pass. MySQL/gRPC and
+Cassandra/TChannel two-History mixed gates both report `GATE SUMMARY failed: []`.
+The 20-minute mysql soak confirms e2e p50=4101ms (Go baseline ~4100ms), but
+4794/4800 workflows complete: six restart-window child-completion stalls remain,
+plus first-host RSS growth fails the guard. See implementation evidence below.
+Do not claim all workflows complete or full soak acceptance.
+
+## Original result before the fix: NOT fixed; narrowed to result long-poll
 
 Rust History + Matching + Frontend + Go Worker, mysql, release build, History log level warn.
 
@@ -103,3 +113,24 @@ the first run's two restart-window child-completion stalls reproduce. The first
 soak's logs contain service-to-service TCP connection errors during restart;
 this is not proof of the exact cause of the missing child-completion events.
 Build succeeded and SDK traffic began at 2026-11-14T03:30:03Z. Result pending.
+
+
+Final longer-soak result: https://github.com/auenkr/cadence-rust/actions/runs/43550611874
+- Source head: 8e2728d87 (Rust code identical to implementation head c4d28963d).
+- Conclusion: FAILURE. 4794/4800 completed, 6 failed, zero inflight.
+- E2E p50=4101ms, p95=4179ms, p99=4214ms, max=10385ms. The original
+  constant 20s result-poll delay is gone, including across the restart load.
+- Six failures: query state "init", workflow suffixes 0002390/2392/2393/2394/
+  2397/2398, all created near restart t=600s. The dumped histories again stop
+  before child completion/continue-as-new; these failures happen before Get().
+- Restarted host RSS check now has 10 samples and PASSES (237.2->299.3 MiB).
+- First History host RSS FAILS (167.9->324.4 MiB, peak343.9): +156.5 MiB,
+  just over the harness's +150MiB alternative limit and over its 1.5x limit.
+- Durable summaries, steps, failure lines, history dump and source/binary
+  identities: `memory/evidence/history-pollms-fix-20261114/soak-20m/`.
+
+Remaining acceptance gap is real: this branch fixes PollMutableState and passes
+both requested mixed gates, but cannot be described as a fully passing soak.
+Further restart child-completion/recovery and RSS work is needed; no checks were
+weakened, workflow failures suppressed, or retries added to hide these findings.
+All validation ran on GitHub Actions; no local Cargo, Go or Docker commands.
