@@ -14,6 +14,7 @@ ap.add_argument('--database', choices=['mysql', 'postgres', 'cassandra'], defaul
 ap.add_argument('--out', type=Path, required=True)
 ap.add_argument('--mode', choices=['go', 'rust', 'rust-fe', 'rust-mt'], default='rust', help='go: all-Go baseline; rust: Rust Frontend+Matching, Go History/Worker; rust-fe: Rust Frontend + Go Matching; rust-mt: Go Frontend + Rust Matching')
 ap.add_argument('--rust-binary', type=Path, default=Path('/nonexistent-rust-binary'))
+ap.add_argument('--matching-heap-profile', action='store_true')
 ap.add_argument('--rust-matching-env', default='', help='allowlisted MALLOC_* assignments for the Rust Matching process')
 ap.add_argument('--go-server', type=Path, required=True)
 ap.add_argument('--go-cli', type=Path, required=True)
@@ -259,6 +260,11 @@ for assignment in shlex.split(args.rust_matching_env):
     if not sep or key not in {'MALLOC_ARENA_MAX', 'MALLOC_TRIM_THRESHOLD_'} or not value.isdigit():
         ap.error(f'invalid --rust-matching-env assignment: {assignment!r}')
     rust_matching_env[key] = value
+if args.matching_heap_profile:
+    profile_dir = work / 'heap-profiles'
+    profile_dir.mkdir(exist_ok=True)
+    rust_matching_env['CADENCE_HEAP_PROFILE_DIR'] = str(profile_dir.resolve())
+    rust_matching_env['_RJEM_MALLOC_CONF'] = 'prof:true,prof_active:true,lg_prof_sample:19'
 rust_frontend = lambda: [args.rust_binary, 'start', '--config', work / 'rust.yaml', '--root', work, '--services', 'frontend',
     '--history-grpc-port', ports['HISTORY_PORT_GRPC'], '--data-dir', work / 'rust-frontend-data']
 frontend_env = {

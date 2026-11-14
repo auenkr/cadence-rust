@@ -8,7 +8,12 @@ license.workspace = true
 name = "cadence-server"
 path = "src/main.rs"
 
+[features]
+heap-profile = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]
+
 [dependencies]
+tikv-jemallocator = { version = "0.6", features = ["profiling"], optional = true }
+tikv-jemalloc-ctl = { version = "0.6", optional = true }
 cadence-frontend = { path = "../cadence-frontend" }
 cadence-service-core = { path = "../cadence-service-core" }
 cadence-matching = { path = "../cadence-matching" }
