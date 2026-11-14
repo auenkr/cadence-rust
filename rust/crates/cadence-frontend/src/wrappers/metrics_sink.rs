@@ -696,11 +696,23 @@ mod tests {
         ("DescribeCluster", "DescribeCluster"),
         ("AddSearchAttribute", "AddSearchAttribute"),
         ("DescribeWorkflowExecution", "DescribeWorkflowExecution"),
-        ("GetWorkflowExecutionRawHistory", "GetWorkflowExecutionRawHistory"),
-        ("GetWorkflowExecutionRawHistoryV2", "GetWorkflowExecutionRawHistoryV2"),
+        (
+            "GetWorkflowExecutionRawHistory",
+            "GetWorkflowExecutionRawHistory",
+        ),
+        (
+            "GetWorkflowExecutionRawHistoryV2",
+            "GetWorkflowExecutionRawHistoryV2",
+        ),
         ("GetReplicationMessages", "GetReplicationMessages"),
-        ("GetDomainReplicationMessages", "GetDomainReplicationMessages"),
-        ("GetDLQReplicationMessages", "AdminGetDLQReplicationMessages"),
+        (
+            "GetDomainReplicationMessages",
+            "GetDomainReplicationMessages",
+        ),
+        (
+            "GetDLQReplicationMessages",
+            "AdminGetDLQReplicationMessages",
+        ),
         ("ReapplyEvents", "ReapplyEvents"),
         ("RefreshWorkflowTasks", "RefreshWorkflowTasks"),
         ("ResendReplicationTasks", "ResendReplicationTasks"),
@@ -714,23 +726,53 @@ mod tests {
         ("MergeDLQMessages", "AdminMergeDLQMessages"),
         ("DescribeShardDistribution", "AdminShardList"),
         ("GetCrossClusterTasks", "AdminGetCrossClusterTasks"),
-        ("RespondCrossClusterTasksCompleted", "AdminRespondCrossClusterTasksCompleted"),
+        (
+            "RespondCrossClusterTasksCompleted",
+            "AdminRespondCrossClusterTasksCompleted",
+        ),
         ("GetDynamicConfig", "AdminGetDynamicConfig"),
         ("UpdateDynamicConfig", "AdminUpdateDynamicConfig"),
         ("RestoreDynamicConfig", "AdminRestoreDynamicConfig"),
         ("ListDynamicConfig", "AdminListDynamicConfig"),
-        ("GetOperationalDynamicConfig", "AdminGetOperationalDynamicConfig"),
-        ("UpdateOperationalDynamicConfig", "AdminUpdateOperationalDynamicConfig"),
-        ("RestoreOperationalDynamicConfig", "AdminRestoreOperationalDynamicConfig"),
-        ("ListOperationalDynamicConfig", "AdminListOperationalDynamicConfig"),
+        (
+            "GetOperationalDynamicConfig",
+            "AdminGetOperationalDynamicConfig",
+        ),
+        (
+            "UpdateOperationalDynamicConfig",
+            "AdminUpdateOperationalDynamicConfig",
+        ),
+        (
+            "RestoreOperationalDynamicConfig",
+            "AdminRestoreOperationalDynamicConfig",
+        ),
+        (
+            "ListOperationalDynamicConfig",
+            "AdminListOperationalDynamicConfig",
+        ),
         ("DeleteWorkflow", "AdminDeleteWorkflow"),
         ("GetGlobalIsolationGroups", "GetGlobalIsolationGroups"),
-        ("UpdateGlobalIsolationGroups", "UpdateGlobalIsolationGroups"),
+        (
+            "UpdateGlobalIsolationGroups",
+            "UpdateGlobalIsolationGroups",
+        ),
         ("GetDomainIsolationGroups", "GetDomainIsolationGroups"),
-        ("UpdateDomainIsolationGroups", "UpdateDomainIsolationGroups"),
-        ("GetDomainAsyncWorkflowConfiguraton", "GetDomainAsyncWorkflowConfiguraton"),
-        ("UpdateDomainAsyncWorkflowConfiguraton", "UpdateDomainAsyncWorkflowConfiguraton"),
-        ("UpdateTaskListPartitionConfig", "UpdateTaskListPartitionConfig"),
+        (
+            "UpdateDomainIsolationGroups",
+            "UpdateDomainIsolationGroups",
+        ),
+        (
+            "GetDomainAsyncWorkflowConfiguraton",
+            "GetDomainAsyncWorkflowConfiguraton",
+        ),
+        (
+            "UpdateDomainAsyncWorkflowConfiguraton",
+            "UpdateDomainAsyncWorkflowConfiguraton",
+        ),
+        (
+            "UpdateTaskListPartitionConfig",
+            "UpdateTaskListPartitionConfig",
+        ),
     ];
 
     #[test]
