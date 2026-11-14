@@ -400,7 +400,8 @@ impl EngineNdcEnv {
         engine_cache: Arc<EngineExecutionCache>,
         cluster: Arc<dyn ClusterMetadata>,
     ) -> Self {
-        let history = SqlHistoryManager::new(core.history_v2.clone(), core.shard.shard_id());
+        let history = SqlHistoryManager::new(core.history_v2.clone(), core.shard.shard_id())
+            .with_transaction_size_limit(core.transaction_size_limit.clone());
         Self {
             shard: core.shard.clone(),
             cluster: EngineNdcClusterMetadata::new(cluster.clone()),
