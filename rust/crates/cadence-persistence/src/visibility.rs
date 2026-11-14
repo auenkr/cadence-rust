@@ -40,9 +40,8 @@ fn time_name(key: &str) -> bool {
             | "CustomDatetimeField"
     )
 }
-fn time_value(ms: Option<i64>) -> Value {
-    ms.map(|n| Value::from(n.saturating_mul(1_000_000)))
-        .unwrap_or(Value::Null)
+fn time_value(nanos: Option<i64>) -> Value {
+    nanos.map(Value::from).unwrap_or(Value::Null)
 }
 fn field(row: &WorkflowExecutionInfo, key: &str, known: &HashSet<String>) -> Result<Value> {
     let key = key.strip_prefix("Attr.").unwrap_or(key);
@@ -463,8 +462,8 @@ mod tests {
         .map(|(id, typ, time, close)| WorkflowExecutionInfo {
             execution: Some(WorkflowExecution::new(id, id)),
             workflow_type: Some(WorkflowType { name: typ.into() }),
-            start_time: Some(time),
-            close_time: close.map(|_| time + 500),
+            start_time: Some(time * 1_000_000),
+            close_time: close.map(|_| (time + 500) * 1_000_000),
             close_status: close,
             search_attributes: Some(SearchAttributes {
                 indexed_fields: Some(
@@ -621,7 +620,6 @@ pub fn filter_start_time(
     }
     rows.retain(|e| {
         e.start_time.is_some_and(|t| {
-            let t = t.saturating_mul(1_000_000);
             t >= first && t <= last
         })
     });
@@ -655,7 +653,7 @@ mod page_tests {
     #[test]
     fn legacy_time_filter_keeps_sub_millisecond_boundaries() {
         let mut rows = vec![WorkflowExecutionInfo {
-            start_time: Some(1000),
+            start_time: Some(1_000_000_000),
             ..Default::default()
         }];
         filter_start_time(
