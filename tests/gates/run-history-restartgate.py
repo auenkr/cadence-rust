@@ -363,12 +363,17 @@ try:
     def restart_host(name, tag, sig):
         expected_down.add(name)
         t_kill = time.monotonic()
+        log_path = work / f'{name}.log'
+        log_offset = log_path.stat().st_size
         try:
             kill(name, sig)
             exited = True
         except subprocess.TimeoutExpired:
             exited = False
             kill(name, signal.SIGKILL)
+        with log_path.open('rb') as log:
+            log.seek(log_offset)
+            (work / f'shutdown-{tag}-{name}.log').write_bytes(log.read())
         record(f'{tag}-{name}-stopped', exited, f'signal={sig.name} after={int(time.monotonic() - t_kill)}s stats={driver_stats()}')
         time.sleep(5)
         start(name, hist_cmds[name]())

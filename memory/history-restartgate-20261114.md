@@ -46,7 +46,7 @@ be recorded below after child-completion investigation and fresh Rust tests.
 | run URL | head | lane | result |
 |---|---|---|---|
 | https://github.com/auenkr/cadence-rust/actions/runs/43561066779 | a79cb0741 | mysql,1500s | SUCCESS,4500/4500,GATE SUMMARY failed: [] |
-| https://github.com/auenkr/cadence-rust/actions/runs/43564455423 | ad45bd03e | postgres,1500s | running |
+| https://github.com/auenkr/cadence-rust/actions/runs/43564455423 | ad45bd03e | postgres,1500s | FAILURE:4500/4500 complete; both SIGTERM stops exceeded60s |
 | pending | pending | cassandra | not dispatched |
 
 Soak predecessor now passes all4800 workflows and RSS on e2167b61a (run43558072143). Cancellation-safe cache lease fixes uncommitted child removal retained across RPC deadline cancellation; Go deferred release clears before unlock. MySQL recovery gate dispatched after soak completed.
@@ -56,3 +56,13 @@ Soak predecessor now passes all4800 workflows and RSS on e2167b61a (run435580721
 MySQL retained evidence: memory/evidence/history-soak-tail-20261114/restart-mysql/. All forced/graceful History restarts,30s DB pause,Matching restart and liveness/completion assertions passed; zero failed workflows,4500/4500 complete,p50 4109ms. Fresh binary SHA256 and source head included.
 
 2026-11-14T06:30Z checkpoint: PostgreSQL run43564455423 completed release build and is executing its1500s fault/load phase; MySQL acceptance passed, Cassandra next. Rust implementation unchanged since e2167b61a and clean workspace run43559207202.
+
+PostgreSQL run43564455423 did not pass: all4500 workflows complete,zero failures,
+but both s2 graceful-stop assertions timed out at60s. Preserved evidence under
+restart-postgres-before/. Inspection found lost shutdown notification when a
+processor monitor/WRR dispatcher subscribes after stop (existing tests themselves
+took60s). Go closed shutdown channels are sticky; Rust watch.send with no receivers
+loses the value and late subscribe misses changed(). Fix uses send_replace plus
+initial value checks, with one-second immediate-stop regression assertions.
+This is confirmed static/test behavior, not yet proven the specific live timeout;
+launcher stage logs and per-restart shutdown log slices now preserve diagnostics.

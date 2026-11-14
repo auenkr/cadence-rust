@@ -71,7 +71,7 @@ jobs:
           CADENCE_GATE_SCRIPT: run-history-restartgate.py
           CADENCE_GATE_TWO_HISTORY: "true"
           RUST_BACKTRACE: 1
-          RUST_LOG: warn
+          RUST_LOG: warn,cadence_history::service=info,cadence_history::launcher=info,cadence_history::task::parallel_processor=info
         run: |
           set +e
           export RG_SECONDS='${{ inputs.seconds || '1500' }}'
