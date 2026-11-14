@@ -141,3 +141,17 @@ Evidence (head = commit "clippy fix in reorder test"):
 - rust-ci cadence-history https://github.com/auenkr/cadence-rust/actions/runs/43549470698 success
 - gate mysql/grpc two_history https://github.com/auenkr/cadence-rust/actions/runs/43550264195 success, GATE SUMMARY failed: []
 - gate cassandra/tchannel two_history https://github.com/auenkr/cadence-rust/actions/runs/43550267251 success, GATE SUMMARY failed: []
+
+## Part 7 (branch history-msbparity7)
+
+Closed the two Part 6 typed Load gaps:
+1. Added a checksum-aware typed load path that receives the persisted snapshot checksum and configured invalidation cutoff. It clears the checksum when `last_updated_time_unix_nanos < cutoff_secs * 1e9`, matching Go `shouldInvalidateChecksum`. Unit test: `typed_load_clears_checksum_before_invalidation_cutoff_like_go`.
+2. Ported Go `fillForBackwardsCompatibility`: typed child records now retain the deprecated persisted domain name, and typed Load resolves it to a domain ID only when the ID is empty. Lookup failures assign the empty result as Go does. Persistence bridge reads/writes the deprecated name. Unit test: `typed_load_fills_legacy_child_domain_id_like_go`.
+
+The required mixed gate initially exposed an additional API mismatch: Rust propagated an invalid DLQ replication-task conversion as INTERNAL, while Go logs the per-workflow error and returns an empty successful response for that workflow. Matched the Go handler behavior to make the full SDK/admin probe gate pass.
+
+Evidence on final head `e04123b0cbbffbf1f155aec3b381e1b97b4543c2`:
+- `rust-ci.yml` cadence-history: https://github.com/auenkr/cadence-rust/actions/runs/43556390443 — success.
+- `history-mixed-gate.yml` MySQL/gRPC, `two_history=true`: https://github.com/auenkr/cadence-rust/actions/runs/43557102789 — success; `GATE SUMMARY failed: []`; gate exit code 0.
+- Rust binary SHA256: cadence-server `4bb7ffdc148290b5626f319b65fcb8a08c3f3108ef16b44fef372f3be4b37c98`; cadence-history `a56ac742cc5e0e01b8d22f939da7c453bddb6ffb2e1f88fdc8ec04358f2abab0`.
+- First mixed gate attempt https://github.com/auenkr/cadence-rust/actions/runs/43554959188 failed only `admin-probe-get-dlq-replication-messages-bad-type`; that Go/Rust handler mismatch was fixed before the passing rerun above.
