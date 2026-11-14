@@ -292,7 +292,7 @@ func main() {
 		}
 		ms := time.Since(t0).Milliseconds()
 		atomic.AddInt64(&completed, 1)
-		if atomic.AddInt64(&dumpedOK, 1) <= 3 {
+		if ms > 12000 && atomic.AddInt64(&dumpedOK, 1) <= 3 {
 			dctx, dcancel := context.WithTimeout(ctx, 20*time.Second)
 			it := c.GetWorkflowHistory(dctx, id, "", false, 0)
 			for it.HasNext() {
