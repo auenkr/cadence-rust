@@ -314,8 +314,7 @@ impl SinkAdminMetrics {
         kind: MetricKind,
         value: MetricValue,
         method: &str,
-        caller: &str,
-        transport: &str,
+        (caller, transport): (&str, &str),
         histogram: Option<HistogramSpec>,
     ) {
         if !admin_is_profiled(method) {
@@ -338,8 +337,7 @@ impl cadence_service_core::workflow_api::AdminMetrics for SinkAdminMetrics {
             MetricKind::Counter,
             MetricValue::Count(1),
             method,
-            caller,
-            transport,
+            (caller, transport),
             None,
         );
     }
@@ -358,8 +356,7 @@ impl cadence_service_core::workflow_api::AdminMetrics for SinkAdminMetrics {
             MetricKind::Timer,
             MetricValue::Duration(elapsed),
             method,
-            caller,
-            transport,
+            (caller, transport),
             None,
         );
         self.emit(
@@ -367,8 +364,7 @@ impl cadence_service_core::workflow_api::AdminMetrics for SinkAdminMetrics {
             MetricKind::Histogram,
             MetricValue::Duration(elapsed),
             method,
-            caller,
-            transport,
+            (caller, transport),
             Some(HistogramSpec::GoLow1ms100s),
         );
         let counter = match outcome {
@@ -382,8 +378,7 @@ impl cadence_service_core::workflow_api::AdminMetrics for SinkAdminMetrics {
             MetricKind::Counter,
             MetricValue::Count(1),
             method,
-            caller,
-            transport,
+            (caller, transport),
             None,
         );
     }
