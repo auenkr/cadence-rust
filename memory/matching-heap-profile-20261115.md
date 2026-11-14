@@ -50,3 +50,11 @@ Measured-soak count is now 1/3. The diagnostic executable artifact is ~208 MB
 compressed (includes debug symbols and the existing Go binaries); heap profiles
 and derived reports remain in the small lane artifact. Automatic full default
 CI at lockfile head `917c5829d` is run 43648251008, still active.
+
+## 23:00 UTC checkpoint
+
+Both profile lanes remain in their soak steps. Automatic workspace CI
+https://github.com/auenkr/cadence-rust/actions/runs/43648251008 passed at
+`917c5829d904ff6c7070577767c1806c7a193220` (clippy/test exits 0).
+This cached automatic run is interim coverage, not final fresh-target evidence.
+No second soak, runtime fix, or leak-free claim. Dashboard updated.
