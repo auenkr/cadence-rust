@@ -189,6 +189,14 @@ def version_histories(side, wid, rid):
     except Exception as ex:
         return None, repr(ex) + ' ' + out[:500]
 
+def norm(value):
+    """Branch UUIDs are cluster-local; preserve every other key and value."""
+    if isinstance(value, dict):
+        return {key: norm(item) for key, item in value.items() if key != 'BranchToken'}
+    if isinstance(value, list):
+        return [norm(item) for item in value]
+    return value
+
 def compare(tag, name, wid, rid, active, standby):
     """Poll until standby events equal active events, then compare version histories."""
     state = {}
@@ -207,7 +215,7 @@ def compare(tag, name, wid, rid, active, standby):
     def vf():
         va, ma = version_histories(active, wid, rid)
         vs, ms_ = version_histories(standby, wid, rid)
-        return va is not None and va == vs, f'{active}={json.dumps(va)[:600]} {standby}={json.dumps(vs)[:600]} {ma} {ms_}'
+        return va is not None and norm(va) == norm(vs), f'{active}={json.dumps(va)[:600]} {standby}={json.dumps(vs)[:600]} {ma} {ms_}'
     poll(f'{tag}-{name}-version-histories-equal', vf, 120)
     return state.get('ea', [])
 
