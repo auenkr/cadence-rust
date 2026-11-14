@@ -41,3 +41,24 @@ Source head: `ef06ae9b97d2e9024ac88e1c2dee005bf56ad789`.
 - [Frontend soak, Go baseline + Rust FE/Go Matching, 20min at 10/s](https://github.com/auenkr/cadence-rust/actions/runs/43547229168)
 
 Cassandra and active Rust Frontend two-cluster validation follow the initial gate.
+
+## Mixed gate results
+
+All below concluded **success**, with `GATE SUMMARY failed: []` in the run log.
+The first run used `ef06ae9b97d2e9024ac88e1c2dee005bf56ad789`; the others used
+`8de10bd46` (same source plus this investigation note).
+
+| Lane | Run | Rust binary SHA256 |
+|---|---|---|
+| mysql single cluster, kafka=false | [43547225372](https://github.com/auenkr/cadence-rust/actions/runs/43547225372) | `79a0e2b73f224560793deed1c9f2b4317f09334d3b4b68afcd3c29b25dc68479` |
+| cassandra single cluster, kafka=false | [43548086254](https://github.com/auenkr/cadence-rust/actions/runs/43548086254) | `583f96011d3873d6ab059a9402b67799a28ddebafece4074a5f0d95b3e63be4d` |
+| mysql two_cluster=true, rust_frontend_active=true, kafka=false | [43548089039](https://github.com/auenkr/cadence-rust/actions/runs/43548089039) | `b03771c44216daebde3c7eb33a8843653c9884abf2574bcbb5cd63f349ef9b94` |
+| cassandra two_cluster=true, rust_frontend_active=true, kafka=false | [43548691333](https://github.com/auenkr/cadence-rust/actions/runs/43548691333) | `412ef3422b1091e56cb2b330f6d675e2d53adcbdc20584f475b8a6e0fe59379d` |
+
+The active Rust Frontend lanes exercise domain updates, isolation groups, and
+replication. The Cassandra isolation-group failure did not recur.
+
+Service-core clean-target clippy/tests [43547221809](https://github.com/auenkr/cadence-rust/actions/runs/43547221809)
+concluded **success**, including the file-based cooldown regression test.
+Fresh full-workspace clippy then tests [43548694169](https://github.com/auenkr/cadence-rust/actions/runs/43548694169)
+on `8de10bd46` is in progress.
