@@ -92,3 +92,14 @@ event or continue-as-new; these are distinct from the result long-poll wakeup.
 The soak also cannot pass restarted-host RSS sampling at 8m: restart at 245s +
 300s warm-up exceeds end=456s, yielding zero samples. Do not report this run green.
 Evidence retained under `memory/evidence/history-pollms-fix-20261114/soak-8m/`.
+
+Longer reproducible validation dispatched on documentation head
+8e2728d87 (same Rust implementation as c4d28963d):
+https://github.com/auenkr/cadence-rust/actions/runs/43550611874
+Inputs: database=mysql, duration_minutes=20, two_history=true, rate=4,
+history_log=warn. The longer duration is necessary for the existing RSS guard:
+restart halfway + 300s warm-up + eight 30-second samples. It also checks whether
+the first run's two restart-window child-completion stalls reproduce. The first
+soak's logs contain service-to-service TCP connection errors during restart;
+this is not proof of the exact cause of the missing child-completion events.
+Build succeeded and SDK traffic began at 2026-11-14T03:30:03Z. Result pending.
