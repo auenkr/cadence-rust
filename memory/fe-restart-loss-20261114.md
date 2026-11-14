@@ -44,3 +44,9 @@ retry policy, workflow activity options, or latency tuning is justified here.
 
 Targeted CI: https://github.com/auenkr/cadence-rust/actions/runs/43613537757,
 head 286ef1e3a (pending).
+
+Targeted CI 43613537757 **SUCCESS**, including
+`tchannel::tests::interrupted_frame_reads_preserve_header_payload_and_next_frame`.
+Compact build/test evidence saved in memory/evidence/fe-restart-loss-20261114/.
+Full fresh-target workspace CI dispatched at documentation head 12e0f53d5:
+https://github.com/auenkr/cadence-rust/actions/runs/43614446974 (pending).
