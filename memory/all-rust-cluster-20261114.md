@@ -20,8 +20,19 @@ Inputs otherwise default: outbound=grpc, queue_v2=false, s3_archival=false, gcs=
 
 | Database | Run | Conclusion | Summary |
 |---|---|---|---|
-| mysql | https://github.com/auenkr/cadence-rust/actions/runs/43583398117 | pending | pending |
-| postgres | https://github.com/auenkr/cadence-rust/actions/runs/43583401011 | pending | pending |
-| cassandra | https://github.com/auenkr/cadence-rust/actions/runs/43583403860 | pending | pending |
+| mysql | https://github.com/auenkr/cadence-rust/actions/runs/43583398117 | success | `GATE SUMMARY failed: []` |
+| postgres | https://github.com/auenkr/cadence-rust/actions/runs/43583401011 | success | `GATE SUMMARY failed: []` |
+| cassandra | https://github.com/auenkr/cadence-rust/actions/runs/43583403860 | success | `GATE SUMMARY failed: []` |
 
-Binary hashes and final results will be recorded after the runs conclude. Frontend and Matching share the cadence-server executable; History uses cadence-history.
+All three runs passed on their first attempt. Frontend and Matching share the cadence-server executable; History uses cadence-history. No Rust bugs were found, so no Rust implementation changes or new Rust unit tests were needed.
+
+| Database | cadence-server SHA256 (Frontend + Matching) | cadence-history SHA256 |
+|---|---|---|
+
+| mysql | `abedec8f83b56064aaefa5c4a41e9dab2ff3c3d521f7b91d07cd1899e2e2d6e6` | `0f0469c7e76e7725ac17ce4eec180a1c2ecaa870c912d3ea7db98517a4cf812b` |
+| postgres | `f9786f670236b91e67997ece80265de65267b6e6417743bbe19bda700fb3a2b2` | `d24450a8230995bb596b4cab51da783ee06065cec4574369d39c8ce36a87e997` |
+| cassandra | `03ce3779e7a84b02f19d6cbc0bf132a49a6f88a8d9867d0b31167df80f834d7e` | `95619eba424873e727bbb6bc42b0939c0f6ad6d3883746aad7c9b9718dd232db` |
+
+Persistent compact evidence: `memory/evidence/all-rust-cluster-20261114/{mysql,postgres,cassandra}.txt` includes hashes, exact Go Worker command, service topology and every GATE assertion. Full artifacts remain attached to the linked runs for 3 days. Each run exercised the ordinary SDK suite, History churn, all-History crash/restart, database restart/reconnect, primary-History crash/restart, Matching crash/restart and Frontend crash/restart with in-flight workflow completion.
+
+Artifact extraction initially hit the local `/tmp` quota; partial downloads created by this task were removed and only selected evidence files were extracted under `/mnt/storage/service/all-rust-evidence-20261114`. This did not affect CI or test results. No merge or branch deletion was performed.
