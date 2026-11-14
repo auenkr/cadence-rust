@@ -44,3 +44,6 @@ Soak 43598100147 still reports both go-baseline and rust in their Soak steps. Aw
 - Only failing criterion: Matching RSS 6.60 MB/h vs Go 1.45; allowed 6.45. Down from prior 10.53 but still fails; this does not establish leak-free Matching.
 - All latency criteria PASS: start p95 13 vs 8 ms, query p99 36 vs 37 ms, e2e p95 4094 vs 4075 ms. 42000/42000 completed; zero failures/panics. Frontend RSS 10.34 vs 6.74 passes Go+5 allowance. Full verdict, Rust summary, samples and hash saved in evidence directory.
 - Final allowed measured attempt 2 dispatched: https://github.com/auenkr/cadence-rust/actions/runs/43605415284 at head 3111896c2 (includes CI-validated QPS clock-sampling serialization). Defaults unchanged. No third measured attempt will be run.
+
+### Final-attempt wait checkpoint (15:00 UTC)
+Run 43605415284 completed its fresh build and started both lanes at 14:44 UTC. It remains in progress; expected workload end around 15:54 UTC plus setup/analysis. Source unchanged since CI-validated 304c2699a. No local validation commands and no additional soak dispatched.
