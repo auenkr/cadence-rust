@@ -3299,8 +3299,8 @@ mod schedule_dispatch_tests {
         ) -> crate::workflow_api::GuardFuture<'a> {
             self.calls.lock().unwrap().push(format!("ongoing:{domain}"));
             Box::pin(async {
-                Err(crate::workflow_api::DomainGuardError::Internal(
-                    "ongoing failover rejected".into(),
+                Err(crate::workflow_api::DomainGuardError::BadRequest(
+                    "Concurrent failover is not allowed".into(),
                 ))
             })
         }
@@ -3472,7 +3472,10 @@ mod schedule_dispatch_tests {
                 .await;
         assert_eq!(
             error,
-            Some(("InternalServiceError", "ongoing failover rejected".to_string()))
+            Some((
+                "BadRequestError",
+                "Concurrent failover is not allowed".to_string()
+            ))
         );
         assert_eq!(
             guard.calls.lock().unwrap().as_slice(),
@@ -3501,7 +3504,10 @@ mod schedule_dispatch_tests {
         .await;
         assert_eq!(
             error,
-            Some(("InternalServiceError", "ongoing failover rejected".to_string()))
+            Some((
+                "BadRequestError",
+                "Concurrent failover is not allowed".to_string()
+            ))
         );
         assert_eq!(
             guard.calls.lock().unwrap().last().map(String::as_str),
