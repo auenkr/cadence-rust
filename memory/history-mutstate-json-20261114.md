@@ -58,3 +58,13 @@ compatible.
   https://github.com/auenkr/cadence-rust/actions/runs/43588548302
   Head `ec4f37b24`, conclusion `failure`: the default trait method needed a
   qualified HistoryError import. Fixed before the next CI dispatch.
+- Follow-up History CI attempts:
+  - https://github.com/auenkr/cadence-rust/actions/runs/43589046708
+    (`d74d3a3c3`, failure: Rust Unicode escape syntax, corrected).
+  - https://github.com/auenkr/cadence-rust/actions/runs/43589592783
+    (`715438627`, failure: clippy type complexity, item ordering and unnecessary
+    concat; corrected). CI also generated the rustfmt patch applied only to the
+    new JSON module; no formatting command ran locally.
+  - https://github.com/auenkr/cadence-rust/actions/runs/43590059755
+    (`9e14cf7d8`, pending when recorded), fresh dedicated target,
+    `package=cadence-history`, clippy then tests.
