@@ -20,21 +20,23 @@ No History or Matching workflow logic was changed. Static config review found Ru
 - Earlier History suite: https://github.com/auenkr/cadence-rust/actions/runs/43736172831 — success, but invalid for allocator validation: `Benchmark/ci.sh` resolved `Benchmark/Dockerfile` from the workflow checkout, so it built System. Its artifact confirms that command. Do not use its latency data as the jemalloc result.
 - Earlier all-Rust suite: https://github.com/auenkr/cadence-rust/actions/runs/43736175975 — canceled after the same Dockerfile resolution issue was found.
 - Corrected History suite (workflow ref `perf-history-throughput-bench`): https://github.com/auenkr/cadence-rust/actions/runs/43743286537 — success; `ci.exit=0`; Alpine build log confirms both jemalloc feature flags/path; source `e2f780c2d80f66327bc5da5474a2a39b6e218814`.
-- Corrected all-Rust suite (workflow ref `perf-history-throughput-bench`): https://github.com/auenkr/cadence-rust/actions/runs/43743289833 (running at last check).
+- Corrected all-Rust suite (workflow ref `perf-history-throughput-bench`): https://github.com/auenkr/cadence-rust/actions/runs/43743289833 — completed with failure in recovery because the first Go repetition had 11 `TimeoutType: START_TO_CLOSE` errors; fixed load and 25/s capacity stages passed for Go and Rust; `ci.exit=1`.
 
 History suite summary: at 5 starts/s, median across three Rust repetitions was p50 63.04 ms / p99 66.55 ms; the three paired Go p99 values had median 49.24 ms. Rust passed all repetitions at 5/s and 25/s; all three 100/s attempts failed their targets. Highest tested passing rate is 25 starts/s. This is not a like-for-like latency comparison with the historical 720 ms p99 because hosted-runner baselines varied; use the same-run Go pair for context. The recovery-stage completion p99 includes the planned MySQL outage and is not a steady-state latency figure.
 
-Status checked 2026-11-15 18:53 UTC: corrected History completed successfully; corrected all-Rust remains active in `Benchmark/ci.sh`. The latest `cadence-server` and `cadence-history` Rust CI runs are green.
+All-Rust suite summary: at 5 starts/s, median across three Rust repetitions was p50 66.93 ms / p99 74.27 ms; paired Go p99 median was 69.07 ms. Both Rust and Go passed all repetitions at 5/s and 25/s; neither passed 100/s. Highest tested passing rate is 25 starts/s. Rust recovery repetitions recovered; the workflow failed because the first Go recovery repetition reported 11 `START_TO_CLOSE` errors. Recovery completion p99 includes the MySQL fault and is not steady-state latency. The build log confirms both jemalloc feature flags were enabled.
 
-The first two benchmark dispatches using source `47f655573` failed because that source branch did not contain the benchmark Docker context. Two dispatches with the merged temporary branch's short SHA failed in `actions/checkout` (the workflow requires a full SHA). Full-SHA dispatches from the harness ref ran, but used the harness ref's old Dockerfile and are not allocator evidence. Corrected runs now use the merged temporary branch for both workflow and source checkout, ensuring the allocator-enabled Dockerfile is used. Replace the pending table values with final run conclusions and p50/p99/capacity results when they complete.
+Status checked 2026-11-15 19:13 UTC: corrected History completed successfully; corrected all-Rust completed with the Go recovery error noted above. The latest `cadence-server` and `cadence-history` Rust CI runs are green.
+
+The first two benchmark dispatches using source `47f655573` failed because that source branch did not contain the benchmark Docker context. Two dispatches with the merged temporary branch's short SHA failed in `actions/checkout` (the workflow requires a full SHA). Full-SHA dispatches from the harness ref ran, but used the harness ref's old Dockerfile and are not allocator evidence. Corrected runs use the merged temporary branch for both workflow and source checkout, ensuring the allocator-enabled Dockerfile is used.
 
 ## Before/after
 
 | Lane | Baseline Rust p50 / p99 | Baseline Go p99 | Post-change Rust p50 / p99 | Post-change max passing rate |
 |---|---:|---:|---:|---:|
 | History | 81.29 / 720.03 ms at 5/s | 559.90 ms | 63.04 / 66.55 ms at 5/s (paired Go p99 49.24 ms) | 25 starts/s |
-| Matching | 41.00 / 71.95 ms at 5/s | 91.22 ms (paired); 54.30 ms all-Go baseline | pending (all-Rust suite) | pending |
-| All Rust | 66.31 / 72.02 ms at 5/s | 54.30 ms | pending | pending |
+| Matching | 41.00 / 71.95 ms at 5/s | 91.22 ms (paired); 54.30 ms all-Go baseline | no isolated Matching-only rerun | 25 starts/s in the all-Rust lane |
+| All Rust | 66.31 / 72.02 ms at 5/s | 54.30 ms | 66.93 / 74.27 ms at 5/s (paired Go p99 69.07 ms) | 25 starts/s |
 
 ## Reproduction
 
