@@ -14,7 +14,10 @@ REPO='auenkr/cadence-rust'
 BRANCH='t3/matching-benchmark-harness'
 SOURCE='77dbaa379eaa88bc7b62b48fc3d711059e2dd93e'
 
-def gh(*args):return subprocess.check_output(['gh',*map(str,args),'--repo',REPO],text=True)
+def gh(*args):
+    command=['gh',*map(str,args)]
+    if args[0]!='api':command+=['--repo',REPO]
+    return subprocess.check_output(command,text=True)
 
 def diagnose(summary,status,build_tails):
     reasons=[]
