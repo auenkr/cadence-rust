@@ -127,3 +127,10 @@ Fresh workspace CI https://github.com/auenkr/cadence-rust/actions/runs/436570183
 at `4802e9251` passed Clippy and is running workspace tests, using clean_target=true.
 Redundant automatic lockfile CI 43656047369 was canceled. No production fix or
 second-soak measurement conclusion yet; no local Cargo/Go/Docker commands.
+
+Fresh workspace run 43657018303 completed SUCCESS at
+`4802e92518a36fd53e4181b6a02df83462c0c088`. Its recorded target is
+`/home/runner/work/_temp/cargo-target-final`; Clippy and workspace test exits
+are both 0. Compact identity/exit evidence is committed under `ci-final/`.
+No runtime code has changed above this tested source. Full artifact logs are
+preserved on storage under `/mnt/storage/service/matching-heap-profile/ci-final/`.
