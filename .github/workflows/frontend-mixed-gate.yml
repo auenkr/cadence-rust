@@ -46,6 +46,9 @@ on:
       repl_rust_cluster:
         description: History replication gate (Go<->Rust History, two clusters, any database). A = Go active -> Rust standby, B = Rust active -> Go standby; empty = off
         default: ""
+      repl_run_tag:
+        description: Optional unique tag to allow concurrent repetitions of the same replication lane
+        default: ""
       two_history_graceful:
         description: With two_cluster+rust_history (side standby), run two Rust History hosts on cluster A and a graceful failover to A asserting cross-host failover markers
         type: boolean
@@ -59,7 +62,7 @@ on:
         default: ""
 
 concurrency:
-  group: frontend-mixed-gate-${{ github.ref }}-${{ inputs.database }}-${{ inputs.es_flavor }}-${{ inputs.es }}-${{ inputs.gcs }}-${{ inputs.two_history_graceful }}-${{ inputs.rust_history }}-${{ inputs.two_cluster }}-${{ inputs.rust_history_side }}-${{ inputs.rust_frontend_active }}-${{ inputs.repl_rust_cluster }}
+  group: frontend-mixed-gate-${{ github.ref }}-${{ inputs.database }}-${{ inputs.es_flavor }}-${{ inputs.es }}-${{ inputs.gcs }}-${{ inputs.two_history_graceful }}-${{ inputs.rust_history }}-${{ inputs.two_cluster }}-${{ inputs.rust_history_side }}-${{ inputs.rust_frontend_active }}-${{ inputs.repl_rust_cluster }}-${{ inputs.repl_run_tag }}
   cancel-in-progress: true
 
 jobs:
