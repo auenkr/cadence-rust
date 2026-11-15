@@ -17,7 +17,7 @@ COPY go/proto go/proto
 COPY rust rust
 WORKDIR /src/rust
 ENV OPENSSL_STATIC=1 OPENSSL_DIR=/usr CARGO_PROFILE_RELEASE_DEBUG=0 CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
-RUN cargo build --release -p cadence-server -j2 \
+RUN cargo build --release -p cadence-server --features jemalloc-default -j2 \
     && sha256sum target/release/cadence-server > /cadence-server.sha256
 
 FROM ${GO_IMAGE} AS final
