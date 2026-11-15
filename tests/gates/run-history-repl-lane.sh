@@ -37,5 +37,9 @@ cassandra)
 esac
 python3 "$ROOT/tests/gates/run-history-repl-gate.py" --database "$DBK" --out "$ARTIFACTS/run" "$@"
 status=$?
+if [[ "$DBK" == mysql && "$status" != 0 ]]; then
+  python3 "$ROOT/tests/gates/dump-history-repl-mysql.py" "$CONTAINER" "$ARTIFACTS/run" "$ARTIFACTS/mysql-failure-rows.txt" \
+    > "$ARTIFACTS/mysql-failure-dump.log" 2>&1 || true
+fi
 echo "$status" > "$ARTIFACTS/lane.exit"
 exit "$status"

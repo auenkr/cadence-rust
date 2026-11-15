@@ -209,12 +209,8 @@ impl SqlHistoryManager {
         new_branch: bool,
         info: &str,
     ) -> Result<DataBlob, PersistenceError> {
-        let first = events
-            .first()
-            .ok_or_else(|| PersistenceError::InvalidPersistenceRequest("events to be appended cannot be empty".into()))?;
-        if first.event_id <= 0 {
-            return Err(PersistenceError::InvalidPersistenceRequest("eventID cannot be less than 1".into()));
-        }
+        validate_history_event_batch(events)?;
+        let first = &events[0];
         let encoded = cadence_thrift::history_blob::encode(events.to_vec());
         let blob = DataBlob { encoding: "thriftrw".to_string(), data: encoded.data };
         let size = blob.data.len() as i64;
@@ -236,6 +232,34 @@ impl SqlHistoryManager {
         retry_transient(|| self.store.append_history_nodes(request.clone())).await?;
         Ok(blob)
     }
+}
+
+/// Go's `historyV2ManagerImpl.AppendHistoryNodes` batch validation.
+fn validate_history_event_batch(events: &[HistoryEvent]) -> Result<(), PersistenceError> {
+    let first = events.first().ok_or_else(|| {
+        PersistenceError::InvalidPersistenceRequest("events to be appended cannot be empty".into())
+    })?;
+    if first.event_id <= 0 {
+        return Err(PersistenceError::InvalidPersistenceRequest("eventID cannot be less than 1".into()));
+    }
+    let version = first.version;
+    let mut expected_id = first.event_id;
+    for event in events {
+        if event.version != version {
+            return Err(PersistenceError::InvalidPersistenceRequest(
+                "event version must be the same inside a batch".into(),
+            ));
+        }
+        if event.event_id != expected_id {
+            return Err(PersistenceError::InvalidPersistenceRequest(
+                "event ID must be continuous".into(),
+            ));
+        }
+        expected_id = expected_id.checked_add(1).ok_or_else(|| {
+            PersistenceError::InvalidPersistenceRequest("event ID overflow".into())
+        })?;
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -922,6 +946,17 @@ impl ExecutionCacheBackend for SqlExecutionCacheBackend {
 mod xrfix_tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn event(id: i64, version: i64) -> HistoryEvent {
+        HistoryEvent { event_id: id, version, ..Default::default() }
+    }
+
+    #[test]
+    fn append_history_nodes_rejects_non_contiguous_or_mixed_version_batches() {
+        assert!(validate_history_event_batch(&[event(35, 10), event(37, 10)]).is_err());
+        assert!(validate_history_event_batch(&[event(35, 10), event(36, 11)]).is_err());
+        assert!(validate_history_event_batch(&[event(35, 10), event(36, 10)]).is_ok());
+    }
 
     #[test]
     fn persistence_timeout_is_possibly_successful() {
