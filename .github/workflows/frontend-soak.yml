@@ -120,6 +120,7 @@ jobs:
           for f in res/lane/run/*.log; do [ -f "$f" ] && tail -n 300 "$f" > "res/up/logs/$(basename "$f")"; done
           test -f res/analysis/summary.json
       - name: Analyze live heap growth
+        timeout-minutes: 8
         if: always() && inputs.heap_profile == true && matrix.mode != 'go-baseline'
         run: |
           sudo apt-get update -qq
@@ -134,6 +135,7 @@ jobs:
           jeprof --text --show_bytes bin/cadence-server "$P/heap-4000.heap" > "$P/live-4000.txt" 2>&1
           cat "$P"/stats-*.txt "$P/growth-4000.txt"
       - name: Analyze system allocator snapshots
+        timeout-minutes: 8
         if: always() && inputs.system_heap_profile == true && matrix.mode != 'go-baseline'
         run: |
           mkdir -p res/up/heap-profiles
