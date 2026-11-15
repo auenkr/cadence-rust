@@ -12,9 +12,9 @@ ENV OPENSSL_STATIC=1 OPENSSL_DIR=/usr CARGO_PROFILE_RELEASE_DEBUG=0 CARGO_PROFIL
 RUN rustc -Vv > /cadence-toolchain.txt
 ARG RUST_PACKAGE=cadence-server
 RUN if [ "${RUST_PACKAGE}" = all ]; then \
-      cargo build --release -p cadence-server -p cadence-history -j2 && \
+      cargo build --release -p cadence-server -p cadence-history --features cadence-server/jemalloc-default,cadence-history/jemalloc-default -j2 && \
       cp target/release/cadence-server /cadence-server && cp target/release/cadence-history /cadence-history; \
-    else cargo build --release -p ${RUST_PACKAGE} -j2 && cp target/release/${RUST_PACKAGE} /cadence-server; fi \
+    else cargo build --release -p ${RUST_PACKAGE} --features jemalloc-default -j2 && cp target/release/${RUST_PACKAGE} /cadence-server; fi \
     && sha256sum /cadence-server > /cadence-server.sha256
 
 FROM ${GO_IMAGE} AS runtime
