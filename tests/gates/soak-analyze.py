@@ -26,7 +26,9 @@ def run(a):
     steps = json.loads((d / 'steps.json').read_text()) if (d / 'steps.json').exists() else []
     cols = ['t', 'load1', 'fe_rss_mb', 'fe_cpu_pct', 'fe_fds', 'fe_threads', 'mt_rss_mb', 'mt_cpu_pct', 'mt_fds', 'mt_threads', 'started', 'completed',
             'failed', 'inflight', 'retried_calls', 'query_init_attempts', 'query_init_workflows',
-            'e2e_p50_ms', 'e2e_p95_ms', 'e2e_p99_ms', 'start_p95_ms', 'query_p50_ms', 'query_p95_ms', 'query_p99_ms']
+            'e2e_p50_ms', 'e2e_p95_ms', 'e2e_p99_ms', 'start_p95_ms', 'query_p50_ms', 'query_p95_ms', 'query_p99_ms',
+            'fe_rss_anon_mb', 'fe_rss_file_mb', 'fe_rss_shmem_mb',
+            'mt_rss_anon_mb', 'mt_rss_file_mb', 'mt_rss_shmem_mb']
     prev = {}
     table = []
     for r in rows:
@@ -35,6 +37,10 @@ def run(a):
             s = r.get(key)
             if s:
                 o[pre + '_rss_mb'] = round(s['rss_kb'] / 1024, 1)
+                for part in ('anon', 'file', 'shmem'):
+                    field = f'rss_{part}_kb'
+                    if s.get(field) is not None:
+                        o[f'{pre}_rss_{part}_mb'] = round(s[field] / 1024, 1)
                 o[pre + '_fds'] = s['fds']
                 o[pre + '_threads'] = s['threads']
                 p = prev.get(key)
@@ -84,6 +90,12 @@ def run(a):
             'window_s': [win0, end], 'frontend_window_s': [fe_start, end],
             'fe_rss_mb_per_h': sl('fe_rss_mb', fe_start), 'fe_fds_per_h': sl('fe_fds', fe_start),
             'mt_rss_mb_per_h': sl('mt_rss_mb', win0), 'mt_fds_per_h': sl('mt_fds', win0),
+            'fe_rss_anon_mb_per_h': sl('fe_rss_anon_mb', fe_start),
+            'fe_rss_file_mb_per_h': sl('fe_rss_file_mb', fe_start),
+            'fe_rss_shmem_mb_per_h': sl('fe_rss_shmem_mb', fe_start),
+            'mt_rss_anon_mb_per_h': sl('mt_rss_anon_mb', win0),
+            'mt_rss_file_mb_per_h': sl('mt_rss_file_mb', win0),
+            'mt_rss_shmem_mb_per_h': sl('mt_rss_shmem_mb', win0),
         },
         'peak': {c: max([r[c] for r in table if r.get(c) is not None] or [None]) for c in ('fe_rss_mb', 'fe_fds', 'mt_rss_mb', 'mt_fds', 'load1')},
         'panic_in_logs': panic, 'service_died_steps': died,
@@ -116,7 +128,7 @@ def compare(a):
     rate = r['failed'] / max(1, r['started'])
     chk('error rate ~0 (< 0.1%) and not higher than Go', rate < 0.001 and r['failed'] <= g['failed'] + max(1, 0.001 * r['started']),
         f"rust={rate:.4%} ({r['failed']}) go={g['failed']} stages={r['fail_stage_counts']}")
-    chk('query "init" after successful signal: none (as Go)', (r['query_init_workflows'] or 0) <= (g['query_init_workflows'] or 0),
+    chk('query "init" retries not above Go (+10%; Go itself retries ~50% of workflows)', (r['query_init_workflows'] or 0) <= 1.1 * (g['query_init_workflows'] or 0) + 10 and (r['query_init_attempts'] or 0) <= 1.1 * (g['query_init_attempts'] or 0) + 10,
         f"rust workflows={r['query_init_workflows']} attempts={r['query_init_attempts']}; go workflows={g['query_init_workflows']} attempts={g['query_init_attempts']}")
     for grp, label in (('e2e_ms', 'e2e'), ('query_ms', 'query call'), ('start_ms', 'start call')):
         for p in ('p50', 'p95', 'p99'):

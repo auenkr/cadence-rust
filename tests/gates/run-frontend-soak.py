@@ -6,7 +6,7 @@ keeps its error text, so Rust Frontend gaps are reported precisely instead of ab
 Usage: run-frontend-soak.py --out DIR --rust-binary P --go-server P --go-cli P --driver P --rust-root DIR
 MySQL comes from CADENCE_MYSQL_{ADDR,USER,PASSWORD} (databases cadence and cadence_visibility exist).
 """
-import argparse, concurrent.futures, json, os, re, secrets, signal, socket, subprocess, sys, time
+import argparse, concurrent.futures, json, os, re, secrets, shlex, signal, socket, subprocess, sys, time
 from pathlib import Path
 
 ap = argparse.ArgumentParser()
@@ -14,6 +14,8 @@ ap.add_argument('--database', choices=['mysql', 'postgres', 'cassandra'], defaul
 ap.add_argument('--out', type=Path, required=True)
 ap.add_argument('--mode', choices=['go', 'rust', 'rust-fe', 'rust-mt'], default='rust', help='go: all-Go baseline; rust: Rust Frontend+Matching, Go History/Worker; rust-fe: Rust Frontend + Go Matching; rust-mt: Go Frontend + Rust Matching')
 ap.add_argument('--rust-binary', type=Path, default=Path('/nonexistent-rust-binary'))
+ap.add_argument('--matching-heap-profile', action='store_true')
+ap.add_argument('--rust-matching-env', default='', help='allowlisted MALLOC_* assignments for the Rust Matching process')
 ap.add_argument('--go-server', type=Path, required=True)
 ap.add_argument('--go-cli', type=Path, required=True)
 ap.add_argument('--driver', type=Path, required=True)
@@ -252,6 +254,17 @@ MT = 'rust-matching' if RUST_MT else 'go-matching'
 rust_matching = lambda: [args.rust_binary, 'start', '--config', work / 'rust.yaml', '--root', work, '--services', 'matching', '--port', '0',
     '--history-grpc-port', ports['HISTORY_PORT_GRPC'], '--matching-grpc-port', ports['RUST_MATCHING_PORT_GRPC'],
     '--matching-tchannel-port', ports['RUST_MATCHING_PORT'], '--data-dir', work / 'rust-matching-data']
+rust_matching_env = dict(os.environ)
+for assignment in shlex.split(args.rust_matching_env):
+    key, sep, value = assignment.partition('=')
+    if not sep or key not in {'MALLOC_ARENA_MAX', 'MALLOC_TRIM_THRESHOLD_'} or not value.isdigit():
+        ap.error(f'invalid --rust-matching-env assignment: {assignment!r}')
+    rust_matching_env[key] = value
+if args.matching_heap_profile:
+    profile_dir = work / 'heap-profiles'
+    profile_dir.mkdir(exist_ok=True)
+    rust_matching_env['CADENCE_HEAP_PROFILE_DIR'] = str(profile_dir.resolve())
+    rust_matching_env['_RJEM_MALLOC_CONF'] = 'prof:true,prof_active:true,lg_prof_sample:19'
 rust_frontend = lambda: [args.rust_binary, 'start', '--config', work / 'rust.yaml', '--root', work, '--services', 'frontend',
     '--history-grpc-port', ports['HISTORY_PORT_GRPC'], '--data-dir', work / 'rust-frontend-data']
 frontend_env = {
@@ -283,7 +296,7 @@ try:
             raise SystemExit(1)
     # Matching opens gRPC only after Ringpop bootstrap. Launch its Frontend
     # seed before waiting for Matching readiness so both can join the ring.
-    start(MT, (rust_matching if RUST_MT else go_matching)())
+    start(MT, (rust_matching if RUST_MT else go_matching)(), env=rust_matching_env if RUST_MT else None)
     start(FE, frontend_cmd(), env=frontend_env)
     mt_port = ports['RUST_MATCHING_PORT_GRPC'] if RUST_MT else ports['MATCHING_PORT_GRPC']
     matching_ready = wait_port(mt_port, 120, MT)
@@ -341,22 +354,82 @@ try:
                 if os.readlink(f'/proc/{pid}/exe').endswith(os.path.basename(str(args.rust_binary))) or name.startswith('go'):
                     st = open(f'/proc/{pid}/status').read()
                     rss = int(re.search(r'VmRSS:\s+(\d+)', st).group(1))
+                    def status_kb(label):
+                        match = re.search(rf'^{label}:\s+(\d+)', st, re.MULTILINE)
+                        return int(match.group(1)) if match else 0
                     thr = int(re.search(r'Threads:\s+(\d+)', st).group(1))
                     fds = len(os.listdir(f'/proc/{pid}/fd'))
                     f = open(f'/proc/{pid}/stat').read().rsplit(')', 1)[1].split()
                     cpu = int(f[11]) + int(f[12])
-                    return dict(pid=pid, rss_kb=rss, threads=thr, fds=fds, cpu_ticks=cpu)
+                    return dict(pid=pid, rss_kb=rss,
+                                rss_anon_kb=status_kb('RssAnon'),
+                                rss_file_kb=status_kb('RssFile'),
+                                rss_shmem_kb=status_kb('RssShmem'),
+                                threads=thr, fds=fds, cpu_ticks=cpu)
             except Exception:
                 continue
         return None
     samples = open(work / 'samples.jsonl', 'a')
     t0 = time.monotonic(); restarted = False; restart_ok = None
     driver_log = work / 'soak-driver.log'
+    captured_proc_snapshots = set()
+
+    def capture_proc_snapshot(name, phase, stats, elapsed):
+        if not stats:
+            return
+        pid = stats['pid']
+        root = work / 'proc-snapshots' / f'{name}-{phase}-pid{pid}'
+        root.mkdir(parents=True, exist_ok=True)
+        proc = Path('/proc') / str(pid)
+        try:
+            (root / 'process.json').write_text(json.dumps({
+                'role': name, 'pid': pid, 'elapsed_s': int(elapsed),
+                'exe': os.readlink(proc / 'exe'), 'sample': stats,
+            }, indent=2) + '\n')
+            (root / 'smaps_rollup').write_text((proc / 'smaps_rollup').read_text())
+            blocks, current = [], []
+            for line in (proc / 'smaps').read_text(errors='replace').splitlines():
+                if re.match(r'^[0-9a-f]+-[0-9a-f]+\s', line):
+                    if current:
+                        blocks.append(current)
+                    current = [line]
+                elif current:
+                    current.append(line)
+            if current:
+                blocks.append(current)
+            mappings = []
+            for block in blocks:
+                rss_line = next((line for line in block[1:] if line.startswith('Rss:')), 'Rss: 0 kB')
+                rss_match = re.search(r'Rss:\s+(\d+)', rss_line)
+                mappings.append((int(rss_match.group(1)) if rss_match else 0, block))
+            mappings.sort(key=lambda item: item[0], reverse=True)
+            with (root / 'smaps-top20-by-rss.txt').open('w') as out:
+                out.write(f'Process {name} pid={pid} elapsed_s={int(elapsed)}; top mappings by Rss\n')
+                for rank, (rss_kb, block) in enumerate(mappings[:20], 1):
+                    out.write(f'\n[{rank}] {block[0]} (Rss: {rss_kb} kB)\n')
+                    out.write('\n'.join(block[1:]) + '\n')
+        except Exception as exc:
+            with (work / 'proc-snapshots' / 'capture-errors.log').open('a') as errors:
+                errors.write(f'{name} {phase} pid={pid}: {exc!r}\n')
+
     while drv.poll() is None:
         el = time.monotonic() - t0
         row = {'t': int(el), 'wall': int(time.time()), 'load1': os.getloadavg()[0]}
         for n, key in [(FE, 'frontend'), (MT, 'matching')]:
             row[key] = proc_stats(n)
+        matching_stats = row.get('matching')
+        if matching_stats:
+            due = []
+            if el <= SAMPLE:
+                due.append('start')
+            if el >= RESTART_AT:
+                due.append('middle')
+            if el >= SOAK_SECONDS:
+                due.append('end')
+            for phase in due:
+                if phase not in captured_proc_snapshots:
+                    capture_proc_snapshot(MT, phase, matching_stats, el)
+                    captured_proc_snapshots.add(phase)
         lines = [l for l in driver_log.read_text(errors='replace').splitlines() if l.startswith('STATS ')]
         row['driver'] = json.loads(lines[-1][6:]) if lines else None
         row['fail_lines'] = sum(1 for l in driver_log.read_text(errors='replace').splitlines() if l.startswith('FAIL '))
@@ -377,6 +450,11 @@ try:
             kill('sdk-driver')
             break
         time.sleep(SAMPLE)
+    # The SDK driver can finish slightly before SOAK_SECONDS, so don't rely on
+    # another sampling-loop iteration to capture the final process mappings.
+    final_elapsed = time.monotonic() - t0
+    if 'end' not in captured_proc_snapshots:
+        capture_proc_snapshot(MT, 'end', proc_stats(MT), final_elapsed)
     record('soak-driver-exit', drv.returncode == 0, f'exit={drv.returncode}')
     # Diagnostics (non-gating): task list pollers/backlog and one workflow history as the Frontend sees them.
     try:

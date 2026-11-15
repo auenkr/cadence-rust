@@ -1,0 +1,61 @@
+{
+  "label": "go-baseline",
+  "samples": 70,
+  "duration_s": 4147,
+  "restart_at_s": 2100,
+  "started": 42000,
+  "completed": 42000,
+  "failed": 0,
+  "in_flight_at_end": 0,
+  "fail_stage_counts": {},
+  "fail_examples": [],
+  "query_init_attempts": 28371,
+  "query_init_workflows": 21039,
+  "retried_calls": 28371,
+  "e2e_ms": {
+    "p50": 3090,
+    "p95": 4096,
+    "p99": 4117,
+    "max": 13105
+  },
+  "query_ms": {
+    "p50": 12,
+    "p95": 34,
+    "p99": 45
+  },
+  "start_ms": {
+    "p50": 9,
+    "p95": 14,
+    "p99": 20
+  },
+  "slopes": {
+    "window_s": [
+      1147,
+      4147
+    ],
+    "frontend_window_s": [
+      2400,
+      4147
+    ],
+    "fe_rss_mb_per_h": 4.13484492945948,
+    "fe_fds_per_h": -0.4401229527983599,
+    "mt_rss_mb_per_h": 1.5005844434323765,
+    "mt_fds_per_h": -2.070853345006968,
+    "fe_rss_anon_mb_per_h": 2.046479208617544,
+    "fe_rss_file_mb_per_h": 2.125714959344171,
+    "fe_rss_shmem_mb_per_h": 0.0,
+    "mt_rss_anon_mb_per_h": 0.8585809911563953,
+    "mt_rss_file_mb_per_h": 0.7389148413106006,
+    "mt_rss_shmem_mb_per_h": 0.0
+  },
+  "peak": {
+    "fe_rss_mb": 117.2,
+    "fe_fds": 28,
+    "mt_rss_mb": 109.5,
+    "mt_fds": 28,
+    "load1": 7.4501953125
+  },
+  "panic_in_logs": false,
+  "service_died_steps": [],
+  "failed_steps": []
+}
