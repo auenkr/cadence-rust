@@ -4,6 +4,8 @@ Branch: `repl-flake-p2b`
 Validated head: `8677ca04ad0d6506d02dc2de885268c853396de7`  
 Base: `origin/master` at `5aa28f9df5f8366f8339bd0abe21943dbb0a6a6a`
 
+Final branch head after recording this evidence: `740ceca9b230f23d7c2761a6891015ead8154d0e` (documentation-only commit after the six runs).
+
 ## Original failure and retry
 
 - Failed Rust-active-B MySQL run: https://github.com/auenkr/cadence-rust/actions/runs/43647065597 (source/head `3a6a5a44fcb20fe871b6093526d447d01417a0ff`). `GATE FAIL p2-B-continued-history-equal(A->B)`: active A had 35 events, standby B had 0.
