@@ -53,7 +53,7 @@ jobs:
         env:
           SERVICE: ${{ inputs.service }}
           BENCHMARK_SOURCE_DIR: ${{ github.workspace }}/benchmark-source
-          RATE: ${{ inputs.rate }}
+          RATE: ${{ inputs.rate || '25' }}
           DURATION: ${{ inputs.duration }}
           WARMUP: ${{ inputs.warmup }}
           REPETITIONS: ${{ inputs.repetitions || '3' }}
