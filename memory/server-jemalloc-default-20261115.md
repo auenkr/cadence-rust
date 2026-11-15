@@ -68,3 +68,16 @@ Pending soak and mixed gate.
 Checkpoint 2026-11-15 04:00 UTC: the soak's Go baseline and Rust workload lanes
 are still running; neither has reported a failure. No conclusion or RSS slope is
 available until the 70-minute workload and analyzer finish.
+
+### Tuned decay validation
+
+- Targeted `rust-ci.yml`, package `cadence-server`: SUCCESS
+  https://github.com/auenkr/cadence-rust/actions/runs/43678579042
+  head `57eab7a129197bcdc04eb03dd9211386b652d96e`.
+- Full `rust-ci.yml`, fresh clean target: SUCCESS
+  https://github.com/auenkr/cadence-rust/actions/runs/43679021081
+  head `57eab7a129197bcdc04eb03dd9211386b652d96e`.
+- Final allowed default soak is running:
+  https://github.com/auenkr/cadence-rust/actions/runs/43680073670
+  lanes `go-baseline,rust`; default rate/duration; no profiler or malloc env
+  override inputs.
