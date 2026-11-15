@@ -402,6 +402,26 @@ try:
                 rss_line = next((line for line in block[1:] if line.startswith('Rss:')), 'Rss: 0 kB')
                 rss_match = re.search(r'Rss:\s+(\d+)', rss_line)
                 mappings.append((int(rss_match.group(1)) if rss_match else 0, block))
+            # Keep a compact record of every VMA, not only the largest 20.
+            # This lets later analysis distinguish arena heap segments from
+            # anonymous stack-sized mappings that fall below the RSS cutoff.
+            import csv
+            with (root / 'smaps-mappings.csv').open('w', newline='') as out:
+                writer = csv.writer(out)
+                writer.writerow(('start', 'end', 'perms', 'offset', 'device', 'inode', 'pathname',
+                                 'size_kb', 'rss_kb', 'anonymous_kb', 'vmflags'))
+                for rss_kb, block in mappings:
+                    header = re.match(
+                        r'^([0-9a-f]+)-([0-9a-f]+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)(?:\s+(.*))?$',
+                        block[0])
+                    if not header:
+                        continue
+                    def field(label, default='0'):
+                        match = next((line for line in block[1:] if line.startswith(label + ':')), None)
+                        value = re.search(r':\s*(.*)', match).group(1).strip() if match else default
+                        return value
+                    writer.writerow((*header.groups()[:6], header.group(7) or '', field('Size'), rss_kb,
+                                     field('Anonymous'), field('VmFlags', '')))
             mappings.sort(key=lambda item: item[0], reverse=True)
             with (root / 'smaps-top20-by-rss.txt').open('w') as out:
                 out.write(f'Process {name} pid={pid} elapsed_s={int(elapsed)}; top mappings by Rss\n')
