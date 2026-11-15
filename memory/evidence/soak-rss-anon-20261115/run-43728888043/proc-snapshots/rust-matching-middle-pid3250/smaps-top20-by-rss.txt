@@ -1,0 +1,521 @@
+Process rust-matching pid=3250 elapsed_s=2104; top mappings by Rss
+
+[1] 5a0beae42000-5a0beecbc000 r-xp 01165000 08:01 7793527                    /home/runner/work/cadence-rust/cadence-rust/bin/cadence-server (Rss: 31884 kB)
+Size:              63976 kB
+KernelPageSize:        4 kB
+MMUPageSize:           4 kB
+Rss:               31884 kB
+Pss:               19676 kB
+Pss_Dirty:             0 kB
+Shared_Clean:      24416 kB
+Shared_Dirty:          0 kB
+Private_Clean:      7468 kB
+Private_Dirty:         0 kB
+Referenced:        31884 kB
+Anonymous:             0 kB
+KSM:                   0 kB
+LazyFree:              0 kB
+AnonHugePages:         0 kB
+ShmemPmdMapped:        0 kB
+FilePmdMapped:         0 kB
+Shared_Hugetlb:        0 kB
+Private_Hugetlb:       0 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+Locked:                0 kB
+THPeligible:           0
+VmFlags: rd ex mr mw me sd 
+
+[2] 5a0bf0bb1000-5a0bf1aaa000 rw-p 00000000 00:00 0                          [heap] (Rss: 14332 kB)
+Size:              15332 kB
+KernelPageSize:        4 kB
+MMUPageSize:           4 kB
+Rss:               14332 kB
+Pss:               14332 kB
+Pss_Dirty:         14332 kB
+Shared_Clean:          0 kB
+Shared_Dirty:          0 kB
+Private_Clean:         0 kB
+Private_Dirty:     14332 kB
+Referenced:        14332 kB
+Anonymous:         14332 kB
+KSM:                   0 kB
+LazyFree:              0 kB
+AnonHugePages:         0 kB
+ShmemPmdMapped:        0 kB
+FilePmdMapped:         0 kB
+Shared_Hugetlb:        0 kB
+Private_Hugetlb:       0 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+Locked:                0 kB
+THPeligible:           0
+VmFlags: rd wr mr mw me ac sd 
+
+[3] 7be014000000-7be014be0000 rw-p 00000000 00:00 0  (Rss: 10968 kB)
+Size:              12160 kB
+KernelPageSize:        4 kB
+MMUPageSize:           4 kB
+Rss:               10968 kB
+Pss:               10968 kB
+Pss_Dirty:         10968 kB
+Shared_Clean:          0 kB
+Shared_Dirty:          0 kB
+Private_Clean:         0 kB
+Private_Dirty:     10968 kB
+Referenced:        10968 kB
+Anonymous:         10968 kB
+KSM:                   0 kB
+LazyFree:              0 kB
+AnonHugePages:         0 kB
+ShmemPmdMapped:        0 kB
+FilePmdMapped:         0 kB
+Shared_Hugetlb:        0 kB
+Private_Hugetlb:       0 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+Locked:                0 kB
+THPeligible:           0
+VmFlags: rd wr mr mw me ac sd 
+
+[4] 5a0be9cdc000-5a0beae42000 r--p 00000000 08:01 7793527                    /home/runner/work/cadence-rust/cadence-rust/bin/cadence-server (Rss: 5440 kB)
+Size:              17816 kB
+KernelPageSize:        4 kB
+MMUPageSize:           4 kB
+Rss:                5440 kB
+Pss:                2892 kB
+Pss_Dirty:             0 kB
+Shared_Clean:       5096 kB
+Shared_Dirty:          0 kB
+Private_Clean:       344 kB
+Private_Dirty:         0 kB
+Referenced:         5440 kB
+Anonymous:             0 kB
+KSM:                   0 kB
+LazyFree:              0 kB
+AnonHugePages:         0 kB
+ShmemPmdMapped:        0 kB
+FilePmdMapped:         0 kB
+Shared_Hugetlb:        0 kB
+Private_Hugetlb:       0 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+Locked:                0 kB
+THPeligible:           0
+VmFlags: rd mr mw me sd 
+
+[5] 7be00dfe1000-7be00efe5000 rw-p 00000000 00:00 0  (Rss: 3076 kB)
+Size:              16400 kB
+KernelPageSize:        4 kB
+MMUPageSize:           4 kB
+Rss:                3076 kB
+Pss:                3076 kB
+Pss_Dirty:          3076 kB
+Shared_Clean:          0 kB
+Shared_Dirty:          0 kB
+Private_Clean:         0 kB
+Private_Dirty:      3076 kB
+Referenced:         3076 kB
+Anonymous:          3076 kB
+KSM:                   0 kB
+LazyFree:              0 kB
+AnonHugePages:         0 kB
+ShmemPmdMapped:        0 kB
+FilePmdMapped:         0 kB
+Shared_Hugetlb:        0 kB
+Private_Hugetlb:       0 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+Locked:                0 kB
+THPeligible:           0
+VmFlags: rd wr mr mw me ac sd 
+
+[6] 5a0beecbc000-5a0beef33000 r--p 04fde000 08:01 7793527                    /home/runner/work/cadence-rust/cadence-rust/bin/cadence-server (Rss: 2508 kB)
+Size:               2524 kB
+KernelPageSize:        4 kB
+MMUPageSize:           4 kB
+Rss:                2508 kB
+Pss:                2508 kB
+Pss_Dirty:          2508 kB
+Shared_Clean:          0 kB
+Shared_Dirty:          0 kB
+Private_Clean:         0 kB
+Private_Dirty:      2508 kB
+Referenced:         2508 kB
+Anonymous:          2508 kB
+KSM:                   0 kB
+LazyFree:              0 kB
+AnonHugePages:         0 kB
+ShmemPmdMapped:        0 kB
+FilePmdMapped:         0 kB
+Shared_Hugetlb:        0 kB
+Private_Hugetlb:       0 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+Locked:                0 kB
+THPeligible:           0
+VmFlags: rd mr mw me ac sd 
+
+[7] 7be019a28000-7be019bc5000 r-xp 00028000 08:01 5414                       /usr/lib/x86_64-linux-gnu/libc.so.6 (Rss: 1312 kB)
+Size:               1652 kB
+KernelPageSize:        4 kB
+MMUPageSize:           4 kB
+Rss:                1312 kB
+Pss:                  36 kB
+Pss_Dirty:             0 kB
+Shared_Clean:       1312 kB
+Shared_Dirty:          0 kB
+Private_Clean:         0 kB
+Private_Dirty:         0 kB
+Referenced:         1312 kB
+Anonymous:             0 kB
+KSM:                   0 kB
+LazyFree:              0 kB
+AnonHugePages:         0 kB
+ShmemPmdMapped:        0 kB
+FilePmdMapped:         0 kB
+Shared_Hugetlb:        0 kB
+Private_Hugetlb:       0 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+Locked:                0 kB
+THPeligible:           0
+VmFlags: rd ex mr mw me sd 
+
+[8] 7be0187f7000-7be019a00000 rw-p 00000000 00:00 0  (Rss: 988 kB)
+Size:              18468 kB
+KernelPageSize:        4 kB
+MMUPageSize:           4 kB
+Rss:                 988 kB
+Pss:                 988 kB
+Pss_Dirty:           988 kB
+Shared_Clean:          0 kB
+Shared_Dirty:          0 kB
+Private_Clean:         0 kB
+Private_Dirty:       988 kB
+Referenced:          988 kB
+Anonymous:           988 kB
+KSM:                   0 kB
+LazyFree:              0 kB
+AnonHugePages:         0 kB
+ShmemPmdMapped:        0 kB
+FilePmdMapped:         0 kB
+Shared_Hugetlb:        0 kB
+Private_Hugetlb:       0 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+Locked:                0 kB
+THPeligible:           0
+VmFlags: rd wr mr mw me gu ac sd nh 
+
+[9] 7be019e00000-7be019ee4000 r--p 00000000 08:01 6521                       /usr/lib/x86_64-linux-gnu/libcrypto.so.3 (Rss: 912 kB)
+Size:                912 kB
+KernelPageSize:        4 kB
+MMUPageSize:           4 kB
+Rss:                 912 kB
+Pss:                  49 kB
+Pss_Dirty:             0 kB
+Shared_Clean:        912 kB
+Shared_Dirty:          0 kB
+Private_Clean:         0 kB
+Private_Dirty:         0 kB
+Referenced:          912 kB
+Anonymous:             0 kB
+KSM:                   0 kB
+LazyFree:              0 kB
+AnonHugePages:         0 kB
+ShmemPmdMapped:        0 kB
+FilePmdMapped:         0 kB
+Shared_Hugetlb:        0 kB
+Private_Hugetlb:       0 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+Locked:                0 kB
+THPeligible:           0
+VmFlags: rd mr mw me sd 
+
+[10] 7be01a397000-7be01a414000 r--p 00597000 08:01 6521                       /usr/lib/x86_64-linux-gnu/libcrypto.so.3 (Rss: 500 kB)
+Size:                500 kB
+KernelPageSize:        4 kB
+MMUPageSize:           4 kB
+Rss:                 500 kB
+Pss:                 500 kB
+Pss_Dirty:           500 kB
+Shared_Clean:          0 kB
+Shared_Dirty:          0 kB
+Private_Clean:         0 kB
+Private_Dirty:       500 kB
+Referenced:          500 kB
+Anonymous:           500 kB
+KSM:                   0 kB
+LazyFree:              0 kB
+AnonHugePages:         0 kB
+ShmemPmdMapped:        0 kB
+FilePmdMapped:         0 kB
+Shared_Hugetlb:        0 kB
+Private_Hugetlb:       0 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+Locked:                0 kB
+THPeligible:           0
+VmFlags: rd mr mw me ac sd 
+
+[11] 7be00f3e7000-7be0103eb000 rw-p 00000000 00:00 0  (Rss: 380 kB)
+Size:              16400 kB
+KernelPageSize:        4 kB
+MMUPageSize:           4 kB
+Rss:                 380 kB
+Pss:                 380 kB
+Pss_Dirty:           380 kB
+Shared_Clean:          0 kB
+Shared_Dirty:          0 kB
+Private_Clean:         0 kB
+Private_Dirty:       380 kB
+Referenced:          380 kB
+Anonymous:           380 kB
+KSM:                   0 kB
+LazyFree:              0 kB
+AnonHugePages:         0 kB
+ShmemPmdMapped:        0 kB
+FilePmdMapped:         0 kB
+Shared_Hugetlb:        0 kB
+Private_Hugetlb:       0 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+Locked:                0 kB
+THPeligible:           0
+VmFlags: rd wr mr mw me ac sd 
+
+[12] 7be013dff000-7be014000000 rw-p 00000000 00:00 0  (Rss: 288 kB)
+Size:               2052 kB
+KernelPageSize:        4 kB
+MMUPageSize:           4 kB
+Rss:                 288 kB
+Pss:                 288 kB
+Pss_Dirty:           288 kB
+Shared_Clean:          0 kB
+Shared_Dirty:          0 kB
+Private_Clean:         0 kB
+Private_Dirty:       288 kB
+Referenced:          288 kB
+Anonymous:           288 kB
+KSM:                   0 kB
+LazyFree:              0 kB
+AnonHugePages:         0 kB
+ShmemPmdMapped:        0 kB
+FilePmdMapped:         0 kB
+Shared_Hugetlb:        0 kB
+Private_Hugetlb:       0 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+Locked:                0 kB
+THPeligible:           0
+VmFlags: rd wr mr mw me gu ac sd nh 
+
+[13] 7fffd2748000-7fffd2782000 rw-p 00000000 00:00 0                          [stack] (Rss: 232 kB)
+Size:                232 kB
+KernelPageSize:        4 kB
+MMUPageSize:           4 kB
+Rss:                 232 kB
+Pss:                 232 kB
+Pss_Dirty:           232 kB
+Shared_Clean:          0 kB
+Shared_Dirty:          0 kB
+Private_Clean:         0 kB
+Private_Dirty:       232 kB
+Referenced:          232 kB
+Anonymous:           232 kB
+KSM:                   0 kB
+LazyFree:              0 kB
+AnonHugePages:         0 kB
+ShmemPmdMapped:        0 kB
+FilePmdMapped:         0 kB
+Shared_Hugetlb:        0 kB
+Private_Hugetlb:       0 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+Locked:                0 kB
+THPeligible:           0
+VmFlags: rd wr mr mw me gd ac 
+
+[14] 7be019ee4000-7be01a278000 r-xp 000e4000 08:01 6521                       /usr/lib/x86_64-linux-gnu/libcrypto.so.3 (Rss: 192 kB)
+Size:               3664 kB
+KernelPageSize:        4 kB
+MMUPageSize:           4 kB
+Rss:                 192 kB
+Pss:                  10 kB
+Pss_Dirty:             0 kB
+Shared_Clean:        192 kB
+Shared_Dirty:          0 kB
+Private_Clean:         0 kB
+Private_Dirty:         0 kB
+Referenced:          192 kB
+Anonymous:             0 kB
+KSM:                   0 kB
+LazyFree:              0 kB
+AnonHugePages:         0 kB
+ShmemPmdMapped:        0 kB
+FilePmdMapped:         0 kB
+Shared_Hugetlb:        0 kB
+Private_Hugetlb:       0 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+Locked:                0 kB
+THPeligible:           0
+VmFlags: rd ex mr mw me sd 
+
+[15] 7be01a484000-7be01a505000 r-xp 00012000 08:01 5417                       /usr/lib/x86_64-linux-gnu/libm.so.6 (Rss: 192 kB)
+Size:                516 kB
+KernelPageSize:        4 kB
+MMUPageSize:           4 kB
+Rss:                 192 kB
+Pss:                  15 kB
+Pss_Dirty:             0 kB
+Shared_Clean:        192 kB
+Shared_Dirty:          0 kB
+Private_Clean:         0 kB
+Private_Dirty:         0 kB
+Referenced:          192 kB
+Anonymous:             0 kB
+KSM:                   0 kB
+LazyFree:              0 kB
+AnonHugePages:         0 kB
+ShmemPmdMapped:        0 kB
+FilePmdMapped:         0 kB
+Shared_Hugetlb:        0 kB
+Private_Hugetlb:       0 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+Locked:                0 kB
+THPeligible:           0
+VmFlags: rd ex mr mw me sd 
+
+[16] 7be019bc5000-7be019c13000 r--p 001c5000 08:01 5414                       /usr/lib/x86_64-linux-gnu/libc.so.6 (Rss: 184 kB)
+Size:                312 kB
+KernelPageSize:        4 kB
+MMUPageSize:           4 kB
+Rss:                 184 kB
+Pss:                   4 kB
+Pss_Dirty:             0 kB
+Shared_Clean:        184 kB
+Shared_Dirty:          0 kB
+Private_Clean:         0 kB
+Private_Dirty:         0 kB
+Referenced:          184 kB
+Anonymous:             0 kB
+KSM:                   0 kB
+LazyFree:              0 kB
+AnonHugePages:         0 kB
+ShmemPmdMapped:        0 kB
+FilePmdMapped:         0 kB
+Shared_Hugetlb:        0 kB
+Private_Hugetlb:       0 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+Locked:                0 kB
+THPeligible:           0
+VmFlags: rd mr mw me sd 
+
+[17] 7be01a6a8000-7be01a6d6000 r-xp 00001000 08:01 5411                       /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2 (Rss: 184 kB)
+Size:                184 kB
+KernelPageSize:        4 kB
+MMUPageSize:           4 kB
+Rss:                 184 kB
+Pss:                   4 kB
+Pss_Dirty:             0 kB
+Shared_Clean:        184 kB
+Shared_Dirty:          0 kB
+Private_Clean:         0 kB
+Private_Dirty:         0 kB
+Referenced:          184 kB
+Anonymous:             0 kB
+KSM:                   0 kB
+LazyFree:              0 kB
+AnonHugePages:         0 kB
+ShmemPmdMapped:        0 kB
+FilePmdMapped:         0 kB
+Shared_Hugetlb:        0 kB
+Private_Hugetlb:       0 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+Locked:                0 kB
+THPeligible:           0
+VmFlags: rd ex mr mw me sd 
+
+[18] 7be019a00000-7be019a28000 r--p 00000000 08:01 5414                       /usr/lib/x86_64-linux-gnu/libc.so.6 (Rss: 160 kB)
+Size:                160 kB
+KernelPageSize:        4 kB
+MMUPageSize:           4 kB
+Rss:                 160 kB
+Pss:                   4 kB
+Pss_Dirty:             0 kB
+Shared_Clean:        160 kB
+Shared_Dirty:          0 kB
+Private_Clean:         0 kB
+Private_Dirty:         0 kB
+Referenced:          160 kB
+Anonymous:             0 kB
+KSM:                   0 kB
+LazyFree:              0 kB
+AnonHugePages:         0 kB
+ShmemPmdMapped:        0 kB
+FilePmdMapped:         0 kB
+Shared_Hugetlb:        0 kB
+Private_Hugetlb:       0 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+Locked:                0 kB
+THPeligible:           0
+VmFlags: rd mr mw me sd 
+
+[19] 7be01a505000-7be01a552000 r--p 00093000 08:01 5417                       /usr/lib/x86_64-linux-gnu/libm.so.6 (Rss: 136 kB)
+Size:                308 kB
+KernelPageSize:        4 kB
+MMUPageSize:           4 kB
+Rss:                 136 kB
+Pss:                  13 kB
+Pss_Dirty:             0 kB
+Shared_Clean:        136 kB
+Shared_Dirty:          0 kB
+Private_Clean:         0 kB
+Private_Dirty:         0 kB
+Referenced:          136 kB
+Anonymous:             0 kB
+KSM:                   0 kB
+LazyFree:              0 kB
+AnonHugePages:         0 kB
+ShmemPmdMapped:        0 kB
+FilePmdMapped:         0 kB
+Shared_Hugetlb:        0 kB
+Private_Hugetlb:       0 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+Locked:                0 kB
+THPeligible:           0
+VmFlags: rd mr mw me sd 
+
+[20] 7be01a581000-7be01a5a3000 r--p 00000000 08:01 6522                       /usr/lib/x86_64-linux-gnu/libssl.so.3 (Rss: 136 kB)
+Size:                136 kB
+KernelPageSize:        4 kB
+MMUPageSize:           4 kB
+Rss:                 136 kB
+Pss:                  13 kB
+Pss_Dirty:             0 kB
+Shared_Clean:        136 kB
+Shared_Dirty:          0 kB
+Private_Clean:         0 kB
+Private_Dirty:         0 kB
+Referenced:          136 kB
+Anonymous:             0 kB
+KSM:                   0 kB
+LazyFree:              0 kB
+AnonHugePages:         0 kB
+ShmemPmdMapped:        0 kB
+FilePmdMapped:         0 kB
+Shared_Hugetlb:        0 kB
+Private_Hugetlb:       0 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+Locked:                0 kB
+THPeligible:           0
+VmFlags: rd mr mw me sd 

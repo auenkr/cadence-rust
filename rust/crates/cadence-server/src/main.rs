@@ -4,6 +4,13 @@ mod heap_profile;
 #[cfg(feature = "system-heap-profile")]
 mod system_heap_profile;
 
+#[cfg(all(
+    target_os = "linux",
+    target_env = "gnu",
+    any(feature = "system-allocator", not(feature = "jemalloc-default"))
+))]
+mod system_allocator;
+
 #[cfg(all(feature = "jemalloc-default", not(feature = "system-allocator")))]
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
@@ -16,8 +23,29 @@ pub static malloc_conf: &[u8] = b"background_thread:true\0";
 
 use tracing_subscriber::EnvFilter;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
+    // Apply glibc's arena cap before Tokio creates its worker threads. The
+    // default multi-thread runtime settings match #[tokio::main].
+    #[cfg(all(
+        target_os = "linux",
+        target_env = "gnu",
+        any(feature = "system-allocator", not(feature = "jemalloc-default"))
+    ))]
+    let arena_cap_applied = system_allocator::configure();
+    #[cfg(not(all(
+        target_os = "linux",
+        target_env = "gnu",
+        any(feature = "system-allocator", not(feature = "jemalloc-default"))
+    )))]
+    let arena_cap_applied = true;
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(run(arena_cap_applied))
+}
+
+async fn run(_arena_cap_applied: bool) -> anyhow::Result<()> {
     #[cfg(feature = "heap-profile")]
     heap_profile::start();
     #[cfg(feature = "system-heap-profile")]
@@ -31,6 +59,19 @@ async fn main() -> anyhow::Result<()> {
         .with_ansi(false)
         .compact()
         .init();
+
+    #[cfg(all(
+        target_os = "linux",
+        target_env = "gnu",
+        any(feature = "system-allocator", not(feature = "jemalloc-default"))
+    ))]
+    {
+        if !_arena_cap_applied {
+            tracing::warn!("glibc rejected M_ARENA_MAX=2; periodic malloc_trim remains enabled");
+        }
+        system_allocator::start_periodic_trim();
+    }
+
     cadence_matching::launcher::run_frontend_with_hook(
         "cadence-server",
         None,

@@ -1,0 +1,16 @@
+{
+  "role": "rust-matching",
+  "pid": 3241,
+  "elapsed_s": 2101,
+  "exe": "/home/runner/work/cadence-rust/cadence-rust/bin/cadence-server",
+  "sample": {
+    "pid": 3241,
+    "rss_kb": 80548,
+    "rss_anon_kb": 38772,
+    "rss_file_kb": 41776,
+    "rss_shmem_kb": 0,
+    "threads": 26,
+    "fds": 124,
+    "cpu_ticks": 28757
+  }
+}
