@@ -12,6 +12,7 @@ def main():
     text=text.replace('77dbaa379 versus 3c2bf3aaa','571fb2a08 versus 77dbaa379').replace('77dbaa379eaa88bc7b62b48fc3d711059e2dd93e','571fb2a0862bca59bb799f7baae9518d26c0e7b4').replace('3c2bf3aaabf160518afde04f75097d2dc2c374a6','77dbaa379eaa88bc7b62b48fc3d711059e2dd93e')
     start=text.index('No allocator feature is enabled:');end=text.index('\n',start)
     text=text[:start]+'New Alpine/musl binaries enable jemalloc-default in both launchers; previous binaries used musl System. The GNU-only glibc arena cap is not exercised here. Allocator and Matching writer changes are measured together.'+text[end:]
+    text=text.replace('Matching QPS retention, cancellation-safe reads, pooled Frontend-to-History connections and History batch validation changed together;', 'Jemalloc and the Matching writer payload-copy optimization changed together; the GNU-only arena cap is outside this musl test;')
     text+='\n## Current Rust versus its paired Go baseline\n\n| Lane | Go / Rust p50 ms | Go / Rust p99 ms | Go / Rust CPU cores | Go / Rust memory MiB | Go / Rust max passing starts/s |\n|---|---:|---:|---:|---:|---:|\n'
     from revision_report import LABELS
     from compare_suite import fmt
