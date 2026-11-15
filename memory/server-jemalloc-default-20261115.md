@@ -34,6 +34,26 @@ RUST OVERALL verdict: pending.
 Matching RSS slope vs Go: pending.
 Rust binary SHA256: pending.
 
+### First default soak result
+
+Run `43672414397` completed SUCCESS at implementation head
+`8e61c5f95cefd3039d409163bbf13ef557692928`, but the analyzer verdict was
+**RUST OVERALL: FAIL**. The uninstrumented default jemalloc build SHA256 was
+`5fc729a865453b803dd401a711d9b97e72eaf67bda7b65a03ea7e6f42f4155d1`.
+Matching RSS slope was `6.8183 MiB/h` versus Go `0.49 MiB/h`, exceeding the
+Go+5 allowance. Frontend RSS passed at Rust `4.1590` vs Go `4.78 MiB/h`.
+Both lanes completed all 42,000 workflows with no errors, panics, or service
+deaths. The Rust lane's query p99 (94 ms vs 25 ms) and start p99 (185 ms vs
+8 ms) thresholds also failed; other reported latency and FD criteria passed.
+The run took 4,145 seconds, including the scheduled Matching and Frontend
+restart. Analyzer evidence was downloaded from `soak-verdict` and `soak-rust`;
+the artifact records the above source SHA and executable checksum.
+
+Because the default-decay evidence missed the Matching RSS allowance, the
+allocator configuration now keeps background purging enabled and sets dirty
+and muzzy decay to 1,000 ms for the next build. This uses the remaining
+permitted soak attempt to evaluate the measured RSS issue.
+
 ## All-Rust recovery gate
 
 Workflow: `history-mixed-gate.yml`, MySQL, gRPC, `two_history=true`,
