@@ -11,6 +11,8 @@ The reported Rust History lane used musl System and measured p50 81.29 ms / p99 
 - `rust/crates/cadence-history`: added the same opt-in allocator feature to the standalone History binary, preserving System as its default.
 - Harness benchmark Dockerfile: on temporary source branch `perf-history-throughput-bench`, both standalone History and all-Rust image builds opt into jemalloc. The harness workflow is pinned to `t3/matching-benchmark-harness`; its source checkout is the temp branch so the run tests the complete matched benchmark context.
 
+The branch was merged with `origin/master` at `07c3928991befdbd52815509bd7f503e6ec1fc41`, which includes `7d83dce4d` (`M_ARENA_MAX=2` plus 60s `malloc_trim` for GNU System builds) and a later Matching writer change. The History/All-Rust benchmark images are Alpine/musl; that GNU-only allocator code is not active in those runs. These results provide no evidence about GNU arena-cap contention or latency. No GNU allocator change was made here.
+
 No History or Matching workflow logic was changed. Static config review found Rust History `taskSchedulerWorkerCount` default 200, `transferProcessorMaxPollInterval` 60s, and `timerProcessorMaxPollInterval` 5m, consistent with Go config behavior. No clear per-request connection setup or lock-across-await mismatch was established from source review. These remain candidates for a CPU profile if jemalloc does not close the latency gap.
 
 ## Validation runs
