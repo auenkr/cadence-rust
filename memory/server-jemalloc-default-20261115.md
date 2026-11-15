@@ -125,3 +125,7 @@ https://github.com/auenkr/cadence-rust/actions/runs/43686161316 on head
 `go-baseline,rust` lanes with no profiler or malloc environment inputs. Its
 result will determine whether the Matching RSS slope is anonymous or
 file-backed before changing the parity criterion or allocator default.
+
+Checkpoint 2026-11-15 07:24 UTC: diagnostic soak 43686161316 remains active;
+both `go-baseline` and `rust` are in their soak workload steps. No analyzer
+verdict or RSS-component samples are available until the lanes complete.
