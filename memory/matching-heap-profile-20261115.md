@@ -98,3 +98,16 @@ Symbolization runs after process exit to avoid caching debug data in the server.
 Feature-specific clippy and a sample lifetime/reallocation regression test are
 queued in https://github.com/auenkr/cadence-rust/actions/runs/43655373681.
 No second soak has started yet. Default builds remain unchanged.
+
+## System-allocator measurement dispatch
+
+- https://github.com/auenkr/cadence-rust/actions/runs/43655943235
+- Source `035fa2506`, 70 minutes, rate 10, Go baseline + Rust, only
+  `system_heap_profile=true`; no malloc tuning. This is soak 2/3 once lanes start.
+- Feature-specific CI 43655373681 passed both profiler Clippy checks and the
+  allocation/reallocation/free regression test, and is continuing default checks.
+- System sampling uses fixed 64-KiB per-thread byte intervals. Sample counts are
+  diagnostic ownership observations, not unbiased estimated byte totals. Exact
+  requested-live-byte counters and mallinfo2/smaps are the main trend evidence.
+- Sampling excludes recursive profiler allocations; exact counters include them.
+  Profile state is bounded by currently sampled live pointers and map capacity.
