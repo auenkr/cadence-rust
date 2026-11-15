@@ -19,6 +19,8 @@ No History or Matching workflow logic was changed. Static config review found Ru
 
 - `rust-ci` for `cadence-server`: https://github.com/auenkr/cadence-rust/actions/runs/43736191723 — success; branch head `b2c10ea3f7f461e2e2af9dcb1a3f34e6f145c56e`.
 - `rust-ci` for `cadence-history`: https://github.com/auenkr/cadence-rust/actions/runs/43736010933 — success; source head `09d14611064a90e52aff6f86c1d3c4a516d02b45`.
+- After merging current `origin/master` (`07c3928991befdbd52815509bd7f503e6ec1fc41`), `rust-ci` for `cadence-server` passed: https://github.com/auenkr/cadence-rust/actions/runs/43751680616.
+- After the same merge, `rust-ci` for `cadence-matching` passed: https://github.com/auenkr/cadence-rust/actions/runs/43751683618.
 - System-allocator History comparison: https://github.com/auenkr/cadence-rust/actions/runs/43736172831 — success; `Benchmark/ci.sh` resolved the Dockerfile from the harness checkout, leaving the default System allocator enabled. This is the before measurement; it does not validate the jemalloc image configuration.
 - Earlier all-Rust suite: https://github.com/auenkr/cadence-rust/actions/runs/43736175975 — canceled after the same Dockerfile resolution issue was found.
 - Corrected History suite (workflow ref `perf-history-throughput-bench`): https://github.com/auenkr/cadence-rust/actions/runs/43743286537 — success; `ci.exit=0`; Alpine build log confirms both jemalloc feature flags/path; source `e2f780c2d80f66327bc5da5474a2a39b6e218814`.
@@ -28,7 +30,7 @@ History allocator comparison, each median across three Rust repetitions: at 5 st
 
 All-Rust suite summary: at 5 starts/s, median across three Rust repetitions was p50 66.93 ms / p99 74.27 ms; paired Go p99 median was 69.07 ms. Both Rust and Go passed all repetitions at 5/s and 25/s; neither passed 100/s. Highest tested passing rate is 25 starts/s. Rust recovery repetitions recovered; the workflow failed because the first Go recovery repetition reported 11 `START_TO_CLOSE` errors. Recovery completion p99 includes the MySQL fault and is not steady-state latency. The build log confirms both jemalloc feature flags were enabled.
 
-Status checked 2026-11-15 19:13 UTC: corrected History completed successfully; corrected all-Rust completed with the Go recovery error noted above. The latest `cadence-server` and `cadence-history` Rust CI runs are green.
+Status checked 2026-11-15 19:26 UTC: corrected History completed successfully; corrected all-Rust completed with the Go recovery error noted above. The merged-master server and Matching CI runs are green.
 
 The first two benchmark dispatches using source `47f655573` failed because that source branch did not contain the benchmark Docker context. Two dispatches with the merged temporary branch's short SHA failed in `actions/checkout` (the workflow requires a full SHA). The full-SHA History run from the harness ref built the default System allocator and serves as the before measurement. Corrected runs use the merged temporary branch for both workflow and source checkout, enabling jemalloc in the image build.
 
