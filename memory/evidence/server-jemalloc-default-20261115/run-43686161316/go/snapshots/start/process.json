@@ -1,0 +1,16 @@
+{
+  "role": "go-matching",
+  "pid": 3233,
+  "elapsed_s": 0,
+  "exe": "/home/runner/work/cadence-rust/cadence-rust/bin/cadence-go-server",
+  "sample": {
+    "pid": 3233,
+    "rss_kb": 95144,
+    "rss_anon_kb": 26768,
+    "rss_file_kb": 68376,
+    "rss_shmem_kb": 0,
+    "threads": 9,
+    "fds": 20,
+    "cpu_ticks": 35
+  }
+}
