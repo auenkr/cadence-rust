@@ -431,6 +431,24 @@ impl DurableTaskQueueBytes {
         let _writer = self.writer.lock().expect("matching writer gate");
         self.append_serialized(&data, now_nanos, Some(&timeouts))
     }
+    /// Append borrowed requests without making an extra deep copy in the
+    /// Matching writer before this queue builds its persistence batch.
+    pub fn append_pending_refs(
+        &self,
+        pending: &[&PendingTaskBytes],
+        now_nanos: i64,
+    ) -> Result<Vec<AllocatedTaskBytes>> {
+        let data = pending
+            .iter()
+            .map(|t| (t.source_domain, t.data.clone()))
+            .collect::<Vec<_>>();
+        let timeouts = pending
+            .iter()
+            .map(|t| t.schedule_to_start_seconds)
+            .collect::<Vec<_>>();
+        let _writer = self.writer.lock().expect("matching writer gate");
+        self.append_serialized(&data, now_nanos, Some(&timeouts))
+    }
     pub fn task_list_kind(&self) -> i16 {
         self.state
             .lock()
