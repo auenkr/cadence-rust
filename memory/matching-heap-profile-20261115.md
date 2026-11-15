@@ -198,3 +198,70 @@ Reviewed profiler counters and post-processing: exact live bytes include
 recursive diagnostic allocations; sampled stacks exclude them and are ownership
 observations rather than unbiased byte totals. Awaiting late snapshots and
 comparison before deciding whether live state or allocator retention grows.
+
+## Final System result (measured soak 3/3; cap exhausted)
+
+- https://github.com/auenkr/cadence-rust/actions/runs/43663938440 completed
+  SUCCESS at source `50f8b76de5ee0d18d9677a43c23b3d4de62d7064`.
+  Binary SHA256 `9775c223cd86a01d59dcb70b215eac8be1219e742a4c933d8762c1dfd527f71f`.
+- Analyzer **RUST OVERALL: FAIL**, solely Matching RSS: 6.3687 MiB/h vs
+  Go 0.920 (allowed Go+5). Every latency/error/FD/crash criterion passed;
+  42,000/42,000 workflows completed, zero failures/panics.
+- This build delegates to the production System allocator, with opt-in counters
+  and sampled stacks; it is **not** an uninstrumented default-build confirmation.
+  Raw snapshot upload and batched symbolization both succeeded.
+
+| seconds | exact Rust requested live B | glibc arena B | glibc used arena B | glibc free arena B | mmap B | RSS KiB | anonymous KiB |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 180 | 94,852,750 | 29,765,632 | 22,980,480 | 6,785,152 | 75,571,200 | 81,140 | 33,464 |
+| 1200 | 95,061,826 | 31,850,496 | 23,601,168 | 8,249,328 | 75,571,200 | 84,668 | 36,928 |
+| 2400 | 94,803,345 | 32,915,456 | 23,425,168 | 9,490,288 | 75,571,200 | 87,980 | 40,240 |
+| 4000 | 94,762,837 | 32,395,264 | 23,500,048 | 8,895,216 | 75,571,200 | 90,300 | 42,560 |
+
+### Growing stacks and interpretation
+
+The largest late positive sampled stack is `NativeMatchingService::poll_for_decision_task`
+boxed futures: +242,688 sampled requested bytes, 40→42 samples. It is already
++242,688 at 1200s and remains there at 2400s and 4000s. Activity poll futures
+have +169,560 sampled bytes at all three later snapshots (different concurrent
+stack variants). The next late increases are only +32,128 B for an activity
+poll variant, +22,128 B decision dispatcher, +19,616 B activity dispatcher,
++15,232 B TChannel RPC task and +11,960 B cluster metadata clones. These are
+concurrent poll/connection state, with no multi-megabyte accumulating stack.
+Sample counts are diagnostic observations, not unbiased allocation estimates;
+full early/late stacks and raw PCs are preserved for independent inspection.
+
+Exact live requested bytes decrease 89,913 B over 180→4000s, and stay within
+299 KB across all snapshots. This independently corroborates the jemalloc
+live-heap plateau. **Growing retained Rust object bytes are not the explanation
+for the reproduced RSS slope in this instrumented run.** Glibc's mmap total is
+constant, arena size is up 2.63 MB and free arena space up 2.11 MB. RSS is up
+9,160 KiB, almost entirely anonymous (+9,096 KiB); file RSS changes by only 64 KiB.
+This is consistent with retained/touched allocator/native pages rather than
+increasing live Rust state. The counters do not identify page residency per
+allocation or account for every native allocation/stack page, so they do not
+prove an exact glibc fragmentation mechanism or an RSS plateau. The earlier
+arena/trim experiments also failed, so no allocator tuning is proposed as a fix.
+
+### Verdict and scope
+
+No production logic/API change or speculative leak fix was made. The bounded
+quantity demonstrated by both allocators is **live Rust heap**, not process RSS.
+Default uninstrumented acceptance remains unproven, and the final System
+instrumented RSS criterion still fails. All three allowed measured workloads
+were used (jemalloc success, canceled System run with lost artifacts, final
+System recovery); no fourth soak or threshold change was made.
+
+Fresh uncached full workspace Clippy then tests passed in run 43657018303 on
+`4802e92518a36fd53e4181b6a02df83462c0c088`; the Rust source is unchanged since.
+Targeted default server CI passed 43647366793; profiler feature Clippy,
+allocation/reallocation/free unit test, and batched-symbolizer regression passed
+43664502873 on `862fa042e2293751ad9ecd260916cfc4debc992b`.
+All Cargo/Go/Docker execution stayed on GitHub Actions.
+
+Evidence: `memory/evidence/matching-heap-profile-20261115/system/` contains raw
+snapshots, compressed full symbolized stacks, compact top-stack deltas, both
+lanes' samples/summaries, verdict and binary identity. Full service logs remain
+in `/mnt/storage/service/matching-heap-profile/system-final/rust/` and the
+three-day Actions artifacts. Artifact downloads used the API streamed to storage
+when gh's temporary zip exceeded the /tmp quota. No service/branch was deleted.

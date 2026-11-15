@@ -1,0 +1,1 @@
+seconds=1200 live_requested=95061826 sampled_live=257 arena=31850496 uordblks=23601168 fordblks=8249328 hblkhd=75571200 keepcost=133120
