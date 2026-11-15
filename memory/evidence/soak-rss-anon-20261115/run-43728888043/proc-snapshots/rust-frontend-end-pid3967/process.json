@@ -1,0 +1,16 @@
+{
+  "role": "rust-frontend",
+  "pid": 3967,
+  "elapsed_s": 4207,
+  "exe": "/home/runner/work/cadence-rust/cadence-rust/bin/cadence-server",
+  "sample": {
+    "pid": 3967,
+    "rss_kb": 75808,
+    "rss_anon_kb": 30812,
+    "rss_file_kb": 44996,
+    "rss_shmem_kb": 0,
+    "threads": 12,
+    "fds": 122,
+    "cpu_ticks": 27829
+  }
+}

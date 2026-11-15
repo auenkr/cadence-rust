@@ -402,6 +402,26 @@ try:
                 rss_line = next((line for line in block[1:] if line.startswith('Rss:')), 'Rss: 0 kB')
                 rss_match = re.search(r'Rss:\s+(\d+)', rss_line)
                 mappings.append((int(rss_match.group(1)) if rss_match else 0, block))
+            # Keep a compact record of every VMA, not only the largest 20.
+            # This lets later analysis distinguish arena heap segments from
+            # anonymous stack-sized mappings that fall below the RSS cutoff.
+            import csv
+            with (root / 'smaps-mappings.csv').open('w', newline='') as out:
+                writer = csv.writer(out)
+                writer.writerow(('start', 'end', 'perms', 'offset', 'device', 'inode', 'pathname',
+                                 'size_kb', 'rss_kb', 'anonymous_kb', 'vmflags'))
+                for rss_kb, block in mappings:
+                    header = re.match(
+                        r'^([0-9a-f]+)-([0-9a-f]+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)(?:\s+(.*))?$',
+                        block[0])
+                    if not header:
+                        continue
+                    def field(label, default='0'):
+                        match = next((line for line in block[1:] if line.startswith(label + ':')), None)
+                        value = re.search(r':\s*(.*)', match).group(1).strip() if match else default
+                        return value
+                    writer.writerow((*header.groups()[:6], header.group(7) or '', field('Size'), rss_kb,
+                                     field('Anonymous'), field('VmFlags', '')))
             mappings.sort(key=lambda item: item[0], reverse=True)
             with (root / 'smaps-top20-by-rss.txt').open('w') as out:
                 out.write(f'Process {name} pid={pid} elapsed_s={int(elapsed)}; top mappings by Rss\n')
@@ -417,19 +437,13 @@ try:
         row = {'t': int(el), 'wall': int(time.time()), 'load1': os.getloadavg()[0]}
         for n, key in [(FE, 'frontend'), (MT, 'matching')]:
             row[key] = proc_stats(n)
-        matching_stats = row.get('matching')
-        if matching_stats:
-            due = []
-            if el <= SAMPLE:
-                due.append('start')
-            if el >= RESTART_AT:
-                due.append('middle')
-            if el >= SOAK_SECONDS:
-                due.append('end')
-            for phase in due:
-                if phase not in captured_proc_snapshots:
-                    capture_proc_snapshot(MT, phase, matching_stats, el)
-                    captured_proc_snapshots.add(phase)
+        if el <= SAMPLE:
+            for name in (FE, MT):
+                stats = row.get('frontend' if name == FE else 'matching')
+                key = (name, 'start')
+                if stats and key not in captured_proc_snapshots:
+                    capture_proc_snapshot(name, 'start', stats, el)
+                    captured_proc_snapshots.add(key)
         lines = [l for l in driver_log.read_text(errors='replace').splitlines() if l.startswith('STATS ')]
         row['driver'] = json.loads(lines[-1][6:]) if lines else None
         row['fail_lines'] = sum(1 for l in driver_log.read_text(errors='replace').splitlines() if l.startswith('FAIL '))
@@ -445,6 +459,15 @@ try:
             start(FE, frontend_cmd(), env=frontend_env)
             restart_ok = wait_port(ports['FRONTEND_PORT'], 120, FE) and wait_port(ports['FRONTEND_PORT_GRPC'], 10, FE)
             record(FE + '-restarted-listening', bool(restart_ok), f't={int(time.monotonic()-t0)}')
+            if restart_ok:
+                # Capture the Frontend after its scheduled restart, so the
+                # middle snapshot belongs to the process used for the second
+                # half of the RSS slope window.
+                for name in (FE, MT):
+                    key = (name, 'middle')
+                    if key not in captured_proc_snapshots:
+                        capture_proc_snapshot(name, 'middle', proc_stats(name), time.monotonic() - t0)
+                        captured_proc_snapshots.add(key)
         if el > SOAK_SECONDS + 600:
             record('soak-driver-timeout', False, 'exceeded soak+10m')
             kill('sdk-driver')
@@ -453,8 +476,11 @@ try:
     # The SDK driver can finish slightly before SOAK_SECONDS, so don't rely on
     # another sampling-loop iteration to capture the final process mappings.
     final_elapsed = time.monotonic() - t0
-    if 'end' not in captured_proc_snapshots:
-        capture_proc_snapshot(MT, 'end', proc_stats(MT), final_elapsed)
+    for name in (FE, MT):
+        key = (name, 'end')
+        if key not in captured_proc_snapshots:
+            capture_proc_snapshot(name, 'end', proc_stats(name), final_elapsed)
+            captured_proc_snapshots.add(key)
     record('soak-driver-exit', drv.returncode == 0, f'exit={drv.returncode}')
     # Diagnostics (non-gating): task list pollers/backlog and one workflow history as the Frontend sees them.
     try:
