@@ -117,3 +117,13 @@ formatting (committed unchanged in `035fa2506`). Both feature Clippy checks,
 System sample-lifetime regression, default server Clippy/tests and configured
 metric comparisons passed. Imported its Cargo.lock (backtrace dependencies)
 without invoking Cargo locally. Redundant automatic CI 43655942178 canceled.
+
+## 00:25 UTC checkpoint
+
+System-allocator soak 43655943235 built successfully and both lanes started
+at 00:09:58 UTC. Measured-soak count is 2/3. The final slot is reserved for
+uninstrumented default-build confirmation after interpreting these snapshots.
+Fresh workspace CI https://github.com/auenkr/cadence-rust/actions/runs/43657018303
+at `4802e9251` passed Clippy and is running workspace tests, using clean_target=true.
+Redundant automatic lockfile CI 43656047369 was canceled. No production fix or
+second-soak measurement conclusion yet; no local Cargo/Go/Docker commands.
