@@ -450,6 +450,11 @@ try:
             kill('sdk-driver')
             break
         time.sleep(SAMPLE)
+    # The SDK driver can finish slightly before SOAK_SECONDS, so don't rely on
+    # another sampling-loop iteration to capture the final process mappings.
+    final_elapsed = time.monotonic() - t0
+    if 'end' not in captured_proc_snapshots:
+        capture_proc_snapshot(MT, 'end', proc_stats(MT), final_elapsed)
     record('soak-driver-exit', drv.returncode == 0, f'exit={drv.returncode}')
     # Diagnostics (non-gating): task list pollers/backlog and one workflow history as the Frontend sees them.
     try:

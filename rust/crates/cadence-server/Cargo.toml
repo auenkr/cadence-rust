@@ -9,7 +9,7 @@ name = "cadence-server"
 path = "src/main.rs"
 
 [features]
-default = ["jemalloc-default"]
+default = []
 jemalloc-default = ["dep:tikv-jemallocator"]
 system-allocator = []
 system-heap-profile = ["dep:backtrace"]

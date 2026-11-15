@@ -129,3 +129,47 @@ file-backed before changing the parity criterion or allocator default.
 Checkpoint 2026-11-15 07:24 UTC: diagnostic soak 43686161316 remains active;
 both `go-baseline` and `rust` are in their soak workload steps. No analyzer
 verdict or RSS-component samples are available until the lanes complete.
+
+## Diagnostic soak 43686161316 result and allocator decision
+
+- Run: https://github.com/auenkr/cadence-rust/actions/runs/43686161316
+- Tested source: `4e16d751da14ae652fd2c4462950665e95ef50ef`; workflow conclusion
+  `success`, but analyzer verdict **RUST OVERALL: FAIL**.
+- Rust Matching binary SHA256:
+  `d2ff8072bb3183fabd3da5226c25907a31a87ce16fe9db0d4feb2cb1b9fc6bae`.
+- All 42,000 workflows completed with zero failures, panics, or process deaths.
+  Rust e2e p50/p95/p99 were 3078/4180/4902 ms vs Go 3090/4096/4117;
+  query p99 was 158 vs 45 ms; start p95/p99 were 106/275 vs 14/20 ms.
+  Thus jemalloc with the background purger did not show a latency win; earlier
+  System allocator run 43663938440 had query p99 31 vs 36 ms and start p95/p99
+  13/18 vs 9/16 ms.
+- Matching total RSS slope was 11.15 MiB/h vs Go 1.50. Component slopes show
+  Rust `RssAnon` 11.11 MiB/h and `RssFile` 0.00; Go `RssAnon` 0.86 and
+  `RssFile` 0.74. The suspected binary-page explanation is disproved for this
+  run. Matching RSS criteria therefore remain total RSS; do not replace them
+  with anonymous RSS criteria because anonymous growth is the failing signal.
+- Rust Matching `smaps_rollup` at start/mid shows anonymous RSS increasing from
+  26,720 to 46,312 KiB while file-backed PSS changes 19,622 to 21,190 KiB.
+  The main executable's executable mapping grows from 29,792 to 32,264 KiB.
+  Anonymous mappings grow across multiple regions: a new listed region had
+  6,560 KiB resident at midpoint, and a persistent 14 MiB region rose from
+  4,884 to 5,332 KiB. Process threads increase from 33 to 35 late in the run.
+  These are anonymous allocator/stack mappings, not the binary text mapping.
+  The top-mapping snapshots alone do not identify which allocations own the
+  pages. This aligns with the earlier instrumented
+  System allocator profile: live Rust allocations stayed flat while anonymous
+  RSS and glibc free arena bytes rose. No program-logic fix is justified by
+  these observations.
+- The requested end snapshots were absent: the SDK driver ended around 55 sec
+  before the sampler's nominal `SOAK_SECONDS`, ending the sampling loop before
+  its threshold check. Fixed the harness to capture Matching mappings once
+  after the driver exits and before service teardown. This fix will be covered
+  by the next permitted soak.
+- As directed, normal cadence-server builds now use the System allocator again:
+  jemalloc's RSS slope was worse and its latency tails regressed. `heap-profile`
+  remains opt-in and explicitly enables jemalloc profiling; the separate
+  `jemalloc-default` feature remains available for controlled comparison.
+  This is allocator selection only; no service logic changed.
+- Artifacts (samples, summaries, binary hash, verdict, start/mid `smaps_rollup`
+  and top-20 mappings for Rust and Go) are in
+  `memory/evidence/server-jemalloc-default-20261115/run-43686161316/`.
