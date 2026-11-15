@@ -188,3 +188,13 @@ at `862fa042e2293751ad9ecd260916cfc4debc992b`: symbolizer regression, both
 profiler feature Clippy checks, allocation lifetime test, default server
 Clippy/tests and metric comparisons. Compact source/exit evidence is under
 `ci-profilers-final/`. No Rust source changed since fresh workspace run 43657018303.
+
+## 02:34 UTC resumed checkpoint
+
+Resumed from clean pushed head `fa4419df3`. Recovery soak 43663938440 still
+has both lanes in their workload steps (started 01:48 UTC); build succeeded.
+All three measured slots are exhausted. No new dispatch or production change.
+Reviewed profiler counters and post-processing: exact live bytes include
+recursive diagnostic allocations; sampled stacks exclude them and are ownership
+observations rather than unbiased byte totals. Awaiting late snapshots and
+comparison before deciding whether live state or allocator retention grows.
