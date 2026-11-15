@@ -85,3 +85,19 @@ available until the 70-minute workload and analyzer finish.
 Checkpoint 2026-11-15 05:48 UTC: final allowed soak 43680073670 has both Go
 baseline and Rust lanes active in their workload steps. The second soak has not
 reported a failure; its analyzer verdict is not yet available.
+
+## RSS attribution instrumentation prepared
+
+The soak harness now samples `RssAnon`, `RssFile`, and `RssShmem` from process
+status for Frontend and Matching and appends those values to `samples.csv`
+without changing existing columns. Its summary records slopes for each component.
+The Rust and Go Matching processes each capture `smaps_rollup` and the top 20
+`smaps` regions by RSS at workload start, midpoint, and end. These diagnostics
+are copied into each lane artifact and do not gate the workload. Python AST
+parsing and `git diff --check` passed locally; no Cargo, Go, or Docker command
+was run locally.
+
+These changes are committed after tuned soak 43680073670 was dispatched, so
+that run still validates only the 1,000 ms decay config. Review it before
+starting any further soak. The diagnostic instrumentation is queued for the
+next permitted soak if the tuned run does not establish a passing verdict.
