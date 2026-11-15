@@ -296,13 +296,17 @@ impl NativeTaskWriter {
                 } else {
                     drain_batch_with(&mut vec![first], &mut receiver, maximum)
                 };
-                let data = batch
-                    .iter()
-                    .map(|request| request.task.clone())
-                    .collect::<Vec<_>>();
+                // Keep the request payloads in one owned batch and let the
+                // queue build its persistence rows from references. Cloning
+                // each task here would duplicate its serialized payload.
+                let (responses, data): (Vec<_>, Vec<_>) = batch
+                    .into_iter()
+                    .map(|request| (request.response, request.task))
+                    .unzip();
                 let queue_copy = queue.clone();
                 let result = crate::matching_blocking::run(move || {
-                    queue_copy.append_pending(&data, crate::matching_dispatch::now())
+                    let pending = data.iter().collect::<Vec<_>>();
+                    queue_copy.append_pending_refs(&pending, crate::matching_dispatch::now())
                 })
                 .await;
                 let result = match result {
@@ -339,13 +343,13 @@ impl NativeTaskWriter {
                 }
                 match result {
                     Ok(tasks) => {
-                        for (request, task) in batch.into_iter().zip(tasks) {
-                            let _ = request.response.send(Ok(task));
+                        for (response, task) in responses.into_iter().zip(tasks) {
+                            let _ = response.send(Ok(task));
                         }
                     }
                     Err(error) => {
-                        for request in batch {
-                            let _ = request.response.send(Err(error.clone()));
+                        for response in responses {
+                            let _ = response.send(Err(error.clone()));
                         }
                     }
                 }

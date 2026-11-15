@@ -1,0 +1,93 @@
+start,end,perms,offset,device,inode,pathname,size_kb,rss_kb,anonymous_kb,vmflags
+57479d9d5000,57479eb3b000,r--p,00000000,08:01,7793527,/home/runner/work/cadence-rust/cadence-rust/bin/cadence-server,17816 kB,5432,0 kB,rd mr mw me sd
+57479eb3b000,5747a29b5000,r-xp,01165000,08:01,7793527,/home/runner/work/cadence-rust/cadence-rust/bin/cadence-server,63976 kB,35640,0 kB,rd ex mr mw me sd
+5747a29b5000,5747a2c2c000,r--p,04fde000,08:01,7793527,/home/runner/work/cadence-rust/cadence-rust/bin/cadence-server,2524 kB,2508,2508 kB,rd mr mw me ac sd
+5747a2c2c000,5747a2c37000,rw-p,05254000,08:01,7793527,/home/runner/work/cadence-rust/cadence-rust/bin/cadence-server,44 kB,40,40 kB,rd wr mr mw me ac sd
+5747a2c37000,5747a2c39000,rw-p,00000000,00:00,0,,8 kB,8,8 kB,rd wr mr mw me ac sd
+5747a98d0000,5747aa30a000,rw-p,00000000,00:00,0,[heap],10472 kB,9556,9556 kB,rd wr mr mw me ac sd
+7ce00f5fd000,7ce00fdff000,rw-p,00000000,00:00,0,,8200 kB,4104,4104 kB,rd wr mr mw me ac sd
+7ce00fdff000,7ce010000000,rw-p,00000000,00:00,0,,2052 kB,152,152 kB,rd wr mr mw me gu ac sd nh
+7ce010000000,7ce0105aa000,rw-p,00000000,00:00,0,,5800 kB,4632,4632 kB,rd wr mr mw me ac sd
+7ce0105aa000,7ce014000000,---p,00000000,00:00,0,,59736 kB,0,0 kB,mr mw me sd
+7ce0141f2000,7ce0143f3000,rw-p,00000000,00:00,0,,2052 kB,56,56 kB,rd wr mr mw me gu ac sd nh
+7ce0143f3000,7ce014bf5000,rw-p,00000000,00:00,0,,8200 kB,4104,4104 kB,rd wr mr mw me ac sd
+7ce014bf5000,7ce014ff7000,rw-p,00000000,00:00,0,,4104 kB,20,20 kB,rd wr mr mw me gu ac sd nh
+7ce014ff7000,7ce0157f9000,rw-p,00000000,00:00,0,,8200 kB,4104,4104 kB,rd wr mr mw me ac sd
+7ce0157f9000,7ce016600000,rw-p,00000000,00:00,0,,14364 kB,628,628 kB,rd wr mr mw me gu ac sd nh
+7ce016600000,7ce016628000,r--p,00000000,08:01,5414,/usr/lib/x86_64-linux-gnu/libc.so.6,160 kB,160,0 kB,rd mr mw me sd
+7ce016628000,7ce0167c5000,r-xp,00028000,08:01,5414,/usr/lib/x86_64-linux-gnu/libc.so.6,1652 kB,1184,0 kB,rd ex mr mw me sd
+7ce0167c5000,7ce016813000,r--p,001c5000,08:01,5414,/usr/lib/x86_64-linux-gnu/libc.so.6,312 kB,184,0 kB,rd mr mw me sd
+7ce016813000,7ce016817000,r--p,00212000,08:01,5414,/usr/lib/x86_64-linux-gnu/libc.so.6,16 kB,16,16 kB,rd mr mw me ac sd
+7ce016817000,7ce016819000,rw-p,00216000,08:01,5414,/usr/lib/x86_64-linux-gnu/libc.so.6,8 kB,8,8 kB,rd wr mr mw me ac sd
+7ce016819000,7ce016826000,rw-p,00000000,00:00,0,,52 kB,20,20 kB,rd wr mr mw me ac sd
+7ce016947000,7ce01694b000,r--p,00000000,08:01,6550,/usr/lib/x86_64-linux-gnu/libzstd.so.1.5.7,16 kB,16,0 kB,rd mr mw me sd
+7ce01694b000,7ce0169f1000,r-xp,00004000,08:01,6550,/usr/lib/x86_64-linux-gnu/libzstd.so.1.5.7,664 kB,64,0 kB,rd ex mr mw me sd
+7ce0169f1000,7ce0169fe000,r--p,000aa000,08:01,6550,/usr/lib/x86_64-linux-gnu/libzstd.so.1.5.7,52 kB,52,0 kB,rd mr mw me sd
+7ce0169fe000,7ce0169ff000,r--p,000b6000,08:01,6550,/usr/lib/x86_64-linux-gnu/libzstd.so.1.5.7,4 kB,4,4 kB,rd mr mw me ac sd
+7ce0169ff000,7ce016a00000,rw-p,000b7000,08:01,6550,/usr/lib/x86_64-linux-gnu/libzstd.so.1.5.7,4 kB,4,4 kB,rd wr mr mw me ac sd
+7ce016a00000,7ce016ae4000,r--p,00000000,08:01,6521,/usr/lib/x86_64-linux-gnu/libcrypto.so.3,912 kB,912,0 kB,rd mr mw me sd
+7ce016ae4000,7ce016e78000,r-xp,000e4000,08:01,6521,/usr/lib/x86_64-linux-gnu/libcrypto.so.3,3664 kB,192,0 kB,rd ex mr mw me sd
+7ce016e78000,7ce016f97000,r--p,00478000,08:01,6521,/usr/lib/x86_64-linux-gnu/libcrypto.so.3,1148 kB,92,0 kB,rd mr mw me sd
+7ce016f97000,7ce017014000,r--p,00597000,08:01,6521,/usr/lib/x86_64-linux-gnu/libcrypto.so.3,500 kB,500,500 kB,rd mr mw me ac sd
+7ce017014000,7ce017017000,rw-p,00614000,08:01,6521,/usr/lib/x86_64-linux-gnu/libcrypto.so.3,12 kB,12,12 kB,rd wr mr mw me ac sd
+7ce017017000,7ce01701a000,rw-p,00000000,00:00,0,,12 kB,4,4 kB,rd wr mr mw me ac sd
+7ce017059000,7ce01705a000,---p,00000000,00:00,0,,4 kB,0,0 kB,mr mw me sd nh
+7ce01705a000,7ce01705c000,rw-p,00000000,00:00,0,,8 kB,0,0 kB,rd wr mr mw me ac sd nh
+7ce01705c000,7ce01705d000,---p,00000000,00:00,0,,4 kB,0,0 kB,mr mw me sd nh
+7ce01705d000,7ce01705f000,rw-p,00000000,00:00,0,,8 kB,0,0 kB,rd wr mr mw me ac sd nh
+7ce01705f000,7ce017060000,---p,00000000,00:00,0,,4 kB,0,0 kB,mr mw me sd nh
+7ce017060000,7ce017062000,rw-p,00000000,00:00,0,,8 kB,0,0 kB,rd wr mr mw me ac sd nh
+7ce017062000,7ce017063000,---p,00000000,00:00,0,,4 kB,0,0 kB,mr mw me sd nh
+7ce017063000,7ce017065000,rw-p,00000000,00:00,0,,8 kB,0,0 kB,rd wr mr mw me ac sd nh
+7ce017065000,7ce017066000,---p,00000000,00:00,0,,4 kB,0,0 kB,mr mw me sd nh
+7ce017066000,7ce017068000,rw-p,00000000,00:00,0,,8 kB,0,0 kB,rd wr mr mw me ac sd nh
+7ce017068000,7ce017069000,---p,00000000,00:00,0,,4 kB,0,0 kB,mr mw me sd nh
+7ce017069000,7ce01706b000,rw-p,00000000,00:00,0,,8 kB,0,0 kB,rd wr mr mw me ac sd nh
+7ce01706b000,7ce01706c000,---p,00000000,00:00,0,,4 kB,0,0 kB,mr mw me sd nh
+7ce01706c000,7ce01706e000,rw-p,00000000,00:00,0,,8 kB,0,0 kB,rd wr mr mw me ac sd nh
+7ce01706e000,7ce01706f000,---p,00000000,00:00,0,,4 kB,0,0 kB,mr mw me sd nh
+7ce01706f000,7ce017071000,rw-p,00000000,00:00,0,,8 kB,0,0 kB,rd wr mr mw me ac sd nh
+7ce017071000,7ce017072000,---p,00000000,00:00,0,,4 kB,0,0 kB,mr mw me sd nh
+7ce017072000,7ce017074000,rw-p,00000000,00:00,0,,8 kB,0,0 kB,rd wr mr mw me ac sd nh
+7ce017074000,7ce017076000,rw-p,00000000,00:00,0,,8 kB,8,8 kB,rd wr mr mw me ac sd
+7ce017076000,7ce017079000,r--p,00000000,08:01,5702,/usr/lib/x86_64-linux-gnu/libz.so.1.3.1,12 kB,12,0 kB,rd mr mw me sd
+7ce017079000,7ce01708c000,r-xp,00003000,08:01,5702,/usr/lib/x86_64-linux-gnu/libz.so.1.3.1,76 kB,64,0 kB,rd ex mr mw me sd
+7ce01708c000,7ce017092000,r--p,00016000,08:01,5702,/usr/lib/x86_64-linux-gnu/libz.so.1.3.1,24 kB,8,0 kB,rd mr mw me sd
+7ce017092000,7ce017093000,r--p,0001c000,08:01,5702,/usr/lib/x86_64-linux-gnu/libz.so.1.3.1,4 kB,4,4 kB,rd mr mw me ac sd
+7ce017093000,7ce017094000,rw-p,0001d000,08:01,5702,/usr/lib/x86_64-linux-gnu/libz.so.1.3.1,4 kB,4,4 kB,rd wr mr mw me ac sd
+7ce017094000,7ce017096000,rw-p,00000000,00:00,0,,8 kB,8,8 kB,rd wr mr mw me ac sd
+7ce017096000,7ce0170a8000,r--p,00000000,08:01,5417,/usr/lib/x86_64-linux-gnu/libm.so.6,72 kB,72,0 kB,rd mr mw me sd
+7ce0170a8000,7ce017129000,r-xp,00012000,08:01,5417,/usr/lib/x86_64-linux-gnu/libm.so.6,516 kB,192,0 kB,rd ex mr mw me sd
+7ce017129000,7ce017176000,r--p,00093000,08:01,5417,/usr/lib/x86_64-linux-gnu/libm.so.6,308 kB,152,0 kB,rd mr mw me sd
+7ce017176000,7ce017177000,r--p,000df000,08:01,5417,/usr/lib/x86_64-linux-gnu/libm.so.6,4 kB,4,4 kB,rd mr mw me ac sd
+7ce017177000,7ce017178000,rw-p,000e0000,08:01,5417,/usr/lib/x86_64-linux-gnu/libm.so.6,4 kB,4,4 kB,rd wr mr mw me ac sd
+7ce017178000,7ce01717c000,r--p,00000000,08:01,5697,/usr/lib/x86_64-linux-gnu/libgcc_s.so.1,16 kB,16,0 kB,rd mr mw me sd
+7ce01717c000,7ce01719f000,r-xp,00004000,08:01,5697,/usr/lib/x86_64-linux-gnu/libgcc_s.so.1,140 kB,64,0 kB,rd ex mr mw me sd
+7ce01719f000,7ce0171a3000,r--p,00027000,08:01,5697,/usr/lib/x86_64-linux-gnu/libgcc_s.so.1,16 kB,16,0 kB,rd mr mw me sd
+7ce0171a3000,7ce0171a4000,r--p,0002b000,08:01,5697,/usr/lib/x86_64-linux-gnu/libgcc_s.so.1,4 kB,4,4 kB,rd mr mw me ac sd
+7ce0171a4000,7ce0171a5000,rw-p,0002c000,08:01,5697,/usr/lib/x86_64-linux-gnu/libgcc_s.so.1,4 kB,4,4 kB,rd wr mr mw me ac sd
+7ce0171a5000,7ce0171c7000,r--p,00000000,08:01,6522,/usr/lib/x86_64-linux-gnu/libssl.so.3,136 kB,136,0 kB,rd mr mw me sd
+7ce0171c7000,7ce01727a000,r-xp,00022000,08:01,6522,/usr/lib/x86_64-linux-gnu/libssl.so.3,716 kB,64,0 kB,rd ex mr mw me sd
+7ce01727a000,7ce0172a8000,r--p,000d5000,08:01,6522,/usr/lib/x86_64-linux-gnu/libssl.so.3,184 kB,32,0 kB,rd mr mw me sd
+7ce0172a8000,7ce0172b2000,r--p,00103000,08:01,6522,/usr/lib/x86_64-linux-gnu/libssl.so.3,40 kB,40,40 kB,rd mr mw me ac sd
+7ce0172b2000,7ce0172b6000,rw-p,0010d000,08:01,6522,/usr/lib/x86_64-linux-gnu/libssl.so.3,16 kB,16,16 kB,rd wr mr mw me ac sd
+7ce0172b6000,7ce0172b7000,---p,00000000,00:00,0,,4 kB,0,0 kB,mr mw me sd nh
+7ce0172b7000,7ce0172b9000,rw-p,00000000,00:00,0,,8 kB,0,0 kB,rd wr mr mw me ac sd nh
+7ce0172b9000,7ce0172ba000,---p,00000000,00:00,0,,4 kB,0,0 kB,mr mw me sd nh
+7ce0172ba000,7ce0172bc000,rw-p,00000000,00:00,0,,8 kB,0,0 kB,rd wr mr mw me ac sd nh
+7ce0172bc000,7ce0172bd000,rw-p,00000000,00:00,0,,4 kB,4,4 kB,rd wr mr mw me ac sd
+7ce0172bd000,7ce0172be000,rw-p,00000000,00:00,0,,4 kB,4,4 kB,rd wr mr mw me nr wf dd sd dp
+7ce0172be000,7ce0172bf000,---p,00000000,00:00,0,,4 kB,0,0 kB,mr mw me sd nh
+7ce0172bf000,7ce0172c1000,rw-p,00000000,00:00,0,,8 kB,0,0 kB,rd wr mr mw me ac sd nh
+7ce0172c1000,7ce0172c3000,rw-p,00000000,00:00,0,,8 kB,8,8 kB,rd wr mr mw me ac sd
+7ce0172c3000,7ce0172c7000,r--p,00000000,00:00,0,[vvar],16 kB,0,0 kB,rd mr pf io de dd sd
+7ce0172c7000,7ce0172c9000,r--p,00000000,00:00,0,[vvar_vclock],8 kB,0,0 kB,rd mr pf io de dd sd
+7ce0172c9000,7ce0172cb000,r-xp,00000000,00:00,0,[vdso],8 kB,8,0 kB,rd ex mr mw me de sd
+7ce0172cb000,7ce0172cc000,r--p,00000000,08:01,5411,/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2,4 kB,4,0 kB,rd mr mw me sd
+7ce0172cc000,7ce0172fa000,r-xp,00001000,08:01,5411,/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2,184 kB,184,0 kB,rd ex mr mw me sd
+7ce0172fa000,7ce017305000,r--p,0002f000,08:01,5411,/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2,44 kB,44,0 kB,rd mr mw me sd
+7ce017305000,7ce017307000,r--p,0003a000,08:01,5411,/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2,8 kB,8,8 kB,rd mr mw me ac sd
+7ce017307000,7ce017308000,rw-p,0003c000,08:01,5411,/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2,4 kB,4,4 kB,rd wr mr mw me ac sd
+7ce017308000,7ce017309000,rw-p,00000000,00:00,0,,4 kB,4,4 kB,rd wr mr mw me ac sd
+7ffc2e6a7000,7ffc2e6da000,rw-p,00000000,00:00,0,[stack],204 kB,204,204 kB,rd wr mr mw me gd ac
+ffffffffff600000,ffffffffff601000,--xp,00000000,00:00,0,[vsyscall],4 kB,0,0 kB,ex
