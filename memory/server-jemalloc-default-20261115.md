@@ -114,7 +114,14 @@ are copied into each lane artifact and do not gate the workload. Python AST
 parsing and `git diff --check` passed locally; no Cargo, Go, or Docker command
 was run locally.
 
-These changes are committed after tuned soak 43680073670 was dispatched, so
-that run still validates only the 1,000 ms decay config. Review it before
-starting any further soak. The diagnostic instrumentation is queued for the
-next permitted soak if the tuned run does not establish a passing verdict.
+These changes were committed after tuned soak 43680073670 was dispatched, so
+that run validates only the 1,000 ms decay config. That run completed with a
+FAIL verdict as recorded above. The next soak has restored default decay and
+includes the diagnostic instrumentation.
+
+Diagnostic soak 3 is now running at
+https://github.com/auenkr/cadence-rust/actions/runs/43686161316 on head
+`4e16d751da14ae652fd2c4462950665e95ef50ef`. It uses the default
+`go-baseline,rust` lanes with no profiler or malloc environment inputs. Its
+result will determine whether the Matching RSS slope is anonymous or
+file-backed before changing the parity criterion or allocator default.
