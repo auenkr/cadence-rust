@@ -5,6 +5,13 @@ name: rust-ci
 on:
   workflow_dispatch:
     inputs:
+      heap_profile_run_id:
+        description: Replay System heap symbolization from an existing soak (skips builds/tests)
+        default: ""
+      heap_profile_checks:
+        description: Validate opt-in server heap profiler features
+        type: boolean
+        default: false
       package:
         description: "Crate to test (empty = whole workspace)"
         required: false
@@ -59,7 +66,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  heap-analysis:
+    if: inputs.heap_profile_run_id != '' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.heap_profile_run_id }}
+          name: soak-binaries
+          path: bin
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.heap_profile_run_id }}
+          name: soak-rust
+          path: data
+      - name: Symbolize snapshots in one addr2line process
+        timeout-minutes: 10
+        run: |
+          python3 -m py_compile tests/gates/system-heap-symbolize.py
+          sha256sum bin/cadence-server > data/heap-profiles/symbolized-binary.sha256
+          python3 tests/gates/system-heap-symbolize.py bin/cadence-server data/heap-profiles
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: system-heap-analysis
+          path: data/heap-profiles/
+          retention-days: 3
   clippy-test:
+    if: inputs.heap_profile_run_id == ''
     runs-on: ubuntu-latest
     timeout-minutes: 90
     services:
@@ -615,6 +653,16 @@ jobs:
           echo "$result" > matching-runtime-format.exit
           cat matching-runtime-format.log
           exit "$result"
+      - name: Test batched heap profile analysis
+        if: inputs.heap_profile_checks == true
+        run: python3 tests/gates/test-system-heap-symbolize.py
+      - name: Check opt-in heap profilers
+        if: inputs.heap_profile_checks == true
+        working-directory: rust
+        run: |
+          cargo clippy -p cadence-server --bin cadence-server --features heap-profile -- -D warnings
+          cargo clippy -p cadence-server --bin cadence-server --features system-heap-profile -- -D warnings
+          cargo test -p cadence-server --bin cadence-server --features system-heap-profile
       - name: Clippy
         working-directory: rust
         run: |

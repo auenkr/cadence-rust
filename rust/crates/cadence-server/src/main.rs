@@ -1,7 +1,18 @@
+#[cfg(feature = "heap-profile")]
+mod heap_profile;
+
+#[cfg(feature = "system-heap-profile")]
+mod system_heap_profile;
+
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    #[cfg(feature = "heap-profile")]
+    heap_profile::start();
+    #[cfg(feature = "system-heap-profile")]
+    system_heap_profile::start();
+
     // Unset RUST_LOG keeps the default `warn` level, so nothing new is logged unless it is set.
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
     tracing_subscriber::fmt()
