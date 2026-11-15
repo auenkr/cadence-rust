@@ -17,10 +17,12 @@ No History or Matching workflow logic was changed. Static config review found Ru
 
 - `rust-ci` for `cadence-server`: https://github.com/auenkr/cadence-rust/actions/runs/43736191723 — success; branch head `b2c10ea3f7f461e2e2af9dcb1a3f34e6f145c56e`.
 - `rust-ci` for `cadence-history`: https://github.com/auenkr/cadence-rust/actions/runs/43736010933 — success; source head `09d14611064a90e52aff6f86c1d3c4a516d02b45`.
-- History benchmark suite: https://github.com/auenkr/cadence-rust/actions/runs/43736172831 (in progress at last check; harness head `cb03e4d19e6562f94d272b0555f3e1f7be267890`, source `e2f780c2d80f66327bc5da5474a2a39b6e218814`).
-- All-Rust benchmark suite: https://github.com/auenkr/cadence-rust/actions/runs/43736175975 (in progress at last check; harness head `cb03e4d19e6562f94d272b0555f3e1f7be267890`, source `e2f780c2d80f66327bc5da5474a2a39b6e218814`).
+- Earlier History suite: https://github.com/auenkr/cadence-rust/actions/runs/43736172831 — success, but invalid for allocator validation: `Benchmark/ci.sh` resolved `Benchmark/Dockerfile` from the workflow checkout, so it built System. Its artifact confirms that command. Do not use its latency data as the jemalloc result.
+- Earlier all-Rust suite: https://github.com/auenkr/cadence-rust/actions/runs/43736175975 — canceled after the same Dockerfile resolution issue was found.
+- Corrected History suite (workflow ref `perf-history-throughput-bench`): https://github.com/auenkr/cadence-rust/actions/runs/43743286537 (running at last check).
+- Corrected all-Rust suite (workflow ref `perf-history-throughput-bench`): https://github.com/auenkr/cadence-rust/actions/runs/43743289833 (running at last check).
 
-The first two benchmark dispatches using source `47f655573` failed because that source branch did not contain the benchmark Docker context. Two subsequent dispatches with the merged temporary branch's short SHA failed in `actions/checkout` (the workflow requires a full SHA). The current full-SHA runs above passed checkout and are running the suite. Replace the pending table values with final run conclusions and p50/p99/capacity results when they complete.
+The first two benchmark dispatches using source `47f655573` failed because that source branch did not contain the benchmark Docker context. Two dispatches with the merged temporary branch's short SHA failed in `actions/checkout` (the workflow requires a full SHA). Full-SHA dispatches from the harness ref ran, but used the harness ref's old Dockerfile and are not allocator evidence. Corrected runs now use the merged temporary branch for both workflow and source checkout, ensuring the allocator-enabled Dockerfile is used. Replace the pending table values with final run conclusions and p50/p99/capacity results when they complete.
 
 ## Before/after
 
@@ -39,4 +41,4 @@ gh workflow run rust-ci.yml --ref perf-history-throughput -f package=cadence-ser
 gh workflow run rust-ci.yml --ref perf-history-throughput -f package=cadence-history
 ```
 
-Benchmark dispatcher is `.github/workflows/frontend-matching-benchmark.yml` on `t3/matching-benchmark-harness`, with `sdk_openloop=true`, `sdk_suite=true`, `service=history` or `service=all`, and `source_ref=e2f780c2d80f66327bc5da5474a2a39b6e218814`.
+Benchmark dispatcher is `.github/workflows/frontend-matching-benchmark.yml` on `perf-history-throughput-bench`, with `sdk_openloop=true`, `sdk_suite=true`, `service=history` or `service=all`, and `source_ref=e2f780c2d80f66327bc5da5474a2a39b6e218814`.
