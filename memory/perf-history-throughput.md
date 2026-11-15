@@ -22,6 +22,8 @@ No History or Matching workflow logic was changed. Static config review found Ru
 - Corrected History suite (workflow ref `perf-history-throughput-bench`): https://github.com/auenkr/cadence-rust/actions/runs/43743286537 (running at last check).
 - Corrected all-Rust suite (workflow ref `perf-history-throughput-bench`): https://github.com/auenkr/cadence-rust/actions/runs/43743289833 (running at last check).
 
+Status checked 2026-11-15 18:26 UTC: both corrected benchmark jobs are still running their `Benchmark/ci.sh` step; no failure has been reported. The latest `cadence-server` and `cadence-history` Rust CI runs are green.
+
 The first two benchmark dispatches using source `47f655573` failed because that source branch did not contain the benchmark Docker context. Two dispatches with the merged temporary branch's short SHA failed in `actions/checkout` (the workflow requires a full SHA). Full-SHA dispatches from the harness ref ran, but used the harness ref's old Dockerfile and are not allocator evidence. Corrected runs now use the merged temporary branch for both workflow and source checkout, ensuring the allocator-enabled Dockerfile is used. Replace the pending table values with final run conclusions and p50/p99/capacity results when they complete.
 
 ## Before/after
