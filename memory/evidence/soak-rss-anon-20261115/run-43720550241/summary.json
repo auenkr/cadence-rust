@@ -1,0 +1,61 @@
+{
+  "label": "rust",
+  "samples": 70,
+  "duration_s": 4146,
+  "restart_at_s": 2100,
+  "started": 42000,
+  "completed": 42000,
+  "failed": 0,
+  "in_flight_at_end": 0,
+  "fail_stage_counts": {},
+  "fail_examples": [],
+  "query_init_attempts": 29966,
+  "query_init_workflows": 20949,
+  "retried_calls": 29966,
+  "e2e_ms": {
+    "p50": 3084,
+    "p95": 4091,
+    "p99": 4109,
+    "max": 12709
+  },
+  "query_ms": {
+    "p50": 11,
+    "p95": 23,
+    "p99": 31
+  },
+  "start_ms": {
+    "p50": 8,
+    "p95": 12,
+    "p99": 21
+  },
+  "slopes": {
+    "window_s": [
+      1146,
+      4146
+    ],
+    "frontend_window_s": [
+      2400,
+      4146
+    ],
+    "fe_rss_mb_per_h": 12.494869058977363,
+    "fe_fds_per_h": 3.3621290374523065,
+    "mt_rss_mb_per_h": 4.172646087496713,
+    "mt_fds_per_h": 0.32162045688897845,
+    "fe_rss_anon_mb_per_h": 12.273436726414284,
+    "fe_rss_file_mb_per_h": 0.2667404527665661,
+    "fe_rss_shmem_mb_per_h": 0.0,
+    "mt_rss_anon_mb_per_h": 4.036601670275133,
+    "mt_rss_file_mb_per_h": 0.1564840821535793,
+    "mt_rss_shmem_mb_per_h": 0.0
+  },
+  "peak": {
+    "fe_rss_mb": 78.9,
+    "fe_fds": 133,
+    "mt_rss_mb": 76.9,
+    "mt_fds": 126,
+    "load1": 6.64208984375
+  },
+  "panic_in_logs": false,
+  "service_died_steps": [],
+  "failed_steps": []
+}
