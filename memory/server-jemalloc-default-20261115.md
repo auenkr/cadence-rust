@@ -232,4 +232,20 @@ mapping capture is available yet.
   `two_history=true`, `all_rust_recovery=true`:
   https://github.com/auenkr/cadence-rust/actions/runs/43700466749.
 - Tested head: `bd5627046183c82746e8e9057b1c49f1c5c0aaee`. Result and
-  cadence-server binary SHA256: pending.
+  workflow conclusion SUCCESS. `cargo-build.exit=0`, `gate.exit=0`, and
+  `GATE SUMMARY failed: []`.
+- cadence-server binary SHA256:
+  `40cdb21e8539c2ff826cc6fcde654b73ecc98f0ec62b724594843979686e3c10`;
+  cadence-history binary SHA256:
+  `7ed1c5f961456cad9cf6b8869fbaee04f1dff5c876ffbdd7b04e5e93f1bd5b1d`.
+- Gate logs, exit codes, source SHA and binary hashes are saved in
+  `memory/evidence/server-jemalloc-default-20261115/gate-43700466749/`.
+
+## Final status
+
+The default-System soak passed `RUST OVERALL: PASS`, and the MySQL all-Rust
+recovery gate passed. Targeted and full fresh-target Rust CI also passed. The
+normal cadence-server build uses System allocation; jemalloc remains an
+opt-in feature, including for heap-profile builds. No RSS analyzer threshold
+was changed because Matching file-backed RSS was flat and the observed anonymous
+growth remained within the existing symmetric total-RSS allowance.
