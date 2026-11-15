@@ -4,6 +4,16 @@ mod heap_profile;
 #[cfg(feature = "system-heap-profile")]
 mod system_heap_profile;
 
+#[cfg(all(feature = "jemalloc-default", not(feature = "system-allocator")))]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
+// Let jemalloc return unused pages to the OS from its background purger while
+// keeping its normal decay intervals and other allocator defaults.
+#[cfg(all(feature = "jemalloc-default", not(feature = "system-allocator")))]
+#[no_mangle]
+pub static malloc_conf: &[u8] = b"background_thread:true\0";
+
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
