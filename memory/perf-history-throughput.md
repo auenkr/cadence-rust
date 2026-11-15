@@ -15,12 +15,12 @@ No History or Matching workflow logic was changed. Static config review found Ru
 
 ## Validation runs
 
-- `rust-ci` for `cadence-server`, pre-History allocator addition: https://github.com/auenkr/cadence-rust/actions/runs/43735842833 (running at report creation; head `47f655573`).
-- `rust-ci` for `cadence-history`: https://github.com/auenkr/cadence-rust/actions/runs/43736010933 (running at report creation; head `09d146110`).
-- History benchmark suite: https://github.com/auenkr/cadence-rust/actions/runs/43736038261 (running at report creation; harness head `cb03e4d19e6562f94d272b0555f3e1f7be267890`, source `e2f780c2d`).
-- All-Rust benchmark suite: https://github.com/auenkr/cadence-rust/actions/runs/43736041525 (running at report creation; harness head `cb03e4d19e6562f94d272b0555f3e1f7be267890`, source `e2f780c2d`).
+- `rust-ci` for `cadence-server`: https://github.com/auenkr/cadence-rust/actions/runs/43736191723 — success; branch head `b2c10ea3f7f461e2e2af9dcb1a3f34e6f145c56e`.
+- `rust-ci` for `cadence-history`: https://github.com/auenkr/cadence-rust/actions/runs/43736010933 — success; source head `09d14611064a90e52aff6f86c1d3c4a516d02b45`.
+- History benchmark suite: https://github.com/auenkr/cadence-rust/actions/runs/43736172831 (in progress at last check; harness head `cb03e4d19e6562f94d272b0555f3e1f7be267890`, source `e2f780c2d80f66327bc5da5474a2a39b6e218814`).
+- All-Rust benchmark suite: https://github.com/auenkr/cadence-rust/actions/runs/43736175975 (in progress at last check; harness head `cb03e4d19e6562f94d272b0555f3e1f7be267890`, source `e2f780c2d80f66327bc5da5474a2a39b6e218814`).
 
-The first two benchmark dispatches used source `47f655573`, which predates the harness context in that checkout and failed. Corrected runs above use the merged temporary harness branch. Replace this section with final run conclusions and p50/p99/capacity results when they complete.
+The first two benchmark dispatches using source `47f655573` failed because that source branch did not contain the benchmark Docker context. Two subsequent dispatches with the merged temporary branch's short SHA failed in `actions/checkout` (the workflow requires a full SHA). The current full-SHA runs above passed checkout and are running the suite. Replace the pending table values with final run conclusions and p50/p99/capacity results when they complete.
 
 ## Before/after
 
@@ -39,4 +39,4 @@ gh workflow run rust-ci.yml --ref perf-history-throughput -f package=cadence-ser
 gh workflow run rust-ci.yml --ref perf-history-throughput -f package=cadence-history
 ```
 
-Benchmark dispatcher is `.github/workflows/frontend-matching-benchmark.yml` on `t3/matching-benchmark-harness`, with `sdk_openloop=true`, `sdk_suite=true`, `service=history` or `service=all`, and `source_ref=e2f780c2d`.
+Benchmark dispatcher is `.github/workflows/frontend-matching-benchmark.yml` on `t3/matching-benchmark-harness`, with `sdk_openloop=true`, `sdk_suite=true`, `service=history` or `service=all`, and `source_ref=e2f780c2d80f66327bc5da5474a2a39b6e218814`.
