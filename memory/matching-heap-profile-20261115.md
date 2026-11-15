@@ -174,3 +174,17 @@ source `50f8b76de`, system_heap_profile=true, 70 minutes/rate 10,
 Go baseline + Rust. Once lanes start, all three measured slots are exhausted.
 Raw snapshots upload before any analysis; batched symbolization has an explicit
 step timeout. No further soak will be dispatched in this task.
+
+## Final measurement running / diagnostic CI success
+
+Recovery soak 43663938440 built successfully; both lanes are running. Three
+measured workloads have now started; the cap is exhausted. Do not dispatch more.
+
+The first symbolizer regression invocation (43664022279) failed because unittest
+discovery skipped the hyphenated filename (zero tests, exit 5). Changed CI to
+invoke the test file directly. Run
+https://github.com/auenkr/cadence-rust/actions/runs/43664502873 completed SUCCESS
+at `862fa042e2293751ad9ecd260916cfc4debc992b`: symbolizer regression, both
+profiler feature Clippy checks, allocation lifetime test, default server
+Clippy/tests and metric comparisons. Compact source/exit evidence is under
+`ci-profilers-final/`. No Rust source changed since fresh workspace run 43657018303.
