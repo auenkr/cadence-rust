@@ -81,3 +81,7 @@ available until the 70-minute workload and analyzer finish.
   https://github.com/auenkr/cadence-rust/actions/runs/43680073670
   lanes `go-baseline,rust`; default rate/duration; no profiler or malloc env
   override inputs.
+
+Checkpoint 2026-11-15 05:48 UTC: final allowed soak 43680073670 has both Go
+baseline and Rust lanes active in their workload steps. The second soak has not
+reported a failure; its analyzer verdict is not yet available.
