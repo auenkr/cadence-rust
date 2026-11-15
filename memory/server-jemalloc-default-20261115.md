@@ -44,3 +44,7 @@ Run URL, conclusion, head SHA and cadence-server binary SHA256: pending.
 ## Final verdict
 
 Pending soak and mixed gate.
+
+Checkpoint 2026-11-15 04:00 UTC: the soak's Go baseline and Rust workload lanes
+are still running; neither has reported a failure. No conclusion or RSS slope is
+available until the 70-minute workload and analyzer finish.
