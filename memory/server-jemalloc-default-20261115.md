@@ -173,3 +173,19 @@ verdict or RSS-component samples are available until the lanes complete.
 - Artifacts (samples, summaries, binary hash, verdict, start/mid `smaps_rollup`
   and top-20 mappings for Rust and Go) are in
   `memory/evidence/server-jemalloc-default-20261115/run-43686161316/`.
+
+## System-default validation in progress
+
+- Targeted `rust-ci.yml`, package `cadence-server`: SUCCESS
+  https://github.com/auenkr/cadence-rust/actions/runs/43692936637 at
+  `324842c6b38319df7691aaf33fa72a2568fc4647`.
+- Full fresh-target `rust-ci.yml`: SUCCESS
+  https://github.com/auenkr/cadence-rust/actions/runs/43693444833 at the same
+  source head.
+- Final allowed soak dispatched with default inputs (lanes `go-baseline,rust`,
+  no profiling and no malloc environment input):
+  https://github.com/auenkr/cadence-rust/actions/runs/43693675128. Build
+  succeeded; both workload lanes are active. It will check the System allocator
+  default and must contain start/middle/end Matching mapping snapshots.
+- Matching RSS/anonymous slopes, latency verdict, Rust binary SHA256, and end
+  snapshot completeness: pending soak artifact upload.
