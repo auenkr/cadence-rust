@@ -86,7 +86,7 @@ def main():
     if a.service == 'all':
         manifest['rust_history_binary_sha256'] = capture(['docker','run','--rm','--entrypoint','sha256sum','cadence-rust-history:ci','/usr/local/bin/cadence-server'])
     manifest['rust_toolchain'] = capture(['docker','run','--rm','--entrypoint','cat','cadence-rust:ci','/etc/cadence/cadence-toolchain.txt'])
-    manifest['rust_allocator'] = 'default System; musl target from rust:1-alpine, no allocator features'
+    manifest['rust_allocator'] = 'jemalloc-default enabled for cadence-server and cadence-history; musl target from rust:1-alpine'
     (OUT/'manifest.json').write_text(json.dumps(manifest, indent=2))
     try:
         for rep in range(a.repetition_offset, a.repetition_offset+a.repetitions):

@@ -12,7 +12,7 @@ import zipfile
 ROOT=Path(__file__).resolve().parent
 REPO='auenkr/cadence-rust'
 BRANCH='t3/matching-benchmark-harness'
-SOURCE='77dbaa379eaa88bc7b62b48fc3d711059e2dd93e'
+SOURCE='571fb2a0862bca59bb799f7baae9518d26c0e7b4'
 
 def gh(*args):
     command=['gh',*map(str,args)]
@@ -58,7 +58,7 @@ def download(run_id,folder):
     return summary,tails
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('--state',type=Path,required=True);p.add_argument('--previous',type=Path,required=True);a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('--state',type=Path,required=True);p.add_argument('--previous',type=Path,required=True);p.add_argument('--output',type=Path,default=ROOT/'reports/jemalloc-master-20261115');a=p.parse_args()
     state=json.loads(a.state.read_text());out=a.state.parent
     def save():a.state.write_text(json.dumps(state,indent=2)+'\n')
     for service,attempts in state.items():
@@ -93,11 +93,11 @@ def main():
             new=[r for r in json.loads(gh('run','list','--workflow','frontend-matching-benchmark.yml','--branch',BRANCH,'--limit','30','--json','databaseId,displayTitle,headSha,url')) if r['databaseId'] not in known and r['displayTitle'].startswith(f'Benchmark {service} source {SOURCE}')]
             if len(new)!=1:raise RuntimeError('Retry dispatch ambiguous; state prevents duplicate dispatch')
             attempts.append({'run_id':new[0]['databaseId'],'url':new[0]['url'],'headSha':new[0]['headSha'],'status':'queued'});save()
-    report=ROOT/'reports/final-master-20261115'
-    subprocess.run([sys.executable,str(ROOT/'revision_report.py'),'--previous',str(a.previous),'--current',str(out),'--attempts',str(a.state),'--output',str(report)],check=True)
+    report=a.output
+    subprocess.run([sys.executable,str(ROOT/'jemalloc_report.py'),'--previous',str(a.previous),'--current',str(out),'--attempts',str(a.state),'--output',str(report)],check=True)
     subprocess.run(['git','add',str(report.with_suffix('.md')),str(report.with_suffix('.html'))],check=True)
     if subprocess.run(['git','diff','--cached','--quiet']).returncode:
-        subprocess.run(['git','commit','-m','Report final-code benchmark versus 3c2bf3aaa, including retries and charts'],check=True)
+        subprocess.run(['git','commit','-m','Report jemalloc master benchmark versus previous runs'],check=True)
         subprocess.run(['git','push','origin','HEAD'],check=True)
     print(report.with_suffix('.md').read_text(),flush=True)
     raise SystemExit(0 if all(v[-1]['conclusion']=='success' for v in state.values()) else 1)
