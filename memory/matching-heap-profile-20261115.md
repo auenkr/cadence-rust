@@ -149,3 +149,21 @@ Second workload steps finished; Go baseline job succeeded. Rust lane is in
 `Analyze system allocator snapshots`, resolving recorded PCs on the runner.
 Awaiting artifact upload and comparison. Still 2/3 measured soaks; no production
 change or third soak dispatched. Fresh workspace CI remains successful.
+
+## Lost System snapshots / final-slot recovery
+
+The System workload ran to completion in both lanes, but post-processing was
+too slow: the initial symbolizer invoked addr2line separately for each of up to
+160 stacks. At 01:29 UTC, canceled run 43655943235 to try to preserve artifacts
+before the 90-minute job deadline. This was an implementation mistake: its
+`always()` analysis continued until cancellation hard-terminated the job; the
+pending artifact upload never ran. Run conclusion CANCELLED. Only Go baseline,
+binaries and an empty comparison artifact survived. No System measurements are
+available, and no System plateau or root cause can be claimed from this run.
+
+Changed symbolization to one addr2line process for all unique PCs, added an
+8-minute analysis step timeout, and upload raw snapshots **before** analysis.
+An artifact-only replay job is available through rust-ci.yml's
+`heap_profile_run_id` input (skips clippy/test builds). No fourth soak allowed.
+The last remaining measured slot will recover System live-heap evidence; a
+separate uninstrumented default confirmation is no longer available within cap.

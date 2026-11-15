@@ -119,6 +119,13 @@ jobs:
           mkdir -p res/up/full; for f in res/lane/run/{rust-matching,rust-frontend,go-frontend,go-matching,go-history-worker}.log; do [ -f "$f" ] && gzip -c "$f" > "res/up/full/$(basename "$f").gz"; done
           for f in res/lane/run/*.log; do [ -f "$f" ] && tail -n 300 "$f" > "res/up/logs/$(basename "$f")"; done
           test -f res/analysis/summary.json
+      - name: Preserve raw heap snapshots before symbolization
+        if: always() && (inputs.heap_profile == true || inputs.system_heap_profile == true) && matrix.mode != 'go-baseline'
+        uses: actions/upload-artifact@v4
+        with:
+          name: raw-heap-${{ matrix.mode }}
+          path: res/lane/run/heap-profiles/
+          retention-days: 3
       - name: Analyze live heap growth
         timeout-minutes: 8
         if: always() && inputs.heap_profile == true && matrix.mode != 'go-baseline'
