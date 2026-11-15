@@ -167,3 +167,10 @@ An artifact-only replay job is available through rust-ci.yml's
 `heap_profile_run_id` input (skips clippy/test builds). No fourth soak allowed.
 The last remaining measured slot will recover System live-heap evidence; a
 separate uninstrumented default confirmation is no longer available within cap.
+
+Final allowed recovery soak:
+https://github.com/auenkr/cadence-rust/actions/runs/43663938440,
+source `50f8b76de`, system_heap_profile=true, 70 minutes/rate 10,
+Go baseline + Rust. Once lanes start, all three measured slots are exhausted.
+Raw snapshots upload before any analysis; batched symbolization has an explicit
+step timeout. No further soak will be dispatched in this task.
