@@ -9,6 +9,7 @@ COPY go/proto go/proto
 COPY rust rust
 WORKDIR /src/rust
 ENV OPENSSL_STATIC=1 OPENSSL_DIR=/usr CARGO_PROFILE_RELEASE_DEBUG=0 CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
+RUN rustc -Vv > /cadence-toolchain.txt
 ARG RUST_PACKAGE=cadence-server
 RUN if [ "${RUST_PACKAGE}" = all ]; then \
       cargo build --release -p cadence-server -p cadence-history -j2 && \
@@ -19,6 +20,7 @@ RUN if [ "${RUST_PACKAGE}" = all ]; then \
 FROM ${GO_IMAGE} AS runtime
 USER root
 COPY --from=builder --chown=cadence:cadence /cadence-server /usr/local/bin/cadence-server
+COPY --from=builder /cadence-toolchain.txt /etc/cadence/cadence-toolchain.txt
 COPY --from=builder /cadence-server.sha256 /etc/cadence/cadence-server.sha256
 COPY --chown=cadence:cadence rust/docker/cadence-auto-setup.sh /usr/local/bin/cadence-auto-setup.sh
 ENV CADENCE_SCHEMA_HELPER=/usr/local/bin/cadence-auto-setup.sh

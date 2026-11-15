@@ -30,7 +30,12 @@ def recovery_result(rows,fault,rate):
 
 def summarize_stage(path,mode,rate,status):
     manifest=json.loads((path/'manifest.json').read_text()) if (path/'manifest.json').exists() else {}
-    result={'mode':mode,'rate':rate,'exit_code':status,'manifest':manifest,'runs':{}}
+    result={'mode':mode,'rate':rate,'exit_code':status,'manifest':manifest,'runs':{},
+            'failures':{f.name:json.loads(f.read_text()) for f in path.glob('*-failure.json')}}
+    if status and (path/'runner.log').exists():
+        with (path/'runner.log').open('rb') as log:
+            log.seek(max(0,log.seek(0,2)-3000))
+            result['runner_tail']=log.read().decode(errors='replace')
     for file in sorted(path.glob('*-samples.jsonl')):
         key=file.name.removesuffix('-samples.jsonl')
         all_rows=[json.loads(x) for x in file.read_text().splitlines()]
@@ -63,7 +68,7 @@ def main():
     stages=[('fixed',5),('capacity',25),('capacity',100),('recovery',5)]
     summary={'service':a.service,'source_head':os.environ.get('SOURCE_REF'),
              'protocol':{'workload':'one-activity','warmup_seconds':10,'measurement_seconds':30,'repetitions':3,'payload_bytes':1024,'activity_ms':10,'capacity_rates':[5,25,100],'completion_p99_target_ms':1000,'error_target':0,'max_end_outstanding':'max(2, 1% of arrivals)','recovery':'3s MySQL TCP INPUT DROP, 10s after collector ready'},
-             'stages':[],'limitations':['Smoke protocol, not 10min/30min production protocol.','Capacity is highest TESTED passing rate; a passing highest step is a lower bound.','Recovery API retries are included in latency; server retry counters unavailable.','Matching memory growth fix in progress; short RSS peaks cannot establish memory stability.']}
+             'stages':[],'limitations':['Smoke protocol, not 10min/30min production protocol.','Capacity is highest TESTED passing rate; a passing highest step is a lower bound.','Recovery API retries are included in latency; server retry counters unavailable.','Short RSS peaks cannot establish memory stability; this benchmark uses musl System, not glibc.']}
     began=time.monotonic()
     for mode,rate in stages:
         # Leave room for artifacts/cleanup within the 90-minute job, including builds.

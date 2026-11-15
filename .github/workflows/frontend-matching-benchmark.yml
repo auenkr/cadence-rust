@@ -1,4 +1,5 @@
 name: Frontend + Matching paired benchmark
+run-name: Benchmark ${{ inputs.service || 'matching' }} source ${{ inputs.source_ref || github.sha }}
 on:
   workflow_dispatch:
     inputs:
@@ -83,6 +84,9 @@ jobs:
           path: |
             Benchmark/evidence/run/suite-summary.json
             Benchmark/evidence/run/ci.exit
+            Benchmark/evidence/run/head.txt
+            Benchmark/evidence/run/drivers.sha256
+            Benchmark/evidence/run/*-build.log
           retention-days: 3
   paired-benchmark:
     if: ${{ inputs.sdk_openloop != true }}
