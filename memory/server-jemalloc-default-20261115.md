@@ -193,3 +193,43 @@ verdict or RSS-component samples are available until the lanes complete.
 Checkpoint 2026-11-15 09:00 UTC: final soak 43693675128 has both lanes active
 in their soak workload steps. Full Rust CI is green; no run conclusion or final
 mapping capture is available yet.
+
+### Final System-default soak result
+
+- Run: https://github.com/auenkr/cadence-rust/actions/runs/43693675128,
+  workflow conclusion SUCCESS, analyzer **RUST OVERALL: PASS**. The source
+  under test was `324842c6b38319df7691aaf33fa72a2568fc4647`; the later commits
+  before the mixed gate only record memory evidence/checkpoints.
+- Rust cadence-server binary SHA256:
+  `248df7d4d75c9f1555a1dc1c38b9a3077a1ab26f4b4f128ef06929189718f7cf`.
+- Matching total RSS slope: Rust `5.47 MiB/h`, Go `1.18 MiB/h`; the maximum
+  allowed is Go+5 = `6.18 MiB/h`. Matching anonymous RSS slope was Rust
+  `5.35 MiB/h`, Go `0.45 MiB/h`; file-backed RSS was Rust `0.00 MiB/h`, Go
+  `0.76 MiB/h`. Since file-backed growth did not cause the observed slope, the
+  analyzer continues to gate on symmetric total RSS. No anonymous-only
+  criterion change was made.
+- All 42,000 workflows completed in both lanes, zero failures, no panics or
+  process deaths. Latency p99s: e2e 4100 vs Go 4108 ms, query 29 vs 50 ms,
+  start 15 vs 41 ms. Every verdict criterion passed.
+- The start/middle/end `smaps_rollup` and top-20 mappings are present for both
+  Rust and Go. Rust Matching has 27 threads throughout the warmed workload.
+  Its largest anonymous mapping at `747e70000000` had RSS 7,260/9,072/8,868
+  KiB at start/middle/end; other large anonymous mappings at `747e68000000`,
+  `747e74000000`, and `747e78000000` also grew over startup and partially
+  receded by end. The main executable's file-backed mapping is not the source
+  of sustained RSS growth. The earlier System-allocator heap profile found
+  stable live requested Rust heap bytes and increasing free glibc arena bytes,
+  consistent with allocator retention rather than a live-object leak. The
+  warmed anonymous slope is within the existing Go+5 allowance; no program
+  logic change is indicated.
+- Complete samples, summaries, binary identity, verdict and all six Matching
+  snapshots are saved under
+  `memory/evidence/server-jemalloc-default-20261115/run-43693675128/`.
+
+### MySQL all-Rust recovery gate
+
+- Dispatched `history-mixed-gate.yml` with `database=mysql`, `outbound=grpc`,
+  `two_history=true`, `all_rust_recovery=true`:
+  https://github.com/auenkr/cadence-rust/actions/runs/43700466749.
+- Tested head: `bd5627046183c82746e8e9057b1c49f1c5c0aaee`. Result and
+  cadence-server binary SHA256: pending.
