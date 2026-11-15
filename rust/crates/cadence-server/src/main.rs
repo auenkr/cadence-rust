@@ -12,7 +12,7 @@ static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 // keeping its normal decay intervals and other allocator defaults.
 #[cfg(all(feature = "jemalloc-default", not(feature = "system-allocator")))]
 #[no_mangle]
-pub static malloc_conf: &[u8] = b"background_thread:true,dirty_decay_ms:1000,muzzy_decay_ms:1000\0";
+pub static malloc_conf: &[u8] = b"background_thread:true\0";
 
 use tracing_subscriber::EnvFilter;
 

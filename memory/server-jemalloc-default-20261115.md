@@ -82,6 +82,23 @@ available until the 70-minute workload and analyzer finish.
   lanes `go-baseline,rust`; default rate/duration; no profiler or malloc env
   override inputs.
 
+### Tuned decay soak result
+
+Run `43680073670` completed SUCCESS at source head
+`57eab7a129197bcdc04eb03dd9211386b652d96e`; analyzer verdict **RUST OVERALL:
+FAIL**. The binary SHA256 was
+`5b9874f329eb1d8fc5923800b784a02ce72307acc387e2941900e8151b1124cb`.
+Matching RSS slope regressed to `11.13 MiB/h` vs Go `1.33 MiB/h`. Frontend FD
+slope also failed (`16.88` vs `0.48` fds/h); query p99 and start p95/p99 failed.
+All 42,000 workflows completed, with no service death, panic, or workflow error.
+This 1-second decay configuration did not establish an allocator win.
+
+The implementation restores jemalloc's default decay intervals and retains
+`background_thread:true`. The requested process `RssAnon`/`RssFile`/`RssShmem`
+sampling and start/mid/end Mapping snapshots are prepared in commit
+`7ce9969e9b6fed75e5d73b383b7abbdae4ef21c5`; the next soak will use them to
+attribute Matching RSS growth. No soak has yet run with this instrumentation.
+
 Checkpoint 2026-11-15 05:48 UTC: final allowed soak 43680073670 has both Go
 baseline and Rust lanes active in their workload steps. The second soak has not
 reported a failure; its analyzer verdict is not yet available.
