@@ -655,7 +655,7 @@ jobs:
           exit "$result"
       - name: Test batched heap profile analysis
         if: inputs.heap_profile_checks == true
-        run: python3 -m unittest discover -s tests/gates -p test-system-heap-symbolize.py
+        run: python3 tests/gates/test-system-heap-symbolize.py
       - name: Check opt-in heap profilers
         if: inputs.heap_profile_checks == true
         working-directory: rust
