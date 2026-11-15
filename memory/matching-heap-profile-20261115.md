@@ -111,3 +111,9 @@ No second soak has started yet. Default builds remain unchanged.
   requested-live-byte counters and mallinfo2/smaps are the main trend evidence.
 - Sampling excludes recursive profiler allocations; exact counters include them.
   Profile state is bounded by currently sampled live pointers and map capacity.
+
+Profiler CI 43655373681 completed SUCCESS on `b430de917` with CI-applied
+formatting (committed unchanged in `035fa2506`). Both feature Clippy checks,
+System sample-lifetime regression, default server Clippy/tests and configured
+metric comparisons passed. Imported its Cargo.lock (backtrace dependencies)
+without invoking Cargo locally. Redundant automatic CI 43655942178 canceled.
