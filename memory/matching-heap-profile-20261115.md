@@ -134,3 +134,11 @@ Fresh workspace run 43657018303 completed SUCCESS at
 are both 0. Compact identity/exit evidence is committed under `ci-final/`.
 No runtime code has changed above this tested source. Full artifact logs are
 preserved on storage under `/mnt/storage/service/matching-heap-profile/ci-final/`.
+
+## 00:55 UTC checkpoint
+
+Second soak 43655943235 continues in both lanes (~45 minutes since job start).
+No late snapshots uploaded yet; no root-cause conclusion, production change,
+or third dispatch. All source above fresh workspace CI `4802e9251` is docs-only.
+Updated dashboard with the fresh workspace validation result. Two measured
+soaks started so far, one remaining.
