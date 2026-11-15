@@ -142,3 +142,10 @@ No late snapshots uploaded yet; no root-cause conclusion, production change,
 or third dispatch. All source above fresh workspace CI `4802e9251` is docs-only.
 Updated dashboard with the fresh workspace validation result. Two measured
 soaks started so far, one remaining.
+
+## 01:25 UTC checkpoint
+
+Second workload steps finished; Go baseline job succeeded. Rust lane is in
+`Analyze system allocator snapshots`, resolving recorded PCs on the runner.
+Awaiting artifact upload and comparison. Still 2/3 measured soaks; no production
+change or third soak dispatched. Fresh workspace CI remains successful.
