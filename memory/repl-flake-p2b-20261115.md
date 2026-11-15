@@ -30,6 +30,23 @@ Final branch head after recording this evidence: `740ceca9b230f23d7c2761a6891015
 - Compared Go `branchManagerImpl.prepareVersionHistory/createNewBranch` with Rust `BranchManager::prepare_version_history/create_new_branch` and `history_branch::fork`. Both duplicate through the LCA, fork at `LCA event ID + 1`, update the branch token in the new version history, and preserve/clip exclusive ancestor ranges. No demonstrated mismatch found.
 - No Rust unit test or implementation change was made: without the failed DB rows or a repeatable state that isolates an operation, a code change would be speculative. To conclusively locate the fault, capture from a reproducing run: workflow/run ID; current and previous branch tokens decoded to tree/branch/ancestor ranges; version-history list/current index; ordered `history_node` rows for each ancestor and current branch (`node_id`, stored and decoded `txn_id`, batch first/last event IDs and versions); and the `ForkHistoryBranch`/`AppendHistoryNodes` requests and successful writes across the conflict/failover. This determines whether event batches were absent, stored under the wrong physical branch/tree/transaction, or present but excluded by range/pagination.
 
+## Follow-up CI and replication reruns
+
+All runs below use head `facc4ed917641d3287e7981da5a926b0e29d369c` (`history-standby-read`). The persistence crate and full workspace Rust CI passed, and all requested replication gates reported `GATE SUMMARY failed: []`:
+
+| Validation | Run | Conclusion / binary SHA256 |
+|---|---|---|
+| rust-ci `cadence-persistence` | https://github.com/auenkr/cadence-rust/actions/runs/43678861079 | success |
+| rust-ci full workspace | https://github.com/auenkr/cadence-rust/actions/runs/43679122214 | success |
+| MySQL repl Rust cluster B, tag `standby-read-B-1` | https://github.com/auenkr/cadence-rust/actions/runs/43678861030 | success; `2308bcedbc84ca38c0394b7ac974d503f5f315eeabcb6aac6be7bd50f241c320` |
+| MySQL repl Rust cluster B, tag `standby-read-B-2` | https://github.com/auenkr/cadence-rust/actions/runs/43678861173 | success; `a161d6c0bf839debba5e45d4b9f38d2988858aee09c3e1746e5fe2ab421704b1` |
+| MySQL repl Rust cluster B, tag `standby-read-B-3` | https://github.com/auenkr/cadence-rust/actions/runs/43678861094 | success; `271d7886612f9696bbd50e08801f768980861e0b2985597c48265c1a4825931d` |
+| MySQL repl Rust cluster B, tag `standby-read-B-4` | https://github.com/auenkr/cadence-rust/actions/runs/43678861109 | success; `855ae361c720b16c1e3d4bd26ba3e3a36b2876e7f8314e484fd0a9a50dca0021` |
+| MySQL repl Rust cluster B, tag `standby-read-B-5` | https://github.com/auenkr/cadence-rust/actions/runs/43678861054 | success; `8d53399ed456ffa14d968b17023e804dd4555e2c6f2e0060e30530d3a3e4acce` |
+| MySQL repl Rust cluster A, tag `standby-read-A-1` | https://github.com/auenkr/cadence-rust/actions/runs/43678861074 | success; `a737ab6affe2a39189e4898bc39545300889823c10ea220974dddec3e0ba8d55` |
+
+These six repetitions did not reproduce the failure. Because no code changed and the database rows from the failed run are unavailable, this evidence does not identify a root cause; it only strengthens the conclusion that the observed failure is intermittent and currently unlocalized.
+
 ## Repeated mixed-cluster validation
 
 All six dispatched runs used MySQL and `repl_run_tag` to avoid the workflow’s `cancel-in-progress` concurrency key cancelling identical parallel repetitions. Defaults match the recorded lane (`kafka=true`, optional ES/archive/two-history lanes off). Each run used a fresh Actions target directory and printed its cadence-server SHA256.
