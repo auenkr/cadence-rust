@@ -41,3 +41,11 @@ The repeated anonymous mapping evidence justifies an allocator-level experiment.
 ### Checkpoint (2026-11-15 14:32 UTC)
 
 Both default soak runs remain in their workload steps with the Rust and Go lanes active and no failure or process exit reported. Run artifacts and final slopes are not yet available.
+
+
+### Default soak 1 result
+
+- [Run 43720552710](https://github.com/auenkr/cadence-rust/actions/runs/43720552710) completed SUCCESS; **RUST OVERALL: PASS**. Tested source `df0aed30a10e8874c666e50a0febc8ae98b58c72`; cadence-server SHA256 `5599ae802463f7390eead6f260e31c7dbb2cfe476ecdb469e7ebd6fd2c70e440`.
+- RSS slopes: Frontend `0.94 MiB/h` vs Go `6.30`; Matching `4.44` vs Go `0.89`. FE anon slope `0.71`; Matching anon `4.42 MiB/h`. Both Rust and Go completed 42,000/42,000 workflows, zero failed, no panics or service deaths. All latency, error, FD and RSS verdict rows passed.
+- Six Rust FE/Matching smaps snapshots are preserved in `memory/evidence/soak-rss-anon-20261115/run-43720552710/`. Each top-20 snapshot shows one 64 MiB-aligned anonymous mapping (lower bound) at start/mid/end, consistent with the `M_ARENA_MAX=2` cap. FE's post-restart middle snapshot is the warm process at 2105s; its RSS/anon rises from 55.2/12.5 MiB there to 75.8/30.0 MiB by end, then samples after the 2400s analyzer window start are flat around 75.2–75.6/31.2–31.6 MiB. That is restart warmup, not sustained second-half growth. Matching RssAnon rose 20.8→37.3 MiB from process start to end; the measured slope remains under the 5 MiB/h absolute guard and within Go+5. The `[heap]` and stack are not the dominant contributor; the aligned anonymous arena mapping RSS grows, while the count is held at one visible mapping.
+- Second default soak [43720550241](https://github.com/auenkr/cadence-rust/actions/runs/43720550241) is still active. Do not close the investigation until its verdict is recorded.
