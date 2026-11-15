@@ -189,3 +189,7 @@ verdict or RSS-component samples are available until the lanes complete.
   default and must contain start/middle/end Matching mapping snapshots.
 - Matching RSS/anonymous slopes, latency verdict, Rust binary SHA256, and end
   snapshot completeness: pending soak artifact upload.
+
+Checkpoint 2026-11-15 09:00 UTC: final soak 43693675128 has both lanes active
+in their soak workload steps. Full Rust CI is green; no run conclusion or final
+mapping capture is available yet.
