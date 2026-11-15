@@ -19,10 +19,12 @@ No History or Matching workflow logic was changed. Static config review found Ru
 - `rust-ci` for `cadence-history`: https://github.com/auenkr/cadence-rust/actions/runs/43736010933 — success; source head `09d14611064a90e52aff6f86c1d3c4a516d02b45`.
 - Earlier History suite: https://github.com/auenkr/cadence-rust/actions/runs/43736172831 — success, but invalid for allocator validation: `Benchmark/ci.sh` resolved `Benchmark/Dockerfile` from the workflow checkout, so it built System. Its artifact confirms that command. Do not use its latency data as the jemalloc result.
 - Earlier all-Rust suite: https://github.com/auenkr/cadence-rust/actions/runs/43736175975 — canceled after the same Dockerfile resolution issue was found.
-- Corrected History suite (workflow ref `perf-history-throughput-bench`): https://github.com/auenkr/cadence-rust/actions/runs/43743286537 (running at last check).
+- Corrected History suite (workflow ref `perf-history-throughput-bench`): https://github.com/auenkr/cadence-rust/actions/runs/43743286537 — success; `ci.exit=0`; Alpine build log confirms both jemalloc feature flags/path; source `e2f780c2d80f66327bc5da5474a2a39b6e218814`.
 - Corrected all-Rust suite (workflow ref `perf-history-throughput-bench`): https://github.com/auenkr/cadence-rust/actions/runs/43743289833 (running at last check).
 
-Status checked 2026-11-15 18:26 UTC: both corrected benchmark jobs are still running their `Benchmark/ci.sh` step; no failure has been reported. The latest `cadence-server` and `cadence-history` Rust CI runs are green.
+History suite summary: at 5 starts/s, median across three Rust repetitions was p50 63.04 ms / p99 66.55 ms; the three paired Go p99 values had median 49.24 ms. Rust passed all repetitions at 5/s and 25/s; all three 100/s attempts failed their targets. Highest tested passing rate is 25 starts/s. This is not a like-for-like latency comparison with the historical 720 ms p99 because hosted-runner baselines varied; use the same-run Go pair for context. The recovery-stage completion p99 includes the planned MySQL outage and is not a steady-state latency figure.
+
+Status checked 2026-11-15 18:53 UTC: corrected History completed successfully; corrected all-Rust remains active in `Benchmark/ci.sh`. The latest `cadence-server` and `cadence-history` Rust CI runs are green.
 
 The first two benchmark dispatches using source `47f655573` failed because that source branch did not contain the benchmark Docker context. Two dispatches with the merged temporary branch's short SHA failed in `actions/checkout` (the workflow requires a full SHA). Full-SHA dispatches from the harness ref ran, but used the harness ref's old Dockerfile and are not allocator evidence. Corrected runs now use the merged temporary branch for both workflow and source checkout, ensuring the allocator-enabled Dockerfile is used. Replace the pending table values with final run conclusions and p50/p99/capacity results when they complete.
 
@@ -30,7 +32,7 @@ The first two benchmark dispatches using source `47f655573` failed because that 
 
 | Lane | Baseline Rust p50 / p99 | Baseline Go p99 | Post-change Rust p50 / p99 | Post-change max passing rate |
 |---|---:|---:|---:|---:|
-| History | 81.29 / 720.03 ms at 5/s | 559.90 ms | pending | pending |
+| History | 81.29 / 720.03 ms at 5/s | 559.90 ms | 63.04 / 66.55 ms at 5/s (paired Go p99 49.24 ms) | 25 starts/s |
 | Matching | 41.00 / 71.95 ms at 5/s | 91.22 ms (paired); 54.30 ms all-Go baseline | pending (all-Rust suite) | pending |
 | All Rust | 66.31 / 72.02 ms at 5/s | 54.30 ms | pending | pending |
 
