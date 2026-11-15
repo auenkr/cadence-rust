@@ -209,6 +209,13 @@ def compare(tag, name, wid, rid, active, standby):
             state['cliout'] = f'rc1={rc1} rc2={rc2} out1={str(raw1)[:300]} out2={str(raw2)[:300]}'
         return ok, state.get('cliout', '') + f' {active}: n={len(ea)} last={ea[-1] if ea else None} | {standby}: n={len(es)} last={es[-1] if es else None}'
     ok = poll(f'{tag}-{name}-history-equal({active}->{standby})', f, 300)
+    if not ok:
+        failures_path = work / 'failure-workflows.json'
+        failures = json.loads(failures_path.read_text()) if failures_path.exists() else []
+        failure = {'workflow_id': wid, 'run_id': rid, 'domain': dom, 'active': active, 'standby': standby, 'step': f'{tag}-{name}'}
+        if failure not in failures:
+            failures.append(failure)
+        failures_path.write_text(json.dumps(failures, indent=2))
     if ok:
         ea = state['ea']
         record(f'{tag}-{name}-event-count-and-last-id', len(ea) >= 5 and ea[-1][0] == len(ea), f'count={len(ea)} last={ea[-1]}')
