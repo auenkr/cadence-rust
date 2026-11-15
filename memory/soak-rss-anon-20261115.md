@@ -37,3 +37,7 @@ The repeated anonymous mapping evidence justifies an allocator-level experiment.
 - Targeted `rust-ci.yml`, `package=cadence-server`: SUCCESS, source `df0aed30a10e8874c666e50a0febc8ae98b58c72`: https://github.com/auenkr/cadence-rust/actions/runs/43718985054.
 - Full `rust-ci.yml`, `clean_target=true`: SUCCESS, fresh-target Clippy, format and workspace tests, same source: https://github.com/auenkr/cadence-rust/actions/runs/43719378837.
 - Two default parallel `frontend-soak.yml` runs are active, both source `df0aed30a10e8874c666e50a0febc8ae98b58c72`: https://github.com/auenkr/cadence-rust/actions/runs/43720550241 and https://github.com/auenkr/cadence-rust/actions/runs/43720552710. Both use default rate/duration, `go-baseline,rust`, and no profiler or malloc environment overrides. Record completion, RUST OVERALL verdicts, slopes, snapshots, and Rust binary SHA256 here.
+
+### Checkpoint (2026-11-15 14:32 UTC)
+
+Both default soak runs remain in their workload steps with the Rust and Go lanes active and no failure or process exit reported. Run artifacts and final slopes are not yet available.
