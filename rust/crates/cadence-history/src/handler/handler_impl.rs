@@ -22,14 +22,15 @@ use crate::handler::Handler;
 use crate::task::deps::MetricsScope as _;
 use crate::wiring::assembly::controller::ShardRegistry;
 use crate::wiring::resources::metrics::Scope;
-use crate::wiring::server::limiter::RateLimiter;
+use cadence_common::dynamic_rate_limiter::{DynamicRateLimiter, RpsFn};
 
 /// Go `shardOwnershipTransferDelay`.
 const SHARD_OWNERSHIP_TRANSFER_DELAY: Duration = Duration::from_secs(5);
 
 pub struct HandlerImpl {
     registry: Arc<ShardRegistry>,
-    rate_limiter: RateLimiter,
+    /// Go `quotas.NewDynamicRateLimiter(config.RPS.AsFloat64())`.
+    rate_limiter: DynamicRateLimiter,
     shutting_down: AtomicBool,
     started: AtomicBool,
     ratelimit_aggregator: crate::ratelimit_aggregator::RequestWeighted,
@@ -128,7 +129,7 @@ fn signal_with_start_retryable(error: &HistoryError) -> bool {
 }
 
 impl HandlerImpl {
-    pub fn new(registry: Arc<ShardRegistry>, rps: f64) -> Self {
+    pub fn new(registry: Arc<ShardRegistry>, rps: RpsFn) -> Self {
         let cfg = registry.env().config.clone();
         let ratelimit_aggregator = crate::ratelimit_aggregator::RequestWeighted::new(crate::ratelimit_aggregator::Config {
             new_data_weight: cfg.global_ratelimiter_new_data_weight.clone(),
@@ -141,7 +142,7 @@ impl HandlerImpl {
         Self {
             ratelimit_aggregator,
             registry,
-            rate_limiter: RateLimiter::new(rps),
+            rate_limiter: DynamicRateLimiter::new(rps),
             shutting_down: AtomicBool::new(false),
             started: AtomicBool::new(false),
         }

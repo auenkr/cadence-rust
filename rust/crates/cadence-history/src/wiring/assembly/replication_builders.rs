@@ -444,7 +444,7 @@ impl ReplicationFactory for ReplicationFactoryImpl {
         let ms_provider: Arc<dyn MutableStateProvider> =
             Arc::new(SqlMutableStateProvider::new(shard_id, env.persistence.executions.clone()));
         let hydrator = Arc::new(TaskHydrator::new_deferred(shard_id, hist_mgr, ms_provider, domains.clone()));
-        let limiter: Arc<dyn Limiter> = Arc::new(SimpleRateLimiter::new(cfg.replication_task_generation_qps()));
+        let limiter: Arc<dyn Limiter> = { let c = cfg.clone(); Arc::new(SimpleRateLimiter::dynamic(Box::new(move || c.replication_task_generation_qps()))) };
         let store = Arc::new(TaskStore::new(
             cfg.as_ref(),
             shard_adapter.remote_cluster_names(),

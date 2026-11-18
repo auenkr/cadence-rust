@@ -8,8 +8,8 @@
 //! workflow) are seams: [`InlineArchivers`] and [`ArchivalSignaler`]. s3 / gs fail explicitly, so
 //! the callers keep the task (and the data).
 
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 
@@ -80,30 +80,22 @@ pub const SIGNAL_TIMEOUT: Duration = Duration::from_millis(300);
 pub const TOO_MANY_REQUESTS_ERR_MSG: &str = "too many requests to archival workflow";
 const ERR_INLINE_ARCHIVAL_THROTTLED: &str = "inline archival throttled";
 
-/// Go `quotas.Limiter.Allow()` (non-blocking, rate re-read on every call).
+/// Go `quotas.NewDynamicRateLimiter(rps).Allow()`: token bucket starting full
+/// with burst `max(ceil(rps), 1)` (0 at rps 0), rps refreshed every 5s.
 pub struct AllowLimiter {
-    rps: Box<dyn Fn() -> i64 + Send + Sync>,
-    next_free: Mutex<Option<Instant>>,
+    inner: cadence_common::dynamic_rate_limiter::DynamicRateLimiter,
 }
 
 impl AllowLimiter {
     pub fn new(rps: impl Fn() -> i64 + Send + Sync + 'static) -> Self {
-        Self { rps: Box::new(rps), next_free: Mutex::new(None) }
+        Self {
+            inner: cadence_common::dynamic_rate_limiter::DynamicRateLimiter::new(Box::new(move || {
+                rps() as f64
+            })),
+        }
     }
     pub fn allow(&self) -> bool {
-        let rps = (self.rps)();
-        if rps <= 0 {
-            return false;
-        }
-        let interval = Duration::from_secs_f64(1.0 / rps as f64);
-        let now = Instant::now();
-        let mut next = self.next_free.lock().unwrap();
-        // burst of one token (Go rate.Limiter with burst = max(rps,1) is approximated by 1 token/interval).
-        if next.is_some_and(|n| n > now) {
-            return false;
-        }
-        *next = Some(now + interval);
-        true
+        self.inner.allow()
     }
 }
 
@@ -303,6 +295,7 @@ impl InlineArchivers for FileInlineArchivers {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
 
     struct Fake {
         history_ok: bool,

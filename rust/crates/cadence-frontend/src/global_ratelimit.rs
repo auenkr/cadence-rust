@@ -201,30 +201,49 @@ fn counted(inner: Reservation, usage: &Arc<AtomicUsage>) -> Reservation {
 struct Bucket {
     rps: f64,
     tokens: f64,
-    last: Instant,
+    /// Go `rate.Limiter.last`; `None` is Go's zero time, so the first use
+    /// refills to a full burst (`clock.NewRatelimiter` keeps `latestNow` zero).
+    last: Option<Instant>,
 }
 
 impl Bucket {
     fn new(rps: f64) -> Self {
         Self {
             rps,
-            tokens: Self::burst_for(rps),
-            last: Instant::now(),
+            tokens: 0.0,
+            last: None,
         }
     }
     /// Go fallback limiter: burst = max(1, int(limit)).
     fn burst_for(rps: f64) -> f64 {
         (rps.trunc()).max(1.0)
     }
+    fn advance(&self, now: Instant) -> f64 {
+        let burst = Self::burst_for(self.rps);
+        match self.last {
+            None => burst,
+            Some(last) => {
+                let elapsed = now.saturating_duration_since(last).as_secs_f64();
+                (self.tokens + elapsed * self.rps).min(burst)
+            }
+        }
+    }
+    /// Go `SetLimit`+`SetBurst`: tokens accrue at the old rate up to now first.
     fn set_rps(&mut self, rps: f64) {
+        if self.rps == rps {
+            return;
+        }
+        if self.last.is_some() {
+            let now = Instant::now();
+            self.tokens = self.advance(now);
+            self.last = Some(now);
+        }
         self.rps = rps;
     }
     fn take(&mut self) -> bool {
-        let burst = Self::burst_for(self.rps);
         let now = Instant::now();
-        let elapsed = now.saturating_duration_since(self.last).as_secs_f64();
-        self.tokens = (self.tokens + elapsed * self.rps).min(burst);
-        self.last = now;
+        self.tokens = self.advance(now);
+        self.last = Some(now);
         if self.tokens >= 1.0 {
             self.tokens -= 1.0;
             true
@@ -777,13 +796,25 @@ mod tests {
     #[test]
     fn fallback_burst_is_max_one_int_limit() {
         let mut b = Bucket::new(2.9);
-        assert_eq!(b.tokens, 2.0);
         assert!(b.take() && b.take() && !b.take());
         b.give_back();
         b.give_back();
         b.give_back();
         assert!(b.tokens <= 2.0);
-        assert_eq!(Bucket::new(0.4).tokens, 1.0);
+        let mut small = Bucket::new(0.4);
+        assert!(small.take() && !small.take());
+    }
+
+    /// Go `clock.NewRatelimiter(0, 0)` keeps a zero `last`, so the primary
+    /// fills to its full burst on first use after `Update`, not one token.
+    #[test]
+    fn primary_fills_full_burst_on_first_use_after_update() {
+        let mut b = Bucket::new(0.0);
+        b.set_rps(5.0);
+        for _ in 0..5 {
+            assert!(b.take());
+        }
+        assert!(!b.take());
     }
 
     use super::*;

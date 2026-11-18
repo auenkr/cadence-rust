@@ -2,7 +2,7 @@
 //! construction, start, and the graceful `Stop` sequence).
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use cadence_service_core::ringpop_tchannel::RingpopHandler;
@@ -55,41 +55,25 @@ impl MembershipControl for NoMembership {
     async fn evict_self(&self) {}
 }
 
-/// Dynamic-rate limiter used by the workflow-ID cache (Go `quotas.NewSimpleDynamicRateLimiter`):
-/// token bucket with burst `max(rps, 1)` whose rate is re-read on every call.
-struct DynamicBucket {
-    rps: Arc<dyn Fn() -> i64 + Send + Sync>,
-    state: Mutex<(f64, Instant)>,
-}
+/// Go `dynamicconfig/quotas.NewSimpleDynamicRateLimiterFactory(rps func(domain) int)`:
+/// one `quotas.NewDynamicRateLimiter` per domain.
+pub struct DynamicLimiterFactory(pub PropDomain<i64>);
+
+struct DynamicBucket(cadence_common::dynamic_rate_limiter::DynamicRateLimiter);
 
 impl Limiter for DynamicBucket {
     fn allow(&self) -> bool {
-        let rps = (self.rps)();
-        let burst = rps.max(1) as f64;
-        let mut st = self.state.lock().unwrap();
-        let now = Instant::now();
-        let elapsed = now.saturating_duration_since(st.1).as_secs_f64();
-        st.1 = now;
-        st.0 = (st.0 + elapsed * rps.max(0) as f64).min(burst);
-        if st.0 >= 1.0 {
-            st.0 -= 1.0;
-            true
-        } else {
-            false
-        }
+        self.0.allow()
     }
 }
-
-/// Go `quotas.NewSimpleDynamicRateLimiterFactory(rps func(domain) int)`.
-pub struct DynamicLimiterFactory(pub PropDomain<i64>);
 
 impl LimiterFactory for DynamicLimiterFactory {
     fn limiter(&self, domain_name: &str) -> Arc<dyn Limiter> {
         let prop = self.0.clone();
         let domain = domain_name.to_string();
-        let rps: Arc<dyn Fn() -> i64 + Send + Sync> = Arc::new(move || prop(&domain));
-        let burst = rps().max(1) as f64;
-        Arc::new(DynamicBucket { rps, state: Mutex::new((burst, Instant::now())) })
+        Arc::new(DynamicBucket(cadence_common::dynamic_rate_limiter::DynamicRateLimiter::new(
+            Box::new(move || prop(&domain) as f64),
+        )))
     }
 }
 
@@ -138,7 +122,10 @@ impl Service {
             WORKFLOW_ID_CACHE_TTL,
             WORKFLOW_ID_CACHE_MAX_COUNT,
         ));
-        let raw = Arc::new(HandlerImpl::new(registry.clone(), (env.config.rps)() as f64));
+        let raw = Arc::new(HandlerImpl::new(registry.clone(), {
+            let rps = env.config.rps.clone();
+            Box::new(move || rps() as f64)
+        }));
         let handler: Arc<dyn Handler> =
             Arc::new(HistoryHandler { wrapped: Arc::new(crate::handler::metrics_handler::MetricsHandler { wrapped: raw, registry: env.metrics_registry.clone(), convert_error: Some({ let reg = registry.clone(); Arc::new(move |e: crate::engine::deps::HistoryError| reg.convert_error(e)) }) }), workflow_id_cache: Arc::new(CacheAdapter(wf_cache)) });
         Self {
@@ -243,7 +230,7 @@ mod tests {
         assert!(l.allow());
         assert!(!l.allow());
         let off = DynamicLimiterFactory(Arc::new(|_d: &str| 0)).limiter("d");
-        assert!(off.allow()); // burst 1 as in rate.NewLimiter(0, 1)
+        // Go getLimitAndBurst: rps 0 zeroes the burst, cutting off all permits.
         assert!(!off.allow());
     }
 }
