@@ -24,40 +24,80 @@ use crate::task::interface as ti;
 // rate limiter
 // ---------------------------------------------------------------------------
 
-/// Go `quotas.NewDynamicRateLimiter(rps)`: a limiter whose rate is re-read on every call.
+/// Go `quotas.NewDynamicRateLimiter(rps)`: a `golang.org/x/time/rate` token bucket whose rate is
+/// re-read on every call, with burst `max(ceil(rps), 1)` (Go `getLimitAndBurst`, `_minBurst = 1`).
+/// The bucket starts full, so an idle queue loads immediately instead of being paced 1/rps apart.
 pub struct DynamicRateLimiter {
     rps: q::IntFn,
-    next_free: Mutex<Option<Instant>>,
+    /// (available tokens, time they were last computed); `None` until first use (starts full).
+    bucket: Mutex<Option<(f64, Instant)>>,
 }
 
 impl DynamicRateLimiter {
     pub fn new(rps: q::IntFn) -> Arc<Self> {
-        Arc::new(Self { rps, next_free: Mutex::new(None) })
+        Arc::new(Self { rps, bucket: Mutex::new(None) })
+    }
+
+    /// Go `rate.Limiter.reserveN(now, 1, maxWait)`: returns the wait before the token is usable,
+    /// or `None` (consuming nothing) when it would exceed `max_wait`.
+    fn reserve(&self, now: Instant, max_wait: Duration) -> Option<Duration> {
+        let rps = (self.rps)();
+        if rps <= 0 {
+            return None;
+        }
+        let rate = rps as f64;
+        let burst = (rate.ceil() as i64).max(1) as f64;
+        let mut bucket = self.bucket.lock().unwrap();
+        let (tokens, last) = bucket.unwrap_or((burst, now));
+        let elapsed = now.saturating_duration_since(last).as_secs_f64();
+        let tokens = (tokens + elapsed * rate).min(burst) - 1.0;
+        let wait = if tokens < 0.0 { Duration::from_secs_f64(-tokens / rate) } else { Duration::ZERO };
+        if wait > max_wait {
+            return None;
+        }
+        *bucket = Some((tokens, now.max(last)));
+        Some(wait)
     }
 }
 
 #[async_trait]
 impl q::Limiter for DynamicRateLimiter {
     async fn wait(&self, timeout: Duration) -> Result<(), q::QueueError> {
-        let rps = (self.rps)();
-        if rps <= 0 {
-            return Err(q::QueueError::Other("rate: Wait(n=1) would exceed context deadline".into()));
-        }
-        let interval = Duration::from_secs_f64(1.0 / rps as f64);
-        let now = Instant::now();
-        let at = {
-            let mut next = self.next_free.lock().unwrap();
-            let at = next.map_or(now, |n| n.max(now));
-            if at.saturating_duration_since(now) > timeout {
-                return Err(q::QueueError::Other("rate: Wait(n=1) would exceed context deadline".into()));
+        match self.reserve(Instant::now(), timeout) {
+            None => Err(q::QueueError::Other("rate: Wait(n=1) would exceed context deadline".into())),
+            Some(wait) => {
+                if !wait.is_zero() {
+                    tokio::time::sleep(wait).await;
+                }
+                Ok(())
             }
-            *next = Some(at + interval);
-            at
-        };
-        if at > now {
-            tokio::time::sleep(at - now).await;
         }
-        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod dynamic_rate_limiter_tests {
+    use super::*;
+
+    #[test]
+    fn bursts_up_to_ceil_rps_then_paces() {
+        let l = DynamicRateLimiter::new(Arc::new(|| 20));
+        let t0 = Instant::now();
+        for _ in 0..20 {
+            assert_eq!(l.reserve(t0, Duration::from_secs(1)), Some(Duration::ZERO));
+        }
+        let w = l.reserve(t0, Duration::from_secs(1)).unwrap();
+        assert!((w.as_secs_f64() - 0.05).abs() < 1e-6, "{w:?}");
+        // a wait beyond the deadline consumes nothing
+        assert_eq!(l.reserve(t0, Duration::from_millis(10)), None);
+        // refills at rps
+        assert!(l.reserve(t0 + Duration::from_secs(2), Duration::ZERO).is_some());
+    }
+
+    #[test]
+    fn zero_rps_rejects() {
+        let l = DynamicRateLimiter::new(Arc::new(|| 0));
+        assert_eq!(l.reserve(Instant::now(), Duration::from_secs(10)), None);
     }
 }
 
