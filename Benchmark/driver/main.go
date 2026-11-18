@@ -137,6 +137,7 @@ func main() {
 	warmup := flag.Duration("warmup", 10*time.Minute, "warmup arrival window")
 	max := flag.Int("max-inflight", 10000, "hard safety bound; overflow fails run without slowing arrivals")
 	capacity := flag.Int("worker-capacity", 128, "activity and decision execution capacity")
+	pollers := flag.Int("worker-pollers", 0, "decision and activity task pollers (0 = SDK default 2)")
 	payload := flag.Int("payload-bytes", 1024, "bytes")
 	activityMS := flag.Int("activity-ms", 10, "controlled activity duration")
 	output := flag.String("output", "samples.jsonl", "per-ID durable ledger")
@@ -155,7 +156,7 @@ func main() {
 	defer d.Stop()
 	rpc := workflowserviceclient.New(d.ClientConfig("cadence-frontend"))
 	if *mode == "worker" {
-		w := worker.New(rpc, *domain, *tl, worker.Options{DisableStickyExecution: true, MaxConcurrentActivityExecutionSize: *capacity, MaxConcurrentDecisionTaskExecutionSize: *capacity})
+		w := worker.New(rpc, *domain, *tl, worker.Options{DisableStickyExecution: true, MaxConcurrentActivityExecutionSize: *capacity, MaxConcurrentDecisionTaskExecutionSize: *capacity, MaxConcurrentDecisionTaskPollers: *pollers, MaxConcurrentActivityTaskPollers: *pollers})
 		w.RegisterWorkflow(oneActivity)
 		w.RegisterActivity(activity)
 		must(w.Start())

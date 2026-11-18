@@ -54,6 +54,7 @@ def main():
     p.add_argument('--payload-bytes', type=int, default=1024)
     p.add_argument('--activity-ms', type=int, default=10)
     p.add_argument('--worker-capacity', type=int, default=128)
+    p.add_argument('--worker-pollers', type=int, default=int(os.environ.get('WORKER_POLLERS', '0')))
     p.add_argument('--recovery', action='store_true', help='drop database TCP traffic for 3s, 10s into measurement')
     a = p.parse_args()
     if not 0 < a.rate <= 100000 or a.duration < 1 or a.warmup < 0 or a.repetitions < 1:
@@ -129,7 +130,7 @@ def main():
                     containers.append(identities['mysql']['Name'].lstrip('/'))
                     (OUT/(key+'-identities.json')).write_text(json.dumps(identities,indent=2))
                     common=[str(ROOT/'bin/driver'),'-domain','benchmark','-task-list',key,
-                            '-worker-capacity',str(a.worker_capacity)]
+                            '-worker-capacity',str(a.worker_capacity),'-worker-pollers',str(a.worker_pollers)]
                     worker_cmd=['taskset','-c',str(cpus[1]),*common,'-mode','worker']
                     with (OUT/(key+'-sdk-worker.log')).open('w') as log:
                         sdk_worker=subprocess.Popen(worker_cmd,stdout=log,stderr=subprocess.STDOUT)
@@ -147,6 +148,10 @@ def main():
                         fault_cmd=['python3',str(ROOT/'fault.py'),'--ready',str(ready),'--output',str(OUT/(key+'-fault.json')),'--mysql-pid',str(identities['mysql']['State']['Pid'])]
                         fault_log=(OUT/(key+'-fault.log')).open('w')
                         fault=subprocess.Popen(fault_cmd,stdout=fault_log,stderr=subprocess.STDOUT)
+                    def proc_cpu(pid):
+                        f=open(f'/proc/{pid}/stat').read().rsplit(')',1)[1].split()
+                        return (int(f[11])+int(f[12]))/os.sysconf('SC_CLK_TCK')
+                    w0,t0=proc_cpu(sdk_worker.pid),time.monotonic()
                     try:
                         run(['taskset','-c',str(cpus[0]),*common,'-mode','generate','-rate',str(a.rate),
                             '-warmup',f'{a.warmup}s','-duration',f'{a.duration}s',
@@ -154,6 +159,8 @@ def main():
                             '-prefix',key,'-measurement-start-file',start,'-measurement-end-file',end,
                             '-collector-ready-file',ready,'-output',OUT/(key+'-samples.jsonl')],
                             key+'-generate',timeout=a.warmup+a.duration+360)
+                        w1,t1=proc_cpu(sdk_worker.pid),time.monotonic()
+                        (OUT/(key+'-sdkworker.json')).write_text(json.dumps({'cpu_seconds':w1-w0,'elapsed_seconds':t1-t0,'average_cpu_cores':(w1-w0)/(t1-t0),'pollers':a.worker_pollers}))
                         if fault is not None and fault.wait(timeout=30): raise RuntimeError('fault injection failed')
                         status=collector.wait(timeout=30)
                         if status: raise RuntimeError('resource collector failed: '+(OUT/(key+'-collector.log')).read_text(errors='replace')[-1500:])
