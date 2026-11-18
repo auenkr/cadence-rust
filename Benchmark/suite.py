@@ -54,6 +54,8 @@ def summarize_stage(path,mode,rate,status):
             f=path/(key+'-fault.json')
             if f.exists():
                 item['fault']=json.loads(f.read_text());item['recovery']=recovery_result(rows,item['fault'],rate)
+        sw=path/(key+'-sdkworker.json')
+        if sw.exists():item['sdk_worker']=json.loads(sw.read_text())
         resources=path/(key+'-resources.json')
         if resources.exists():
             data=json.loads(resources.read_text());item['resources']={k:v for k,v in data.items() if k not in ('timeline','mysql_samples')}

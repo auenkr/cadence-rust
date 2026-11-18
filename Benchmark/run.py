@@ -148,6 +148,10 @@ def main():
                         fault_cmd=['python3',str(ROOT/'fault.py'),'--ready',str(ready),'--output',str(OUT/(key+'-fault.json')),'--mysql-pid',str(identities['mysql']['State']['Pid'])]
                         fault_log=(OUT/(key+'-fault.log')).open('w')
                         fault=subprocess.Popen(fault_cmd,stdout=fault_log,stderr=subprocess.STDOUT)
+                    def proc_cpu(pid):
+                        f=open(f'/proc/{pid}/stat').read().rsplit(')',1)[1].split()
+                        return (int(f[11])+int(f[12]))/os.sysconf('SC_CLK_TCK')
+                    w0,t0=proc_cpu(sdk_worker.pid),time.monotonic()
                     try:
                         run(['taskset','-c',str(cpus[0]),*common,'-mode','generate','-rate',str(a.rate),
                             '-warmup',f'{a.warmup}s','-duration',f'{a.duration}s',
@@ -155,6 +159,8 @@ def main():
                             '-prefix',key,'-measurement-start-file',start,'-measurement-end-file',end,
                             '-collector-ready-file',ready,'-output',OUT/(key+'-samples.jsonl')],
                             key+'-generate',timeout=a.warmup+a.duration+360)
+                        w1,t1=proc_cpu(sdk_worker.pid),time.monotonic()
+                        (OUT/(key+'-sdkworker.json')).write_text(json.dumps({'cpu_seconds':w1-w0,'elapsed_seconds':t1-t0,'average_cpu_cores':(w1-w0)/(t1-t0),'pollers':a.worker_pollers}))
                         if fault is not None and fault.wait(timeout=30): raise RuntimeError('fault injection failed')
                         status=collector.wait(timeout=30)
                         if status: raise RuntimeError('resource collector failed: '+(OUT/(key+'-collector.log')).read_text(errors='replace')[-1500:])
