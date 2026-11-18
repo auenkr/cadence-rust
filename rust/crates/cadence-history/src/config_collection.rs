@@ -18,6 +18,8 @@ pub struct Filters {
     pub shard_id: Option<i64>,
     pub task_list: Option<String>,
     pub workflow_id: Option<String>,
+    /// Go `TaskType` filter (persistence task-list type: 0 decision, 1 activity).
+    pub task_type: Option<i64>,
 }
 
 /// Go `dynamicconfig.Client`: raw JSON-typed value lookup by key + filters.

@@ -695,6 +695,34 @@ pub fn string_domain(values: impl PropertyValueSource, domain: &str, default: &s
     }
 }
 
+/// Go `GetStringPropertyFilteredByTaskListInfo` (domain, task list, task type),
+/// e.g. `system.tasklistLoadBalancerStrategy`. An unset key is not an error.
+pub fn task_list_string(
+    values: impl PropertyValueSource,
+    domain: Option<&str>,
+    task_list: &str,
+    task_type: i32,
+    default: &str,
+) -> String {
+    let filters = task_list_filters(domain, task_list.as_bytes(), task_type);
+    if let Some(result) = values.runtime_value(
+        RuntimePropertyType::String,
+        Value::String(default.into()),
+        &filters,
+    ) {
+        return runtime_typed(result, default, "string")
+            .and_then(|value| value.as_str().map(str::to_owned))
+            .unwrap_or_else(|| default.into());
+    }
+    selected_context(
+        values.snapshot_values(),
+        domain,
+        Some((task_list, task_type)),
+    )
+    .and_then(|value| value.as_str().map(str::to_owned))
+    .unwrap_or_else(|| default.to_owned())
+}
+
 /// Go `GetStringPropertyFilteredByRatelimitKey`: the only allowed filter is
 /// `ratelimitKey` (the global key, e.g. `user:<domain>`).
 pub fn string_ratelimit_key(values: impl PropertyValueSource, key: &str, default: &str) -> String {
@@ -883,6 +911,33 @@ mod tests {
         assert_eq!(float(&[entry(json!(0.25), &[])], 0.0), 0.25);
         assert_eq!(float(&[entry(json!("x"), &[])], 0.5), 0.5);
         assert_eq!(float(&[], 0.0), 0.0);
+    }
+
+    #[test]
+    fn task_list_string_filters_by_task_type() {
+        let values = vec![
+            entry(json!("random"), &[]),
+            entry(
+                json!("round-robin"),
+                &[
+                    ("domainName", json!("d")),
+                    ("taskListName", json!("tl")),
+                    ("taskType", json!(1)),
+                ],
+            ),
+        ];
+        assert_eq!(
+            task_list_string(&values, Some("d"), "tl", 1, "weighted"),
+            "round-robin"
+        );
+        assert_eq!(
+            task_list_string(&values, Some("d"), "tl", 0, "weighted"),
+            "random"
+        );
+        assert_eq!(
+            task_list_string(&values[1..], Some("d"), "other", 1, "weighted"),
+            "weighted"
+        );
     }
 
     #[test]

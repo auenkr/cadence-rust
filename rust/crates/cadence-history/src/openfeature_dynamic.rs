@@ -42,6 +42,9 @@ impl OpenFeatureDynamicClient {
         if let Some(v) = &f.workflow_id {
             ctx.insert("workflowID".to_string(), Value::from(v.clone()));
         }
+        if let Some(v) = f.task_type {
+            ctx.insert("taskType".to_string(), Value::from(v));
+        }
         if !self.cluster_name.is_empty() {
             ctx.entry("clusterName".to_string()).or_insert_with(|| Value::from(self.cluster_name.clone()));
         }
@@ -104,6 +107,7 @@ mod tests {
             shard_id: Some(3),
             task_list: Some("tl".into()),
             workflow_id: Some("wf".into()),
+            task_type: None,
         });
         let keys: Vec<_> = ctx.keys().map(String::as_str).collect();
         assert_eq!(keys, ["clusterName", "domainID", "domainName", "shardID", "taskListName", "workflowID"]);
