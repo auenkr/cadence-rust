@@ -59,6 +59,16 @@ def summarize_stage(path,mode,rate,status):
         resources=path/(key+'-resources.json')
         if resources.exists():
             data=json.loads(resources.read_text());item['resources']={k:v for k,v in data.items() if k not in ('timeline','mysql_samples')}
+            ms=data.get('mysql_samples') or []
+            if len(ms)>=2:
+                first,last=ms[0]['counters'],ms[-1]['counters'];span=ms[-1]['elapsed_seconds']-ms[0]['elapsed_seconds']
+                gauge=lambda k:k.startswith(('tasks_backlog','transfer_tasks','timer_tasks','Threads_','Innodb_os_log_pending'))
+                item['mysql']={'span_seconds':span,
+                    'deltas':{k:last[k]-first.get(k,0) for k in last if not gauge(k)},
+                    'gauge_max':{k:max(m['counters'].get(k,0) for m in ms) for k in set().union(*(m['counters'] for m in ms)) if gauge(k)}}
+                d=item['mysql']['deltas']
+                if d.get('commit_count'):item['mysql']['avg_commit_ms']=d['commit_wait_ps']/d['commit_count']/1e9
+                if d.get('log_file_write_count'):item['mysql']['avg_log_io_us']=d['log_file_wait_ps']/d['log_file_write_count']/1e6
             item['resources']['rss_trend_note']='30s plus drain; diagnostic only, not a soak slope'
         result['runs'][key]=item
     # Keep one exact resolved deployment per arm; no container inventories/logs.

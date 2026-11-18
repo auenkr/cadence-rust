@@ -64,10 +64,19 @@ def main():
     if len(cpus) < 4:
         raise RuntimeError('need >=4 CPUs: generator, SDK worker, and two service CPUs')
     override = OUT / 'limits.yml'
-    override.write_text('services:\n' + ''.join(
-        f'  {s}:\n    cpuset: "{cpus[2]},{cpus[3]}"\n    cpus: 1.0\n    mem_limit: 1400m\n    memswap_limit: 1400m\n    pids_limit: 2048\n'
-        for s in ('frontend', 'matching', 'history', 'worker')) +
-        f'  mysql:\n    cpuset: "{cpus[2]},{cpus[3]}"\n')
+    svc={s:{'cpuset':f'{cpus[2]},{cpus[3]}','cpus':1.0,'mem_limit':'1400m','memswap_limit':'1400m','pids_limit':2048}
+         for s in ('frontend','matching','history','worker')}
+    svc['mysql']={'cpuset':f'{cpus[2]},{cpus[3]}'}
+    # Variant knobs; always identical for the Go and Rust arms.
+    if os.environ.get('MYSQL_ARGS') not in (None,'','none'):svc['mysql']['command']=os.environ['MYSQL_ARGS'].split()
+    if os.environ.get('MYSQL_TMPFS')=='true':svc['mysql']['tmpfs']=['/var/lib/mysql:size=1200m']
+    if os.environ.get('DYNAMIC_CONFIG_EXTRA'):
+        base=subprocess.check_output(['docker','run','--rm','--entrypoint','cat','cadence-go:ci','/etc/cadence/dynamicconfig/development.yaml'],text=True)
+        dyn=OUT/'development.yaml'
+        dyn.write_text(base.rstrip('\n')+'\n'+os.environ['DYNAMIC_CONFIG_EXTRA'].replace('\\n','\n')+'\n')
+        for s in ('frontend','matching','history','worker'):svc[s]['volumes']=[f'{dyn}:/etc/cadence/dynamicconfig/development.yaml:ro']
+    override = OUT / 'limits.yml'
+    override.write_text(json.dumps({'services':svc},indent=1))
     env = dict(os.environ, COMPOSE_FILE=os.pathsep.join((str(ROOT/'compose.yml'), str(override))))
     compose = ['docker', 'compose', '-p', PROJECT]
     source = Path(os.environ.get('BENCHMARK_SOURCE_DIR', ROOT.parent))
@@ -78,6 +87,7 @@ def main():
                     driver_sha256=hashlib.sha256((ROOT/'bin/driver').read_bytes()).hexdigest(),
                     cpu_affinity={'generator':cpus[0], 'sdk_worker':cpus[1], 'services_and_db':cpus[2:4]},
                     hardware=capture(['lscpu']), protocol='open-loop-one-activity-v1',
+                    variant={k:os.environ.get(k) for k in ('MYSQL_ARGS','MYSQL_TMPFS','NUM_HISTORY_SHARDS','DYNAMIC_CONFIG_EXTRA')},
                     metrics_unavailable=['database query latency percentiles', 'server retry counters',
                                          'server queue backlog age'],
                     scope='All Rust core services; Go system Worker' if a.service == 'all' else f'{a.service.title()} only; other core services and system Worker stay Go in both arms')

@@ -28,6 +28,15 @@ on:
       worker_pollers:
         description: SDK worker decision/activity pollers (0 = SDK default)
         default: '0'
+      mysql_args:
+        description: Extra mysqld args, both arms (default removes runner-disk fsync ceiling; 'none' = MySQL defaults)
+        default: '--innodb-flush-log-at-trx-commit=2 --sync-binlog=0'
+      history_shards:
+        description: numHistoryShards (both arms)
+        default: '4'
+      dynamic_config_extra:
+        description: YAML appended to dynamic config (literal \n for newlines; both arms)
+        default: ''
       sdk_repetitions:
         description: Fresh database pairs for SDK mode
         default: '1'
@@ -80,6 +89,9 @@ jobs:
           CAPACITY_RATES: ${{ inputs.capacity_rates }}
           CAPACITY_ONLY: ${{ inputs.capacity_only }}
           WORKER_POLLERS: ${{ inputs.worker_pollers }}
+          MYSQL_ARGS: ${{ inputs.mysql_args }}
+          NUM_HISTORY_SHARDS: ${{ inputs.history_shards || '4' }}
+          DYNAMIC_CONFIG_EXTRA: ${{ inputs.dynamic_config_extra }}
           CAPACITY_REPETITIONS: ${{ inputs.sdk_repetitions }}
           SERVICE: ${{ inputs.service || 'matching' }}
           REPETITIONS: ${{ inputs.sdk_repetitions || '1' }}
