@@ -29,8 +29,8 @@ on:
         description: SDK worker decision/activity pollers (0 = SDK default)
         default: '0'
       mysql_args:
-        description: Extra mysqld args (variant, both arms)
-        default: ''
+        description: Extra mysqld args, both arms (default removes runner-disk fsync ceiling; 'none' = MySQL defaults)
+        default: '--innodb-flush-log-at-trx-commit=2 --sync-binlog=0'
       history_shards:
         description: numHistoryShards (both arms)
         default: '4'

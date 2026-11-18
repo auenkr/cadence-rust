@@ -68,7 +68,7 @@ def main():
          for s in ('frontend','matching','history','worker')}
     svc['mysql']={'cpuset':f'{cpus[2]},{cpus[3]}'}
     # Variant knobs; always identical for the Go and Rust arms.
-    if os.environ.get('MYSQL_ARGS'):svc['mysql']['command']=os.environ['MYSQL_ARGS'].split()
+    if os.environ.get('MYSQL_ARGS') not in (None,'','none'):svc['mysql']['command']=os.environ['MYSQL_ARGS'].split()
     if os.environ.get('MYSQL_TMPFS')=='true':svc['mysql']['tmpfs']=['/var/lib/mysql:size=1200m']
     if os.environ.get('DYNAMIC_CONFIG_EXTRA'):
         base=subprocess.check_output(['docker','run','--rm','--entrypoint','cat','cadence-go:ci','/etc/cadence/dynamicconfig/development.yaml'],text=True)
