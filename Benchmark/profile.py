@@ -22,7 +22,7 @@ while not Path(a.end).exists() and time.time() < deadline: time.sleep(0.5)
 subprocess.run(['sudo', 'kill', '-INT', str(rec.pid)]); subprocess.run(['sudo', 'pkill', '-INT', '-f', data])
 rec.wait(timeout=120)
 fg = Path(a.flamegraph_dir)
-script = subprocess.run(['sudo', 'perf', 'script', '-i', data], capture_output=True, text=True, errors='replace').stdout
+script = subprocess.run(['sudo', 'perf', 'script', '--no-inline', '-i', data], capture_output=True, text=True, errors='replace').stdout
 print('perf script bytes', len(script), flush=True)
 folded = subprocess.run(['perl', str(fg/'stackcollapse-perf.pl')], input=script, capture_output=True, text=True).stdout
 Path(a.output_prefix + '.folded').write_text(folded)

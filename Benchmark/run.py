@@ -162,7 +162,7 @@ def main():
                             '-collector-ready-file',ready,'-output',OUT/(key+'-samples.jsonl')],
                             key+'-generate',timeout=a.warmup+a.duration+360)
                         if fault is not None and fault.wait(timeout=30): raise RuntimeError('fault injection failed')
-                        if profiler is not None: profiler.wait(timeout=300)
+                        if profiler is not None: profiler.wait(timeout=1200)
                         status=collector.wait(timeout=30)
                         if status: raise RuntimeError('resource collector failed: '+(OUT/(key+'-collector.log')).read_text(errors='replace')[-1500:])
                     finally:
