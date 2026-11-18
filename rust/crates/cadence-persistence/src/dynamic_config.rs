@@ -714,9 +714,13 @@ pub fn task_list_string(
             .and_then(|value| value.as_str().map(str::to_owned))
             .unwrap_or_else(|| default.into());
     }
-    selected_context(values.snapshot_values(), domain, Some((task_list, task_type)))
-        .and_then(|value| value.as_str().map(str::to_owned))
-        .unwrap_or_else(|| default.to_owned())
+    selected_context(
+        values.snapshot_values(),
+        domain,
+        Some((task_list, task_type)),
+    )
+    .and_then(|value| value.as_str().map(str::to_owned))
+    .unwrap_or_else(|| default.to_owned())
 }
 
 /// Go `GetStringPropertyFilteredByRatelimitKey`: the only allowed filter is
@@ -915,12 +919,25 @@ mod tests {
             entry(json!("random"), &[]),
             entry(
                 json!("round-robin"),
-                &[("domainName", json!("d")), ("taskListName", json!("tl")), ("taskType", json!(1))],
+                &[
+                    ("domainName", json!("d")),
+                    ("taskListName", json!("tl")),
+                    ("taskType", json!(1)),
+                ],
             ),
         ];
-        assert_eq!(task_list_string(&values, Some("d"), "tl", 1, "weighted"), "round-robin");
-        assert_eq!(task_list_string(&values, Some("d"), "tl", 0, "weighted"), "random");
-        assert_eq!(task_list_string(&values[1..], Some("d"), "other", 1, "weighted"), "weighted");
+        assert_eq!(
+            task_list_string(&values, Some("d"), "tl", 1, "weighted"),
+            "round-robin"
+        );
+        assert_eq!(
+            task_list_string(&values, Some("d"), "tl", 0, "weighted"),
+            "random"
+        );
+        assert_eq!(
+            task_list_string(&values[1..], Some("d"), "other", 1, "weighted"),
+            "weighted"
+        );
     }
 
     #[test]
