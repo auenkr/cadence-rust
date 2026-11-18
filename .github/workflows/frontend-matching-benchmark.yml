@@ -19,6 +19,12 @@ on:
       source_ref:
         description: Exact migrated source commit (empty uses workflow head)
         default: ''
+      capacity_rates:
+        description: Comma separated capacity starts/s (suite mode); capacity_only skips fixed/recovery
+        default: '25,100'
+      capacity_only:
+        type: boolean
+        default: false
       sdk_repetitions:
         description: Fresh database pairs for SDK mode
         default: '1'
@@ -68,6 +74,9 @@ jobs:
       - run: bash Benchmark/ci.sh
         env:
           SUITE: ${{ inputs.sdk_suite }}
+          CAPACITY_RATES: ${{ inputs.capacity_rates }}
+          CAPACITY_ONLY: ${{ inputs.capacity_only }}
+          CAPACITY_REPETITIONS: ${{ inputs.sdk_repetitions }}
           SERVICE: ${{ inputs.service || 'matching' }}
           REPETITIONS: ${{ inputs.sdk_repetitions || '1' }}
           BENCHMARK_SOURCE_DIR: ${{ github.workspace }}/benchmark-source

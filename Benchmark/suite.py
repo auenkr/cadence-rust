@@ -65,16 +65,18 @@ def summarize_stage(path,mode,rate,status):
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--service',choices=('matching','frontend','history','all'),required=True);a=p.parse_args()
-    stages=[('fixed',5),('capacity',25),('capacity',100),('recovery',5)]
+    rates=[int(x) for x in os.environ.get('CAPACITY_RATES','25,100').split(',') if x.strip()]
+    reps=os.environ.get('CAPACITY_REPETITIONS','3')
+    stages=[('capacity',r) for r in rates] if os.environ.get('CAPACITY_ONLY')=='true' else [('fixed',5)]+[('capacity',r) for r in rates]+[('recovery',5)]
     summary={'service':a.service,'source_head':os.environ.get('SOURCE_REF'),
-             'protocol':{'workload':'one-activity','warmup_seconds':10,'measurement_seconds':30,'repetitions':3,'payload_bytes':1024,'activity_ms':10,'capacity_rates':[5,25,100],'completion_p99_target_ms':1000,'error_target':0,'max_end_outstanding':'max(2, 1% of arrivals)','recovery':'3s MySQL TCP INPUT DROP, 10s after collector ready'},
+             'protocol':{'workload':'one-activity','warmup_seconds':10,'measurement_seconds':30,'repetitions':3,'payload_bytes':1024,'activity_ms':10,'capacity_rates':rates,'capacity_repetitions':reps,'completion_p99_target_ms':1000,'error_target':0,'max_end_outstanding':'max(2, 1% of arrivals)','recovery':'3s MySQL TCP INPUT DROP, 10s after collector ready'},
              'stages':[],'limitations':['Smoke protocol, not 10min/30min production protocol.','Capacity is highest TESTED passing rate; a passing highest step is a lower bound.','Recovery API retries are included in latency; server retry counters unavailable.','Short RSS peaks cannot establish memory stability; this benchmark uses musl System, not glibc.']}
     began=time.monotonic()
     for mode,rate in stages:
         # Leave room for artifacts/cleanup within the 90-minute job, including builds.
         path=OUT/f'{mode}-{rate}';path.mkdir(parents=True,exist_ok=True)
         env=dict(os.environ,BENCHMARK_OUTPUT_DIR=str(path))
-        cmd=['python3',str(ROOT/'run.py'),'--service',a.service,'--rate',str(rate),'--warmup','10','--duration','30','--repetitions','3']
+        cmd=['python3',str(ROOT/'run.py'),'--service',a.service,'--rate',str(rate),'--warmup','10','--duration','30','--repetitions',reps if mode=='capacity' else '3']
         if mode=='recovery':cmd+=['--recovery']
         with (path/'runner.log').open('w') as log:
             try:status=subprocess.run(cmd,env=env,stdout=log,stderr=subprocess.STDOUT,timeout=1200).returncode
