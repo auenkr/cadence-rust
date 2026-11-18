@@ -25,6 +25,7 @@ pub mod engine_timer;
 pub mod env;
 pub mod failover;
 pub mod failover_client;
+pub mod matching_lb_config;
 pub mod ndc_adapters;
 pub mod parent_close_policy_client;
 #[cfg(test)]

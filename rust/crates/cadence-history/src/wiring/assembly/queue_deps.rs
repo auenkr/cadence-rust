@@ -160,6 +160,22 @@ fn proto_task_list(name: &str, kind: TaskListKind) -> cadence_proto::api::TaskLi
     }
 }
 
+#[allow(deprecated)]
+fn partition_config_from_proto(
+    c: cadence_proto::task_list_partition::matching::TaskListPartitionConfig,
+) -> cadence_common::matching_lb::PartitionConfig {
+    let groups = |m: std::collections::HashMap<i32, cadence_proto::matching::TaskListPartition>| {
+        m.into_iter().map(|(k, v)| (k, v.isolation_groups)).collect()
+    };
+    cadence_common::matching_lb::PartitionConfig::from_parts(
+        c.version,
+        c.num_read_partitions,
+        groups(c.read_partitions),
+        c.num_write_partitions,
+        groups(c.write_partitions),
+    )
+}
+
 fn matching_metadata<T>(request: &mut tonic::Request<T>) {
     let metadata = request.metadata_mut();
     metadata.insert("rpc-service", tonic::metadata::MetadataValue::from_static("cadence-matching"));
@@ -190,6 +206,39 @@ impl TransferDepsImpl {
         Ok(cadence_proto::matching::matching_api_client::MatchingApiClient::new(channel))
     }
 
+    fn lb_request<'a>(request: &'a AddMatchingTaskRequest, partition_config: &'a std::collections::HashMap<String, String>) -> cadence_common::matching_lb::LbRequest<'a> {
+        cadence_common::matching_lb::LbRequest {
+            domain_id: &request.domain_uuid,
+            task_list: &request.task_list.name,
+            kind_normal: matches!(request.task_list.kind, TaskListKind::Normal),
+            forwarded_from: "",
+            partition_config: Some(partition_config),
+        }
+    }
+
+    /// Go matching client `loadBalancer.PickWritePartition`.
+    fn pick_write_partition(&self, request: &AddMatchingTaskRequest, tt: i32) -> String {
+        let config = Self::partition_config(request);
+        self.env.matching_lb.pick_write_partition(tt, &Self::lb_request(request, &config))
+    }
+
+    /// Go matching client `provider.UpdatePartitionConfig` on the original task list.
+    fn update_partition_config(
+        &self,
+        request: &AddMatchingTaskRequest,
+        tt: i32,
+        config: Option<cadence_proto::task_list_partition::matching::TaskListPartitionConfig>,
+    ) {
+        let config = config.map(partition_config_from_proto);
+        self.env.matching_lb.provider().update_partition_config(
+            &request.domain_uuid,
+            &request.task_list.name,
+            matches!(request.task_list.kind, TaskListKind::Normal),
+            tt,
+            config,
+        );
+    }
+
     fn partition_config(request: &AddMatchingTaskRequest) -> std::collections::HashMap<String, String> {
         request
             .partition_config
@@ -215,7 +264,9 @@ impl TransferDependencies for TransferDepsImpl {
     }
 
     async fn add_activity_task(&self, request: AddMatchingTaskRequest) -> TaskResult<()> {
-        let mut client = self.matching_client(&request.task_list.name).await?;
+        let tt = cadence_common::matching_lb::TASK_LIST_TYPE_ACTIVITY;
+        let partition = self.pick_write_partition(&request, tt);
+        let mut client = self.matching_client(&partition).await?;
         let mut rpc = tonic::Request::new(cadence_proto::matching::AddActivityTaskRequest {
             domain_id: request.domain_uuid.clone(),
             source_domain_id: request.source_domain_uuid.clone().unwrap_or_default(),
@@ -223,7 +274,7 @@ impl TransferDependencies for TransferDepsImpl {
                 workflow_id: request.execution.workflow_id.clone(),
                 run_id: request.execution.run_id.clone(),
             }),
-            task_list: Some(proto_task_list(&request.task_list.name, request.task_list.kind)),
+            task_list: Some(proto_task_list(&partition, request.task_list.kind)),
             schedule_id: request.schedule_id,
             schedule_to_start_timeout: Some(cadence_proto::convert::duration(i64::from(
                 request.schedule_to_start_timeout_seconds,
@@ -235,18 +286,22 @@ impl TransferDependencies for TransferDepsImpl {
             activity_task_dispatch_info: None,
         });
         matching_metadata(&mut rpc);
-        client.add_activity_task(rpc).await.map(|_| ()).map_err(status_err)
+        let response = client.add_activity_task(rpc).await.map_err(status_err)?.into_inner();
+        self.update_partition_config(&request, tt, response.partition_config);
+        Ok(())
     }
 
     async fn add_decision_task(&self, request: AddMatchingTaskRequest) -> TaskResult<()> {
-        let mut client = self.matching_client(&request.task_list.name).await?;
+        let tt = cadence_common::matching_lb::TASK_LIST_TYPE_DECISION;
+        let partition = self.pick_write_partition(&request, tt);
+        let mut client = self.matching_client(&partition).await?;
         let mut rpc = tonic::Request::new(cadence_proto::matching::AddDecisionTaskRequest {
             domain_id: request.domain_uuid.clone(),
             workflow_execution: Some(cadence_proto::api::WorkflowExecution {
                 workflow_id: request.execution.workflow_id.clone(),
                 run_id: request.execution.run_id.clone(),
             }),
-            task_list: Some(proto_task_list(&request.task_list.name, request.task_list.kind)),
+            task_list: Some(proto_task_list(&partition, request.task_list.kind)),
             schedule_id: request.schedule_id,
             schedule_to_start_timeout: Some(cadence_proto::convert::duration(i64::from(
                 request.schedule_to_start_timeout_seconds,
@@ -257,7 +312,9 @@ impl TransferDependencies for TransferDepsImpl {
             partition_config: Self::partition_config(&request),
         });
         matching_metadata(&mut rpc);
-        client.add_decision_task(rpc).await.map(|_| ()).map_err(status_err)
+        let response = client.add_decision_task(rpc).await.map_err(status_err)?.into_inner();
+        self.update_partition_config(&request, tt, response.partition_config);
+        Ok(())
     }
 
     fn visibility_domain(&self, domain_id: &str, workflow_id: &str) -> TaskResult<VisibilityDomain> {
