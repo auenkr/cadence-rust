@@ -15,14 +15,15 @@ pids, todo = set(), list(a.pids)
 while todo:
     pid = todo.pop(); pids.add(pid)
     todo += subprocess.run(['pgrep', '-P', pid], capture_output=True, text=True).stdout.split()
-data = a.output_prefix + '.perf.data'
+data = '/tmp/' + Path(a.output_prefix).name + '.perf.data'  # outside artifact dir (root-owned)
 rec = subprocess.Popen(['sudo', 'perf', 'record', '-F', '99', '-g', '-o', data, '-p', ','.join(sorted(pids))],
                        stdout=subprocess.DEVNULL, stderr=open(a.output_prefix + '-perf.log', 'w'))
 while not Path(a.end).exists() and time.time() < deadline: time.sleep(0.5)
 subprocess.run(['sudo', 'kill', '-INT', str(rec.pid)]); subprocess.run(['sudo', 'pkill', '-INT', '-f', data])
 rec.wait(timeout=120)
 fg = Path(a.flamegraph_dir)
-script = subprocess.run(['sudo', 'perf', 'script', '-i', data], capture_output=True, text=True).stdout
+script = subprocess.run(['sudo', 'perf', 'script', '-i', data], capture_output=True, text=True, errors='replace').stdout
+print('perf script bytes', len(script), flush=True)
 folded = subprocess.run(['perl', str(fg/'stackcollapse-perf.pl')], input=script, capture_output=True, text=True).stdout
 Path(a.output_prefix + '.folded').write_text(folded)
 svg = subprocess.run(['perl', str(fg/'flamegraph.pl'), '--width', '1600'], input=folded, capture_output=True, text=True).stdout
