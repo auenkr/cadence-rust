@@ -16,15 +16,17 @@ impl MySqlShardStore {
 
 #[async_trait]
 impl ShardStore for MySqlShardStore {
-    async fn create_shard(&self, row: ShardRow) -> Result<(), E> {
+    async fn create_shard(&self, row: ShardRow) -> Result<(), E> { crate::history_sql_backend::blocking(move || {
         let mut conn = self.pool.checkout().map_err(Self::error)?;
         conn.exec_drop(crate::history_sql_queries::Dialect::MySql.statement(crate::history_sql_queries::Statement::CreateShard), (row.shard_id, row.range_id, row.data, row.data_encoding)).map_err(Self::error)
+    })
     }
-    async fn get_shard(&self, shard_id: i32) -> Result<ShardRow, E> {
+    async fn get_shard(&self, shard_id: i32) -> Result<ShardRow, E> { crate::history_sql_backend::blocking(move || {
         let mut conn = self.pool.checkout().map_err(Self::error)?;
         conn.exec_first(crate::history_sql_queries::Dialect::MySql.statement(crate::history_sql_queries::Statement::GetShard), (shard_id,)).map_err(Self::error)?.map(|(shard_id, range_id, data, data_encoding)| ShardRow { shard_id, range_id, data, data_encoding }).ok_or_else(|| E::EntityNotExists(format!("shard {shard_id} does not exist")))
+    })
     }
-    async fn update_shard(&self, row: ShardRow, previous_range_id: i64) -> Result<(), E> {
+    async fn update_shard(&self, row: ShardRow, previous_range_id: i64) -> Result<(), E> { crate::history_sql_backend::blocking(move || {
         let mut conn = self.pool.checkout().map_err(Self::error)?;
         let mut tx = conn.start_transaction(mysql::TxOpts::default()).map_err(Self::error)?;
         let found: Option<i64> = tx.exec_first(crate::history_sql_queries::Dialect::MySql.statement(crate::history_sql_queries::Statement::LockShard), (row.shard_id,)).map_err(Self::error)?;
@@ -33,6 +35,7 @@ impl ShardStore for MySqlShardStore {
         tx.exec_drop(crate::history_sql_queries::Dialect::MySql.statement(crate::history_sql_queries::Statement::UpdateShard), (row.range_id, row.data, row.data_encoding, row.shard_id)).map_err(Self::error)?;
         if tx.affected_rows() != 1 { return Err(E::Internal(format!("shard {} update affected an unexpected number of rows", row.shard_id))); }
         tx.commit().map_err(Self::error)
+    })
     }
 }
 
@@ -46,7 +49,7 @@ impl PostgresShardStore {
     /// from a thread inside a tokio runtime (the History shard bridge calls us
     /// via `Handle::block_on`), so run the blocking body on a plain thread.
     fn blocking<T: Send>(f: impl FnOnce() -> Result<T, E> + Send) -> Result<T, E> {
-        crate::matching_postgres::outside_runtime(f)
+        crate::history_sql_backend::blocking(|| crate::matching_postgres::outside_runtime(f))
     }
 }
 
