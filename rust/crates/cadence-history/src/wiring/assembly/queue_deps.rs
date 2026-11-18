@@ -239,6 +239,20 @@ impl TransferDepsImpl {
         );
     }
 
+    /// Go: on `ReadOnlyPartitionError` the partition is being drained; invalidate
+    /// the cached partition config so the next request routes to the root.
+    fn matching_add_err(&self, request: &AddMatchingTaskRequest, tt: i32, status: tonic::Status) -> TaskError {
+        if crate::wiring::server::errors::is_read_only_partition_error(&status) {
+            self.env.matching_lb.provider().invalidate(
+                &request.domain_uuid,
+                &request.task_list.name,
+                matches!(request.task_list.kind, TaskListKind::Normal),
+                tt,
+            );
+        }
+        status_err(status)
+    }
+
     fn partition_config(request: &AddMatchingTaskRequest) -> std::collections::HashMap<String, String> {
         request
             .partition_config
@@ -286,7 +300,7 @@ impl TransferDependencies for TransferDepsImpl {
             activity_task_dispatch_info: None,
         });
         matching_metadata(&mut rpc);
-        let response = client.add_activity_task(rpc).await.map_err(status_err)?.into_inner();
+        let response = client.add_activity_task(rpc).await.map_err(|e| self.matching_add_err(&request, tt, e))?.into_inner();
         self.update_partition_config(&request, tt, response.partition_config);
         Ok(())
     }
@@ -312,7 +326,7 @@ impl TransferDependencies for TransferDepsImpl {
             partition_config: Self::partition_config(&request),
         });
         matching_metadata(&mut rpc);
-        let response = client.add_decision_task(rpc).await.map_err(status_err)?.into_inner();
+        let response = client.add_decision_task(rpc).await.map_err(|e| self.matching_add_err(&request, tt, e))?.into_inner();
         self.update_partition_config(&request, tt, response.partition_config);
         Ok(())
     }

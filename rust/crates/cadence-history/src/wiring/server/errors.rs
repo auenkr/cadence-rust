@@ -70,6 +70,14 @@ struct RpcStatus {
     details: Vec<AnyMsg>,
 }
 
+/// Go `errors.As(err, *types.ReadOnlyPartitionError)` on a matching gRPC
+/// response: the status carries an `uber.cadence.api.v1.ReadOnlyPartitionError` detail.
+pub(crate) fn is_read_only_partition_error(status: &tonic::Status) -> bool {
+    RpcStatus::decode(status.details()).is_ok_and(|s| {
+        s.details.iter().any(|d| d.type_url.rsplit(['/', '.']).next() == Some("ReadOnlyPartitionError"))
+    })
+}
+
 #[derive(Clone, PartialEq, Message)]
 struct WorkflowStartedDetail {
     #[prost(string, tag = "1")]
@@ -361,5 +369,20 @@ mod typed_detail_tests {
 
         let st = grpc_status(&HistoryError::EventAlreadyStarted(cadence_api::errors::EventAlreadyStartedError::new("e")));
         assert!(first_detail(&st).type_url.ends_with("shared.v1.EventAlreadyStartedError"));
+    }
+
+    #[test]
+    fn read_only_partition_detail_is_detected() {
+        let detail = RpcStatus {
+            code: tonic::Code::Aborted as i32,
+            message: "Current partition is drained.".into(),
+            details: vec![AnyMsg {
+                type_url: "type.googleapis.com/uber.cadence.api.v1.ReadOnlyPartitionError".into(),
+                value: Vec::new(),
+            }],
+        };
+        let st = tonic::Status::with_details(tonic::Code::Aborted, "Current partition is drained.", detail.encode_to_vec().into());
+        assert!(super::is_read_only_partition_error(&st));
+        assert!(!super::is_read_only_partition_error(&tonic::Status::aborted("x")));
     }
 }

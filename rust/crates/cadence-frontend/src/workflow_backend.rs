@@ -1049,13 +1049,16 @@ impl cadence_common::matching_lb::LbDynamicConfig for FrontendLbConfig {
             )
         })
     }
-    fn strategy(&self, domain: &str, _task_list: &str, _task_type: i32) -> String {
+    /// Go `GetStringPropertyFilteredByTaskListInfo(TasklistLoadBalancerStrategy)`.
+    fn strategy(&self, domain: &str, task_list: &str, task_type: i32) -> String {
         self.overlay.lock().map_or_else(
             |_| "weighted".to_owned(),
             |o| {
-                cadence_persistence::dynamic_config::string_domain(
+                cadence_persistence::dynamic_config::task_list_string(
                     o.property_values("system.tasklistLoadBalancerStrategy"),
-                    domain,
+                    Some(domain),
+                    task_list,
+                    task_type,
                     "weighted",
                 )
             },

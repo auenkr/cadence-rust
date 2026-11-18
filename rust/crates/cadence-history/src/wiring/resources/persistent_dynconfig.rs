@@ -55,6 +55,7 @@ fn filter_matches(f: &DynamicConfigFilter, filters: &Filters) -> bool {
         "tasklistname" => s(&filters.task_list),
         "workflowid" => s(&filters.workflow_id),
         "shardid" => filters.shard_id.is_some_and(|v| want.as_i64() == Some(v)),
+        "tasktype" => filters.task_type.is_some_and(|v| want.as_i64() == Some(v)),
         _ => false,
     }
 }

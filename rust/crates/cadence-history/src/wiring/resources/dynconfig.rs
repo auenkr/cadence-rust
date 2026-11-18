@@ -90,6 +90,7 @@ fn constraint_matches(name: &str, want: &Value, f: &Filters) -> bool {
         "tasklistname" => s(&f.task_list),
         "workflowid" => s(&f.workflow_id),
         "shardid" => f.shard_id.is_some_and(|v| want.as_i64() == Some(v)),
+        "tasktype" => f.task_type.is_some_and(|v| want.as_i64() == Some(v)),
         _ => false,
     }
 }
@@ -147,6 +148,7 @@ fn filter_value(f: &Filters, name: &str) -> Option<Value> {
         "tasklistname" => s(&f.task_list),
         "workflowid" => s(&f.workflow_id),
         "shardid" => f.shard_id.map(Value::from),
+        "tasktype" => f.task_type.map(Value::from),
         _ => None,
     }
 }
@@ -162,6 +164,7 @@ impl DynamicClient for ConfigStoreDynamicClient {
             filters.task_list.is_some(),
             filters.workflow_id.is_some(),
             filters.shard_id.is_some(),
+            filters.task_type.is_some(),
         ]
         .into_iter()
         .filter(|b| *b)
@@ -203,5 +206,14 @@ mod tests {
         let f = Filters { domain_name: Some("foo".into()), ..Default::default() };
         assert_eq!(c.get_value("History.RPS", &f), Some(Value::from(20)));
         assert_eq!(c.get_value("missing", &f), None);
+    }
+
+    #[test]
+    fn task_type_constraint_filters_partition_counts() {
+        let text = "matching.numTasklistReadPartitions:\n- value: 4\n  constraints:\n    taskListName: tl\n    taskType: 1\n- value: 2\n  constraints:\n    taskListName: tl\n    taskType: 0\n";
+        let c = FileDynamicClient { path: None, entries: RwLock::new(FileDynamicClient::parse(text).unwrap()) };
+        let f = |tt| Filters { task_list: Some("tl".into()), task_type: Some(tt), ..Default::default() };
+        assert_eq!(c.get_value("matching.numTasklistReadPartitions", &f(1)), Some(Value::from(4)));
+        assert_eq!(c.get_value("matching.numTasklistReadPartitions", &f(0)), Some(Value::from(2)));
     }
 }
