@@ -25,6 +25,9 @@ on:
       capacity_only:
         type: boolean
         default: false
+      worker_pollers:
+        description: SDK worker decision/activity pollers (0 = SDK default)
+        default: '0'
       sdk_repetitions:
         description: Fresh database pairs for SDK mode
         default: '1'
@@ -76,6 +79,7 @@ jobs:
           SUITE: ${{ inputs.sdk_suite }}
           CAPACITY_RATES: ${{ inputs.capacity_rates }}
           CAPACITY_ONLY: ${{ inputs.capacity_only }}
+          WORKER_POLLERS: ${{ inputs.worker_pollers }}
           CAPACITY_REPETITIONS: ${{ inputs.sdk_repetitions }}
           SERVICE: ${{ inputs.service || 'matching' }}
           REPETITIONS: ${{ inputs.sdk_repetitions || '1' }}

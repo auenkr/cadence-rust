@@ -54,6 +54,7 @@ def main():
     p.add_argument('--payload-bytes', type=int, default=1024)
     p.add_argument('--activity-ms', type=int, default=10)
     p.add_argument('--worker-capacity', type=int, default=128)
+    p.add_argument('--worker-pollers', type=int, default=int(os.environ.get('WORKER_POLLERS', '0')))
     p.add_argument('--recovery', action='store_true', help='drop database TCP traffic for 3s, 10s into measurement')
     a = p.parse_args()
     if not 0 < a.rate <= 100000 or a.duration < 1 or a.warmup < 0 or a.repetitions < 1:
@@ -129,7 +130,7 @@ def main():
                     containers.append(identities['mysql']['Name'].lstrip('/'))
                     (OUT/(key+'-identities.json')).write_text(json.dumps(identities,indent=2))
                     common=[str(ROOT/'bin/driver'),'-domain','benchmark','-task-list',key,
-                            '-worker-capacity',str(a.worker_capacity)]
+                            '-worker-capacity',str(a.worker_capacity),'-worker-pollers',str(a.worker_pollers)]
                     worker_cmd=['taskset','-c',str(cpus[1]),*common,'-mode','worker']
                     with (OUT/(key+'-sdk-worker.log')).open('w') as log:
                         sdk_worker=subprocess.Popen(worker_cmd,stdout=log,stderr=subprocess.STDOUT)
