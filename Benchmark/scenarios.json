@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "implemented": [{"name":"one-activity","payload_bytes":1024,"activity_ms":10,"activities":1}],
+  "planned": [
+    {"name":"sequential-activities","activities":100},
+    {"name":"parallel-fanout","activities":100},
+    {"name":"timers","timer_seconds":300},
+    {"name":"signals-queries","signals_per_workflow":10,"queries_per_workflow":10},
+    {"name":"large-history-payload","activities":1000,"payload_bytes":65536},
+    {"name":"failures-retries-timeouts","failures_before_success":2}
+  ],
+  "production_distribution_available": false,
+  "note":"Planned entries are scenario specifications, not executable or validated workloads."
+}

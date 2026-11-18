@@ -1,7 +1,27 @@
 name: Frontend + Matching paired benchmark
+run-name: Benchmark ${{ inputs.service || 'matching' }} source ${{ inputs.source_ref || github.sha }}
 on:
   workflow_dispatch:
     inputs:
+      sdk_openloop:
+        description: Run the isolated service fixed-arrival harness in Benchmark/
+        type: boolean
+        default: false
+      service:
+        description: Isolated service to replace in SDK benchmark
+        type: choice
+        options: [matching, frontend, history, all]
+        default: matching
+      sdk_suite:
+        description: Run fixed-load, stepped capacity and database recovery smoke suite
+        type: boolean
+        default: false
+      source_ref:
+        description: Exact migrated source commit (empty uses workflow head)
+        default: ''
+      sdk_repetitions:
+        description: Fresh database pairs for SDK mode
+        default: '1'
       requests:
         description: Measured workflows per concurrency and arm
         type: number
@@ -23,10 +43,53 @@ on:
         type: number
         default: 1024
 concurrency:
-  group: frontend-matching-benchmark-${{ github.ref }}
+  group: frontend-matching-benchmark-${{ github.ref }}-${{ inputs.sdk_openloop && inputs.service || 'legacy' }}
   cancel-in-progress: true
 jobs:
+  sdk-service-smoke:
+    if: ${{ inputs.sdk_openloop == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
+          path: benchmark-source
+          submodules: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: Benchmark/go.mod
+          cache-dependency-path: |
+            Benchmark/go.sum
+            go/go.sum
+      - run: bash Benchmark/ci.sh
+        env:
+          SUITE: ${{ inputs.sdk_suite }}
+          SERVICE: ${{ inputs.service || 'matching' }}
+          REPETITIONS: ${{ inputs.sdk_repetitions || '1' }}
+          BENCHMARK_SOURCE_DIR: ${{ github.workspace }}/benchmark-source
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() && !inputs.sdk_suite }}
+        with:
+          name: sdk-${{ inputs.service || 'matching' }}-benchmark
+          path: Benchmark/evidence/run/
+          retention-days: 3
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() && inputs.sdk_suite }}
+        with:
+          name: sdk-${{ inputs.service || 'matching' }}-benchmark
+          path: |
+            Benchmark/evidence/run/suite-summary.json
+            Benchmark/evidence/run/ci.exit
+            Benchmark/evidence/run/head.txt
+            Benchmark/evidence/run/drivers.sha256
+            Benchmark/evidence/run/*-build.log
+          retention-days: 3
   paired-benchmark:
+    if: ${{ inputs.sdk_openloop != true }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
