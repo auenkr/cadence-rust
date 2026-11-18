@@ -44,6 +44,30 @@ pub trait SqlTx {
         columns: &[Column],
     ) -> Result<Vec<Vec<Value>>, PersistenceError>;
 }
+/// Runs synchronous SQL I/O from an async History path. Go's database/sql
+/// call parks only its goroutine; on a multi-thread Tokio runtime
+/// `block_in_place` gives the same effect by moving the worker's other tasks
+/// (RPCs, queue processors, timers) to another thread for the duration.
+/// Without it a slow commit stalled every task on that worker (p99 tail).
+pub fn blocking<T>(f: impl FnOnce() -> T) -> T {
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(f)
+        }
+        _ => f(),
+    }
+}
+/// Env-gated diagnostics: `CADENCE_HISTORY_SQL_SLOW_MS=<ms>` logs transactions
+/// slower than the threshold to stderr. Unset means no timing.
+fn slow_threshold() -> Option<std::time::Duration> {
+    static THRESHOLD: std::sync::OnceLock<Option<std::time::Duration>> = std::sync::OnceLock::new();
+    *THRESHOLD.get_or_init(|| {
+        std::env::var("CADENCE_HISTORY_SQL_SLOW_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .map(std::time::Duration::from_millis)
+    })
+}
 pub fn internal(error: impl std::fmt::Display) -> PersistenceError {
     PersistenceError::Internal(error.to_string())
 }
@@ -225,6 +249,22 @@ impl SqlBackend {
         &self,
         run: impl FnOnce(&mut dyn SqlTx) -> Result<T, PersistenceError>,
     ) -> Result<T, PersistenceError> {
+        blocking(|| {
+            let started = slow_threshold().map(|t| (t, std::time::Instant::now()));
+            let result = self.transaction_inner(run);
+            if let Some((threshold, started)) = started {
+                let elapsed = started.elapsed();
+                if elapsed >= threshold {
+                    eprintln!("cadence-history sql transaction slow: {} ms", elapsed.as_millis());
+                }
+            }
+            result
+        })
+    }
+    fn transaction_inner<T>(
+        &self,
+        run: impl FnOnce(&mut dyn SqlTx) -> Result<T, PersistenceError>,
+    ) -> Result<T, PersistenceError> {
         match &self.0 {
             Backend::MySql(pool) => {
                 // A connection broken by a DB restart must not return to the pool
@@ -348,5 +388,32 @@ impl Value {
                 .ok_or_else(|| internal("SQL timestamp out of range")),
             _ => Err(internal("expected SQL timestamp")),
         }
+    }
+}
+
+#[cfg(test)]
+mod blocking_tests {
+    use super::blocking;
+
+    #[test]
+    fn blocking_runs_without_runtime() {
+        assert_eq!(blocking(|| 7), 7);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn blocking_runs_inline_on_current_thread_runtime() {
+        assert_eq!(blocking(|| 8), 8);
+    }
+
+    /// A blocking body on one worker must not stall other tasks: with
+    /// `block_in_place` a concurrently spawned task still completes while the
+    /// body waits for it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn blocking_lets_other_tasks_progress() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let handle = tokio::spawn(async move { tx.send(1).unwrap() });
+        let got = blocking(|| rx.recv_timeout(std::time::Duration::from_secs(5)));
+        assert_eq!(got, Ok(1));
+        handle.await.unwrap();
     }
 }
