@@ -230,7 +230,7 @@ mod tests {
         assert!(l.allow());
         assert!(!l.allow());
         let off = DynamicLimiterFactory(Arc::new(|_d: &str| 0)).limiter("d");
-        assert!(off.allow()); // burst 1 as in rate.NewLimiter(0, 1)
+        // Go getLimitAndBurst: rps 0 zeroes the burst, cutting off all permits.
         assert!(!off.allow());
     }
 }
