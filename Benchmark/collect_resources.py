@@ -91,7 +91,24 @@ def cpu_seconds(before_ns, after_ns):
 def mysql_snapshot(container):
     query = """SHOW GLOBAL STATUS WHERE Variable_name IN
       ('Threads_connected','Connections','Questions','Com_select','Com_insert',
-       'Com_update','Com_delete','Aborted_connects','Threads_running');
+       'Com_update','Com_delete','Aborted_connects','Threads_running',
+       'Innodb_os_log_fsyncs','Innodb_data_fsyncs','Innodb_log_waits','Innodb_row_lock_waits',
+       'Innodb_row_lock_time','Innodb_os_log_pending_fsyncs','Handler_commit');
+      SELECT 'log_file_wait_ps', COALESCE(SUM(SUM_TIMER_WAIT),0)
+        FROM performance_schema.file_summary_by_event_name WHERE EVENT_NAME LIKE 'wait/io/file/innodb/innodb_log_file';
+      SELECT 'log_file_write_count', COALESCE(SUM(COUNT_WRITE),0)
+        FROM performance_schema.file_summary_by_event_name WHERE EVENT_NAME LIKE 'wait/io/file/innodb/innodb_log_file';
+      SELECT 'data_file_wait_ps', COALESCE(SUM(SUM_TIMER_WAIT),0)
+        FROM performance_schema.file_summary_by_event_name WHERE EVENT_NAME LIKE 'wait/io/file/innodb/innodb_data_file';
+      SELECT 'commit_count', COALESCE(SUM(COUNT_STAR),0)
+        FROM performance_schema.events_statements_summary_global_by_event_name WHERE EVENT_NAME='statement/sql/commit';
+      SELECT 'commit_wait_ps', COALESCE(SUM(SUM_TIMER_WAIT),0)
+        FROM performance_schema.events_statements_summary_global_by_event_name WHERE EVENT_NAME='statement/sql/commit';
+      SELECT 'lock_wait_ps', COALESCE(SUM(SUM_LOCK_TIME),0)
+        FROM performance_schema.events_statements_summary_global_by_event_name WHERE EVENT_NAME LIKE 'statement/sql/%';
+      SELECT CONCAT('tasks_backlog_type', task_type), COUNT(*) FROM cadence.tasks GROUP BY task_type;
+      SELECT CONCAT('transfer_tasks_shard', shard_id), COUNT(*) FROM cadence.transfer_tasks GROUP BY shard_id;
+      SELECT CONCAT('timer_tasks_shard', shard_id), COUNT(*) FROM cadence.timer_tasks GROUP BY shard_id;
       SELECT 'statement_count', COALESCE(SUM(COUNT_STAR),0)
         FROM performance_schema.events_statements_summary_global_by_event_name
         WHERE EVENT_NAME LIKE 'statement/sql/%';

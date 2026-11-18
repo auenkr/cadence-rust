@@ -9,6 +9,7 @@ x-env: &env
   PRIMARY_FRONTEND_SERVICE: frontend
   RINGPOP_SEEDS: frontend:7933,history:7934,matching:7935,worker:7939
   CADENCE_AUTO_SETUP: "false"
+  NUM_HISTORY_SHARDS: ${NUM_HISTORY_SHARDS:-4}
 services:
   mysql:
     image: mysql:8.0
