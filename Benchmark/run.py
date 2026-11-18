@@ -147,6 +147,13 @@ def main():
                         fault_cmd=['python3',str(ROOT/'fault.py'),'--ready',str(ready),'--output',str(OUT/(key+'-fault.json')),'--mysql-pid',str(identities['mysql']['State']['Pid'])]
                         fault_log=(OUT/(key+'-fault.log')).open('w')
                         fault=subprocess.Popen(fault_cmd,stdout=fault_log,stderr=subprocess.STDOUT)
+                    profiler = None
+                    if os.environ.get('PROFILE') == '1' and arm == 'rust':
+                        pids=[str(identities[s]['State']['Pid']) for s,im in expected.items() if im!='cadence-go:ci']
+                        profiler=subprocess.Popen(['python3',str(ROOT/'profile.py'),'--start',str(start),'--end',str(end),
+                            '--output-prefix',str(OUT/(key+'-profile')),'--flamegraph-dir',os.environ['FLAMEGRAPH_DIR'],
+                            '--max-seconds',str(a.warmup+a.duration+400),'--pids',*pids],
+                            stdout=(OUT/(key+'-profile.log')).open('w'),stderr=subprocess.STDOUT)
                     try:
                         run(['taskset','-c',str(cpus[0]),*common,'-mode','generate','-rate',str(a.rate),
                             '-warmup',f'{a.warmup}s','-duration',f'{a.duration}s',
@@ -155,6 +162,7 @@ def main():
                             '-collector-ready-file',ready,'-output',OUT/(key+'-samples.jsonl')],
                             key+'-generate',timeout=a.warmup+a.duration+360)
                         if fault is not None and fault.wait(timeout=30): raise RuntimeError('fault injection failed')
+                        if profiler is not None: profiler.wait(timeout=300)
                         status=collector.wait(timeout=30)
                         if status: raise RuntimeError('resource collector failed: '+(OUT/(key+'-collector.log')).read_text(errors='replace')[-1500:])
                     finally:
