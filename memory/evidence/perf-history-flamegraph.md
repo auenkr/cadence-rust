@@ -29,4 +29,23 @@ identical keys/values. No API/logic change (Go uses tally; this is the in-proces
 
 ## Before/after (History lane, 15 starts/s, 30 s warmup, 120 s, 3 alternating pairs)
 Rate 15 instead of 25 because the Go arm generator failed at 25/s on this runner.
-(results below)
+Before = master 469779f95 https://github.com/auenkr/cadence-rust/actions/runs/44369094172 (success)
+After = 94f38087a https://github.com/auenkr/cadence-rust/actions/runs/44359632339 (success)
+rust-ci cadence-history on 94f38087a: https://github.com/auenkr/cadence-rust/actions/runs/44359206360 (success)
+History container avg CPU cores; completion latency ms.
+
+| run | before CPU | before p50 | before p99 | after CPU | after p50 | after p99 |
+|---|---:|---:|---:|---:|---:|---:|
+| 00-go | 0.437 | 68.9 | 116.8 | 0.435 | 68.5 | 119.2 |
+| 00-rust | 0.218 | 87.6 | 220.5 | 0.221 | 88.2 | 223.6 |
+| 01-go | 0.438 | 67.6 | 119.7 | 0.425 | 65.8 | 115.5 |
+| 01-rust | 0.223 | 89.1 | 222.8 | 0.217 | 87.9 | 222.8 |
+| 02-go | 0.434 | 67.5 | 119.8 | 0.433 | 68.3 | 116.7 |
+| 02-rust | 0.224 | 89.3 | 223.9 | 0.219 | 89.0 | 225.2 |
+
+Rust/Go History CPU ratio: before 0.50/0.51/0.52 (mean 0.508); after 0.51/0.51/0.51 (mean 0.508).
+Result: no measurable change at 15/s (metrics share ~5% of an already ~0.22-core process is within noise).
+Rust History already uses ~half Go's CPU. The real gap is latency: Rust completion p50 +20 ms, p99 ~1.9x Go,
+with decision schedule-to-start p99 93 ms vs 33 ms and activity STS 1.0 ms vs 0.08 ms -> a waiting/latency
+issue (queue/poll/notification path), not CPU. Next: latency profiling (off-CPU / tracing) of the decision
+task dispatch path; kernel MySQL send is the largest CPU block (per-statement round trips).
