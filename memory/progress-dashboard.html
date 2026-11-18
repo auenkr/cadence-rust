@@ -136,6 +136,7 @@
   </div>
 </header>
 <main>
+<section class="card"><h2>Performance investigation resumed — 2026-11-18</h2><p>Frontend tail latency remains under investigation, not a confirmed Rust-only capacity regression: its paired Go baseline also fell to 5 starts/sec (p99 218 ms versus Rust 448 ms). A longer three-pair CI reproduction is <a href="https://github.com/auenkr/cadence-rust/actions/runs/44247071847">pending</a>, on source 571fb2a08. No service logic changes yet. See performance-resume-20261118.md.</p></section>
 <p class="note">History checkpoint 2026-11-14: merged work now covers standby replication, cross-host failover marker routing, Go↔Rust database swap/recovery and bidirectional replication, S3 archival, advanced ES/OpenSearch visibility, decision-failover flush, and mutable-state parity part 2. Review 3 has identified remaining compatibility issues; timestamp units, archive enum encoding, authenticated Kafka, shard lifecycle, and the transfer decision guard remain open. The History soak stall and mutable-state parity re-read are also open. Mixed-cluster service completion and the admin CLI gate are not yet established. See the <a href="#history-1114">History status and evidence notes</a>.</p>
   <section class="est">
     <h2>Frontend + Matching benchmark — verified results</h2>
