@@ -154,13 +154,13 @@ impl EngineMutableState {
 
     /// Go `AddTimerFiredEvent`.
     pub fn add_timer_fired(&self, timer_id: &str) -> HResult<()> {
-        let ms = self.now_millis();
+        let now_ns = self.now();
         let mut g = self.inner.lock().unwrap();
         let Some(t) = g.timers.get(timer_id).cloned() else {
             return Err(HistoryError::internal(super::invalid_history_action_message("TimerFired", g.next_event_id)));
         };
         let id = timer_id.to_string();
-        g.push_event(EventType::TimerFired, ms * 1_000_000, |e| {
+        g.push_event(EventType::TimerFired, now_ns, |e| {
             e.timer_fired_event_attributes = Some(TimerFiredEventAttributes { timer_id: id, started_event_id: t.started_id });
         });
         g.timers.remove(timer_id);
@@ -197,7 +197,7 @@ impl EngineMutableState {
 
     /// Go `AddActivityTaskTimedOutEvent` (+ replicate).
     pub fn add_activity_timed_out(&self, schedule_id: i64, started_id: i64, timeout_type: TimeoutType) -> HResult<()> {
-        let ms = self.now_millis();
+        let now_ns = self.now();
         let mut g = self.inner.lock().unwrap();
         let Some(a) = g.pc_acts.get(&schedule_id).cloned() else {
             return Err(HistoryError::internal(super::invalid_history_action_message("ActivityTaskTimedOut", g.next_event_id)));
@@ -213,7 +213,7 @@ impl EngineMutableState {
             failure_category: crate::execution::retry::failure_category_from_go_i32(a.retry_last_failure_category),
             next_retry_interval_seconds: Some(a.retry_last_retry_interval_seconds),
         });
-        g.push_event(EventType::ActivityTaskTimedOut, ms * 1_000_000, |e| {
+        g.push_event(EventType::ActivityTaskTimedOut, now_ns, |e| {
             e.activity_task_timed_out_event_attributes = Some(ActivityTaskTimedOutEventAttributes {
                 details,
                 scheduled_event_id: schedule_id,
@@ -309,13 +309,13 @@ impl EngineMutableState {
 
     /// Go `AddTimeoutWorkflowEvent`.
     pub fn add_timeout_workflow(&self, first_event_id: i64) -> HResult<()> {
-        let ms = self.now_millis();
+        let now_ns = self.now();
         let params = self.params.clone();
         let mut g = self.inner.lock().unwrap();
         if !g.exec.is_running() {
             return Err(HistoryError::internal(crate::execution::mutable_state_methods_common::ERR_WORKFLOW_FINISHED));
         }
-        let ev = g.push_event(EventType::WorkflowExecutionTimedOut, ms * 1_000_000, |e| {
+        let ev = g.push_event(EventType::WorkflowExecutionTimedOut, now_ns, |e| {
             e.workflow_execution_timed_out_event_attributes =
                 Some(WorkflowExecutionTimedOutEventAttributes { timeout_type: Some(TimeoutType::StartToClose) });
         });
@@ -325,7 +325,7 @@ impl EngineMutableState {
         g.pc_exec.close_status = WORKFLOW_CLOSE_STATUS_TIMED_OUT;
         g.pc_exec.completion_event_batch_id = first_event_id;
         g.clear_stickyness();
-        g.gen_workflow_close_tasks(&params, ms * 1_000_000, ev.version);
+        g.gen_workflow_close_tasks(&params, now_ns, ev.version);
         Ok(())
     }
 

@@ -363,12 +363,12 @@ impl EngineMutableState {
         started_id: i64,
         request: &RespondActivityTaskCompletedRequest,
     ) -> HResult<()> {
-        let ms = self.now_millis();
+        let now_ns = self.now();
         let mut g = self.inner.lock().unwrap();
         Self::check_activity_close(&g, schedule_id, started_id, "ActivityTaskCompleted")?;
         let started = g.add_transient_started(schedule_id)?;
         let (result, identity) = (request.result.clone(), request.identity.clone());
-        g.push_event(EventType::ActivityTaskCompleted, ms * 1_000_000, |e| {
+        g.push_event(EventType::ActivityTaskCompleted, now_ns, |e| {
             e.activity_task_completed_event_attributes = Some(ActivityTaskCompletedEventAttributes {
                 result,
                 scheduled_event_id: schedule_id,
@@ -386,12 +386,12 @@ impl EngineMutableState {
         started_id: i64,
         request: &RespondActivityTaskFailedRequest,
     ) -> HResult<()> {
-        let ms = self.now_millis();
+        let now_ns = self.now();
         let mut g = self.inner.lock().unwrap();
         Self::check_activity_close(&g, schedule_id, started_id, "ActivityTaskFailed")?;
         let started = g.add_transient_started(schedule_id)?;
         let r = request.clone();
-        g.push_event(EventType::ActivityTaskFailed, ms * 1_000_000, |e| {
+        g.push_event(EventType::ActivityTaskFailed, now_ns, |e| {
             e.activity_task_failed_event_attributes = Some(ActivityTaskFailedEventAttributes {
                 reason: r.reason,
                 details: r.details,
@@ -413,7 +413,7 @@ impl EngineMutableState {
         details: &[u8],
         identity: &str,
     ) -> HResult<()> {
-        let ms = self.now_millis();
+        let now_ns = self.now();
         let mut g = self.inner.lock().unwrap();
         Self::check_activity_close(&g, schedule_id, started_id, "ActivityTaskCanceled")?;
         if !g.pc_acts[&schedule_id].cancel_requested {
@@ -421,7 +421,7 @@ impl EngineMutableState {
         }
         let started = g.add_transient_started(schedule_id)?;
         let (details, identity) = (details.to_vec(), identity.to_string());
-        g.push_event(EventType::ActivityTaskCanceled, ms * 1_000_000, |e| {
+        g.push_event(EventType::ActivityTaskCanceled, now_ns, |e| {
             e.activity_task_canceled_event_attributes = Some(ActivityTaskCanceledEventAttributes {
                 details,
                 latest_cancel_requested_event_id: cancel_request_id,
@@ -501,10 +501,10 @@ impl EngineMutableState {
 
     /// Go `AddWorkflowExecutionSignaled` + `ReplicateWorkflowExecutionSignaled`.
     pub(super) fn ev_signaled(&self, name: &str, input: &[u8], identity: &str, request_id: &str) -> HResult<()> {
-        let ms = self.now_millis();
+        let now_ns = self.now();
         let mut g = self.inner.lock().unwrap();
         let (n, i, id, r) = (name.to_string(), input.to_vec(), identity.to_string(), request_id.to_string());
-        g.push_event(EventType::WorkflowExecutionSignaled, ms * 1_000_000, |e| {
+        g.push_event(EventType::WorkflowExecutionSignaled, now_ns, |e| {
             e.workflow_execution_signaled_event_attributes =
                 Some(cadence_api::service_types::WorkflowExecutionSignaledEventAttributes {
                     signal_name: n,
@@ -524,7 +524,7 @@ impl EngineMutableState {
         cause: &str,
         request: &HistoryRequestCancelWorkflowExecutionRequest,
     ) -> HResult<()> {
-        let ms = self.now_millis();
+        let now_ns = self.now();
         let mut g = self.inner.lock().unwrap();
         if g.pc_exec.cancel_requested {
             return Err(Self::invalid_action("WorkflowExecutionCancelRequested", g.next_event_id));
@@ -533,7 +533,7 @@ impl EngineMutableState {
         let (cause, ext_id, ext_exec) =
             (cause.to_string(), request.external_initiated_event_id, request.external_workflow_execution.clone());
         let (identity, request_id) = (cancel.identity.clone(), cancel.request_id.clone());
-        g.push_event(EventType::WorkflowExecutionCancelRequested, ms * 1_000_000, |e| {
+        g.push_event(EventType::WorkflowExecutionCancelRequested, now_ns, |e| {
             e.workflow_execution_cancel_requested_event_attributes =
                 Some(cadence_api::service_types::WorkflowExecutionCancelRequestedEventAttributes {
                     cause,
@@ -550,14 +550,14 @@ impl EngineMutableState {
 
     /// Go `AddWorkflowExecutionTerminatedEvent` + replicate.
     pub(super) fn ev_terminate(&self, first_event_id: i64, reason: &str, details: &[u8], identity: &str) -> HResult<()> {
-        let ms = self.now_millis();
+        let now_ns = self.now();
         let params = self.params.clone();
         let mut g = self.inner.lock().unwrap();
         if !g.exec.is_running() {
             return Err(HistoryError::internal(crate::execution::mutable_state_methods_common::ERR_WORKFLOW_FINISHED));
         }
         let (reason, details, identity) = (reason.to_string(), details.to_vec(), identity.to_string());
-        let ev = g.push_event(EventType::WorkflowExecutionTerminated, ms * 1_000_000, |e| {
+        let ev = g.push_event(EventType::WorkflowExecutionTerminated, now_ns, |e| {
             e.workflow_execution_terminated_event_attributes =
                 Some(cadence_api::service_types::WorkflowExecutionTerminatedEventAttributes { reason, details, identity });
         });
@@ -565,7 +565,7 @@ impl EngineMutableState {
         g.exec.close_status = WORKFLOW_CLOSE_STATUS_TERMINATED;
         g.pc_exec.completion_event_batch_id = first_event_id;
         g.clear_stickyness();
-        g.gen_workflow_close_tasks(&params, ms * 1_000_000, ev.version);
+        g.gen_workflow_close_tasks(&params, now_ns, ev.version);
         Ok(())
     }
 
@@ -587,12 +587,12 @@ impl EngineMutableState {
         execution: &WorkflowExecution,
         attrs: Option<&WorkflowExecutionCompletedEventAttributes>,
     ) -> HResult<()> {
-        let ms = self.now_millis();
+        let now_ns = self.now();
         let mut g = self.inner.lock().unwrap();
         let (domain, wt, started) = self.child_info(&g, initiated_id, "ChildWorkflowExecutionCompleted")?;
         let result = attrs.map(|a| a.result.clone()).unwrap_or_default();
         let exec = execution.clone();
-        g.push_event(EventType::ChildWorkflowExecutionCompleted, ms * 1_000_000, |e| {
+        g.push_event(EventType::ChildWorkflowExecutionCompleted, now_ns, |e| {
             e.child_workflow_execution_completed_event_attributes = Some(ChildWorkflowExecutionCompletedEventAttributes {
                 result,
                 domain,
@@ -611,12 +611,12 @@ impl EngineMutableState {
         execution: &WorkflowExecution,
         attrs: Option<&WorkflowExecutionFailedEventAttributes>,
     ) -> HResult<()> {
-        let ms = self.now_millis();
+        let now_ns = self.now();
         let mut g = self.inner.lock().unwrap();
         let (domain, wt, started) = self.child_info(&g, initiated_id, "ChildWorkflowExecutionFailed")?;
         let (reason, details) = attrs.map(|a| (a.reason.clone(), a.details.clone())).unwrap_or_default();
         let exec = execution.clone();
-        g.push_event(EventType::ChildWorkflowExecutionFailed, ms * 1_000_000, |e| {
+        g.push_event(EventType::ChildWorkflowExecutionFailed, now_ns, |e| {
             e.child_workflow_execution_failed_event_attributes = Some(ChildWorkflowExecutionFailedEventAttributes {
                 reason,
                 details,
@@ -636,12 +636,12 @@ impl EngineMutableState {
         execution: &WorkflowExecution,
         attrs: Option<&WorkflowExecutionCanceledEventAttributes>,
     ) -> HResult<()> {
-        let ms = self.now_millis();
+        let now_ns = self.now();
         let mut g = self.inner.lock().unwrap();
         let (domain, wt, started) = self.child_info(&g, initiated_id, "ChildWorkflowExecutionCanceled")?;
         let details = attrs.map(|a| a.details.clone()).unwrap_or_default();
         let exec = execution.clone();
-        g.push_event(EventType::ChildWorkflowExecutionCanceled, ms * 1_000_000, |e| {
+        g.push_event(EventType::ChildWorkflowExecutionCanceled, now_ns, |e| {
             e.child_workflow_execution_canceled_event_attributes = Some(ChildWorkflowExecutionCanceledEventAttributes {
                 details,
                 domain,
@@ -660,11 +660,11 @@ impl EngineMutableState {
         execution: &WorkflowExecution,
         _attrs: Option<&cadence_api::service_types::WorkflowExecutionTerminatedEventAttributes>,
     ) -> HResult<()> {
-        let ms = self.now_millis();
+        let now_ns = self.now();
         let mut g = self.inner.lock().unwrap();
         let (domain, wt, started) = self.child_info(&g, initiated_id, "ChildWorkflowExecutionTerminated")?;
         let exec = execution.clone();
-        g.push_event(EventType::ChildWorkflowExecutionTerminated, ms * 1_000_000, |e| {
+        g.push_event(EventType::ChildWorkflowExecutionTerminated, now_ns, |e| {
             e.child_workflow_execution_terminated_event_attributes = Some(ChildWorkflowExecutionTerminatedEventAttributes {
                 domain,
                 workflow_execution: Some(exec),
@@ -682,12 +682,12 @@ impl EngineMutableState {
         execution: &WorkflowExecution,
         attrs: Option<&WorkflowExecutionTimedOutEventAttributes>,
     ) -> HResult<()> {
-        let ms = self.now_millis();
+        let now_ns = self.now();
         let mut g = self.inner.lock().unwrap();
         let (domain, wt, started) = self.child_info(&g, initiated_id, "ChildWorkflowExecutionTimedOut")?;
         let timeout_type = attrs.and_then(|a| a.timeout_type);
         let exec = execution.clone();
-        g.push_event(EventType::ChildWorkflowExecutionTimedOut, ms * 1_000_000, |e| {
+        g.push_event(EventType::ChildWorkflowExecutionTimedOut, now_ns, |e| {
             e.child_workflow_execution_timed_out_event_attributes = Some(ChildWorkflowExecutionTimedOutEventAttributes {
                 timeout_type,
                 domain,

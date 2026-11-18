@@ -145,20 +145,20 @@ impl EngineOps<'_> {
         _what: &str,
         fill: impl FnOnce(&mut HistoryEvent),
     ) -> Result<()> {
-        let ms = self.state.now_millis();
+        let now_ns = self.state.now();
         let params = self.state.params.clone();
         let mut g = self.state.inner.lock().unwrap();
         if !g.exec.is_running() {
             return Err(internal(crate::execution::mutable_state_methods_common::ERR_WORKFLOW_FINISHED));
         }
-        let ev = g.push_event(ty, ms * 1_000_000, fill);
+        let ev = g.push_event(ty, now_ns, fill);
         g.exec.state = WORKFLOW_STATE_COMPLETED;
         g.exec.close_status = status;
         g.pc_exec.state = WORKFLOW_STATE_COMPLETED;
         g.pc_exec.close_status = status;
         g.pc_exec.completion_event_batch_id = g.hist.iter().find(|e| e.event_id > 0).map(|e| e.event_id).unwrap_or(completed_id);
         g.clear_stickyness();
-        g.gen_workflow_close_tasks(&params, ms * 1_000_000, ev.version);
+        g.gen_workflow_close_tasks(&params, now_ns, ev.version);
         Ok(())
     }
 }
@@ -251,8 +251,7 @@ impl Operations for EngineOps<'_> {
             .schedule_activity_task_decision_attributes
             .clone()
             .ok_or_else(|| bad("ScheduleActivityTaskDecisionAttributes is not set on decision."))?;
-        let ms = self.state.now_millis();
-        let now_nanos = ms * 1_000_000;
+        let now_ns = self.state.now();
         let limit_enabled = (self.config.pending_activity_validation_enabled)();
         let limit = (self.config.pending_activities_count_limit_error)(&self.domain_name);
         let mut g = self.state.inner.lock().unwrap();
@@ -277,7 +276,7 @@ impl Operations for EngineOps<'_> {
             retry_policy: a.retry_policy.clone(),
             header: a.header.clone(),
         };
-        let ev = g.push_event(EventType::ActivityTaskScheduled, ms * 1_000_000, |e| {
+        let ev = g.push_event(EventType::ActivityTaskScheduled, now_ns, |e| {
             e.activity_task_scheduled_event_attributes = Some(ev_attrs);
         });
         let sid = ev.event_id;
@@ -291,7 +290,7 @@ impl Operations for EngineOps<'_> {
                 .find(|e| e.event_id > 0)
                 .map(|e| e.event_id)
                 .unwrap_or(completed_id),
-            scheduled_time_unix_nanos: now_nanos,
+            scheduled_time_unix_nanos: now_ns,
             started_id: EMPTY_EVENT_ID,
             activity_id: a.activity_id.clone(),
             schedule_to_start_timeout_seconds: a.schedule_to_start_timeout_seconds.unwrap_or(0),
@@ -311,7 +310,7 @@ impl Operations for EngineOps<'_> {
             info.retry_backoff_coefficient = p.backoff_coefficient;
             info.retry_non_retriable_errors = p.non_retriable_error_reasons.clone();
             if p.expiration_interval_in_seconds > 0 {
-                info.retry_expiration_time_unix_nanos = now_nanos + p.expiration_interval_in_seconds as i64 * NANOS;
+                info.retry_expiration_time_unix_nanos = now_ns + p.expiration_interval_in_seconds as i64 * NANOS;
             }
         }
         g.pc_acts.insert(sid, info);
@@ -328,7 +327,7 @@ impl Operations for EngineOps<'_> {
             started_id: EMPTY_EVENT_ID,
             cancel_event_id: EMPTY_EVENT_ID,
             activity_id: a.activity_id,
-            scheduled_time_unix_nanos: now_nanos,
+            scheduled_time_unix_nanos: now_ns,
             started_time_unix_nanos: 0,
         };
         let dispatch = local_dispatch.then(|| ActivityLocalDispatchInfo {
@@ -368,7 +367,7 @@ impl Operations for EngineOps<'_> {
     }
 
     fn request_cancel_activity(&mut self, completed_id: i64, id: &str, _identity: &str) -> Result<Activity> {
-        let ms = self.state.now_millis();
+        let now_ns = self.state.now();
         let mut g = self.state.inner.lock().unwrap();
         let Some((sid, info)) = g.pc_acts.iter().find(|(_, a)| a.activity_id == id).map(|(s, a)| (*s, a.clone())) else {
             return Err(bad(format!("unable to find activity ID: {id}")));
@@ -377,7 +376,7 @@ impl Operations for EngineOps<'_> {
             return Err(bad(format!("activity {id} cancellation already requested")));
         }
         let activity_id = id.to_string();
-        let ev = g.push_event(EventType::ActivityTaskCancelRequested, ms * 1_000_000, |e| {
+        let ev = g.push_event(EventType::ActivityTaskCancelRequested, now_ns, |e| {
             e.activity_task_cancel_requested_event_attributes = Some(ActivityTaskCancelRequestedEventAttributes {
                 activity_id,
                 decision_task_completed_event_id: completed_id,
@@ -405,10 +404,10 @@ impl Operations for EngineOps<'_> {
     }
 
     fn request_cancel_activity_failed(&mut self, completed_id: i64, id: &str, cause: &str) -> Result<()> {
-        let ms = self.state.now_millis();
+        let now_ns = self.state.now();
         let (activity_id, cause) = (id.to_string(), cause.to_string());
         let mut g = self.state.inner.lock().unwrap();
-        g.push_event(EventType::RequestCancelActivityTaskFailed, ms * 1_000_000, |e| {
+        g.push_event(EventType::RequestCancelActivityTaskFailed, now_ns, |e| {
             e.request_cancel_activity_task_failed_event_attributes = Some(RequestCancelActivityTaskFailedEventAttributes {
                 activity_id,
                 cause,
@@ -423,14 +422,14 @@ impl Operations for EngineOps<'_> {
             .start_timer_decision_attributes
             .clone()
             .ok_or_else(|| bad("StartTimerDecisionAttributes is not set on decision."))?;
-        let ms = self.state.now_millis();
+        let now_ns = self.state.now();
         let mut g = self.state.inner.lock().unwrap();
         if g.timers.contains_key(&a.timer_id) {
             return Err(bad(format!("timer id {} is already pending", a.timer_id)));
         }
         let fire = a.start_to_fire_timeout_seconds;
         let timer_id = a.timer_id.clone();
-        let ev = g.push_event(EventType::TimerStarted, ms * 1_000_000, |e| {
+        let ev = g.push_event(EventType::TimerStarted, now_ns, |e| {
             e.timer_started_event_attributes = Some(TimerStartedEventAttributes {
                 timer_id,
                 start_to_fire_timeout_seconds: fire,
@@ -440,7 +439,7 @@ impl Operations for EngineOps<'_> {
         let info = pc::TimerInfo {
             version: ev.version,
             started_id: ev.event_id,
-            expiry_time_unix_nanos: ms * 1_000_000 + fire.unwrap_or(0) * NANOS,
+            expiry_time_unix_nanos: now_ns + fire.unwrap_or(0) * NANOS,
             task_id: 0,
         };
         g.delete_timers.remove(&a.timer_id);
@@ -455,7 +454,7 @@ impl Operations for EngineOps<'_> {
             .cancel_timer_decision_attributes
             .clone()
             .ok_or_else(|| bad("CancelTimerDecisionAttributes is not set on decision."))?;
-        let ms = self.state.now_millis();
+        let now_ns = self.state.now();
         let identity = identity.to_string();
         let mut g = self.state.inner.lock().unwrap();
         let running = g.timers.get(&a.timer_id).cloned();
@@ -471,7 +470,7 @@ impl Operations for EngineOps<'_> {
             }
         };
         let timer_id = a.timer_id.clone();
-        g.push_event(EventType::TimerCanceled, ms * 1_000_000, |e| {
+        g.push_event(EventType::TimerCanceled, now_ns, |e| {
             e.timer_canceled_event_attributes = Some(TimerCanceledEventAttributes {
                 timer_id,
                 started_event_id: started_id,
@@ -490,10 +489,10 @@ impl Operations for EngineOps<'_> {
 
     fn cancel_timer_failed(&mut self, completed_id: i64, decision: &Decision, identity: &str) -> Result<()> {
         let timer_id = decision.cancel_timer_decision_attributes.as_ref().map(|a| a.timer_id.clone()).unwrap_or_default();
-        let ms = self.state.now_millis();
+        let now_ns = self.state.now();
         let identity = identity.to_string();
         let mut g = self.state.inner.lock().unwrap();
-        g.push_event(EventType::CancelTimerFailed, ms * 1_000_000, |e| {
+        g.push_event(EventType::CancelTimerFailed, now_ns, |e| {
             e.cancel_timer_failed_event_attributes = Some(CancelTimerFailedEventAttributes {
                 timer_id,
                 cause: "TIMER_ID_UNKNOWN".to_string(),
@@ -633,9 +632,9 @@ impl Operations for EngineOps<'_> {
             .record_marker_decision_attributes
             .clone()
             .ok_or_else(|| bad("RecordMarkerDecisionAttributes is not set on decision."))?;
-        let ms = self.state.now_millis();
+        let now_ns = self.state.now();
         let mut g = self.state.inner.lock().unwrap();
-        g.push_event(EventType::MarkerRecorded, ms * 1_000_000, |e| {
+        g.push_event(EventType::MarkerRecorded, now_ns, |e| {
             e.marker_recorded_event_attributes = Some(MarkerRecordedEventAttributes {
                 marker_name: a.marker_name,
                 details: a.details,
@@ -652,10 +651,10 @@ impl Operations for EngineOps<'_> {
             .clone()
             .ok_or_else(|| bad("RequestCancelExternalWorkflowExecutionDecisionAttributes is not set on decision."))?;
         let target_domain_id = self.target_domain_id(&a.domain)?;
-        let ms = self.state.now_millis();
+        let now_ns = self.state.now();
         let mut g = self.state.inner.lock().unwrap();
         let attrs = a.clone();
-        let ev = g.push_event(EventType::RequestCancelExternalWorkflowExecutionInitiated, ms * 1_000_000, |e| {
+        let ev = g.push_event(EventType::RequestCancelExternalWorkflowExecutionInitiated, now_ns, |e| {
             e.request_cancel_external_workflow_execution_initiated_event_attributes =
                 Some(RequestCancelExternalWorkflowExecutionInitiatedEventAttributes {
                     decision_task_completed_event_id: completed_id,
@@ -689,10 +688,10 @@ impl Operations for EngineOps<'_> {
             .ok_or_else(|| bad("SignalExternalWorkflowExecutionDecisionAttributes is not set on decision."))?;
         let target_domain_id = self.target_domain_id(&a.domain)?;
         let exec = a.execution.clone().unwrap_or_default();
-        let ms = self.state.now_millis();
+        let now_ns = self.state.now();
         let mut g = self.state.inner.lock().unwrap();
         let attrs = a.clone();
-        let ev = g.push_event(EventType::SignalExternalWorkflowExecutionInitiated, ms * 1_000_000, |e| {
+        let ev = g.push_event(EventType::SignalExternalWorkflowExecutionInitiated, now_ns, |e| {
             e.signal_external_workflow_execution_initiated_event_attributes =
                 Some(SignalExternalWorkflowExecutionInitiatedEventAttributes {
                     decision_task_completed_event_id: completed_id,
@@ -728,10 +727,10 @@ impl Operations for EngineOps<'_> {
             .ok_or_else(|| bad("StartChildWorkflowExecutionDecisionAttributes is not set on decision."))?;
         let target_domain_id = self.target_domain_id(&a.domain)?;
         let parent_domain_name = self.domain_name.clone();
-        let ms = self.state.now_millis();
+        let now_ns = self.state.now();
         let mut g = self.state.inner.lock().unwrap();
         let attrs = a.clone();
-        let ev = g.push_event(EventType::StartChildWorkflowExecutionInitiated, ms * 1_000_000, |e| {
+        let ev = g.push_event(EventType::StartChildWorkflowExecutionInitiated, now_ns, |e| {
             e.start_child_workflow_execution_initiated_event_attributes =
                 Some(StartChildWorkflowExecutionInitiatedEventAttributes {
                     domain: child_event_domain(attrs.domain, &parent_domain_name),
@@ -801,9 +800,9 @@ impl Operations for EngineOps<'_> {
             .clone()
             .ok_or_else(|| bad("UpsertWorkflowSearchAttributesDecisionAttributes is not set on decision."))?;
         let fields = a.search_attributes.as_ref().and_then(|s| s.indexed_fields.clone()).unwrap_or_default();
-        let ms = self.state.now_millis();
+        let now_ns = self.state.now();
         let mut g = self.state.inner.lock().unwrap();
-        g.push_event(EventType::UpsertWorkflowSearchAttributes, ms * 1_000_000, |e| {
+        g.push_event(EventType::UpsertWorkflowSearchAttributes, now_ns, |e| {
             e.upsert_workflow_search_attributes_event_attributes = Some(UpsertWorkflowSearchAttributesEventAttributes {
                 decision_task_completed_event_id: completed_id,
                 search_attributes: a.search_attributes,
@@ -1010,6 +1009,9 @@ mod tests {
         fn unregister_domain_change_callback(&self, _shard_name: &str) {}
     }
 
+    /// Sub-millisecond clock: Go stamps events with `timeSource.Now().UnixNano()` (no truncation).
+    const NOW_NS: i64 = 1_700_000_000_123_456_789;
+
     fn state() -> EngineMutableState {
         let domain = DomainCacheEntry {
             info: DomainInfo { id: "domain-id".into(), name: "test-domain".into(), status: 0 },
@@ -1021,7 +1023,7 @@ mod tests {
         snapshot.execution_info.run_id = "run".into();
         snapshot.execution_info.task_list = "wf-tl".into();
         snapshot.execution_info.next_event_id = 5;
-        let s = EngineMutableState::from_snapshot(snapshot, domain, 0, Arc::new(|| 1_700_000_000_000_000_000)).unwrap();
+        let s = EngineMutableState::from_snapshot(snapshot, domain, 0, Arc::new(|| NOW_NS)).unwrap();
         s.inner.lock().unwrap().exec.workflow_timeout = 100;
         s
     }
@@ -1208,6 +1210,17 @@ mod tests {
         assert!(!h.fail_decision);
         assert_eq!(event_types(&s), vec![EventType::WorkflowExecutionFailed]);
         assert_eq!(crate::decision::ERR_TOO_MANY_PENDING_ACTIVITIES, "Too many pending activities");
+    }
+
+    #[test]
+    fn scheduled_activity_keeps_nanosecond_timestamp() {
+        let s = state();
+        let mut h = handler(&s);
+        let mut d = schedule_activity_decision(false);
+        h.handle_decisions(b"", &mut d).unwrap();
+        let g = s.inner.lock().unwrap();
+        assert_eq!(g.hist.last().unwrap().timestamp, Some(NOW_NS));
+        assert_eq!(g.pc_acts.values().next().unwrap().scheduled_time_unix_nanos, NOW_NS);
     }
 
     #[test]

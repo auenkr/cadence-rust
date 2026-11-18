@@ -292,7 +292,7 @@ impl EngineMutableState {
         advanced_visibility_writing: bool,
     ) -> HResult<i64> {
         let now = self.now();
-        let ms = now / 1_000_000;
+        let now_ns = now;
         let mut g = self.inner.lock().unwrap();
         if !g.exec.is_running()
             || g.pc_exec.decision_schedule_id != schedule_id
@@ -329,7 +329,7 @@ impl EngineMutableState {
             stid = ev.event_id;
         }
         let (ctx, ident, checksum) = (execution_context.to_vec(), identity.to_string(), binary_checksum.to_string());
-        let completed = g.push_event(EventType::DecisionTaskCompleted, ms * 1_000_000, |e| {
+        let completed = g.push_event(EventType::DecisionTaskCompleted, now_ns, |e| {
             e.decision_task_completed_event_attributes = Some(DecisionTaskCompletedEventAttributes {
                 execution_context: ctx,
                 scheduled_event_id: sid,
