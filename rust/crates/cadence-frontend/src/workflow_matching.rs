@@ -532,7 +532,8 @@ impl ProductionBackend {
             &cadence_common::matching_lb::LbRequest {
                 domain_id: &domain_id,
                 task_list: &task_list.name,
-                kind_normal: task_list.kind_or_default() == cadence_api::enums::TaskListKind::Normal,
+                kind_normal: task_list.kind_or_default()
+                    == cadence_api::enums::TaskListKind::Normal,
                 forwarded_from: &forwarded_from,
                 partition_config: None,
             },

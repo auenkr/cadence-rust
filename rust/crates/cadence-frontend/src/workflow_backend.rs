@@ -53,7 +53,8 @@ pub struct ProductionBackend {
     pub(crate) history_page_size:
         Option<std::sync::Arc<dyn crate::handler_workflow::HistoryPageSizePolicy>>,
     /// Go matching client `multiLoadBalancer` (poll partition selection).
-    pub(crate) matching_lb: Option<std::sync::Arc<cadence_common::matching_lb::MatchingLoadBalancer>>,
+    pub(crate) matching_lb:
+        Option<std::sync::Arc<cadence_common::matching_lb::MatchingLoadBalancer>>,
     /// pollerID -> partition polled, so a cancellation reaches the same
     /// partition (Go rewrites the request task list to the partition).
     pub(crate) poll_partitions:
@@ -1022,10 +1023,20 @@ impl cadence_common::matching_lb::LbDynamicConfig for FrontendLbConfig {
         self.domains.domain_name(domain_id).ok().flatten()
     }
     fn num_read_partitions(&self, domain: &str, task_list: &str, task_type: i32) -> i64 {
-        self.tl_int("matching.numTasklistReadPartitions", domain, task_list, task_type)
+        self.tl_int(
+            "matching.numTasklistReadPartitions",
+            domain,
+            task_list,
+            task_type,
+        )
     }
     fn num_write_partitions(&self, domain: &str, task_list: &str, task_type: i32) -> i64 {
-        self.tl_int("matching.numTasklistWritePartitions", domain, task_list, task_type)
+        self.tl_int(
+            "matching.numTasklistWritePartitions",
+            domain,
+            task_list,
+            task_type,
+        )
     }
     fn read_from_cache(&self, domain: &str, task_list: &str, task_type: i32) -> bool {
         self.overlay.lock().is_ok_and(|o| {
