@@ -8,10 +8,13 @@ COPY go/idls go/idls
 COPY go/proto go/proto
 COPY rust rust
 WORKDIR /src/rust
+# PROFILE=1 (perf runs only): line tables + frame pointers, same opt level.
+ARG PROFILE=0
 ENV OPENSSL_STATIC=1 OPENSSL_DIR=/usr CARGO_PROFILE_RELEASE_DEBUG=0 CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
+RUN if [ "$PROFILE" = 1 ]; then printf 'CARGO_PROFILE_RELEASE_DEBUG=line-tables-only\nCARGO_PROFILE_RELEASE_STRIP=none\nRUSTFLAGS="-C force-frame-pointers=yes"\n' > /profile.env; else : > /profile.env; fi
 RUN rustc -Vv > /cadence-toolchain.txt
 ARG RUST_PACKAGE=cadence-server
-RUN if [ "${RUST_PACKAGE}" = all ]; then \
+RUN set -a; . /profile.env; set +a; if [ "${RUST_PACKAGE}" = all ]; then \
       cargo build --release -p cadence-server -p cadence-history --features cadence-server/jemalloc-default,cadence-history/jemalloc-default -j2 && \
       cp target/release/cadence-server /cadence-server && cp target/release/cadence-history /cadence-history; \
     else cargo build --release -p ${RUST_PACKAGE} --features ${RUST_PACKAGE}/jemalloc-default -j2 && cp target/release/${RUST_PACKAGE} /cadence-server; fi \

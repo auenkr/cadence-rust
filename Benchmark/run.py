@@ -162,6 +162,13 @@ def main():
                         f=open(f'/proc/{pid}/stat').read().rsplit(')',1)[1].split()
                         return (int(f[11])+int(f[12]))/os.sysconf('SC_CLK_TCK')
                     w0,t0=proc_cpu(sdk_worker.pid),time.monotonic()
+                    profiler = None
+                    if os.environ.get('PROFILE') == '1' and arm == 'rust':
+                        pids=[str(identities[s]['State']['Pid']) for s,im in expected.items() if im!='cadence-go:ci']
+                        profiler=subprocess.Popen(['python3',str(ROOT/'profile.py'),'--start',str(start),'--end',str(end),
+                            '--output-prefix',str(OUT/(key+'-profile')),'--flamegraph-dir',os.environ['FLAMEGRAPH_DIR'],
+                            '--max-seconds',str(a.warmup+a.duration+400),'--pids',*pids],
+                            stdout=(OUT/(key+'-profile.log')).open('w'),stderr=subprocess.STDOUT)
                     try:
                         run(['taskset','-c',str(cpus[0]),*common,'-mode','generate','-rate',str(a.rate),
                             '-warmup',f'{a.warmup}s','-duration',f'{a.duration}s',
@@ -172,6 +179,7 @@ def main():
                         w1,t1=proc_cpu(sdk_worker.pid),time.monotonic()
                         (OUT/(key+'-sdkworker.json')).write_text(json.dumps({'cpu_seconds':w1-w0,'elapsed_seconds':t1-t0,'average_cpu_cores':(w1-w0)/(t1-t0),'pollers':a.worker_pollers}))
                         if fault is not None and fault.wait(timeout=30): raise RuntimeError('fault injection failed')
+                        if profiler is not None: profiler.wait(timeout=1200)
                         status=collector.wait(timeout=30)
                         if status: raise RuntimeError('resource collector failed: '+(OUT/(key+'-collector.log')).read_text(errors='replace')[-1500:])
                     finally:

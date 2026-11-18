@@ -5,7 +5,7 @@ on:
       service:
         description: Isolated service to replace
         type: choice
-        options: [matching, frontend, history]
+        options: [matching, frontend, history, all]
         default: matching
       source_ref:
         description: Exact migrated source commit (empty uses workflow head)
@@ -22,6 +22,9 @@ on:
       repetitions:
         description: Fresh-database alternating pairs (fit total inside 90 minutes)
         default: '1'
+      profile:
+        description: 'perf record Rust services during measurement (1 = on)'
+        default: '0'
       repetition_offset:
         description: Starting pair index (odd runs Rust first)
         default: '0'
@@ -56,6 +59,7 @@ jobs:
           WARMUP: ${{ inputs.warmup }}
           REPETITIONS: ${{ inputs.repetitions }}
           REPETITION_OFFSET: ${{ inputs.repetition_offset }}
+          PROFILE: ${{ inputs.profile }}
         run: bash Benchmark/ci.sh
       - uses: actions/upload-artifact@v4
         if: always()
