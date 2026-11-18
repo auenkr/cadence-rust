@@ -37,7 +37,7 @@ impl EngineMutableState {
                 .ok_or_else(|| HistoryError::internal("workflow start event is not loaded"))?
         };
         let new_run_id = uuid::Uuid::new_v4().to_string();
-        let ms = self.now_millis();
+        let now_ns = self.now();
         let now = self.now();
         let backoff = a.backoff_start_interval_in_seconds;
         let initiator = a.initiator.unwrap_or(ContinueAsNewInitiator::Decider);
@@ -77,7 +77,7 @@ impl EngineMutableState {
         // Go `AddContinuedAsNewEvent` + `ReplicateWorkflowExecutionContinuedAsNewEvent`.
         let attrs = a.clone();
         let run = new_run_id.clone();
-        let event = g.push_event(EventType::WorkflowExecutionContinuedAsNew, ms * 1_000_000, |e| {
+        let event = g.push_event(EventType::WorkflowExecutionContinuedAsNew, now_ns, |e| {
             e.workflow_execution_continued_as_new_event_attributes =
                 Some(WorkflowExecutionContinuedAsNewEventAttributes {
                     new_execution_run_id: run,
@@ -106,7 +106,7 @@ impl EngineMutableState {
         g.pc_exec.close_status = WORKFLOW_CLOSE_STATUS_CONTINUED_AS_NEW;
         g.pc_exec.completion_event_batch_id = first_event_id;
         g.clear_stickyness();
-        g.gen_workflow_close_tasks(&params, ms * 1_000_000, event.version);
+        g.gen_workflow_close_tasks(&params, now_ns, event.version);
         drop(g);
 
         // Go `addWorkflowExecutionStartedEventForContinueAsNew`.

@@ -551,10 +551,6 @@ impl EngineMutableState {
     pub(super) fn now(&self) -> i64 {
         (self.now_nanos)()
     }
-
-    pub(super) fn now_millis(&self) -> i64 {
-        self.now() / 1_000_000
-    }
 }
 
 #[async_trait]

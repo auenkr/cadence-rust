@@ -26,7 +26,7 @@ pub enum SemaphoreOpError {
 
 struct Exec<'a> {
     g: &'a mut Inner,
-    now_ms: i64,
+    now_ns: i64,
 }
 
 impl SemaphoreExecution for Exec<'_> {
@@ -50,7 +50,7 @@ impl SemaphoreExecution for Exec<'_> {
         else {
             unreachable!("engine only adds SemaphoreAcquireInitiated events");
         };
-        let ev = self.g.push_event(EventType::SemaphoreAcquireInitiated, self.now_ms * 1_000_000, |e| {
+        let ev = self.g.push_event(EventType::SemaphoreAcquireInitiated, self.now_ns, |e| {
             e.semaphore_acquire_initiated_event_attributes = Some(SemaphoreAcquireInitiatedEventAttributes {
                 semaphore_name,
                 wait_timeout_seconds: Some(wait_timeout_seconds),
@@ -60,7 +60,7 @@ impl SemaphoreExecution for Exec<'_> {
         SemaphoreEvent {
             id: ev.event_id,
             version: ev.version,
-            timestamp_unix_nanos: self.now_ms * 1_000_000,
+            timestamp_unix_nanos: self.now_ns,
             attributes,
         }
     }
@@ -87,11 +87,11 @@ impl EngineMutableState {
         name: &str,
         wait_timeout_seconds: i32,
     ) -> Result<SemaphoreInfo, SemaphoreOpError> {
-        let now_ms = self.now_millis();
+        let now_ns = self.now();
         let mut g = self.inner.lock().unwrap();
         let mut sems = std::mem::take(&mut g.semaphores);
         let res = {
-            let mut exec = Exec { g: &mut g, now_ms };
+            let mut exec = Exec { g: &mut g, now_ns };
             sems.add_semaphore_acquire_initiated_event(
                 &mut exec,
                 decision_completed_event_id,
