@@ -240,3 +240,20 @@ Runner-to-runner variation is visible in the All-Go baselines. Compare Rust with
 | all / go | True | 124 | 8987 |
 | all / rust | True | 124 | 5595 |
 
+
+## Matching retry: CI 44321372113 (complete)
+
+- matching, attempt 3: https://github.com/auenkr/cadence-rust/actions/runs/44321372113 — **success**; harness `173f9053797595b3e9b441f54635419e15c7edbb`; source `571fb2a0862bca59bb799f7baae9518d26c0e7b4` (rust tree `f09d282fe`, go tree `60cff4fed`).
+- Rust binary SHA256 `61362e6593274a3b2368f5f171fb98164b8b09f462c0a5552d7f9a79b9142859`; Go binary SHA256 `4f01bf34c5d6cd6e891b5a59cc54726518b84b680308867d879b9b68a4dbc1fa`; driver SHA256 `547c5167949b765fc573f25a0bccd6665025f91b92d0910ddf93e1064de2e562`.
+- Harness change before this attempt: MySQL observer-probe failures are recorded as sample gaps (`mysql_sample_errors`) instead of aborting the collector, and collector failures now carry the log tail. In this run no probe failed (0 gaps in all six recovery arms), and the earlier `00-go` stall did not recur. That stall is therefore unexplained: it was seen twice and is not reproduced here.
+
+Same protocol as above: three alternating fresh-MySQL pairs; medians of per-run values; CPU sums Frontend+Matching+History.
+
+| Arm | completions/s | p50 ms | p95 ms | p99 ms | CPU cores | memory MiB | RSS MiB | Matching CPU / memory MiB / RSS MiB | correct | errors | passing starts/s | recovery |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| Go (paired baseline) | 5.00 | 59.28 | 67.85 | 75.53 | 0.21 | 106.10 | 306.55 | 0.026 / 30.97 / 95.67 | 450 | 0 | 25 | 3/3, 5s, 0 errors |
+| Rust Matching only | 5.00 | 61.13 | 70.75 | 78.04 | 0.22 | 100.49 | 277.72 | 0.025 / 23.38 / 59.70 | 450 | 0 | 25 | 3/3, 5s, 0 errors |
+
+100/s failed for both arms (stage exit 124 on the 90-minute-bounded step; Go 8985 vs Rust 2997 recorded errors). These are not completion-throughput results.
+
+**Conclusion:** Rust Matching is a drop-in replacement under this one-activity workload. Correctness, capacity bound (25/s) and recovery (5s, no errors) are equal. At 5 starts/s, end-to-end latency and total cluster CPU are within run-to-run noise (p99 +2.5ms, CPU +0.01 core). The Matching process itself used ~25% less cgroup memory and ~38% less summed RSS. This closes the earlier Matching recovery validation gap.
