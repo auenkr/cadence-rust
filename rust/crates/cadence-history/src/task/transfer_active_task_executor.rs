@@ -280,10 +280,15 @@ impl TransferActiveTaskExecutor {
  }
  pub async fn process_decision_task(&self,task:&DecisionTask)->Result<()> {
   tracing::debug!("process_decision_task: get_context");
+  let diag_t0=std::time::Instant::now();
+  let diag_queue_ms=(self.now().0-task.get_visibility_timestamp().0)/1_000_000;
   let ctx=self.get_context(task.domain_id(),task.workflow_id(),task.run_id()).await;
+  let diag_lock_ms=diag_t0.elapsed().as_millis() as u64;
   tracing::debug!(ok=ctx.is_ok(),"process_decision_task: got context");
   let ctx=ctx?;
   let result=self.process_decision_task_locked(ctx.as_ref(),task).await;
+  let diag_total_ms=diag_t0.elapsed().as_millis() as u64;
+  if diag_queue_ms>=30||diag_total_ms>=30{tracing::warn!(queue_ms=diag_queue_ms,lock_ms=diag_lock_ms,total_ms=diag_total_ms,schedule_id=task.schedule_id,ok=result.is_ok(),"DIAG slow decision transfer task");}
   tracing::debug!(result=?result,"process_decision_task: locked done");
   ctx.release(result.clone().err());result
  }

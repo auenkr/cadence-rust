@@ -179,6 +179,7 @@ impl ProcInner {
             if shut || !task.retry_err(&err) {
                 return Err(err);
             }
+            tracing::warn!(error = %err, "DIAG task attempt failed, retrying");
             let delay = retrier.next_backoff(&mut rand::thread_rng());
             match delay {
                 None => return Err(err),

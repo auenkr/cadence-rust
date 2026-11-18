@@ -25,6 +25,8 @@ impl MetricsHandler {
         // Go handler methods return `h.convertError(err)` before `updateErrorMetric`.
         let res = match (res, &self.convert_error) { (Err(e), Some(c)) => Err(c(e)), (r, _) => r };
         let d = start.elapsed();
+        if d.as_millis() >= 40 { tracing::warn!(op, ms = d.as_millis() as u64, err = res.is_err(), "DIAG slow history rpc"); }
+        else if let Err(e) = &res { tracing::warn!(op, ms = d.as_millis() as u64, error = %e, "DIAG history rpc error"); }
         scope.record_timer("CadenceLatency", d);
         scope.record_histogram_duration("CadenceLatencyHistogram", d);
         if let Err(e) = &res { Self::update_error_metric(&scope, op, e); }
