@@ -14,28 +14,72 @@ use crate::task::deps as task;
 
 #[derive(Default)]
 pub struct MetricsRegistry {
-    values: Mutex<BTreeMap<String, f64>>,
+    // Hash map on the hot path; `snapshot()` still returns the sorted BTreeMap view.
+    values: Mutex<HashMap<String, f64>>,
+}
+
+thread_local! {
+    static KEY_BUF: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
 }
 
 impl MetricsRegistry {
     pub fn new() -> Arc<Self> {
         Arc::new(Self::default())
     }
-    fn key(scope: &str, name: &str, tags: &[(String, String)], suffix: &str) -> String {
-        let mut k = format!("{scope}/{name}{suffix}");
+    /// Writes `scope/name<suffix>{a=b,c=d}` into `k` (same format as before).
+    fn write_key(k: &mut String, scope: &str, name: &str, tags: &[(String, String)], suffix: &str) {
+        k.clear();
+        k.push_str(scope);
+        k.push('/');
+        k.push_str(name);
+        k.push_str(suffix);
         if !tags.is_empty() {
-            let t: Vec<String> = tags.iter().map(|(a, b)| format!("{a}={b}")).collect();
             k.push('{');
-            k.push_str(&t.join(","));
+            for (i, (a, b)) in tags.iter().enumerate() {
+                if i > 0 {
+                    k.push(',');
+                }
+                k.push_str(a);
+                k.push('=');
+                k.push_str(b);
+            }
             k.push('}');
         }
-        k
+    }
+    fn with_key<R>(scope: &str, name: &str, tags: &[(String, String)], suffix: &str, f: impl FnOnce(&str) -> R) -> R {
+        KEY_BUF.with(|buf| match buf.try_borrow_mut() {
+            Ok(mut k) => {
+                Self::write_key(&mut k, scope, name, tags, suffix);
+                f(&k)
+            }
+            Err(_) => {
+                let mut k = String::new();
+                Self::write_key(&mut k, scope, name, tags, suffix);
+                f(&k)
+            }
+        })
     }
     fn add(&self, scope: &str, name: &str, tags: &[(String, String)], suffix: &str, delta: f64) {
-        *self.values.lock().unwrap().entry(Self::key(scope, name, tags, suffix)).or_default() += delta;
+        Self::with_key(scope, name, tags, suffix, |k| {
+            let mut values = self.values.lock().unwrap();
+            match values.get_mut(k) {
+                Some(v) => *v += delta,
+                None => {
+                    values.insert(k.to_owned(), 0.0 + delta);
+                }
+            }
+        })
     }
     fn set(&self, scope: &str, name: &str, tags: &[(String, String)], v: f64) {
-        self.values.lock().unwrap().insert(Self::key(scope, name, tags, ""), v);
+        Self::with_key(scope, name, tags, "", |k| {
+            let mut values = self.values.lock().unwrap();
+            match values.get_mut(k) {
+                Some(slot) => *slot = v,
+                None => {
+                    values.insert(k.to_owned(), v);
+                }
+            }
+        })
     }
     /// Observation for timers/histograms: `<name>_count` and `<name>_sum`.
     fn observe(&self, scope: &str, name: &str, tags: &[(String, String)], v: f64) {
@@ -43,10 +87,10 @@ impl MetricsRegistry {
         self.add(scope, name, tags, "_sum", v);
     }
     pub fn snapshot(&self) -> BTreeMap<String, f64> {
-        self.values.lock().unwrap().clone()
+        self.values.lock().unwrap().iter().map(|(k, v)| (k.clone(), *v)).collect()
     }
     pub fn get(&self, scope: &str, name: &str) -> f64 {
-        self.values.lock().unwrap().get(&Self::key(scope, name, &[], "")).copied().unwrap_or(0.0)
+        Self::with_key(scope, name, &[], "", |k| self.values.lock().unwrap().get(k).copied().unwrap_or(0.0))
     }
 }
 
