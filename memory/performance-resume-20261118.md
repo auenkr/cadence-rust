@@ -9,3 +9,5 @@
 - Next: inspect paired reproduction, identify request-level evidence, then implement only a justified behavior-preserving optimization and validate on CI.
 - Worker completed read-only audit; its tonic-client channel-reuse hypothesis does not describe the production benchmark path. Parent traced `cadence-server/src/main.rs` to `workflow_backend::build_workflow_api`; `ProductionBackend` uses `cadence_service_core::tchannel_json_client::call_thrift`. That client already has a process-global idle connection pool and sets TCP_NODELAY on connect. Do not add a tonic cache based on this audit.
 - Reproduction workflow head: `e1ed8545962544b04142af4b0c8dc5bf2d5e8917`; run is in progress, conclusion not yet available. Implementation source remains the pinned `571fb2a08` above.
+- Paired FE reproduction 44247071847 (success, 3 alternating pairs, 5/s): completion p99 Go 78.3/76.9/82.2 ms vs Rust 76.9/74.2/76.5 ms. The 448 ms FE p99 in jemalloc-master-20261115 did NOT reproduce; Rust FE is at parity/slightly better at fixed load.
+- Merged matching-perf-frontend-trace (remove unconditional FE debug prints) as 6788dfab4; CI 44251729418 green.
