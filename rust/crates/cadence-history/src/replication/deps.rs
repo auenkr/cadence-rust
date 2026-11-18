@@ -587,38 +587,29 @@ pub trait Daemon: Send + Sync {
     fn stop(&self);
 }
 
-/// Minimal `quotas.NewDynamicRateLimiter` stand-in: spaces `wait()` calls
-/// at `1/qps` seconds (a qps <= 0 or non-finite value means unlimited).
+/// Go `quotas.NewDynamicRateLimiter(qps)`: a token bucket starting full with
+/// burst `max(ceil(qps), 1)`; callers ignore `Wait`'s error (burst 0 at qps 0
+/// returns immediately), so a non-positive qps never blocks.
 pub struct SimpleRateLimiter {
-    interval: Option<Duration>,
-    next: tokio::sync::Mutex<tokio::time::Instant>,
+    inner: cadence_common::dynamic_rate_limiter::DynamicRateLimiter,
 }
 
 impl SimpleRateLimiter {
     pub fn new(qps: f64) -> Self {
-        let interval = if qps.is_finite() && qps > 0.0 {
-            Some(Duration::from_secs_f64(1.0 / qps))
-        } else {
-            None
-        };
-        Self { interval, next: tokio::sync::Mutex::new(tokio::time::Instant::now()) }
+        Self::dynamic(Box::new(move || qps))
+    }
+    pub fn dynamic(qps: cadence_common::dynamic_rate_limiter::RpsFn) -> Self {
+        Self { inner: cadence_common::dynamic_rate_limiter::DynamicRateLimiter::new(qps) }
     }
 }
 
 #[async_trait]
 impl Limiter for SimpleRateLimiter {
     async fn wait(&self) {
-        let interval = match self.interval {
-            Some(i) => i,
-            None => return,
-        };
-        let at = {
-            let mut next = self.next.lock().await;
-            let now = tokio::time::Instant::now();
-            let at = if *next > now { *next } else { now };
-            *next = at + interval;
-            at
-        };
-        tokio::time::sleep_until(at).await;
+        if let Some(d) = self.inner.reserve_delay() {
+            if !d.is_zero() {
+                tokio::time::sleep(d).await;
+            }
+        }
     }
 }

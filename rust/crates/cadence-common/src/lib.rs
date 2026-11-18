@@ -34,6 +34,7 @@ pub mod liveness;
 pub mod matching_rate;
 pub mod qps;
 pub mod qps_bytes;
+pub mod dynamic_rate_limiter;
 pub mod rate_limiter;
 
 pub mod membership;

@@ -120,7 +120,7 @@ impl TaskProcessorImpl {
 
         let (sync_shard_tx, sync_shard_rx) = mpsc::channel(1);
         let shard_rate_limiter: Arc<dyn Limiter> =
-            Arc::new(SimpleRateLimiter::new(config.replication_task_processor_shard_qps()));
+            { let c = config.clone(); Arc::new(SimpleRateLimiter::dynamic(Box::new(move || c.replication_task_processor_shard_qps()))) };
         Arc::new_cyclic(|me| Self {
             me: me.clone(),
             current_cluster: shard.current_cluster_name(),

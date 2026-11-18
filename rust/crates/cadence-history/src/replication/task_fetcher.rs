@@ -140,7 +140,7 @@ impl TaskFetcherImpl {
             request_rx.push(Some(rx));
         }
         let rate_limiter: Arc<dyn Limiter> =
-            Arc::new(SimpleRateLimiter::new(config.replication_task_processor_host_qps()));
+            { let c = config.clone(); Arc::new(SimpleRateLimiter::dynamic(Box::new(move || c.replication_task_processor_host_qps()))) };
         Arc::new_cyclic(|me| Self {
             me: me.clone(),
             status: AtomicU8::new(STATUS_INITIALIZED),
