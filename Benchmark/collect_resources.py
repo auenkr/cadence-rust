@@ -104,6 +104,15 @@ def mysql_snapshot(container):
     return {key: int(value) for key,value in (line.split('\t') for line in raw.splitlines())}
 
 
+def mysql_sample(container, elapsed, errors):
+    """Observer probe; a stalled probe during a fault is a gap, not a run failure."""
+    try:
+        return {"elapsed_seconds": elapsed, "counters": mysql_snapshot(container)}
+    except (subprocess.SubprocessError, ValueError) as error:
+        errors.append({"elapsed_seconds": elapsed, "error": f"{type(error).__name__}: {error}"[:300]})
+        return None
+
+
 def collect(interval, output, names, start_event=None, end_event=None, duration=None, ready_event=None, event_timeout=180, mysql_container=None):
     if bool(start_event) != bool(end_event):
         raise ValueError("--start-event and --end-event must be provided together")
@@ -132,6 +141,7 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
     started_at = datetime.now(timezone.utc).isoformat()
     started = time.monotonic()
     first = snapshot(selected)
+    mysql_errors = []
     mysql_samples = [{"elapsed_seconds":0,"counters":mysql_snapshot(mysql_container)}] if mysql_container else []
     timeline = [{"elapsed_seconds":0,"containers":first}]
     last_timeline = last_mysql = 0
@@ -155,7 +165,8 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
             timeline.append({"elapsed_seconds":elapsed,"containers":now})
             last_timeline = elapsed
         if mysql_container and elapsed-last_mysql >= 5:
-            mysql_samples.append({"elapsed_seconds":elapsed,"counters":mysql_snapshot(mysql_container)})
+            sample = mysql_sample(mysql_container, elapsed, mysql_errors)
+            if sample: mysql_samples.append(sample)
             last_mysql = elapsed
         for name, data in now.items():
             peak[name] = max(peak[name], data["memory_bytes"])
@@ -172,7 +183,8 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
     elapsed = time.monotonic() - started
     timeline.append({"elapsed_seconds":elapsed,"containers":last})
     if mysql_container:
-        mysql_samples.append({"elapsed_seconds":elapsed,"counters":mysql_snapshot(mysql_container)})
+        sample = mysql_sample(mysql_container, elapsed, mysql_errors)
+        if sample: mysql_samples.append(sample)
     containers_result = {}
     for name, (_, version) in selected.items():
         try:
@@ -195,7 +207,7 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
               "memory_method": "peak sampled cgroup memory usage; includes charged cache and is not RSS",
               "interval_method": "start/end marker files" if start_event else "fixed duration",
               "containers": containers_result, "timeline": timeline,
-              "mysql_samples": mysql_samples,
+              "mysql_samples": mysql_samples, "mysql_sample_errors": mysql_errors,
               "mysql_note": "Global SQL counters and total Performance Schema wait; includes observer queries. Query tail latency unavailable."}
     Path(output).write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 

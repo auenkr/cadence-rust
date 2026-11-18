@@ -61,3 +61,15 @@ class PipelineTests(unittest.TestCase):
     def test_missing_identity_and_digest_rejected(self):
         for change in (dict(run_id=''),dict(observed_result_sha256='wrong')):
             with self.assertRaises(ValueError):summarize([dict(self.row,**change)],self.manifest)
+
+
+class CollectorProbeTests(unittest.TestCase):
+    def test_stalled_mysql_probe_is_recorded_gap(self):
+        import subprocess
+        from unittest import mock
+        import collect_resources
+        errors=[]
+        with mock.patch.object(collect_resources,'mysql_snapshot',side_effect=subprocess.TimeoutExpired('mysql',10)):
+            self.assertIsNone(collect_resources.mysql_sample('db',5.0,errors))
+        self.assertEqual(errors[0]['elapsed_seconds'],5.0)
+        self.assertIn('TimeoutExpired',errors[0]['error'])

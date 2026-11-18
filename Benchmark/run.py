@@ -156,7 +156,7 @@ def main():
                             key+'-generate',timeout=a.warmup+a.duration+360)
                         if fault is not None and fault.wait(timeout=30): raise RuntimeError('fault injection failed')
                         status=collector.wait(timeout=30)
-                        if status: raise RuntimeError('resource collector failed')
+                        if status: raise RuntimeError('resource collector failed: '+(OUT/(key+'-collector.log')).read_text(errors='replace')[-1500:])
                     finally:
                         if fault is not None:
                             if fault.poll() is None: fault.terminate();fault.wait(timeout=15)
