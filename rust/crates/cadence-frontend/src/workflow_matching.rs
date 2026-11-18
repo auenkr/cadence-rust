@@ -515,13 +515,69 @@ impl ProductionBackend {
         Ok(Struct { fields })
     }
 
+    /// Go matching client `loadBalancer.PickReadPartition`; `None` keeps the
+    /// caller's task list (no load balancer installed or no task list).
+    fn pick_read_partition(
+        &self,
+        request: &serde_json::Value,
+        task_list: Option<&ty::TaskList>,
+        task_type: i32,
+    ) -> Option<String> {
+        let lb = self.matching_lb.as_ref()?;
+        let task_list = task_list?;
+        let domain_id = str_field(request, "domainUUID");
+        let forwarded_from = str_field(request, "forwardedFrom");
+        let partition = lb.pick_read_partition(
+            task_type,
+            &cadence_common::matching_lb::LbRequest {
+                domain_id: &domain_id,
+                task_list: &task_list.name,
+                kind_normal: task_list.kind_or_default()
+                    == cadence_api::enums::TaskListKind::Normal,
+                forwarded_from: &forwarded_from,
+                partition_config: None,
+            },
+            &str_field(request, "isolationGroup"),
+        );
+        (partition != task_list.name).then_some(partition)
+    }
+
+    /// Remember (Some) or forget (None) the partition a poller is waiting on.
+    fn track_poll(&self, poller: &str, partition: Option<&str>) {
+        if poller.is_empty() {
+            return;
+        }
+        let Ok(mut polls) = self.poll_partitions.lock() else {
+            return;
+        };
+        match partition {
+            Some(p) => {
+                polls.insert(poller.to_owned(), p.to_owned());
+            }
+            None => {
+                polls.remove(poller);
+            }
+        }
+    }
+
     /// Go `MatchingClient.CancelOutstandingPoll`: routed to the same owner as
     /// the original poll (by task-list name).
     pub(crate) async fn cancel_outstanding_poll(
         &self,
         request: &serde_json::Value,
     ) -> Result<(), CadenceError> {
-        let task_list: Option<ty::TaskList> = typed(request, "taskList")?;
+        let mut task_list: Option<ty::TaskList> = typed(request, "taskList")?;
+        // Go cancels with the request whose task list was rewritten to the
+        // partition actually polled.
+        let poller_id = str_field(request, "pollerID");
+        let polled = self
+            .poll_partitions
+            .lock()
+            .ok()
+            .and_then(|mut polls| polls.remove(&poller_id));
+        if let (Some(partition), Some(task_list)) = (polled, task_list.as_mut()) {
+            task_list.name = partition;
+        }
         let name = task_list
             .as_ref()
             .map_or("", |t| t.name.as_str())
@@ -554,8 +610,18 @@ impl ProductionBackend {
         &self,
         request: &serde_json::Value,
     ) -> Result<serde_json::Value, CadenceError> {
-        let poll: tk::PollForDecisionTaskRequest = typed(request, "pollRequest")?;
+        let mut poll: tk::PollForDecisionTaskRequest = typed(request, "pollRequest")?;
+        let partition = self.pick_read_partition(
+            request,
+            poll.task_list.as_ref(),
+            cadence_common::matching_lb::TASK_LIST_TYPE_DECISION,
+        );
+        if let (Some(partition), Some(task_list)) = (&partition, poll.task_list.as_mut()) {
+            task_list.name = partition.clone();
+        }
         let envelope = self.poll_envelope(request, "pollRequest", poll.to_thrift())?;
+        let poller = str_field(request, "pollerID");
+        self.track_poll(&poller, partition.as_deref());
         let reply = self
             .matching_for(
                 poll.task_list.as_ref().map_or("", |t| t.name.as_str()),
@@ -563,7 +629,9 @@ impl ProductionBackend {
                 envelope,
                 POLL_TIMEOUT,
             )
-            .await?;
+            .await;
+        self.track_poll(&poller, None);
+        let reply = reply?;
         let Some(task) = DecisionTask::from_matching(&reply)? else {
             // Go returns the AutoConfigHint even for an empty poll.
             let hint = reply
@@ -585,8 +653,18 @@ impl ProductionBackend {
         &self,
         request: &serde_json::Value,
     ) -> Result<serde_json::Value, CadenceError> {
-        let poll: tk::PollForActivityTaskRequest = typed(request, "pollRequest")?;
+        let mut poll: tk::PollForActivityTaskRequest = typed(request, "pollRequest")?;
+        let partition = self.pick_read_partition(
+            request,
+            poll.task_list.as_ref(),
+            cadence_common::matching_lb::TASK_LIST_TYPE_ACTIVITY,
+        );
+        if let (Some(partition), Some(task_list)) = (&partition, poll.task_list.as_mut()) {
+            task_list.name = partition.clone();
+        }
         let envelope = self.poll_envelope(request, "pollRequest", poll.to_thrift())?;
+        let poller = str_field(request, "pollerID");
+        self.track_poll(&poller, partition.as_deref());
         let reply = self
             .matching_for(
                 poll.task_list.as_ref().map_or("", |t| t.name.as_str()),
@@ -594,7 +672,9 @@ impl ProductionBackend {
                 envelope,
                 POLL_TIMEOUT,
             )
-            .await?;
+            .await;
+        self.track_poll(&poller, None);
+        let reply = reply?;
         let response = tk::PollForActivityTaskResponse::from_thrift(&reply)
             .map_err(|e| thrift_err("Matching PollForActivityTask response", e))?;
         to_json(&response)

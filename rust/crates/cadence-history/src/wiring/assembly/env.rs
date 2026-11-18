@@ -91,6 +91,8 @@ pub struct HistoryEnv {
     pub visibility: Arc<dyn crate::wiring::persistence::visibility::VisibilityWriter>,
     /// Matching channel resolver (add-task RPCs of the transfer executors).
     pub matching_resolver: ChannelResolver,
+    /// Go matching client `multiLoadBalancer` (partition selection for add-task).
+    pub matching_lb: Arc<cadence_common::matching_lb::MatchingLoadBalancer>,
     pub dynamic_client: Option<Arc<dyn DynamicClient>>,
     pub identity: String,
     /// Go `failover.NewCoordinator` (handler-level; started by the handler).
@@ -236,6 +238,9 @@ impl HistoryEnv {
             archiver_provider,
         )
         .with_metrics(crate::task::deps::MetricsClient::scope(&*metrics, "ArchiverClient", vec![])));
+        let matching_lb = Arc::new(cadence_common::matching_lb::MatchingLoadBalancer::new(Arc::new(
+            super::matching_lb_config::HistoryLbConfig { dynamic: dynamic_client.clone(), domains: domain_cache.clone() },
+        )));
         Ok(Arc::new(Self {
             archiver_client,
             dlq_host_limiter,
@@ -253,9 +258,10 @@ impl HistoryEnv {
             domain_scope_cache: Arc::new(DomainMetricsScopeCacheImpl::default()),
             membership,
             client_checker: Arc::new(VersionChecker),
-            query_matching: Arc::new(GrpcQueryMatchingClient::new(matching_resolver.clone())),
+            query_matching: Arc::new(GrpcQueryMatchingClient::new(matching_resolver.clone()).with_load_balancer(matching_lb.clone())),
             visibility,
             matching_resolver,
+            matching_lb,
             dynamic_client,
             identity: who_am_i,
             failover_coordinator,

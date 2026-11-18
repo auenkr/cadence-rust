@@ -31,6 +31,7 @@ pub mod poller_bytes;
 
 pub mod liveness;
 
+pub mod matching_lb;
 pub mod matching_rate;
 pub mod qps;
 pub mod qps_bytes;

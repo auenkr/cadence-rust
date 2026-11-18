@@ -52,6 +52,13 @@ pub struct ProductionBackend {
     header_rules: std::sync::Arc<Vec<cadence_service_core::header_forwarding::HeaderRule>>,
     pub(crate) history_page_size:
         Option<std::sync::Arc<dyn crate::handler_workflow::HistoryPageSizePolicy>>,
+    /// Go matching client `multiLoadBalancer` (poll partition selection).
+    pub(crate) matching_lb:
+        Option<std::sync::Arc<cadence_common::matching_lb::MatchingLoadBalancer>>,
+    /// pollerID -> partition polled, so a cancellation reaches the same
+    /// partition (Go rewrites the request task list to the partition).
+    pub(crate) poll_partitions:
+        std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, String>>>,
 }
 
 impl std::fmt::Debug for ProductionBackend {
@@ -224,7 +231,18 @@ impl ProductionBackend {
             list_sampler: None,
             domains: None,
             header_rules: Default::default(),
+            matching_lb: None,
+            poll_partitions: Default::default(),
         }
+    }
+
+    /// Install Go's matching-client partition load balancer.
+    pub fn with_matching_load_balancer(
+        mut self,
+        lb: std::sync::Arc<cadence_common::matching_lb::MatchingLoadBalancer>,
+    ) -> Self {
+        self.matching_lb = Some(lb);
+        self
     }
 
     /// Go `HeaderForwardingMiddleware` rules for outbound History/Matching calls.
@@ -980,6 +998,80 @@ impl crate::handler_workflow::WorkflowQueryPolicy for DynamicQueryPolicy {
     }
 }
 
+/// Go `client/matching` load-balancer dynamic config (Frontend matching client).
+struct FrontendLbConfig {
+    overlay: SharedOverlay,
+    domains: std::sync::Arc<dyn crate::handler_workflow::WorkflowDomainLookup>,
+}
+
+impl FrontendLbConfig {
+    fn tl_int(&self, key: &str, domain: &str, task_list: &str, task_type: i32) -> i64 {
+        self.overlay.lock().map_or(1, |o| {
+            cadence_persistence::dynamic_config::task_list_integer(
+                o.property_values(key),
+                Some(domain),
+                task_list,
+                task_type,
+                1,
+            )
+        })
+    }
+}
+
+impl cadence_common::matching_lb::LbDynamicConfig for FrontendLbConfig {
+    fn domain_name(&self, domain_id: &str) -> Option<String> {
+        self.domains.domain_name(domain_id).ok().flatten()
+    }
+    fn num_read_partitions(&self, domain: &str, task_list: &str, task_type: i32) -> i64 {
+        self.tl_int(
+            "matching.numTasklistReadPartitions",
+            domain,
+            task_list,
+            task_type,
+        )
+    }
+    fn num_write_partitions(&self, domain: &str, task_list: &str, task_type: i32) -> i64 {
+        self.tl_int(
+            "matching.numTasklistWritePartitions",
+            domain,
+            task_list,
+            task_type,
+        )
+    }
+    fn read_from_cache(&self, domain: &str, task_list: &str, task_type: i32) -> bool {
+        self.overlay.lock().is_ok_and(|o| {
+            cadence_persistence::dynamic_config::task_list_boolean(
+                o.property_values("matching.enableGetNumberOfPartitionsFromCache"),
+                Some(domain),
+                task_list,
+                task_type,
+                false,
+            )
+        })
+    }
+    fn strategy(&self, domain: &str, _task_list: &str, _task_type: i32) -> String {
+        self.overlay.lock().map_or_else(
+            |_| "weighted".to_owned(),
+            |o| {
+                cadence_persistence::dynamic_config::string_domain(
+                    o.property_values("system.tasklistLoadBalancerStrategy"),
+                    domain,
+                    "weighted",
+                )
+            },
+        )
+    }
+    fn isolation_assignment_enabled(&self, domain: &str) -> bool {
+        self.overlay.lock().is_ok_and(|o| {
+            cadence_persistence::dynamic_config::boolean(
+                o.property_values("matching.enablePartitionIsolationGroupAssignment"),
+                Some(domain),
+                false,
+            )
+        })
+    }
+}
+
 /// Go `frontend.historyMaxPageSize` (domain filtered, default 1000).
 struct DynamicHistoryPageSize(SharedOverlay);
 
@@ -1092,6 +1184,14 @@ pub fn build_workflow_api(
         .with_history_page_size_policy(std::sync::Arc::new(DynamicHistoryPageSize(
             ctx.state.admin.dynamic_config.clone(),
         )))
+        .with_matching_load_balancer(std::sync::Arc::new(
+            cadence_common::matching_lb::MatchingLoadBalancer::new(std::sync::Arc::new(
+                FrontendLbConfig {
+                    overlay: ctx.state.admin.dynamic_config.clone(),
+                    domains: lookup.clone(),
+                },
+            )),
+        ))
         .with_history_routing(
             ctx.state.admin.membership.clone(),
             ctx.state.num_history_shards,

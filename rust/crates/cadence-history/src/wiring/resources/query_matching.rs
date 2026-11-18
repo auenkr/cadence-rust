@@ -17,11 +17,18 @@ pub type ChannelResolver = Arc<dyn Fn(&str) -> Result<Channel, String> + Send + 
 
 pub struct GrpcQueryMatchingClient {
     resolver: ChannelResolver,
+    lb: Option<Arc<cadence_common::matching_lb::MatchingLoadBalancer>>,
 }
 
 impl GrpcQueryMatchingClient {
     pub fn new(resolver: ChannelResolver) -> Self {
-        Self { resolver }
+        Self { resolver, lb: None }
+    }
+
+    /// Go matching client `loadBalancer.PickReadPartition` for QueryWorkflow.
+    pub fn with_load_balancer(mut self, lb: Arc<cadence_common::matching_lb::MatchingLoadBalancer>) -> Self {
+        self.lb = Some(lb);
+        self
     }
 }
 
@@ -39,13 +46,31 @@ impl QueryMatchingClient for GrpcQueryMatchingClient {
         request: &QueryWorkflowRequest,
         task_list: Option<&TaskList>,
     ) -> HResult<QueryWorkflowResponse> {
-        let name = task_list.map(|t| t.name.as_str()).unwrap_or_default();
-        let channel = (self.resolver)(name).map_err(other)?;
+        let root = task_list.map(|t| t.name.as_str()).unwrap_or_default();
+        let normal = task_list.is_none_or(|t| t.kind_or_default() == cadence_api::enums::TaskListKind::Normal);
+        let name = match &self.lb {
+            Some(lb) => lb.pick_read_partition(
+                cadence_common::matching_lb::TASK_LIST_TYPE_DECISION,
+                &cadence_common::matching_lb::LbRequest {
+                    domain_id,
+                    task_list: root,
+                    kind_normal: normal,
+                    forwarded_from: "",
+                    partition_config: None,
+                },
+                "",
+            ),
+            None => root.to_owned(),
+        };
+        let channel = (self.resolver)(&name).map_err(other)?;
         let mut client = cadence_proto::matching::matching_api_client::MatchingApiClient::new(channel);
         let proto = cadence_proto::matching::QueryWorkflowRequest {
             domain_id: domain_id.to_string(),
             request: Some(cadence_proto::convert::client::query_request_out(request.clone())),
-            task_list: task_list.cloned().map(cadence_proto::convert::task_list_out),
+            task_list: task_list.cloned().map(|mut t| {
+                t.name = name.clone();
+                cadence_proto::convert::task_list_out(t)
+            }),
             forwarded_from: String::new(),
         };
         // Go's matching client goes through yarpc: the target (Go) Matching rejects a call without
