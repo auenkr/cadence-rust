@@ -28,14 +28,7 @@ macro_rules! forward {
                 self.trace_list_task_list_partitions(request).await
             }
             $(async fn $method(&self, request: Request<m::$request>) -> Result<Response<m::$response>, Status> {
-                let t = std::time::Instant::now();
-                { let d = format!("{:?}", request.get_ref()); eprintln!("NATIVE-TRACE begin {} {}", stringify!($method), &d[..d.len().min(3000)]); }
-                let r = self.0.$method(request).await;
-                match &r {
-                    Ok(_) => eprintln!("NATIVE-TRACE end ok {} {}ms", stringify!($method), t.elapsed().as_millis()),
-                    Err(s) => eprintln!("NATIVE-TRACE end err {} {}ms {:?} {}", stringify!($method), t.elapsed().as_millis(), s.code(), s.message()),
-                }
-                r
+                self.0.$method(request).await
             })*
         }
     };
