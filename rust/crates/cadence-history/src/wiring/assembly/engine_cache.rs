@@ -125,7 +125,7 @@ impl EngineCore {
     }
 
     pub(super) fn notify_tasks_with(&self, transfer: &[pc::TransferTask], timer: &[pc::TimerTask], persistence_error: bool) {
-        use crate::engine::notify_tasks::{NotifiedTask, NotifiedTaskKind, NotifyTaskInfo};
+        use crate::engine::notify_tasks::{NotifiedTask, NotifyTaskInfo};
         tracing::debug!(transfer = transfer.len(), timer = timer.len(), has_engine = self.engine_slot.get().is_some(), "notify queues of new tasks");
         let Some(engine) = self.engine_slot.get().and_then(std::sync::Weak::upgrade) else { return };
         let info_of = |d: &str, w: &str, r: &str, tasks: Vec<NotifiedTask>| {
@@ -138,26 +138,14 @@ impl EngineCore {
         if let Some(first) = transfer.first() {
             let tasks = transfer
                 .iter()
-                .map(|t| NotifiedTask {
-                    version: t.version,
-                    task_id: t.task_id,
-                    task_type: t.task_type as i16,
-                    visibility_timestamp: t.visibility_time_unix_nanos,
-                    kind: NotifiedTaskKind::Generic,
-                })
+                .map(NotifiedTask::from_transfer)
                 .collect();
             engine.notify_new_transfer_tasks(&info_of(&first.domain_id, &first.workflow_id, &first.run_id, tasks));
         }
         if let Some(first) = timer.first() {
             let tasks = timer
                 .iter()
-                .map(|t| NotifiedTask {
-                    version: t.version,
-                    task_id: t.task_id,
-                    task_type: t.task_type as i16,
-                    visibility_timestamp: t.visibility_timestamp_unix_nanos,
-                    kind: NotifiedTaskKind::Generic,
-                })
+                .map(NotifiedTask::from_timer)
                 .collect();
             engine.notify_new_timer_tasks(&info_of(&first.domain_id, &first.workflow_id, &first.run_id, tasks));
         }

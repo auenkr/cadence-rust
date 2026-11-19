@@ -217,11 +217,11 @@ impl HistoryEngine {
         // the fake tasks will not be actually used, we just need to make sure
         // its length > 0 and has correct timestamp, to trigger a db scan
         let fake_decision_task = NotifyTaskInfo {
-            tasks: vec![NotifiedTask { version: 0, task_id: 0, task_type: 0, visibility_timestamp: 0, kind: NotifiedTaskKind::Generic }],
+            tasks: vec![NotifiedTask { version: 0, task_id: 0, task_type: 0, visibility_timestamp: 0, kind: NotifiedTaskKind::Generic, full: None }],
             ..Default::default()
         };
         let fake_decision_timeout_task = NotifyTaskInfo {
-            tasks: vec![NotifiedTask { version: 0, task_id: 0, task_type: 0, visibility_timestamp: now, kind: NotifiedTaskKind::Generic }],
+            tasks: vec![NotifiedTask { version: 0, task_id: 0, task_type: 0, visibility_timestamp: now, kind: NotifiedTaskKind::Generic, full: None }],
             ..Default::default()
         };
         let Some(transfer) = self.queue_processors.get(&HistoryTaskCategory::Transfer) else {

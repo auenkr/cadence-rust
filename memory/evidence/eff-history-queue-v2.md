@@ -32,3 +32,14 @@ Suggested split for workers: (A) a full-task notify payload in the engine (this 
 | rust-ci cadence-history (head 17ba6ee8f) | https://github.com/auenkr/cadence-rust/actions/runs/44493897357 | success (clippy + tests) |
 
 No gates or benchmark were run: queue behaviour is unchanged (test-only diff).
+
+## Piece A: full-task notify payload (branch queue-v2-a-notify, 2026-11-19)
+- `engine/notify_tasks.rs`: `NotifiedTask.full: Option<FullPersistedTask>` (`Transfer(pc::TransferTask)` / `Timer(pc::TimerTask)`), filled by `NotifiedTask::from_transfer/from_timer`. This matches Go, where `NotifyTaskInfo.Tasks` carries the full `persistence.Task`. `None` only for the synthetic failover-callback notify tasks, which Go also builds with no payload.
+- All call sites go through `wiring/assembly/engine_cache.rs::notify_tasks_with`, which is used for successful writes, ambiguous-error writes and the NDC context hooks. It now passes the full tasks. The v1 processors ignore the new field.
+- Unit tests `notify_tasks::full_task_tests::{transfer,timer}_notification_carries_full_persisted_task`.
+
+| check | run | result |
+|---|---|---|
+| rust-ci cadence-history (b03e0db22) | https://github.com/auenkr/cadence-rust/actions/runs/44495411634 | success |
+| History mixed gate MySQL | https://github.com/auenkr/cadence-rust/actions/runs/44495416974 | success, `GATE SUMMARY failed: []` |
+| History mixed gate Postgres | https://github.com/auenkr/cadence-rust/actions/runs/44495422534 | success, `GATE SUMMARY failed: []` |
