@@ -1472,7 +1472,10 @@ async fn run_with_lifecycle(
             }
             if let Some(provider) = &frontend_ringpop_provider {
                 state.admin.membership.set(Some(std::sync::Arc::new(
-                    crate::matching_ringpop_provider::RingpopClusterMembership(provider.clone()),
+                    crate::matching_ringpop_provider::RingpopClusterMembership(
+                        provider.clone(),
+                        Default::default(),
+                    ),
                 )));
             }
             let matching_membership = matching_ringpop_provider.as_ref().map(|provider| {

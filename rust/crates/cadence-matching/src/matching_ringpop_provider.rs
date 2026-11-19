@@ -227,7 +227,40 @@ impl MatchingRingpopProvider {
 
 /// Go `membership.Resolver` view for Admin `DescribeCluster`, backed by this
 /// provider's live Ringpop snapshot (all roles, not just its own).
-pub struct RingpopClusterMembership(pub Arc<MatchingRingpopProvider>);
+pub struct RingpopClusterMembership(pub Arc<MatchingRingpopProvider>, pub RoleRingCache);
+
+/// Per-role hash ring built once per membership snapshot instead of on every
+/// owner lookup (same hosts, same ring, same lookup result).
+#[derive(Default)]
+pub struct RoleRingCache(std::sync::Mutex<Vec<CachedRoleRing>>);
+
+type CachedRoleRing = (
+    &'static str,
+    Arc<Vec<PeerMember>>,
+    Arc<cadence_common::membership::Ring>,
+);
+
+impl RoleRingCache {
+    fn ring(
+        &self,
+        members: &Arc<Vec<PeerMember>>,
+        role: &'static str,
+    ) -> Arc<cadence_common::membership::Ring> {
+        let mut cache = self.0.lock().expect("ring cache lock");
+        if let Some((_, _, ring)) = cache
+            .iter()
+            .find(|(r, cached, _)| *r == role && Arc::ptr_eq(cached, members))
+        {
+            return ring.clone();
+        }
+        let ring = Arc::new(cadence_common::membership::Ring::new(
+            members.iter().filter_map(|m| m.matching_host(role)),
+        ));
+        cache.retain(|(r, _, _)| *r != role);
+        cache.push((role, members.clone(), ring.clone()));
+        ring
+    }
+}
 
 impl cadence_service_core::admin::ClusterMembership for RingpopClusterMembership {
     fn history_host(
@@ -249,14 +282,8 @@ impl cadence_service_core::admin::ClusterMembership for RingpopClusterMembership
         &self,
         shard: i32,
     ) -> Result<Option<cadence_common::membership::Host>, String> {
-        use cadence_common::membership::Ring;
         let snapshot = self.0.snapshot();
-        let ring = Ring::new(
-            snapshot
-                .members
-                .iter()
-                .filter_map(|m| m.matching_host("cadence-history")),
-        );
+        let ring = self.1.ring(&snapshot.members, "cadence-history");
         let Some(mut host) = ring
             .lookup(
                 &char::from_u32(shard as u32)
@@ -279,14 +306,8 @@ impl cadence_service_core::admin::ClusterMembership for RingpopClusterMembership
         &self,
         key: &str,
     ) -> Result<Option<cadence_common::membership::Host>, String> {
-        use cadence_common::membership::Ring;
         let snapshot = self.0.snapshot();
-        let ring = Ring::new(
-            snapshot
-                .members
-                .iter()
-                .filter_map(|m| m.matching_host("cadence-matching")),
-        );
+        let ring = self.1.ring(&snapshot.members, "cadence-matching");
         let Some(mut host) = ring.lookup(key).cloned() else {
             return Ok(None);
         };
@@ -1067,5 +1088,18 @@ mod tests {
         provider_b.stop().await.unwrap();
         restarted_server.abort();
         server_b.abort();
+    }
+
+    #[test]
+    fn role_ring_cache_reuses_ring_until_snapshot_changes() {
+        let cache = super::RoleRingCache::default();
+        let a = Arc::new(Vec::new());
+        let r1 = cache.ring(&a, "cadence-history");
+        assert!(Arc::ptr_eq(&r1, &cache.ring(&a, "cadence-history")));
+        let m = cache.ring(&a, "cadence-matching");
+        assert!(!Arc::ptr_eq(&r1, &m));
+        assert!(Arc::ptr_eq(&r1, &cache.ring(&a, "cadence-history")));
+        let b = Arc::new(Vec::new());
+        assert!(!Arc::ptr_eq(&r1, &cache.ring(&b, "cadence-history")));
     }
 }
