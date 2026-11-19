@@ -25,9 +25,10 @@ on:
         type: boolean
         default: false
       queue_v2:
-        description: Explicitly enable history.enableTimerQueueV2 and history.enableTransferQueueV2 for Rust History
-        type: boolean
-        default: false
+        description: "Rust History queue v2 flags: false = config as is (development.yaml sets v2 on), true = add enable if missing, off = force queue v1"
+        type: choice
+        options: ['false', 'true', 'off']
+        default: 'false'
       outbound:
         description: Rust service outbound transport
         type: choice

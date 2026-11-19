@@ -113,7 +113,14 @@ if args.es_url:
     dyn = dyn.replace('value: "db"', 'value: "es"')
 # development.yaml already sets system.minRetentionDays=0 and system.workflowDeletionJitterRange=1 (retention-0 archival scenario).
 (work / 'dynamic-config.yaml').write_text(dyn)
-(work / 'rust-dynamic-config.yaml').write_text(dyn + f'\nsystem.enableGRPCOutbound:\n  - value: {str(args.rust_outbound == "grpc").lower()}\nfrontend.sendRawWorkflowHistory:\n  - value: true\n' + (''.join(f'\n{k}:\n  - value: true\n' for k in ('history.enableTimerQueueV2', 'history.enableTransferQueueV2') if k + ':' not in dyn) if os.environ.get('CADENCE_GATE_QUEUE_V2') == 'true' else ''))
+rust_dyn = dyn
+if os.environ.get('CADENCE_GATE_QUEUE_V2') == 'off':
+    # Force queue v1 in Rust History (history.enable{Timer,Transfer}QueueV2 = false).
+    for k in ('history.enableTimerQueueV2', 'history.enableTransferQueueV2'):
+        rust_dyn, n = re.subn(rf'^{re.escape(k)}:\n- value: true$', f'{k}:\n- value: false', rust_dyn, flags=re.M)
+        if n == 0:
+            rust_dyn += f'\n{k}:\n  - value: false\n'
+(work / 'rust-dynamic-config.yaml').write_text(rust_dyn + f'\nsystem.enableGRPCOutbound:\n  - value: {str(args.rust_outbound == "grpc").lower()}\nfrontend.sendRawWorkflowHistory:\n  - value: true\n' + (''.join(f'\n{k}:\n  - value: true\n' for k in ('history.enableTimerQueueV2', 'history.enableTransferQueueV2') if k + ':' not in dyn) if os.environ.get('CADENCE_GATE_QUEUE_V2') == 'true' else ''))
 (work / 'config/base.yaml').write_text((root / 'go/config/base.yaml').read_text())
 seeds = ', '.join(f'"127.0.0.1:{ports[k]}"' for k in ['FRONTEND_PORT', 'HISTORY_PORT', 'WORKER_PORT', 'RUST_MATCHING_PORT'] + (['HISTORY2_PORT'] if args.two_history else []))
 text = (root / 'go/config/development.yaml').read_text()
