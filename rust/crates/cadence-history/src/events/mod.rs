@@ -30,6 +30,8 @@ impl<R:HistoryEventReader> EventCache<R>{pub fn new(reader:Arc<R>,max_count:usiz
  pub fn get_event(&self,shard_id:i32,domain_id:&str,workflow_id:&str,run_id:&str,first_event_id:i64,event_id:i64,branch_token:&[u8])->Result<Arc<HistoryEvent>,EventCacheError>{
  let started=Instant::now();self.observer.request("GetEvent");
  let result=(||{let key=EventKey{domain_id:domain_id.into(),workflow_id:workflow_id.into(),run_id:run_id.into(),event_id};if !self.disabled {if let Some(e)=self.cached(&key){return Ok(e)}}self.observer.miss();let event=match self.reader.read_event(shard_id,domain_id,first_event_id,event_id,branch_token){Ok(event)=>Arc::new(event),Err(error)=>{self.observer.failure(&error);return Err(error)}};self.put(key,event.clone());Ok(event)})();self.observer.latency("GetEvent",started.elapsed());result}
+ /// Cache-only lookup (no store read); `None` when disabled, missing or expired.
+ pub fn get_cached(&self,domain_id:&str,workflow_id:&str,run_id:&str,event_id:i64)->Option<Arc<HistoryEvent>>{if self.disabled{return None}self.cached(&EventKey{domain_id:domain_id.into(),workflow_id:workflow_id.into(),run_id:run_id.into(),event_id})}
  pub fn put_event(&self,domain_id:&str,workflow_id:&str,run_id:&str,event_id:i64,event:HistoryEvent){let started=Instant::now();self.observer.request("PutEvent");self.put(EventKey{domain_id:domain_id.into(),workflow_id:workflow_id.into(),run_id:run_id.into(),event_id},Arc::new(event));self.observer.latency("PutEvent",started.elapsed());}
  fn cached(&self,key:&EventKey)->Option<Arc<HistoryEvent>>{let mut c=self.state.lock().unwrap();if let Some(entry)=c.events.get(key){if self.ttl.is_zero() || entry.inserted.elapsed()<=self.ttl{let event=entry.event.clone();c.lru.retain(|k|k!=key);c.lru.push_back(key.clone());return Some(event)}}c.events.remove(key);c.lru.retain(|k|k!=key);None}
  fn put(&self,key:EventKey,event:Arc<HistoryEvent>){
@@ -46,6 +48,13 @@ if let Some(oldest)=c.lru.pop_front(){c.events.remove(&oldest);}else{break}}
  }
 
 }
+/// Reader for a cache that is only filled by explicit puts (Go shard events cache used by
+/// mutable state; misses are read by the caller through the history node store).
+pub struct NoStoreEventReader;
+impl HistoryEventReader for NoStoreEventReader{fn read_event(&self,_:i32,_:&str,_:i64,_:i64,_:&[u8])->Result<HistoryEvent,EventCacheError>{Err(EventCacheError("events cache has no store reader".into()))}}
+/// Go `events.Cache` owned by the shard (`shard.GetEventsCache()`).
+pub type ShardEventsCache=EventCache<NoStoreEventReader>;
+pub fn new_shard_events_cache(max_count:usize,ttl:Duration)->Arc<ShardEventsCache>{Arc::new(EventCache::new_with_ttl(Arc::new(NoStoreEventReader),max_count,ttl))}
 #[derive(Debug, Clone, Default, Hash, PartialEq, Eq)]pub struct WorkflowIdentifier{pub domain_id:String,pub workflow_id:String,pub run_id:String}
 #[derive(Debug, Clone, Default)]pub struct Notification{pub id:WorkflowIdentifier,pub last_first_event_id:i64,pub next_event_id:i64,pub previous_started_event_id:i64,pub timestamp_unix_millis:i64,pub workflow_state:i32,pub workflow_close_state:i32,pub version_histories:Option<VersionHistories>}
 

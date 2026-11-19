@@ -55,6 +55,13 @@ fn is_bufferable(ty: EventType) -> bool {
     )
 }
 
+/// Events Go writes to the shard events cache when they are created (`writeEventToCache`
+/// for start / close events, `PutEvent` for activity scheduled and child initiated).
+fn is_cached_event(ty: EventType) -> bool {
+    matches!(ty, EventType::WorkflowExecutionStarted | EventType::ActivityTaskScheduled | EventType::StartChildWorkflowExecutionInitiated)
+        || is_close_event(Some(ty))
+}
+
 fn is_close_event(ty: Option<EventType>) -> bool {
     matches!(
         ty,
@@ -70,6 +77,13 @@ fn is_close_event(ty: Option<EventType>) -> bool {
 }
 
 impl Inner {
+    /// Go `mutableStateBuilder.writeEventToCache`.
+    pub(super) fn write_event_to_cache(&self, ev: &HistoryEvent) {
+        if let Some(cache) = &self.events_cache {
+            cache.put_event(&self.exec.domain_id, &self.exec.workflow_id, &self.exec.run_id, ev.event_id, ev.clone());
+        }
+    }
+
     /// Go `checkAndClearTimerFiredEvent`: removes and returns a TimerFired event for `timer_id`
     /// from the persisted buffered events, the update-buffered events, then the new history.
     pub(super) fn check_and_clear_timer_fired_event(&mut self, timer_id: &str) -> Option<HistoryEvent> {
@@ -111,6 +125,9 @@ impl Inner {
             self.next_event_id += 1;
         }
         fill(&mut ev);
+        if !buffer && is_cached_event(ty) {
+            self.write_event_to_cache(&ev);
+        }
         self.hist.push(ev.clone());
         self.dirty = true;
         ev
@@ -749,11 +766,23 @@ impl EngineMutableState {
 
     /// Go `GetStartEvent`.
     pub(super) async fn ev_start_event(&self) -> HResult<HistoryEvent> {
+        if let Some(e) = self.cached_event(1) {
+            return Ok(e);
+        }
         let events = self.read_events(1, 2).await?;
-        events
+        let e = events
             .into_iter()
             .find(|e| e.event_id == 1)
-            .ok_or_else(|| HistoryError::internal("workflow start event is missing"))
+            .ok_or_else(|| HistoryError::internal("workflow start event is missing"))?;
+        self.inner.lock().unwrap().write_event_to_cache(&e);
+        Ok(e)
+    }
+
+    /// Go `eventsCache.GetEvent` hit path (key: domain, workflow, run, event id).
+    pub(super) fn cached_event(&self, event_id: i64) -> Option<HistoryEvent> {
+        let g = self.inner.lock().unwrap();
+        let cache = g.events_cache.as_ref()?;
+        cache.get_cached(&g.exec.domain_id, &g.exec.workflow_id, &g.exec.run_id, event_id).map(|e| (*e).clone())
     }
 
     /// Go `GetCompletionEvent`: the last event of the closed workflow.
@@ -765,11 +794,16 @@ impl EngineMutableState {
             }
             (g.pc_exec.completion_event_batch_id, g.next_event_id)
         };
+        if let Some(e) = self.cached_event(next - 1) {
+            return Ok(e);
+        }
         let events = self.read_events(batch, next).await?;
-        events
+        let e = events
             .into_iter()
             .find(|e| e.event_id == next - 1)
-            .ok_or_else(|| HistoryError::internal("workflow completion event is missing"))
+            .ok_or_else(|| HistoryError::internal("workflow completion event is missing"))?;
+        self.inner.lock().unwrap().write_event_to_cache(&e);
+        Ok(e)
     }
 
     /// Go `GetActivityScheduledEvent`.
@@ -781,11 +815,16 @@ impl EngineMutableState {
                 None => return Err(HistoryError::internal(format!("missing activity info for schedule id {schedule_id}"))),
             }
         };
+        if let Some(e) = self.cached_event(schedule_id) {
+            return Ok(e);
+        }
         let events = self.read_events(batch, schedule_id + 1).await?;
-        events
+        let e = events
             .into_iter()
             .find(|e| e.event_id == schedule_id)
-            .ok_or_else(|| HistoryError::internal(format!("activity scheduled event {schedule_id} not found")))
+            .ok_or_else(|| HistoryError::internal(format!("activity scheduled event {schedule_id} not found")))?;
+        self.inner.lock().unwrap().write_event_to_cache(&e);
+        Ok(e)
     }
 
     /// Go `execution.GetResurrectedActivities`.
@@ -844,5 +883,76 @@ mod buffer_tests {
         for ty in [EventType::TimerStarted, EventType::DecisionTaskCompleted, EventType::WorkflowExecutionCompleted] {
             assert!(!is_bufferable(ty), "{ty:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod events_cache_tests {
+    use super::*;
+    use crate::engine::deps::{DomainCacheEntry, DomainInfo};
+    use crate::wiring::assembly::engine_state::StateParams;
+    use std::sync::Arc;
+
+    fn state(cache: Option<Arc<crate::events::ShardEventsCache>>) -> EngineMutableState {
+        let domain = DomainCacheEntry {
+            info: DomainInfo { id: "domain-id".into(), name: "test-domain".into(), status: 0 },
+            ..Default::default()
+        };
+        let mut snapshot = pc::WorkflowSnapshot::default();
+        snapshot.execution_info.domain_id = "domain-id".into();
+        snapshot.execution_info.workflow_id = "wf".into();
+        snapshot.execution_info.run_id = "run".into();
+        snapshot.execution_info.next_event_id = 5;
+        snapshot.execution_info.decision_schedule_id = crate::engine::deps::EMPTY_EVENT_ID;
+        snapshot.execution_info.decision_started_id = crate::engine::deps::EMPTY_EVENT_ID;
+        EngineMutableState::from_snapshot(snapshot, domain, 0, Arc::new(|| 1_700_000_000_000_000_000))
+            .unwrap()
+            .with_params(StateParams { events_cache: cache, ..StateParams::default() })
+    }
+
+    #[test]
+    fn go_cached_event_types() {
+        for ty in [
+            EventType::WorkflowExecutionStarted,
+            EventType::WorkflowExecutionCompleted,
+            EventType::WorkflowExecutionFailed,
+            EventType::WorkflowExecutionTimedOut,
+            EventType::WorkflowExecutionTerminated,
+            EventType::WorkflowExecutionContinuedAsNew,
+            EventType::WorkflowExecutionCanceled,
+            EventType::ActivityTaskScheduled,
+            EventType::StartChildWorkflowExecutionInitiated,
+        ] {
+            assert!(is_cached_event(ty), "{ty:?}");
+        }
+        for ty in [EventType::DecisionTaskCompleted, EventType::TimerStarted, EventType::ActivityTaskCompleted] {
+            assert!(!is_cached_event(ty), "{ty:?}");
+        }
+    }
+
+    #[test]
+    fn created_events_are_written_to_shard_cache() {
+        let cache = crate::events::new_shard_events_cache(512, std::time::Duration::from_secs(3600));
+        let s = state(Some(cache.clone()));
+        {
+            let mut g = s.inner.lock().unwrap();
+            g.push_event(EventType::ActivityTaskScheduled, 1, |_| {});
+            g.push_event(EventType::TimerStarted, 1, |_| {});
+            g.push_event(EventType::WorkflowExecutionCompleted, 1, |_| {});
+        }
+        assert_eq!(cache.get_cached("domain-id", "wf", "run", 5).unwrap().event_type, Some(EventType::ActivityTaskScheduled));
+        assert!(cache.get_cached("domain-id", "wf", "run", 6).is_none());
+        assert_eq!(s.cached_event(7).unwrap().event_type, Some(EventType::WorkflowExecutionCompleted));
+        assert!(cache.get_cached("domain-id", "wf", "other-run", 5).is_none());
+    }
+
+    #[tokio::test]
+    async fn start_event_served_from_cache_without_history_store() {
+        let cache = crate::events::new_shard_events_cache(512, std::time::Duration::from_secs(3600));
+        let s = state(Some(cache.clone()));
+        cache.put_event("domain-id", "wf", "run", 1, HistoryEvent { event_id: 1, event_type: Some(EventType::WorkflowExecutionStarted), ..Default::default() });
+        // No history node store is configured: a store read would fail.
+        assert_eq!(s.ev_start_event().await.unwrap().event_id, 1);
+        assert!(state(None).ev_start_event().await.is_err());
     }
 }
