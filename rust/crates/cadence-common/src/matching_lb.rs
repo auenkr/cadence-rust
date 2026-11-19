@@ -94,27 +94,61 @@ fn key(req: &LbRequest<'_>, task_type: i32) -> Key {
     (req.domain_id.to_owned(), req.task_list.to_owned(), task_type)
 }
 
-/// Bounded map standing in for Go's LRU `cache.Cache` (evicts arbitrarily when full).
-struct BoundedMap<V>(Mutex<HashMap<Key, V>>);
+/// LRU map mirroring Go's `cache.Cache` (`MaxCount: 3000`): `get` refreshes
+/// recency and inserting into a full map evicts the least recently used key.
+struct BoundedMap<V>(Mutex<Lru<V>>);
+
+struct Lru<V> {
+    cap: usize,
+    tick: u64,
+    entries: HashMap<Key, (V, u64)>,
+    order: BTreeMap<u64, Key>,
+}
+
+impl<V: Clone> Lru<V> {
+    fn touch(&mut self, k: &Key) -> Option<V> {
+        self.tick += 1;
+        let tick = self.tick;
+        let (v, t) = self.entries.get_mut(k)?;
+        self.order.remove(t);
+        *t = tick;
+        self.order.insert(tick, k.clone());
+        Some(v.clone())
+    }
+}
 
 impl<V: Clone> BoundedMap<V> {
     fn new() -> Self {
-        Self(Mutex::new(HashMap::new()))
+        Self::with_capacity(CACHE_MAX)
+    }
+    fn with_capacity(cap: usize) -> Self {
+        Self(Mutex::new(Lru { cap, tick: 0, entries: HashMap::new(), order: BTreeMap::new() }))
     }
     fn get(&self, k: &Key) -> Option<V> {
-        self.0.lock().unwrap().get(k).cloned()
+        self.0.lock().unwrap().touch(k)
     }
     fn get_or_insert(&self, k: Key, v: impl FnOnce() -> V) -> V {
         let mut m = self.0.lock().unwrap();
-        if !m.contains_key(&k) && m.len() >= CACHE_MAX {
-            if let Some(evict) = m.keys().next().cloned() {
-                m.remove(&evict);
+        if let Some(existing) = m.touch(&k) {
+            return existing;
+        }
+        if m.entries.len() >= m.cap {
+            if let Some((_, evict)) = m.order.pop_first() {
+                m.entries.remove(&evict);
             }
         }
-        m.entry(k).or_insert_with(v).clone()
+        m.tick += 1;
+        let tick = m.tick;
+        let v = v();
+        m.order.insert(tick, k.clone());
+        m.entries.insert(k, (v.clone(), tick));
+        v
     }
     fn remove(&self, k: &Key) {
-        self.0.lock().unwrap().remove(k);
+        let mut m = self.0.lock().unwrap();
+        if let Some((_, t)) = m.entries.remove(k) {
+            m.order.remove(&t);
+        }
     }
 }
 
@@ -642,5 +676,22 @@ mod tests {
         assert_eq!(p.number_of_read_partitions("id", "tl", true, 0), 4);
         p.invalidate("id", "tl", true, 0);
         assert_eq!(p.number_of_read_partitions("id", "tl", true, 0), 1);
+    }
+
+    #[test]
+    fn bounded_map_evicts_least_recently_used() {
+        let k = |n: &str| (String::from("d"), n.to_owned(), 0);
+        let m = BoundedMap::with_capacity(2);
+        m.get_or_insert(k("a"), || 1);
+        m.get_or_insert(k("b"), || 2);
+        assert_eq!(m.get(&k("a")), Some(1)); // refresh a
+        m.get_or_insert(k("c"), || 3); // evicts b
+        assert_eq!(m.get(&k("b")), None);
+        assert_eq!(m.get(&k("a")), Some(1));
+        assert_eq!(m.get(&k("c")), Some(3));
+        assert_eq!(m.get_or_insert(k("a"), || 9), 1);
+        m.remove(&k("a"));
+        m.get_or_insert(k("d"), || 4);
+        assert_eq!(m.get(&k("c")), Some(3));
     }
 }

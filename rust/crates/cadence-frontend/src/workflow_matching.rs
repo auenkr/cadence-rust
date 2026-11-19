@@ -542,21 +542,35 @@ impl ProductionBackend {
         (partition != task_list.name).then_some(partition)
     }
 
-    /// Remember (Some) or forget (None) the partition a poller is waiting on.
-    fn track_poll(&self, poller: &str, partition: Option<&str>) {
-        if poller.is_empty() {
-            return;
-        }
-        let Ok(mut polls) = self.poll_partitions.lock() else {
-            return;
-        };
-        match partition {
-            Some(p) => {
-                polls.insert(poller.to_owned(), p.to_owned());
-            }
-            None => {
-                polls.remove(poller);
-            }
+    /// Remember the partition a poller is waiting on until the returned guard
+    /// drops (poll finished, failed or its future was dropped).
+    fn track_poll(&self, poller: &str, partition: Option<&str>) -> Option<PollGuard> {
+        track_poll(&self.poll_partitions, poller, partition?)
+    }
+
+    /// Go matching client poll feedback (client.go PollForDecisionTask /
+    /// PollForActivityTask): `provider.UpdatePartitionConfig` on the root task
+    /// list and `loadBalancer.UpdateWeight` for the polled partition.
+    fn poll_feedback(
+        &self,
+        request: &serde_json::Value,
+        root: Option<&ty::TaskList>,
+        polled: &str,
+        task_type: i32,
+        config: Option<cadence_common::matching_lb::PartitionConfig>,
+        hints: Option<cadence_common::matching_lb::LoadBalancerHints>,
+    ) {
+        if let (Some(lb), Some(root)) = (self.matching_lb.as_ref(), root) {
+            poll_feedback(
+                lb,
+                &str_field(request, "domainUUID"),
+                &str_field(request, "forwardedFrom"),
+                root,
+                polled,
+                task_type,
+                config,
+                hints,
+            );
         }
     }
 
@@ -574,7 +588,8 @@ impl ProductionBackend {
             .poll_partitions
             .lock()
             .ok()
-            .and_then(|mut polls| polls.remove(&poller_id));
+            .and_then(|mut polls| polls.remove(&poller_id))
+            .map(|(_, partition)| partition);
         if let (Some(partition), Some(task_list)) = (polled, task_list.as_mut()) {
             task_list.name = partition;
         }
@@ -611,6 +626,7 @@ impl ProductionBackend {
         request: &serde_json::Value,
     ) -> Result<serde_json::Value, CadenceError> {
         let mut poll: tk::PollForDecisionTaskRequest = typed(request, "pollRequest")?;
+        let root = poll.task_list.clone();
         let partition = self.pick_read_partition(
             request,
             poll.task_list.as_ref(),
@@ -621,17 +637,23 @@ impl ProductionBackend {
         }
         let envelope = self.poll_envelope(request, "pollRequest", poll.to_thrift())?;
         let poller = str_field(request, "pollerID");
-        self.track_poll(&poller, partition.as_deref());
+        let guard = self.track_poll(&poller, partition.as_deref());
+        let polled = poll.task_list.as_ref().map_or("", |t| t.name.as_str());
         let reply = self
-            .matching_for(
-                poll.task_list.as_ref().map_or("", |t| t.name.as_str()),
-                "PollForDecisionTask",
-                envelope,
-                POLL_TIMEOUT,
-            )
+            .matching_for(polled, "PollForDecisionTask", envelope, POLL_TIMEOUT)
             .await;
-        self.track_poll(&poller, None);
+        drop(guard);
         let reply = reply?;
+        // Matching's Thrift poll responses carry no partitionConfig /
+        // loadBalancerHints (same as Go over TChannel), so both are nil here.
+        self.poll_feedback(
+            request,
+            root.as_ref(),
+            polled,
+            cadence_common::matching_lb::TASK_LIST_TYPE_DECISION,
+            None,
+            None,
+        );
         let Some(task) = DecisionTask::from_matching(&reply)? else {
             // Go returns the AutoConfigHint even for an empty poll.
             let hint = reply
@@ -654,6 +676,7 @@ impl ProductionBackend {
         request: &serde_json::Value,
     ) -> Result<serde_json::Value, CadenceError> {
         let mut poll: tk::PollForActivityTaskRequest = typed(request, "pollRequest")?;
+        let root = poll.task_list.clone();
         let partition = self.pick_read_partition(
             request,
             poll.task_list.as_ref(),
@@ -664,17 +687,23 @@ impl ProductionBackend {
         }
         let envelope = self.poll_envelope(request, "pollRequest", poll.to_thrift())?;
         let poller = str_field(request, "pollerID");
-        self.track_poll(&poller, partition.as_deref());
+        let guard = self.track_poll(&poller, partition.as_deref());
+        let polled = poll.task_list.as_ref().map_or("", |t| t.name.as_str());
         let reply = self
-            .matching_for(
-                poll.task_list.as_ref().map_or("", |t| t.name.as_str()),
-                "PollForActivityTask",
-                envelope,
-                POLL_TIMEOUT,
-            )
+            .matching_for(polled, "PollForActivityTask", envelope, POLL_TIMEOUT)
             .await;
-        self.track_poll(&poller, None);
+        drop(guard);
         let reply = reply?;
+        // Matching's Thrift poll responses carry no partitionConfig /
+        // loadBalancerHints (same as Go over TChannel), so both are nil here.
+        self.poll_feedback(
+            request,
+            root.as_ref(),
+            polled,
+            cadence_common::matching_lb::TASK_LIST_TYPE_ACTIVITY,
+            None,
+            None,
+        );
         let response = tk::PollForActivityTaskResponse::from_thrift(&reply)
             .map_err(|e| thrift_err("Matching PollForActivityTask response", e))?;
         to_json(&response)
@@ -1127,5 +1156,172 @@ mod decision_time_precision_tests {
         let task = DecisionTask::from_started(&history, exec, vec![]).unwrap();
         assert_eq!(task.scheduled_timestamp, Some(scheduled));
         assert_eq!(task.started_timestamp, Some(started));
+    }
+}
+
+/// pollerID -> (poll generation, partition polled), so a cancellation reaches
+/// the same partition (Go rewrites the request task list to the partition).
+pub(crate) type PollPartitions = Arc<std::sync::Mutex<HashMap<String, (u64, String)>>>;
+
+static POLL_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Removes its own poll entry on drop; a newer overlapping poll for the same
+/// poller (other generation) is left untouched.
+pub(crate) struct PollGuard {
+    polls: PollPartitions,
+    poller: String,
+    generation: u64,
+}
+
+impl Drop for PollGuard {
+    fn drop(&mut self) {
+        if let Ok(mut polls) = self.polls.lock() {
+            if polls
+                .get(&self.poller)
+                .is_some_and(|(g, _)| *g == self.generation)
+            {
+                polls.remove(&self.poller);
+            }
+        }
+    }
+}
+
+pub(crate) fn track_poll(
+    polls: &PollPartitions,
+    poller: &str,
+    partition: &str,
+) -> Option<PollGuard> {
+    if poller.is_empty() {
+        return None;
+    }
+    let generation = POLL_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    polls
+        .lock()
+        .ok()?
+        .insert(poller.to_owned(), (generation, partition.to_owned()));
+    Some(PollGuard {
+        polls: polls.clone(),
+        poller: poller.to_owned(),
+        generation,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn poll_feedback(
+    lb: &cadence_common::matching_lb::MatchingLoadBalancer,
+    domain_id: &str,
+    forwarded_from: &str,
+    root: &ty::TaskList,
+    polled: &str,
+    task_type: i32,
+    config: Option<cadence_common::matching_lb::PartitionConfig>,
+    hints: Option<cadence_common::matching_lb::LoadBalancerHints>,
+) {
+    let normal = root.kind_or_default() == cadence_api::enums::TaskListKind::Normal;
+    lb.provider()
+        .update_partition_config(domain_id, &root.name, normal, task_type, config);
+    lb.update_weight(
+        task_type,
+        &cadence_common::matching_lb::LbRequest {
+            domain_id,
+            task_list: &root.name,
+            kind_normal: normal,
+            forwarded_from,
+            partition_config: None,
+        },
+        polled,
+        hints,
+    );
+}
+
+#[cfg(test)]
+mod poll_tracking_tests {
+    use super::*;
+    use cadence_common::matching_lb::{LbDynamicConfig, MatchingLoadBalancer, PartitionConfig};
+    use std::future::Future;
+
+    #[test]
+    fn overlapping_polls_keep_newest_entry() {
+        let polls = PollPartitions::default();
+        let first = track_poll(&polls, "p", "/__cadence_sys/tl/1").unwrap();
+        let second = track_poll(&polls, "p", "/__cadence_sys/tl/2").unwrap();
+        drop(first);
+        assert_eq!(polls.lock().unwrap()["p"].1, "/__cadence_sys/tl/2");
+        drop(second);
+        assert!(polls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn dropped_poll_future_releases_entry() {
+        let polls = PollPartitions::default();
+        let fut = {
+            let polls = polls.clone();
+            async move {
+                let _guard = track_poll(&polls, "p", "/__cadence_sys/tl/3");
+                std::future::pending::<()>().await;
+            }
+        };
+        let mut fut = Box::pin(fut);
+        let waker = std::task::Waker::noop();
+        let _ = fut
+            .as_mut()
+            .poll(&mut std::task::Context::from_waker(waker));
+        assert_eq!(polls.lock().unwrap().len(), 1);
+        drop(fut);
+        assert!(polls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn empty_poller_is_not_tracked() {
+        let polls = PollPartitions::default();
+        assert!(track_poll(&polls, "", "x").is_none());
+        assert!(polls.lock().unwrap().is_empty());
+    }
+
+    struct Dc;
+    impl LbDynamicConfig for Dc {
+        fn domain_name(&self, _: &str) -> Option<String> {
+            Some("d".into())
+        }
+        fn num_read_partitions(&self, _: &str, _: &str, _: i32) -> i64 {
+            1
+        }
+        fn num_write_partitions(&self, _: &str, _: &str, _: i32) -> i64 {
+            1
+        }
+        fn read_from_cache(&self, _: &str, _: &str, _: i32) -> bool {
+            true
+        }
+        fn strategy(&self, _: &str, _: &str, _: i32) -> String {
+            "weighted".into()
+        }
+        fn isolation_assignment_enabled(&self, _: &str) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    fn poll_feedback_updates_root_partition_config() {
+        let lb = MatchingLoadBalancer::new(Arc::new(Dc));
+        let root = ty::TaskList {
+            name: "tl".into(),
+            ..Default::default()
+        };
+        let config = PartitionConfig::from_parts(4, 3, HashMap::new(), 2, HashMap::new());
+        poll_feedback(
+            &lb,
+            "id",
+            "",
+            &root,
+            "/__cadence_sys/tl/2",
+            0,
+            Some(config.clone()),
+            None,
+        );
+        assert_eq!(lb.provider().partition_config("id", "tl", true, 0), config);
+        assert_eq!(
+            lb.provider().number_of_read_partitions("id", "tl", true, 0),
+            3
+        );
     }
 }
