@@ -440,7 +440,8 @@ impl EngineWorkflowResetter {
                 .as_any()
                 .and_then(|a| a.downcast_ref::<EngineExecutionContext>())
                 .ok_or_else(|| HistoryError::internal("workflow resetter: current context is not an engine context"))?;
-            context.update_with_new_as_active(prepared.now, prepared.snapshot, &gate).await
+            let (transfer, timer) = hooks.take_pending_tasks();
+            context.update_with_new_as_active(prepared.now, prepared.snapshot, (&transfer, &timer), &gate).await
         } else {
             let create = pc::CreateWorkflowExecutionRequest {
                 shard_id: shard.shard_id(),

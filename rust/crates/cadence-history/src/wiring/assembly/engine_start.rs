@@ -601,8 +601,9 @@ impl WorkflowStartHost for EngineStartHost {
         };
         match self.core.executions.create_workflow_execution(request).await {
             Ok(_) => {
-                shard.update_max_read_level(max_read_level);
+                // Go notifyingExecutionManager notifies (cache inject) before updateMaxReadLevelLocked.
                 self.core.notify_tasks(&notify_transfer, &notify_timer);
+                shard.update_max_read_level(max_read_level);
                 new_run.state.finish_transaction(size, last);
                 ctx.set_state(new_run.state.clone());
                 Ok(())
@@ -634,12 +635,11 @@ impl WorkflowStartHost for EngineStartHost {
         let (size, last, _blob) = append_new_branch(&self.core, &mut txn, &execution_info_string(new_context)).await?;
         let gate = self.core.shard.lock_task_writes().await;
         let (snap, max_read_level, notify_transfer, notify_timer) = snapshot_of(&self.core, txn)?;
-        // Go taskNotifier also notifies the new workflow snapshot's tasks, so the cached
-        // queue reader injects them (failed writes are handled inside persist).
-        running_ctx.update_with_new_as_active(now, snap, &gate).await?;
+        // Go taskNotifier also notifies the new workflow snapshot's tasks (inside persist,
+        // before the read level moves) so the cached queue reader injects them.
+        running_ctx.update_with_new_as_active(now, snap, (&notify_transfer, &notify_timer), &gate).await?;
         self.core.shard.update_max_read_level(max_read_level);
         drop(gate);
-        self.core.notify_tasks(&notify_transfer, &notify_timer);
         state.finish_transaction(size, last);
         new_ctx.set_state(state);
         Ok(())
