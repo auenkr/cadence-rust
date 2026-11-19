@@ -80,3 +80,13 @@ Validation of the fix branch:
   history logs show 29x "Fail to process task error=context deadline exceeded". Some appear before faults.
 Status: OPEN. A second queue-v2-specific issue remains. Next steps: compare restart gate with
 history.enableTransferQueueV2/enableTimerQueueV2=false on master (if green, v2 path), then per category (transfer only / timer only).
+
+## fix-v2-restart bisect (2026-11-19/20)
+Restart gate MySQL 600s, branch fix-v2-restart:
+- v1 (both v2 off): PASS 44569724164, 44569731235
+- transfer-only v2: FAIL 44569673637, 44569679791; timer-only v2: FAIL 44569687064, 44569693894
+- v2 cached reader disabled/shadow: FAIL 44576178696, 44576186728, 44576194660 (cached reader not the cause)
+- Fix efe0ad7ce (scheduled max read level held while a task write is in flight; Go shard-lock parity):
+  rust-ci cadence-history 44582621160 success; timer-only v2 PASS 44582627935, 44582633770;
+  default (both v2) FAIL 44582640507, 44582648353; transfer-only FAIL 44582654324.
+- Open: transfer v2 tasks delayed 5-10s (decision scheduled->started 9.3s). Read-level/notify ordering verified matches Go.
