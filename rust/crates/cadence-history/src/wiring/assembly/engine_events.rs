@@ -889,6 +889,7 @@ mod buffer_tests {
 #[cfg(test)]
 mod events_cache_tests {
     use super::*;
+    use cadence_persistence::history_contract as pc;
     use crate::engine::deps::{DomainCacheEntry, DomainInfo};
     use crate::wiring::assembly::engine_state::StateParams;
     use std::sync::Arc;
