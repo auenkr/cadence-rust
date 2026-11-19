@@ -29,6 +29,6 @@ Suggested split for workers: (A) a full-task notify payload in the engine (this 
 ## Validation (this branch)
 | check | run | result |
 |---|---|---|
-| rust-ci cadence-history | see below | pending |
+| rust-ci cadence-history (head 17ba6ee8f) | https://github.com/auenkr/cadence-rust/actions/runs/44493897357 | success (clippy + tests) |
 
 No gates or benchmark were run: queue behaviour is unchanged (test-only diff).
