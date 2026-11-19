@@ -243,12 +243,17 @@ impl ShardRegistry {
                 tracing::info!(shard_id = closed, reason = "shardClosedCallback", "Shard controller state changed: stopping shard");
                 // Go `removeEngineForShard(shardID, shardItem)` only removes the item that owns the closing
                 // context: a late callback of a replaced shard must not tear down its healthy successor.
-                {
+                // Keep the removed cell alive until `on_closed` has upgraded the entry: dropping the
+                // map's (only) strong reference first left the engine unstopped, so its queue v2
+                // loops kept running on the closed shard.
+                let _removed = {
                     let mut map = on_close.lock().unwrap();
                     if remove_matches(map.get(&(closed as u32)), &my_cell) {
-                        map.remove(&(closed as u32));
+                        map.remove(&(closed as u32))
+                    } else {
+                        None
                     }
-                }
+                };
                 // Go stops the closing item's engine even when the registry no longer holds it; a
                 // close during initialization stops the engine once creation publishes it.
                 if let Some(engine) = lifecycle_cb.on_closed() {
