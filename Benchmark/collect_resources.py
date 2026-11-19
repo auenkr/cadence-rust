@@ -175,7 +175,7 @@ SQL_LOG_SECS = float(os.environ.get("SQL_LOG_SECS") or 0)
 
 def _mysql(container, sql, timeout=20):
     return subprocess.check_output(['docker','exec',container,'mysql','-proot','-N','-B','-e',sql],
-                                   text=True, stderr=subprocess.DEVNULL, timeout=timeout)
+                                   stderr=subprocess.DEVNULL, timeout=timeout).decode('utf-8', 'replace')
 
 
 def sql_log_start(container):
@@ -199,7 +199,7 @@ def _normalize_sql(text):
 def sql_log_stop(container, seconds):
     try:
         _mysql(container, "SET GLOBAL general_log=OFF;")
-        raw = _mysql(container, "SELECT command_type, REPLACE(REPLACE(CONVERT(LEFT(argument,600) USING latin1),'\\t',' '),'\\n',' ') "
+        raw = _mysql(container, "SELECT command_type, REPLACE(REPLACE(CONVERT(LEFT(argument,600) USING binary),'\\t',' '),'\\n',' ') "
                      "FROM mysql.general_log WHERE command_type IN ('Execute','Query')", timeout=120)
     except subprocess.SubprocessError as error:
         return {"error": f"{type(error).__name__}: {error}"[:300]}
