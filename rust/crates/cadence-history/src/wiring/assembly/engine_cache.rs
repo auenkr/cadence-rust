@@ -403,6 +403,7 @@ impl EngineExecutionContext {
         // History batch.
         let mut history_size = state.history_size();
         let mut last_event_task_id = None;
+        let diag_t0 = std::time::Instant::now();
         if !txn.events.is_empty() {
             let ids = shard.generate_task_ids(txn.events.len()).map_err(shard_err(shard.shard_id()))?;
             for (ev, id) in txn.events.iter_mut().zip(ids.iter()) {
@@ -427,10 +428,13 @@ impl EngineExecutionContext {
 
         // Task ids. The gate stays held until the write finished (see ShardContext::lock_task_writes).
         // When the caller already holds it (task ids allocated for a new run), do not lock again.
+        let diag_append_ms = diag_t0.elapsed().as_millis() as u64;
+        let diag_t1 = std::time::Instant::now();
         let _task_write_gate = match held_gate {
             Some(_) => None,
             None => Some(shard.lock_task_writes().await),
         };
+        let diag_gate_ms = diag_t1.elapsed().as_millis() as u64;
         let mut max_read_level = 0i64;
         let mut transfer_slots: Vec<(i64, i64)> = txn.transfer.iter().map(|_| (0, 0)).collect();
         shard.allocate_transfer_ids(&mut transfer_slots, &mut max_read_level).map_err(shard_err(shard.shard_id()))?;
@@ -495,7 +499,13 @@ impl EngineExecutionContext {
             workflow_request_mode: pc::WorkflowRequestMode::New,
             current_timestamp_unix_nanos: now,
         };
-        match core.executions.update_workflow_execution(request).await {
+        let diag_t2 = std::time::Instant::now();
+        let diag_res = core.executions.update_workflow_execution(request).await;
+        let diag_update_ms = diag_t2.elapsed().as_millis() as u64;
+        if diag_append_ms + diag_gate_ms + diag_update_ms >= 30 {
+            tracing::warn!(shard = shard.shard_id(), append_ms = diag_append_ms, gate_ms = diag_gate_ms, update_ms = diag_update_ms, "DIAG slow persist");
+        }
+        match diag_res {
             Ok(()) => {
                 shard.update_max_read_level(max_read_level);
                 core.notify_tasks(&txn.transfer, &txn.timer);
