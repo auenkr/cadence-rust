@@ -18,7 +18,7 @@ on:
       queue_v2:
         description: Rust History queue v2 (default = config as is; off; transfer = only transfer v2; timer = only timer v2)
         type: choice
-        options: [default, off, transfer, timer]
+        options: [default, v1, transfer, timer]
         default: default
 
 concurrency:

@@ -92,7 +92,7 @@ if args.es_url:
 (work / 'dynamic-config.yaml').write_text(dyn)
 rust_dyn = dyn
 _q2 = os.environ.get('CADENCE_GATE_QUEUE_V2', 'default')
-_q2_off = {'off': ('history.enableTimerQueueV2', 'history.enableTransferQueueV2'),
+_q2_off = {'v1': ('history.enableTimerQueueV2', 'history.enableTransferQueueV2'),
            'transfer': ('history.enableTimerQueueV2',), 'timer': ('history.enableTransferQueueV2',)}.get(_q2, ())
 for k in ('history.enableTimerQueueV2', 'history.enableTransferQueueV2'):
     v = 'false' if k in _q2_off else 'true'
