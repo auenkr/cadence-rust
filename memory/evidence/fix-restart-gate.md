@@ -93,3 +93,31 @@ Restart gate MySQL 600s, branch fix-v2-restart:
 - Transfer-only 44582654324 vs v1 pass 44569724164: steady-state identical (e2e p50 4065 vs 4063ms, p99 35.6s vs 34.5s).
   v2 adds 10 failures, all inside fault windows (0 failed in first ~400): 6x result "TChannel error 1: Request timed out"/deadline,
   4x query "must handle at least one decision task". The earlier "9s steady-state delay" was fault-window recovery, not steady state.
+
+## 2026-11-19/20: transfer v2 lost decision tasks, root cause and fix (head dca628c49)
+
+Comparison runs before the fix (bb9eb2a85):
+- restart gate, both v2, 600s: 44598123434 failed=9, 44598130499 failed=16. Failures were stuck runs (DecisionTaskScheduled only) and the result/query errors that follow from them.
+- restart gate, queue_v2=v1, 1500s: 44598137891 success.
+- restart gate, both v2, cached_reader=disabled, 600s: 44605815266 success. This narrows the fault to the v2 cached immediate queue reader.
+
+Root cause: the v2 cached immediate reader serves `[ack, maxReadLevel)` from its in-memory cache. Go injects written tasks into the cache through `notifyingExecutionManager` inside the shard lock, before `updateMaxReadLevelLocked`. Its reader then takes the shard RLock to read the level. Rust differed in two ways:
+1. It published the immediate max read level before it notified (injected), sometimes after dropping the write gate. A concurrent v2 read could cover a task ID not yet in the cache and skip that task for good.
+2. `update_workflow_execution_with_new_as_active` (engine_start) never notified the new run's tasks at all.
+
+Fixes on fix-v2-restart:
+- fa0a634c5: notify the new run's tasks after the update-with-new write.
+  - Alone, this made the gate worse: 44606414877 failed=39, from the ordering race in (1).
+- 97f7688af: notify (inject) before `update_max_read_level` on every write path.
+  - The new-run tasks are notified inside persist together with the mutation; the resetter uses `take_pending_tasks`.
+  - Cassandra mixed gate 44614353596 then failed once, with "Context timeout is too short" on RespondDecisionTaskFailed: a lost queue wake delayed the decision task.
+- dca628c49: the v2 immediate `process_new_tasks` awaits in-flight task writes (`lock_task_writes`) before reading the level. This matches Go's RLock in `getImmediateTaskMaxReadLevel`, so a wake from notify always sees the new level.
+
+Validation at dca628c49 (all success):
+- rust-ci cadence-history: https://github.com/auenkr/cadence-rust/actions/runs/44617689979
+- History mixed gate MySQL: https://github.com/auenkr/cadence-rust/actions/runs/44617697434
+- History mixed gate Cassandra: https://github.com/auenkr/cadence-rust/actions/runs/44617704654
+- Restart gate, both v2, 1500s, run A: https://github.com/auenkr/cadence-rust/actions/runs/44617711152
+- Restart gate, both v2, 1500s, run B: https://github.com/auenkr/cadence-rust/actions/runs/44617717446
+
+There is no Go-baseline restart workflow, so no Go flake rate was measured.
