@@ -28,6 +28,7 @@ memory notes calling this a "Rust deferred soak issue" were wrong for the
 see memory/frontend-soakfix-20261113.md).
 
 ## Confirmation runs (branch fe-soak-query-init, head = origin/master 56b58c6c1 + this note)
-- rust-ci cadence-frontend: https://github.com/auenkr/cadence-rust/actions/runs/44426988643 — RESULT_CI
-- frontend-soak default: https://github.com/auenkr/cadence-rust/actions/runs/44426979723 — RESULT_SOAK
-- frontend-mixed-gate default: https://github.com/auenkr/cadence-rust/actions/runs/44426984365 — RESULT_GATE
+- rust-ci cadence-frontend: https://github.com/auenkr/cadence-rust/actions/runs/44426988643 — success
+- frontend-soak default: https://github.com/auenkr/cadence-rust/actions/runs/44426979723 — success but **`RUST OVERALL: FAIL`** — sole failing criterion start call p99 rust=123ms vs go=35ms (known tail-latency issue, memory/fe-soak-fix-deferred, unrelated to query). Query criteria all PASS: failed=0 in both lanes, query "init" rust 21346 wf/30313 attempts vs go 20929/28253; query p99 rust 33ms vs go 47ms.
+- frontend-mixed-gate default: https://github.com/auenkr/cadence-rust/actions/runs/44426984365 — success; `GATE SUMMARY failed: []`
+- frontend-soak rerun: https://github.com/auenkr/cadence-rust/actions/runs/44439992947 — RESULT_SOAK2
