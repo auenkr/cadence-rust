@@ -57,8 +57,7 @@ pub struct ProductionBackend {
         Option<std::sync::Arc<cadence_common::matching_lb::MatchingLoadBalancer>>,
     /// pollerID -> partition polled, so a cancellation reaches the same
     /// partition (Go rewrites the request task list to the partition).
-    pub(crate) poll_partitions:
-        std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, String>>>,
+    pub(crate) poll_partitions: crate::workflow_matching::PollPartitions,
 }
 
 impl std::fmt::Debug for ProductionBackend {
