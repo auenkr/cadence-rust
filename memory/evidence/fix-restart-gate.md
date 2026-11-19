@@ -47,3 +47,36 @@ Validation:
 - restart gate, fix-restart-gate (master + fix): 44531357568 FAIL 54, 44538966210 FAIL 96 (master without the fix: 337)
 
 Remaining: a second regression after 56b58c6c1 (bc073c19b 27, 6c7ce1f5a 107 before the fix). Its failure modes are query "init", "must handle at least one decision task" and History TChannel timeouts, which point to stuck decision or transfer dispatch. Next step: bisect 56b58c6c1..master with this fix cherry-picked.
+
+## Update 2026-11-19 (2): bisect with timer fix cherry-picked (branch fix-restart-regression)
+Restart gate MySQL 600 s, each point = merge + e8d808562 + f611c1a85 (branches restart-bisect-<sha>), 2 runs each:
+
+| merge | runs | result (failed/1800) |
+|---|---|---|
+| ac9997c51 | 44547381538, 44547388717 | pass, 1 |
+| bc073c19b | 44547398283, 44547406483 | pass, pass |
+| 6c7ce1f5a | 44547414380, 44547422531 | pass, pass |
+| 27bf33105 | 44547431123, 44547437218 | pass, pass |
+| 594ae6b11 | 44547444072, 44547450625 | pass, pass |
+| 7e3c75d09 | 44547456811, 44547467311 | pass, 1 |
+| 54d16d617 | 44547474456, 44547482524 | pass, pass |
+| 0e5c84050 | 44547489550, 44547497435 | pass, pass |
+| **9d656c446** (queue v2 default) | 44553433260, 44553438870 | **19, 14** |
+| master 4ba368c63 | 44553446580, 44553454803 | 28, 34 |
+
+Culprit: 9d656c446 (queue v2 switch). 1/1800 is baseline flake.
+
+Bug 1 found (fixed, commit on fix-restart-regression): controller close callback removed the shard entry
+from the registry before `Lifecycle::on_closed` upgraded its Weak -> engine.stop() never ran on shard close.
+Queue v1 self-stops on ShardClosed (masked it); queue v2 does not (like Go), so v2 loops kept running on the
+closed shard ("Failed to update queue state error=shard closed" every ~30 s). Fix keeps the removed cell alive
+until the engine is stopped (Go removeEngineForShard always stops the item's engine).
+
+Validation of the fix branch:
+- rust-ci cadence-history 44561468088 success
+- history-mixed-gate MySQL 44561479043 success, `GATE SUMMARY failed: []`
+- restart gate 44561486156 FAIL 27, 44561494007 FAIL 13 -> "shard closed" errors gone (0), but failures remain:
+  query state "init", ServiceBusy "cadence-history unavailable: TChannel error 1" and result deadline exceeded;
+  history logs show 29x "Fail to process task error=context deadline exceeded". Some appear before faults.
+Status: OPEN. A second queue-v2-specific issue remains. Next steps: compare restart gate with
+history.enableTransferQueueV2/enableTimerQueueV2=false on master (if green, v2 path), then per category (transfer only / timer only).
