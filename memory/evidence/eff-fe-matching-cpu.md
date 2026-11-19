@@ -55,3 +55,8 @@ Raw table from first (invalid-after) pair, service container cpu_seconds / peak 
 4. Candidate further items (not done): Frontend metrics_sink builds BTreeMap<String,String> tags per emit
    (MetricEvent API needs owned map — wider change); serde_json Value round-trips in redirector path.
 5. Delete /mnt/storage/service/tmp/effprof after.
+
+## Update (runs finished during pause; no new runs started)
+- rust-ci a976c635c: cadence-matching 44441712799 success, cadence-frontend 44441716854 success.
+- Pinned benchmarks: before FE 44441894483 success, before MT 44441898274 success, after MT 44441839160 success,
+  **after FE 44441831107 FAILURE** (not yet investigated). Table not yet extracted.
