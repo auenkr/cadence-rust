@@ -1,4 +1,4 @@
-# eff-db-roundtrips (2026-11-19) — PAUSED, after-results pending
+# eff-db-roundtrips (2026-11-19) — fixes verified (gates + after-benchmark green)
 
 Branch `eff-db-roundtrips` from master 56b58c6c1. Code head 4463266d3.
 
@@ -50,17 +50,32 @@ Findings:
 - rust-ci cadence-persistence on isolation commit: https://github.com/auenkr/cadence-rust/actions/runs/44427409557 success
 - rust-ci cadence-history on 4463266d3: https://github.com/auenkr/cadence-rust/actions/runs/44438979764 success
 - rust-ci cadence-persistence on 4463266d3: https://github.com/auenkr/cadence-rust/actions/runs/44441507314 success
-- PENDING at pause (started on 4463266d3, unverified):
-  - history-mixed-gate mysql/grpc https://github.com/auenkr/cadence-rust/actions/runs/44441490810
-  - history-mixed-gate postgres/tchannel https://github.com/auenkr/cadence-rust/actions/runs/44441495221
-  - after-benchmark history https://github.com/auenkr/cadence-rust/actions/runs/44441499077
-  - after-benchmark all https://github.com/auenkr/cadence-rust/actions/runs/44441503390
+- history-mixed-gate mysql/grpc https://github.com/auenkr/cadence-rust/actions/runs/44441490810 success; `GATE SUMMARY failed: []`
+- history-mixed-gate postgres/tchannel https://github.com/auenkr/cadence-rust/actions/runs/44441495221 success; `GATE SUMMARY failed: []`
+
+## After (code 4463266d3, same settings)
+History lane https://github.com/auenkr/cadence-rust/actions/runs/44441499077 (success);
+all-Rust https://github.com/auenkr/cadence-rust/actions/runs/44441503390 (success).
+Per workflow (all 3 pairs within 0.3): Rust BEGIN/COMMIT 32.7 -> 7.0 (= Go), Questions 141.8 -> 90.4
+(Go 95.5), SET isolation per tx 0 (session init only). stmt_execute 76 / Com_select 44 unchanged (Go 65 / 34).
+Est. round trips/wf: Rust ~146 -> ~94 (Go ~152).
+
+CPU = container avg cores; completion latency ms (mean of 3 pairs).
+| lane | arm | before History CPU | after History CPU | before MySQL CPU | after MySQL CPU | before p50/p99 | after p50/p99 |
+|---|---|---:|---:|---:|---:|---|---|
+| history | Go | 0.220 | 0.435 | 0.266 | 0.505 | 39.9 / 54.7 | 68.4 / 111.1 |
+| history | Rust | 0.147 | 0.222 | 0.216 | 0.338 | 34.7 / 42.8 | 47.5 / 66.5 |
+| all | Go | 0.407 | 0.402 | 0.478 | 0.475 | 61.0 / 105.9 | 60.2 / 103.1 |
+| all | Rust | 0.212 | 0.171 | 0.361 | 0.305 | 45.6 / 62.6 | 40.5 / 56.8 |
+
+Caveat: the History-lane after run landed on a ~2x slower runner (Go arm, unchanged code, doubled CPU
+and latency), so compare Rust/Go ratios there: History CPU 0.67 -> 0.51, MySQL CPU 0.81 -> 0.67,
+p50 0.87 -> 0.69, p99 0.78 -> 0.60. All-Rust lane (Go arm stable): Rust History CPU -19%,
+MySQL CPU -16%, completion p50 -11%, p99 -9%.
 
 ## Next steps
-1. Read pending runs; gate pass = success + `GATE SUMMARY failed: []`.
-2. Compare after vs baseline (scripts: per-wf Com_* deltas from resources.json mysql_samples / 1800).
-   Expect BEGIN/COMMIT ~7/wf.
-3. Attribute the +11 SELECT/wf: run benchmark with CADENCE_SQL_STATS_SECS set (needs compose env
+1. Attribute the +11 SELECT/wf: run benchmark with CADENCE_SQL_STATS_SECS set (needs compose env
    passthrough) or compare Go/Rust History call paths (shard range reads, domain cache, mutable-state
    cache misses, history-branch reads).
-4. Delete /mnt/storage/service/tmp/eff-db-4182088 and eff-scripts after evidence is final.
+2. Optional: re-run History lane after-benchmark to get a same-runner-class comparison.
+(Temp artifacts in /mnt/storage/service/tmp deleted.)
