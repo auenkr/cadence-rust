@@ -43,7 +43,7 @@ import json,sys,datetime as d
 p=lambda s:d.datetime.fromisoformat(s.replace("Z","+00:00"))
 r=json.load(sys.stdin); print("run:", r["name"], "->", r["conclusion"])
 for j in r["jobs"]:
-  if not (j.get("startedAt") and j.get("completedAt")): continue
+  if not (j.get("startedAt") and j.get("completedAt") and j.get("conclusion")): continue
   print("  job %s: %s queue %ds run %ds" % (j["name"], j["conclusion"], (p(j["startedAt"])-p(r["createdAt"])).seconds, (p(j["completedAt"])-p(j["startedAt"])).seconds))
   for s in j["steps"]:
     if s.get("startedAt") and s.get("completedAt"):
