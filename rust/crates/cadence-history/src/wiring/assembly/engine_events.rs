@@ -125,7 +125,8 @@ impl Inner {
             self.next_event_id += 1;
         }
         fill(&mut ev);
-        if !buffer && is_cached_event(ty) {
+        // The start event is cached by the start path once the execution info (workflow id) is set.
+        if !buffer && is_cached_event(ty) && ty != EventType::WorkflowExecutionStarted {
             self.write_event_to_cache(&ev);
         }
         self.hist.push(ev.clone());

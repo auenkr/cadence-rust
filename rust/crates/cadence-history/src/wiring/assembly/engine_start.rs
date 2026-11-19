@@ -250,6 +250,9 @@ impl EngineMutableState {
             e.cron_overlap_policy = start.cron_overlap_policy;
             e.active_cluster_selection_policy = start.active_cluster_selection_policy.clone();
         }
+        // Go `AddWorkflowExecutionStartedEvent`: writeEventToCache runs after
+        // ReplicateWorkflowExecutionStartedEvent, i.e. keyed by the real workflow id.
+        g.write_event_to_cache(&event);
         g.mirror_decision();
 
         let mut timeout_at = now + timeout_secs * NANOS + backoff.unwrap_or(0) as i64 * NANOS;
@@ -856,5 +859,31 @@ mod failover_marker_tests {
     fn failover_marker_task_rejects_bad_domain_id() {
         let m = FailoverMarkerTask { version: 1, domain_id: "not-a-uuid".into() };
         assert!(failover_marker_task(&m, 1, 1).is_err());
+    }
+}
+
+#[cfg(test)]
+mod start_event_cache_tests {
+    use super::*;
+    use crate::engine::deps::DomainInfo;
+
+    #[test]
+    fn start_event_is_cached_under_real_workflow_id() {
+        let cache = crate::events::new_shard_events_cache(512, std::time::Duration::from_secs(3600));
+        let domain = DomainCacheEntry {
+            info: DomainInfo { id: "domain-id".into(), name: "test-domain".into(), status: 0 },
+            ..Default::default()
+        };
+        let params = StateParams { events_cache: Some(cache.clone()), ..StateParams::default() };
+        let state = EngineMutableState::new_for_start(domain, 0, "run", 0, Arc::new(|| 1_700_000_000_000_000_000), params).unwrap();
+        let execution = WorkflowExecution { workflow_id: "wf".into(), run_id: "run".into() };
+        let request = HistoryStartWorkflowExecutionRequest {
+            start_request: Some(Default::default()),
+            ..Default::default()
+        };
+        state.start_event(&execution, &request).unwrap();
+        // Go writes the start event after ReplicateWorkflowExecutionStartedEvent (real workflow id).
+        assert_eq!(cache.get_cached("domain-id", "wf", "run", 1).unwrap().event_type, Some(EventType::WorkflowExecutionStarted));
+        assert!(cache.get_cached("domain-id", "", "run", 1).is_none());
     }
 }
