@@ -15,6 +15,7 @@
 
 Other findings:
 - **GitHub free plan = max 20 concurrent jobs per account.** With ~11 workers there were 28 runs in progress + 9 queued at 01:00Z; queue wait is now the largest single sink for short runs. "Unlimited minutes" != unlimited concurrency: don't dispatch speculative/duplicate runs, cancel your own superseded runs.
+- **REST API quota exhausted** (2026-11-19 00:38Z, 0 left, reset 01:13Z): all workers share one 5000/h token quota; tight `gh run watch`/`gh run view` loops by ~11 workers burn it, after which every gh call (dispatch, watch, download) fails with HTTP 403 for up to an hour. gh-run.sh polls once per 120s (`CI_POLL_SECONDS`) and tolerates errors; avoid `gh run watch` (polls every 3s).
 - Concurrency groups without run_id (matching-production-validation was GLOBAL: any dispatch cancelled every other worker's run; matching-mixed/cassandra/active-offer/... per ref; rust-ci dispatch per ref+package+sha).
 - Cache quota (10GB) is mostly setup-go caches (~640MB each, many duplicate per-branch copies); branch caches are only readable by that branch, master caches by everyone.
 - Gates intentionally build in a fresh target (~3 min); kept as is (evidence rule).

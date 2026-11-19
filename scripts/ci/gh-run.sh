@@ -55,10 +55,11 @@ PY
 
 wait_run() {
   local id=$1 st
+  # One API call per 120s: all workers share one 5000/h REST quota (exhausted on 2026-11-19).
   while :; do
-    st=$(gh run view "$id" --json status -q .status)
+    st=$(gh run view "$id" --json status -q .status 2>/dev/null || echo error)
     [[ "$st" == completed ]] && break
-    sleep 60
+    sleep "${CI_POLL_SECONDS:-120}"
   done
   timings "$id"
   [[ "$(gh run view "$id" --json conclusion -q .conclusion)" == success ]]
