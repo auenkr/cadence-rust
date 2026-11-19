@@ -136,11 +136,17 @@ pub fn build_core(env: &Arc<HistoryEnv>, shard: &Arc<ShardContext>) -> (Arc<Engi
             let domains = env.domain_cache.clone();
             let history_nodes = env.persistence.history_nodes.clone();
             let shard_id = shard.shard_id();
+            // Go shard context `eventsCache` (eventsCacheMaxSize / eventsCacheTTL).
+            let events_cache = crate::events::new_shard_events_cache(
+                (cfg.events_cache_max_count)().max(0) as usize,
+                (cfg.events_cache_ttl)(),
+            );
             let cluster = env.cluster.clone();
             let metrics = env.metrics.clone();
             Arc::new(move |domain_id: &str| {
                 let mut p = StateParams {
                     history_nodes: Some(history_nodes.clone()),
+                    events_cache: Some(events_cache.clone()),
                     shard_id,
                     max_buffered_events_batch: (cfg.maximum_buffered_events_batch)(),
                     close_policy: Some(super::engine_state::ClosePolicy {

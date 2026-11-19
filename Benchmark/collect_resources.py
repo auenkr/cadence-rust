@@ -170,6 +170,48 @@ def mysql_digests(container):
     return {"rows": rows}
 
 
+SQL_LOG_SECS = float(os.environ.get("SQL_LOG_SECS") or 0)
+
+
+def _mysql(container, sql, timeout=20):
+    return subprocess.check_output(['docker','exec',container,'mysql','-proot','-N','-B','-e',sql],
+                                   stderr=subprocess.DEVNULL, timeout=timeout).decode('utf-8', 'replace')
+
+
+def sql_log_start(container):
+    """Diagnostics only (SQL_LOG_SECS>0): general log to table captures prepared executes with values."""
+    try:
+        _mysql(container, "SET GLOBAL general_log=OFF; TRUNCATE TABLE mysql.general_log; "
+               "SET GLOBAL log_output='TABLE'; SET GLOBAL general_log=ON;")
+        return True
+    except subprocess.SubprocessError:
+        return False
+
+
+def _normalize_sql(text):
+    import re
+    text = re.sub(r"'(?:[^'\\]|\\.)*'", "?", text)
+    text = re.sub(r"\b0x[0-9a-fA-F]+\b|\b\d+(?:\.\d+)?\b", "?", text)
+    text = re.sub(r"\(\s*\?(?:\s*,\s*\?)*\s*\)", "(?..)", text)
+    return re.sub(r"\s+", " ", text).strip()[:400]
+
+
+def sql_log_stop(container, seconds):
+    try:
+        _mysql(container, "SET GLOBAL general_log=OFF;")
+        raw = _mysql(container, "SELECT command_type, REPLACE(REPLACE(CONVERT(LEFT(argument,600) USING binary),'\\t',' '),'\\n',' ') "
+                     "FROM mysql.general_log WHERE command_type IN ('Execute','Query')", timeout=120)
+    except subprocess.SubprocessError as error:
+        return {"error": f"{type(error).__name__}: {error}"[:300]}
+    counts = {}
+    for line in raw.splitlines():
+        cmd, _, arg = line.partition('\t')
+        key = cmd + ' ' + _normalize_sql(arg)
+        counts[key] = counts.get(key, 0) + 1
+    rows = sorted(({"count": c, "statement": k} for k, c in counts.items()), key=lambda r: -r["count"])[:300]
+    return {"seconds": seconds, "rows": rows}
+
+
 def mysql_sample(container, elapsed, errors):
     """Observer probe; a stalled probe during a fault is a gap, not a run failure."""
     try:
@@ -210,6 +252,8 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
     if mysql_container:
         mysql_digest_reset(mysql_container)
     mysql_errors = []
+    sql_log = None
+    sql_log_on = bool(mysql_container and SQL_LOG_SECS > 0 and sql_log_start(mysql_container))
     mysql_samples = [{"elapsed_seconds":0,"counters":mysql_snapshot(mysql_container)}] if mysql_container else []
     timeline = [{"elapsed_seconds":0,"containers":first,"host":host_snapshot()}]
     last_timeline = last_mysql = 0
@@ -232,6 +276,9 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
         if elapsed-last_timeline >= 1:
             timeline.append({"elapsed_seconds":elapsed,"containers":now,"host":host_snapshot()})
             last_timeline = elapsed
+        if sql_log_on and elapsed >= SQL_LOG_SECS:
+            sql_log = sql_log_stop(mysql_container, elapsed)
+            sql_log_on = False
         if mysql_container and elapsed-last_mysql >= 5:
             sample = mysql_sample(mysql_container, elapsed, mysql_errors)
             if sample: mysql_samples.append(sample)
@@ -255,6 +302,8 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
         sample = mysql_sample(mysql_container, elapsed, mysql_errors)
         if sample: mysql_samples.append(sample)
         digests = mysql_digests(mysql_container)
+        if sql_log_on:
+            sql_log = sql_log_stop(mysql_container, elapsed)
     containers_result = {}
     for name, (_, version) in selected.items():
         try:
@@ -278,7 +327,7 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
               "interval_method": "start/end marker files" if start_event else "fixed duration",
               "containers": containers_result, "timeline": timeline,
               "mysql_samples": mysql_samples, "mysql_sample_errors": mysql_errors,
-              "mysql_digests": digests,
+              "mysql_digests": digests, "mysql_general_log": sql_log,
               "mysql_note": "Global SQL counters and total Performance Schema wait; includes observer queries. Query tail latency unavailable."}
     Path(output).write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 

@@ -87,6 +87,9 @@ pub struct StateParams {
     pub require_checksum_match_after_rebuild_repair: bool,
     /// Emits `DataInconsistentCounter` (Go `logDataInconsistency`).
     pub data_inconsistency: crate::execution::mutable_state_builder::DataInconsistencyHook,
+    /// Go `shard.GetEventsCache()`: start / close / activity scheduled / child initiated
+    /// events are written here when created and read before loading history.
+    pub events_cache: Option<Arc<crate::events::ShardEventsCache>>,
 }
 
 impl Default for StateParams {
@@ -108,6 +111,7 @@ impl Default for StateParams {
             corruption_repair_timeout: std::time::Duration::from_secs(30),
             require_checksum_match_after_rebuild_repair: true,
             data_inconsistency: Default::default(),
+            events_cache: None,
         }
     }
 }
@@ -254,6 +258,8 @@ pub(super) struct Inner {
     pub(super) dirty: bool,
     /// Go `logDataInconsistency` metric hook (installed by `with_params`).
     pub(super) data_inconsistency: crate::execution::mutable_state_builder::DataInconsistencyHook,
+    /// Shard events cache (installed by `with_params`).
+    pub(super) events_cache: Option<Arc<crate::events::ShardEventsCache>>,
 }
 
 impl Inner {
@@ -459,6 +465,7 @@ impl EngineMutableState {
         }
         let inner = Inner {
             data_inconsistency: Default::default(),
+            events_cache: None,
             prev_start_event: None,
             new_run: None,
             exec,
@@ -533,7 +540,11 @@ impl EngineMutableState {
 
     /// Sets the config / domain derived parameters.
     pub fn with_params(mut self, params: StateParams) -> Self {
-        self.inner.lock().unwrap().data_inconsistency = params.data_inconsistency.clone();
+        {
+            let mut g = self.inner.lock().unwrap();
+            g.data_inconsistency = params.data_inconsistency.clone();
+            g.events_cache = params.events_cache.clone();
+        }
         self.params = params;
         self
     }
