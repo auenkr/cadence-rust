@@ -38,7 +38,21 @@ Other findings:
    values from JSON, failed log tail, then deletes the dir unless --keep), go = all three.
 
 ## Before/after proof
-PROOF_PLACEHOLDER
+All on branch platform-speedup, sdk-matching-benchmark service=matching duration=30 warmup=10.
+
+| Measure | Before | After | Run(s) |
+|---|---|---|---|
+| Rust image build, fresh (`#17 DONE`) | 1444s (-j2, 44395950242) | 914s / 733s / 765s (-j$(nproc)) | 44430034276, 44430038814, 44435568712 |
+| Rust image build, cache hit | (always rebuilt) | 4s (`rust binaries: cache hit (d265f1aa...)`) | 44438177182 |
+| Whole benchmark job (smoke) | 1114-1331s | **331s** | 44438177182 |
+| Two dispatches same ref+service | 2nd cancelled (12/43 cancelled) | both success | 44430034276 + 44430038814 |
+| rust-ci format failure detection | after oracles+clippy, ~4-7 min | fmt job fails in 11s and cancels run, BUT under runner saturation its queue (790s) exceeded clippy-test's (480s), which then failed first at its own fmt step (186s) | 44430053669 |
+| rust-ci success (cadence-matching) | ~7 min | fmt 12s; clippy-test 393s (no regression) | 44430043355 |
+
+Caveats: cache key is the rust/ + IDL *tree*, so a benchmark of newer master (any rust/ change) rebuilds fresh;
+pin source_ref to one SHA for repeats. Cache entries are 34MB. Fast-fmt gain only shows when runners are free;
+with ~11 workers the 20-concurrent-job cap gives 6-13 min queue waits, the dominant sink now.
+Throwaway branch platform-speedup-fmtprobe (deliberate rustfmt error) must not be merged; delete it when allowed.
 
 ## How to use (workers)
 ```
