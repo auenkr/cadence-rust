@@ -68,6 +68,47 @@ fn slow_threshold() -> Option<std::time::Duration> {
             .map(std::time::Duration::from_millis)
     })
 }
+/// Env-gated SQL round-trip counters: `CADENCE_SQL_STATS_SECS=<n>` prints
+/// cumulative History SQL transaction/statement counts to stderr every n
+/// seconds. Unset means the counters are never touched.
+pub mod sql_stats {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    pub static TRANSACTIONS: AtomicU64 = AtomicU64::new(0);
+    pub static STATEMENTS: AtomicU64 = AtomicU64::new(0);
+    pub static QUERIES: AtomicU64 = AtomicU64::new(0);
+    pub fn enabled() -> bool {
+        static INTERVAL: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
+        INTERVAL
+            .get_or_init(|| {
+                let secs = std::env::var("CADENCE_SQL_STATS_SECS")
+                    .ok()
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .filter(|v| *v > 0)?;
+                std::thread::Builder::new()
+                    .name("sql-stats".into())
+                    .spawn(move || loop {
+                        std::thread::sleep(std::time::Duration::from_secs(secs));
+                        eprintln!("{}", line());
+                    })
+                    .ok()?;
+                Some(secs)
+            })
+            .is_some()
+    }
+    pub fn line() -> String {
+        format!(
+            "cadence-history sql stats: transactions={} exec={} query={}",
+            TRANSACTIONS.load(Ordering::Relaxed),
+            STATEMENTS.load(Ordering::Relaxed),
+            QUERIES.load(Ordering::Relaxed)
+        )
+    }
+    pub fn count(counter: &AtomicU64) {
+        if enabled() {
+            counter.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
 pub fn internal(error: impl std::fmt::Display) -> PersistenceError {
     PersistenceError::Internal(error.to_string())
 }
@@ -136,6 +177,7 @@ impl MySqlTx<'_, '_> {
 }
 impl SqlTx for MySqlTx<'_, '_> {
     fn execute(&mut self, sql: &str, params: &[Value]) -> Result<u64, PersistenceError> {
+        sql_stats::count(&sql_stats::STATEMENTS);
         self.tx
             .exec_drop(sql, mysql_params(params))
             .map_err(|e| self.fail(e))?;
@@ -147,6 +189,7 @@ impl SqlTx for MySqlTx<'_, '_> {
         params: &[Value],
         columns: &[Column],
     ) -> Result<Vec<Vec<Value>>, PersistenceError> {
+        sql_stats::count(&sql_stats::QUERIES);
         let rows: Vec<mysql::Row> = self
             .tx
             .exec(sql, mysql_params(params))
@@ -249,6 +292,7 @@ impl SqlBackend {
         &self,
         run: impl FnOnce(&mut dyn SqlTx) -> Result<T, PersistenceError>,
     ) -> Result<T, PersistenceError> {
+        sql_stats::count(&sql_stats::TRANSACTIONS);
         blocking(|| {
             let started = slow_threshold().map(|t| (t, std::time::Instant::now()));
             let result = self.transaction_inner(run);

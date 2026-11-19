@@ -185,7 +185,7 @@ impl MatchingTaskStoreBytes for MySqlTaskStore {
             return Err(stale(current.range_id));
         }
         let mut transaction = connection
-            .start_transaction(TxOpts::default().set_isolation_level(Some(self.isolation)))
+            .start_transaction(TxOpts::default())
             .map_err(|error| leg(normalize_mysql_error_on_lease(error, &discard)))?;
         discard.store(true, Ordering::Release);
         Self::lock_and_check_bytes(&mut transaction, &discard, shard_id, key, current.range_id)?;
@@ -240,7 +240,7 @@ impl MatchingTaskStoreBytes for MySqlTaskStore {
         let mut connection = self.pool_bytes(key).checkout().map_err(leg)?;
         let discard = connection.discard.clone();
         let mut transaction = connection
-            .start_transaction(TxOpts::default().set_isolation_level(Some(self.isolation)))
+            .start_transaction(TxOpts::default())
             .map_err(|error| leg(normalize_mysql_error_on_lease(error, &discard)))?;
         discard.store(true, Ordering::Release);
         Self::lock_and_check_bytes(&mut transaction, &discard, shard_id, key, range)?;
@@ -286,7 +286,7 @@ impl MatchingTaskStoreBytes for MySqlTaskStore {
         let mut connection = self.pool_bytes(key).checkout().map_err(leg)?;
         let discard = connection.discard.clone();
         let mut transaction = connection
-            .start_transaction(TxOpts::default().set_isolation_level(Some(self.isolation)))
+            .start_transaction(TxOpts::default())
             .map_err(|error| leg(normalize_mysql_error_on_lease(error, &discard)))?;
         discard.store(true, Ordering::Release);
         let encoding = self.write_encoding_bytes()?;

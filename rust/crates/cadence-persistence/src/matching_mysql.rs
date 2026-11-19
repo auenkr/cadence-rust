@@ -477,7 +477,6 @@ pub struct MySqlTaskStore {
     n_shards: usize,
     encoding: BlobEncoding,
     encoding_source: Option<crate::matching_blob::EncodingSource>,
-    isolation: IsolationLevel,
 }
 
 impl MySqlTaskStore {
@@ -526,7 +525,6 @@ impl MySqlTaskStore {
             n_shards: config.n_shards.max(1),
             encoding: config.encoding,
             encoding_source: None,
-            isolation: configured_isolation(&config.connect_attributes)?,
         })
     }
 
@@ -562,7 +560,6 @@ impl MySqlTaskStore {
             n_shards: config.n_shards,
             encoding: config.encoding,
             encoding_source: None,
-            isolation: configured_isolation(&config.connect_attributes)?,
         };
         store.validate_schema()?;
         Ok(store)
@@ -875,7 +872,7 @@ impl MatchingTaskStore for MySqlTaskStore {
             )));
         }
         let mut transaction = connection
-            .start_transaction(TxOpts::default().set_isolation_level(Some(self.isolation)))
+            .start_transaction(TxOpts::default())
             .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
         // Any early return below drops the transaction and asks mysql 26 to
         // roll it back. Since Drop intentionally hides rollback errors, never
@@ -934,7 +931,7 @@ impl MatchingTaskStore for MySqlTaskStore {
         let mut connection = self.pool(key).checkout()?;
         let discard = connection.discard.clone();
         let mut transaction = connection
-            .start_transaction(TxOpts::default().set_isolation_level(Some(self.isolation)))
+            .start_transaction(TxOpts::default())
             .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
         discard.store(true, Ordering::Release);
         Self::lock_and_check(&mut transaction, &discard, shard_id, key, range)?;
@@ -980,7 +977,7 @@ impl MatchingTaskStore for MySqlTaskStore {
         let mut connection = self.pool(key).checkout()?;
         let discard = connection.discard.clone();
         let mut transaction = connection
-            .start_transaction(TxOpts::default().set_isolation_level(Some(self.isolation)))
+            .start_transaction(TxOpts::default())
             .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
         discard.store(true, Ordering::Release);
         // Go encodes every row in the request before opening the transaction;
@@ -1332,8 +1329,10 @@ pub(crate) fn mysql_options(config: &MySqlTaskStoreConfig) -> Result<Opts> {
         builder = builder.ssl_opts(Some(ssl));
     }
 
-    // Isolation is set per transaction below, matching the Go MySQL DSN's
-    // transaction_isolation session setting without relying on server default.
+    // Go's DSN carries transaction_isolation, which go-sql-driver sends once
+    // per connection as a session `SET`; transactions then use plain
+    // START TRANSACTION (no per-transaction SET round trip).
+    builder = builder.init(vec![session_isolation_init(&config.connect_attributes)?]);
     Ok(Opts::from(builder))
 }
 
@@ -1347,7 +1346,8 @@ fn mysql_async_options(config: &MySqlTaskStoreConfig) -> Result<mysql_async::Opt
         .user(Some(config.user.clone()))
         .pass(Some(config.password.clone()))
         .db_name(Some(config.database_name.clone()))
-        .client_found_rows(true);
+        .client_found_rows(true)
+        .init(vec![session_isolation_init(&config.connect_attributes)?]);
     let mut connect_timeout = None;
     let mut read_timeout = None;
     let mut write_timeout = None;
@@ -1495,20 +1495,31 @@ fn validate_mysql_tls_config(config: &MySqlTaskStoreConfig) -> Result<()> {
     Ok(())
 }
 
-fn configured_isolation(
+/// The session statement go-sql-driver issues at connect for Go's DSN
+/// isolation attribute (`buildDSNAttrs`/`sanitizeAttr`): the attribute name as
+/// configured (lower-cased, default `transaction_isolation`) and the
+/// lower-cased value wrapped in single quotes (default `'READ-COMMITTED'`).
+pub(crate) fn session_isolation_init(
     attributes: &std::collections::HashMap<String, String>,
-) -> Result<IsolationLevel> {
-    let value = attributes
-        .iter()
-        .find(|(key, _)| {
-            matches!(
-                key.to_ascii_lowercase().as_str(),
-                "transaction_isolation" | "tx_isolation"
-            )
-        })
-        .map(|(_, value)| value.as_str())
-        .unwrap_or("READ-COMMITTED");
-    parse_isolation(value)
+) -> Result<String> {
+    let configured = attributes.iter().find_map(|(key, value)| {
+        let key = key.trim().to_ascii_lowercase();
+        matches!(key.as_str(), "transaction_isolation" | "tx_isolation")
+            .then(|| (key, value.trim().to_ascii_lowercase()))
+    });
+    let (key, value) = match configured {
+        Some((key, value)) => {
+            parse_isolation(value.trim_matches('\''))?;
+            let value = if value.starts_with('\'') {
+                value
+            } else {
+                format!("'{value}'")
+            };
+            (key, value)
+        }
+        None => ("transaction_isolation".to_owned(), "'READ-COMMITTED'".to_owned()),
+    };
+    Ok(format!("SET {key}={value}"))
 }
 
 fn parse_isolation(value: &str) -> Result<IsolationLevel> {
@@ -2537,5 +2548,41 @@ mod tests {
             mysql_options(&config),
             Err(StorageError::BackendConfiguration(_))
         ));
+    }
+}
+
+#[cfg(test)]
+mod session_isolation_tests {
+    use super::session_isolation_init;
+    use std::collections::HashMap;
+
+    fn attrs(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    #[test]
+    fn default_matches_go_dsn() {
+        assert_eq!(
+            session_isolation_init(&attrs(&[])).unwrap(),
+            "SET transaction_isolation='READ-COMMITTED'"
+        );
+    }
+
+    #[test]
+    fn configured_value_is_quoted_and_lowercased_like_go() {
+        assert_eq!(
+            session_isolation_init(&attrs(&[("Transaction_Isolation", "REPEATABLE-READ")]))
+                .unwrap(),
+            "SET transaction_isolation='repeatable-read'"
+        );
+        assert_eq!(
+            session_isolation_init(&attrs(&[("tx_isolation", "'read-committed'")])).unwrap(),
+            "SET tx_isolation='read-committed'"
+        );
+    }
+
+    #[test]
+    fn invalid_level_is_rejected() {
+        assert!(session_isolation_init(&attrs(&[("transaction_isolation", "bogus")])).is_err());
     }
 }
