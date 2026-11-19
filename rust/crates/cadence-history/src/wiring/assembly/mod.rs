@@ -43,6 +43,7 @@ pub mod queue_deps_standby;
 pub mod queue_deps_timer_active;
 pub mod queue_deps_transfer_active;
 pub mod queue_exec;
+pub mod queue_v2_adapters;
 pub mod queue_factory;
 pub mod queue_policy;
 pub mod queue_provider;
