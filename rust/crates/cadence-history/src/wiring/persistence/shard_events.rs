@@ -606,3 +606,37 @@ impl HistoryTaskDLQManager for SqlHistoryTaskDLQManager {
         dlq_unsupported()
     }
 }
+
+#[cfg(test)]
+mod queue_state_roundtrip_tests {
+    use super::*;
+    use crate::shard_context::{QueuePredicate, QueueState, ShardInfoData, TaskKey, VirtualSliceState};
+
+    /// Go shard/context.go UpdateQueueState -> shardManager.UpdateShard -> GetShard: every virtual
+    /// queue id, slice range and predicate survives the shard row round trip.
+    #[test]
+    fn shard_row_keeps_full_queue_v2_state() {
+        let k = |t: i64, id: i64| TaskKey { scheduled_time_nano: t, task_id: id };
+        let mut qs = QueueState { exclusive_max_read_level: k(0, 500), ..Default::default() };
+        qs.virtual_queue_states.insert(0, vec![
+            VirtualSliceState { inclusive_min: k(0, 10), exclusive_max: k(0, 200), predicate: Some(QueuePredicate::Universal) },
+            VirtualSliceState { inclusive_min: k(0, 200), exclusive_max: k(0, 500), predicate: None },
+        ]);
+        qs.virtual_queue_states.insert(3, vec![VirtualSliceState {
+            inclusive_min: k(0, 50),
+            exclusive_max: k(0, 300),
+            predicate: Some(QueuePredicate::DomainId { domain_ids: vec!["d1".into(), "d2".into()], is_exclusive: Some(true) }),
+        }]);
+        let mut timer = QueueState { exclusive_max_read_level: k(1_700_000_000_000_000_000, 7), ..Default::default() };
+        timer.virtual_queue_states.insert(1, vec![VirtualSliceState {
+            inclusive_min: k(1_600_000_000_000_000_000, 0),
+            exclusive_max: k(1_700_000_000_000_000_000, 7),
+            predicate: Some(QueuePredicate::Empty),
+        }]);
+        let mut info = ShardInfoData { shard_id: 4, range_id: 9, ..Default::default() };
+        info.queue_states.insert(1, qs);
+        info.queue_states.insert(2, timer);
+        let back = shard_row_to_data(&data_to_row(&info).unwrap()).unwrap();
+        assert_eq!(back.queue_states, info.queue_states);
+    }
+}
