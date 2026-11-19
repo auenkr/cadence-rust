@@ -19,6 +19,39 @@ pub struct NotifiedTask {
     pub task_type: i16,
     pub visibility_timestamp: i64,
     pub kind: NotifiedTaskKind,
+    /// The full persisted task (Go `NotifyTaskInfo.Tasks` holds the whole `persistence.Task`),
+    /// for the queue v2 cached reader. `None` only for Go's synthetic failover notify tasks.
+    pub full: Option<FullPersistedTask>,
+}
+/// Full persisted task written alongside the execution update.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FullPersistedTask {
+    Transfer(cadence_persistence::history_contract::TransferTask),
+    Timer(cadence_persistence::history_contract::TimerTask),
+}
+impl NotifiedTask {
+    /// Notified view of a persisted transfer task.
+    pub fn from_transfer(t: &cadence_persistence::history_contract::TransferTask) -> Self {
+        Self {
+            version: t.version,
+            task_id: t.task_id,
+            task_type: t.task_type as i16,
+            visibility_timestamp: t.visibility_time_unix_nanos,
+            kind: NotifiedTaskKind::Generic,
+            full: Some(FullPersistedTask::Transfer(t.clone())),
+        }
+    }
+    /// Notified view of a persisted timer task.
+    pub fn from_timer(t: &cadence_persistence::history_contract::TimerTask) -> Self {
+        Self {
+            version: t.version,
+            task_id: t.task_id,
+            task_type: t.task_type as i16,
+            visibility_timestamp: t.visibility_timestamp_unix_nanos,
+            kind: NotifiedTaskKind::Generic,
+            full: Some(FullPersistedTask::Timer(t.clone())),
+        }
+    }
 }
 /// `hcommon.NotifyTaskInfo`
 #[derive(Clone, Default)]
@@ -116,5 +149,37 @@ impl HistoryEngine {
             branch_token: branch,
             new_run_branch_token: new_branch,
         }).await
+    }
+}
+
+#[cfg(test)]
+mod full_task_tests {
+    use super::*;
+    use cadence_persistence::history_contract as pc;
+
+    #[test]
+    fn transfer_notification_carries_full_persisted_task() {
+        let t = pc::TransferTask {
+            domain_id: "d".into(), workflow_id: "w".into(), run_id: "r".into(),
+            task_id: 42, task_type: 0, version: 7, visibility_time_unix_nanos: 99,
+            target_domain_id: "td".into(), task_list: "tl".into(), schedule_id: 5,
+            ..Default::default()
+        };
+        let n = NotifiedTask::from_transfer(&t);
+        assert_eq!(n.full, Some(FullPersistedTask::Transfer(t.clone())));
+        assert_eq!((n.task_id, n.version, n.visibility_timestamp), (42, 7, 99));
+    }
+
+    #[test]
+    fn timer_notification_carries_full_persisted_task() {
+        let t = pc::TimerTask {
+            domain_id: "d".into(), workflow_id: "w".into(), run_id: "r".into(),
+            task_id: 43, task_type: 2, version: 8, visibility_timestamp_unix_nanos: 100,
+            event_id: 9, schedule_attempt: 1, timeout_type: 3,
+            ..Default::default()
+        };
+        let n = NotifiedTask::from_timer(&t);
+        assert_eq!(n.full, Some(FullPersistedTask::Timer(t.clone())));
+        assert_eq!((n.task_id, n.task_type, n.visibility_timestamp), (43, 2, 100));
     }
 }
