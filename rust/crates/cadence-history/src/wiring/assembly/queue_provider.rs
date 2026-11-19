@@ -30,7 +30,10 @@ use super::queue_factory::QueueExecProvider;
 use super::queue_policy::{processor_config, queue_config};
 use super::queues::QueueExec;
 use super::resender::HistoryResenderImpl;
-use super::shard_adapters::RealQueueShardContext;
+use super::queue_v2_adapters::{V2ProcessorAdapter, V2QueueEnv};
+use super::queue_v2_wiring::{queue_v2_config, QueueV2Exec, TracingV2Logger};
+use super::shard_adapters::{RealQueueShardContext, RealQueueV2ShardContext};
+use crate::wiring::persistence::queues::SqlExecutionManager;
 use super::shard_factory::{ShardClusterInfo, TaskShardContext};
 use crate::config::Config;
 use crate::queue::deps as q;
@@ -409,6 +412,59 @@ impl QueueExecProvider for HistoryQueueExecProvider {
             );
         }
 
+        // Queue v2 (Go `queuev2.New{Transfer,Timer}QueueFactory`): executor wrapper over the active
+        // executor and a standby executor for the current cluster, as Go `createQueuev2` builds.
+        let current_cluster = env.cluster.metadata().current_cluster_name.clone();
+        let transfer_wrapper = crate::task::executor_wrapper::new_executor_wrapper(
+            current_cluster.clone(),
+            task_shard_dyn.get_active_cluster_manager(),
+            transfer_active.clone(),
+            crate::task::transfer_standby_task_executor::new_transfer_standby_task_executor(
+                crate::task::transfer_task_executor_base::new_transfer_task_executor_base(
+                    task_shard_dyn.clone(),
+                    transfer_deps.clone(),
+                    logger.clone(),
+                ),
+                current_cluster.clone(),
+                TransferStandbyDepsImpl::new(env.clone(), ctx.shard.clone(), ctx.cache.clone(), shared.resender.clone()),
+            ),
+            logger.clone(),
+        );
+        let timer_wrapper = crate::task::executor_wrapper::new_executor_wrapper(
+            current_cluster.clone(),
+            task_shard_dyn.get_active_cluster_manager(),
+            timer_active.clone(),
+            crate::task::timer_standby_task_executor::new_timer_standby_task_executor(
+                timer_base(),
+                current_cluster.clone(),
+                TimerStandbyDepsImpl::new(env.clone(), ctx.shard.clone(), ctx.cache.clone(), shared.resender.clone()),
+            ),
+            logger.clone(),
+        );
+        let v2_shard = RealQueueV2ShardContext::new(
+            ctx.shard.clone(),
+            Arc::new(SqlExecutionManager::new(env.persistence.executions.clone(), ctx.shard.shard_id())),
+            env.clock.clone() as Arc<dyn crate::queuev2::deps::TimeSource>,
+            Arc::new(queue_v2_config(&config)),
+            TracingV2Logger::new(),
+            env.metrics.clone() as Arc<dyn crate::queuev2::deps::MetricsClient>,
+            Arc::new(ShardClusterInfo::from_env(&env)),
+        );
+        let v2_env = Arc::new(V2QueueEnv {
+            task_shard: task_shard_dyn.clone(),
+            task_processor: shared.processor.clone(),
+            logger: logger.clone(),
+            critical_retry_count: critical_retry_count.clone(),
+            rescheduler_scope: Arc::new(Scope::new(env.metrics_registry.clone(), "TaskRescheduler", Vec::new())) as Arc<dyn t::MetricsScope>,
+        });
+        let v2 = QueueV2Exec {
+            shard: v2_shard,
+            env: v2_env,
+            processor: V2ProcessorAdapter::new(shared.processor.clone()),
+            transfer_executor: transfer_wrapper,
+            timer_executor: timer_wrapper,
+        };
+
         let common = QueueExecCommon {
             queue_shard,
             task_shard: task_shard_dyn,
@@ -423,6 +479,7 @@ impl QueueExecProvider for HistoryQueueExecProvider {
             common,
             transfer: CategoryExecutors { active: transfer_active, standby: transfer_standby },
             timer: CategoryExecutors { active: timer_active, standby: timer_standby },
+            v2: Some(v2),
         }))
     }
 }

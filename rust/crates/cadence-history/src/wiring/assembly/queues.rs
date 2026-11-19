@@ -45,6 +45,9 @@ pub struct QueueExec {
     pub common: QueueExecCommon,
     pub transfer: CategoryExecutors,
     pub timer: CategoryExecutors,
+    /// Queue v2 inputs; the category uses queue v2 when `history.enable{Transfer,Timer}QueueV2`
+    /// is true for the shard (Go `queuev2.New{Transfer,Timer}QueueFactory`).
+    pub v2: Option<super::queue_v2_wiring::QueueV2Exec>,
 }
 
 /// Adapts `queue::interface::Processor` to `engine::runtime::QueueProcessor`.
@@ -186,17 +189,27 @@ impl QueueProcessor for EngineQueueProcessor {
 /// `engine` side map of queue processors per task category.
 pub fn build_queue_processors(deps: QueueDeps) -> HashMap<HistoryTaskCategory, Arc<dyn QueueProcessor>> {
     let mut processors = deps.processors;
+    let mut out: HashMap<HistoryTaskCategory, Arc<dyn QueueProcessor>> = HashMap::new();
     if let Some(exec) = deps.exec {
-        // Go `NewTransferQueueProcessor` / `NewTimerQueueProcessor` (queue v1) constructed for real.
-        processors
-            .entry(HistoryTaskCategory::Transfer)
-            .or_insert_with(|| build_transfer_queue_processor(&exec.common, exec.transfer) as Arc<dyn Processor>);
-        processors
-            .entry(HistoryTaskCategory::Timer)
-            .or_insert_with(|| build_timer_queue_processor(&exec.common, exec.timer) as Arc<dyn Processor>);
+        for category in [HistoryTaskCategory::Transfer, HistoryTaskCategory::Timer] {
+            if processors.contains_key(&category) {
+                continue;
+            }
+            // Go queuev2 factory `CreateQueue`: v2 when enabled for the shard, else queue v1.
+            if let Some(v2) = exec.v2.as_ref().filter(|v2| super::queue_v2_wiring::is_queue_v2_enabled(v2, category)) {
+                out.insert(category, super::queue_v2_wiring::build_queue_v2(v2, category));
+                continue;
+            }
+            // Go `NewTransferQueueProcessor` / `NewTimerQueueProcessor` (queue v1).
+            let p = match category {
+                HistoryTaskCategory::Timer => build_timer_queue_processor(&exec.common, exec.timer.clone()) as Arc<dyn Processor>,
+                _ => build_transfer_queue_processor(&exec.common, exec.transfer.clone()) as Arc<dyn Processor>,
+            };
+            processors.insert(category, p);
+        }
     }
-    processors
-        .into_iter()
-        .map(|(category, p)| (category, EngineQueueProcessor::new(p, category) as Arc<dyn QueueProcessor>))
-        .collect()
+    for (category, p) in processors {
+        out.insert(category, EngineQueueProcessor::new(p, category) as Arc<dyn QueueProcessor>);
+    }
+    out
 }
