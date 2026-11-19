@@ -354,7 +354,7 @@ impl SqlHistoryTasks {
                     Value::Text(source_cluster.into()),
                     Value::I32(self.shard_id),
                     Value::I64(task.task_id),
-                    Value::Bytes(data),
+                    Value::Bytes(data.clone()),
                     Value::Text(self.encoding.as_str().into()),
                 ],
             )

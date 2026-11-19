@@ -1077,7 +1077,7 @@ impl GoExecutionStore for SqlWorkflowStore {
         } else {
             crate::history_tree_token::decode_execution(&filter.next_page_token)?
         };
-        let rows=self.backend.autocommit(|tx|tx.query(&self.query("SELECT shard_id,domain_id,workflow_id,run_id,next_event_id,last_write_version,data,data_encoding FROM executions WHERE shard_id=? AND workflow_id>? ORDER BY workflow_id LIMIT ?"),&[Value::I32(shard),Value::Text(workflow),Value::I32(filter.page_size)],&[Column::I32,Column::Bytes,Column::Text,Column::Bytes,Column::I64,Column::I64,Column::Bytes,Column::Text]))?;
+        let rows=self.backend.autocommit(|tx|tx.query(&self.query("SELECT shard_id,domain_id,workflow_id,run_id,next_event_id,last_write_version,data,data_encoding FROM executions WHERE shard_id=? AND workflow_id>? ORDER BY workflow_id LIMIT ?"),&[Value::I32(shard),Value::Text(workflow.clone()),Value::I32(filter.page_size)],&[Column::I32,Column::Bytes,Column::Text,Column::Bytes,Column::I64,Column::I64,Column::Bytes,Column::Text]))?;
         let mut executions = Vec::new();
         for row in &rows {
             let key = crate::history_sql::WorkflowKey {

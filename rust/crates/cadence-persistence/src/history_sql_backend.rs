@@ -188,7 +188,14 @@ impl<Q: Queryable> SqlTx for MySqlTx<'_, Q> {
                 drop(result);
                 affected
             }
-            Err(error) => return Err(self.fail(error)),
+            Err(error) => {
+                // `self.tx` is still borrowed by the match; poison via the field.
+                if error.is_connectivity_error() {
+                    self.discard
+                        .store(true, std::sync::atomic::Ordering::Release);
+                }
+                return Err(mysql_error(error));
+            }
         };
         Ok(affected)
     }
