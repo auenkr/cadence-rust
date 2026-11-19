@@ -387,6 +387,20 @@ impl ShardContext {
         Ok(())
     }
 
+    /// Go `default:` branch of Create/Update/ConflictResolveWorkflowExecution: the write outcome is unknown,
+    /// so renew the RangeID (later reads either see that write or know it failed, and the immediate read
+    /// level moves past its task ids); if the renew fails, close the shard.
+    pub fn renew_range_after_unknown_write_error(&self) {
+        let failed = {
+            let mut g = self.inner.lock().unwrap();
+            self.renew_range_locked(&mut g, false).is_err()
+        };
+        if failed {
+            tracing::warn!(shard_id = self.shard_id, "Closing shard: write failed due to unknown error.");
+            self.close_shard(None);
+        }
+    }
+
     /// Held by a writer from transfer-id allocation until the write result and read-level update are done, so a higher
     /// read level never overtakes a lower, not yet committed task id (Go does this under the shard lock).
     pub async fn lock_task_writes(&self) -> tokio::sync::OwnedMutexGuard<()> {

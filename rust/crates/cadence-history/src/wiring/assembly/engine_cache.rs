@@ -85,6 +85,21 @@ pub(super) fn notify_needed_on_error(err: &pc::PersistenceError) -> bool {
     crate::common::is_operation_possibly_successful_error(Some(err))
 }
 
+/// Go Create/Update/ConflictResolveWorkflowExecution: errors for which the write is known to have
+/// failed. Any other error (except ShardOwnershipLost, which closes the shard) leaves the outcome
+/// unknown and makes Go renew the shard range.
+pub(super) fn write_outcome_unknown(err: &pc::PersistenceError) -> bool {
+    !matches!(
+        err,
+        pc::PersistenceError::ShardOwnershipLost { .. }
+            | pc::PersistenceError::ConditionFailed { .. }
+            | pc::PersistenceError::WorkflowAlreadyStarted { .. }
+            | pc::PersistenceError::CurrentWorkflowConditionFailed { .. }
+            | pc::PersistenceError::DuplicateRequest { .. }
+            | pc::PersistenceError::ServiceBusy { .. }
+    )
+}
+
 impl EngineCore {
     /// Go `shard.GetEngine().NotifyNewHistoryEvent`. No engine yet: nothing to wake.
     pub(super) fn notify_history_event(&self, event: crate::engine::runtime::HistoryNotification) {
@@ -508,6 +523,9 @@ impl EngineExecutionContext {
                 core.notify_tasks_after_failed_write(&e, &txn.transfer, &txn.timer);
                 if matches!(e, cadence_persistence::history_contract::PersistenceError::ShardOwnershipLost { .. }) {
                     shard.close_shard(None);
+                }
+                if write_outcome_unknown(&e) {
+                    shard.renew_range_after_unknown_write_error();
                 }
                 Err(to_history_error(e))
             }

@@ -452,7 +452,12 @@ impl EngineWorkflowResetter {
                 workflow_request_mode: pc::WorkflowRequestMode::New,
                 current_timestamp_unix_nanos: prepared.now,
             };
-            core.executions.create_workflow_execution(create).await.map(|_| ()).map_err(to_history_error)
+            core.executions.create_workflow_execution(create).await.map(|_| ()).map_err(|e| {
+                if super::engine_cache::write_outcome_unknown(&e) {
+                    shard.renew_range_after_unknown_write_error();
+                }
+                to_history_error(e)
+            })
         };
         let result = match result {
             Ok(()) => {

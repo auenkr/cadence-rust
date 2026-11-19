@@ -612,6 +612,9 @@ impl WorkflowStartHost for EngineStartHost {
                 if matches!(e, pc::PersistenceError::ShardOwnershipLost { .. }) {
                     shard.close_shard(None);
                 }
+                if super::engine_cache::write_outcome_unknown(&e) {
+                    shard.renew_range_after_unknown_write_error();
+                }
                 Err(to_history_error(e))
             }
         }
