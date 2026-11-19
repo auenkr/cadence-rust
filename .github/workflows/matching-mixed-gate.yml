@@ -7,7 +7,8 @@ on:
         default: "--matching-restart --matching-failure-recovery --matching-idle-check-seconds 3"
 
 concurrency:
-  group: matching-mysql-gate-${{ github.ref }}
+  # Dispatches are independent samples: include run_id so parallel workers never cancel each other.
+  group: matching-mysql-gate-${{ github.ref }}-${{ github.run_id }}
   cancel-in-progress: true
 
 jobs:

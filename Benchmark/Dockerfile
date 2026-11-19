@@ -1,5 +1,8 @@
 # Benchmark-only image: package selects Matching/Frontend launcher or standalone History.
 ARG GO_IMAGE=cadence-go:ci
+# BIN_STAGE=prebuilt reuses binaries restored from the CI cache (Benchmark/prebuilt in the context);
+# the builder stage is then skipped entirely by BuildKit.
+ARG BIN_STAGE=builder
 
 FROM rust:1-alpine AS builder
 RUN apk add --no-cache musl-dev gcc g++ make cmake perl git pkgconf openssl-dev openssl-libs-static linux-headers
@@ -14,22 +17,28 @@ ENV OPENSSL_STATIC=1 OPENSSL_DIR=/usr CARGO_PROFILE_RELEASE_DEBUG=0 CARGO_PROFIL
 RUN if [ "$PROFILE" = 1 ]; then printf 'CARGO_PROFILE_RELEASE_DEBUG=line-tables-only\nCARGO_PROFILE_RELEASE_STRIP=none\nRUSTFLAGS="-C force-frame-pointers=yes"\n' > /profile.env; else : > /profile.env; fi
 RUN rustc -Vv > /cadence-toolchain.txt
 ARG RUST_PACKAGE=cadence-server
+ARG JOBS=2
 RUN set -a; . /profile.env; set +a; if [ "${RUST_PACKAGE}" = all ]; then \
-      cargo build --release -p cadence-server -p cadence-history --features cadence-server/jemalloc-default,cadence-history/jemalloc-default -j2 && \
+      cargo build --release -p cadence-server -p cadence-history --features cadence-server/jemalloc-default,cadence-history/jemalloc-default -j${JOBS} && \
       cp target/release/cadence-server /cadence-server && cp target/release/cadence-history /cadence-history; \
-    else cargo build --release -p ${RUST_PACKAGE} --features ${RUST_PACKAGE}/jemalloc-default -j2 && cp target/release/${RUST_PACKAGE} /cadence-server; fi \
+    else cargo build --release -p ${RUST_PACKAGE} --features ${RUST_PACKAGE}/jemalloc-default -j${JOBS} && cp target/release/${RUST_PACKAGE} /cadence-server; fi \
     && sha256sum /cadence-server > /cadence-server.sha256
+
+FROM scratch AS prebuilt
+COPY Benchmark/prebuilt/ /
+
+FROM ${BIN_STAGE} AS bin
 
 FROM ${GO_IMAGE} AS runtime
 USER root
-COPY --from=builder --chown=cadence:cadence /cadence-server /usr/local/bin/cadence-server
-COPY --from=builder /cadence-toolchain.txt /etc/cadence/cadence-toolchain.txt
-COPY --from=builder /cadence-server.sha256 /etc/cadence/cadence-server.sha256
+COPY --from=bin --chown=cadence:cadence /cadence-server /usr/local/bin/cadence-server
+COPY --from=bin /cadence-toolchain.txt /etc/cadence/cadence-toolchain.txt
+COPY --from=bin /cadence-server.sha256 /etc/cadence/cadence-server.sha256
 COPY --chown=cadence:cadence rust/docker/cadence-auto-setup.sh /usr/local/bin/cadence-auto-setup.sh
 ENV CADENCE_SCHEMA_HELPER=/usr/local/bin/cadence-auto-setup.sh
 USER cadence
 
 # All-Rust needs both launchers; reuse the exact same builder output.
 FROM runtime AS history
-COPY --from=builder --chown=cadence:cadence /cadence-history /usr/local/bin/cadence-server
+COPY --from=bin --chown=cadence:cadence /cadence-history /usr/local/bin/cadence-server
 FROM runtime AS final

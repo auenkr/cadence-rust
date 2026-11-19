@@ -62,7 +62,7 @@ on:
 
 concurrency:
   # Pushes cancel superseded pushes; dispatches are unique per package+SHA so parallel runs are not cancelled.
-  group: rust-ci-${{ github.ref }}-${{ github.event_name }}-${{ inputs.package || 'all' }}-${{ github.event_name == 'workflow_dispatch' && github.sha || 'push' }}
+  group: rust-ci-${{ github.ref }}-${{ github.event_name }}-${{ inputs.package || 'all' }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || 'push' }}
   cancel-in-progress: true
 
 jobs:
@@ -96,6 +96,25 @@ jobs:
           name: system-heap-analysis
           path: data/heap-profiles/
           retention-days: 3
+  fmt:
+    # Fast fail: the enforced rustfmt checks finish in ~30s on their own runner; on failure the whole
+    # run is cancelled so `gh run watch` returns before clippy/test (previously ~4-7 min).
+    if: inputs.heap_profile_run_id == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Enforced rustfmt checks
+        working-directory: rust
+        run: bash ../scripts/ci/rust-fmt-check.sh all
+      - name: Cancel run on formatting failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel ${{ github.run_id }} -R ${{ github.repository }}
   clippy-test:
     if: inputs.heap_profile_run_id == ''
     runs-on: ubuntu-latest
@@ -646,13 +665,7 @@ jobs:
           exit 0
       - name: Check changed Matching runtime formatting
         working-directory: rust
-        run: |
-          set +e
-          rustfmt --edition 2021 --check crates/cadence-matching/src/launcher.rs crates/cadence-matching/src/matching_config.rs crates/cadence-matching/src/matching_runtime.rs crates/cadence-matching/src/matching_registry.rs crates/cadence-matching/src/matching_writer.rs crates/cadence-persistence/src/dynamic_config.rs crates/cadence-service-core/src/admin.rs crates/cadence-service-core/src/openfeature/runtime.rs > matching-runtime-format.log 2>&1
-          result=$?
-          echo "$result" > matching-runtime-format.exit
-          cat matching-runtime-format.log
-          exit "$result"
+        run: bash ../scripts/ci/rust-fmt-check.sh matching-runtime
       - name: Test batched heap profile analysis
         if: inputs.heap_profile_checks == true
         run: python3 tests/gates/test-system-heap-symbolize.py
@@ -675,13 +688,7 @@ jobs:
           exit "$result"
       - name: Formatting
         working-directory: rust
-        run: |
-          set +e
-          rustfmt --edition 2021 --check crates/cadence-service-core/src/openfeature/unleash_engine.rs crates/cadence-service-core/src/openfeature/unleash.rs crates/cadence-frontend/src/lib.rs crates/cadence-frontend/src/main.rs crates/cadence-frontend/src/config.rs crates/cadence-frontend/src/handler_admin.rs crates/cadence-frontend/src/handler_domain.rs crates/cadence-frontend/src/handler_schedule.rs crates/cadence-frontend/src/handler_workflow.rs crates/cadence-frontend/src/handler_workflow_async.rs crates/cadence-frontend/src/history_client.rs crates/cadence-frontend/src/lifecycle.rs crates/cadence-frontend/src/matching_client.rs crates/cadence-frontend/src/request_validator.rs crates/cadence-frontend/src/wrappers/mod.rs crates/cadence-frontend/src/wrappers/accesscontrolled.rs crates/cadence-frontend/src/wrappers/clusterredirection.rs crates/cadence-frontend/src/wrappers/metered.rs crates/cadence-frontend/src/wrappers/ratelimited.rs crates/cadence-frontend/src/wrappers/thrift.rs crates/cadence-frontend/src/wrappers/versioncheck.rs > fmt.log 2>&1
-          result=$?
-          echo "$result" > fmt.exit
-          cat fmt.log
-          exit "$result"
+        run: bash ../scripts/ci/rust-fmt-check.sh frontend
       - name: Test
         working-directory: rust
         run: |

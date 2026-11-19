@@ -10,7 +10,8 @@ on:
         default: false
 
 concurrency:
-  group: matching-raw-runid-oracle-${{ github.ref }}
+  # Dispatches are independent samples: include run_id so parallel workers never cancel each other.
+  group: matching-raw-runid-oracle-${{ github.ref }}-${{ github.run_id }}
   cancel-in-progress: true
 
 jobs:

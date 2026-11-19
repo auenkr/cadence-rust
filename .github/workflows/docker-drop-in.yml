@@ -6,7 +6,8 @@ on:
         description: Services switched to the Rust image (comma list of frontend,matching)
         default: "frontend,matching"
 concurrency:
-  group: docker-drop-in-${{ github.ref }}
+  # Dispatches are independent samples: include run_id so parallel workers never cancel each other.
+  group: docker-drop-in-${{ github.ref }}-${{ github.run_id }}
   cancel-in-progress: true
 jobs:
   drop-in:
