@@ -4,7 +4,7 @@
 //! executor adapters, and the conversion of engine notifications (which carry the full persisted
 //! task since queue v2 piece A) into `queuev2` `NotifyTaskInfo` for the cached queue reader.
 //!
-//! Not wired into the queue factory yet (queue v2 piece C); queue v1 stays the only active path.
+//! Wired into the queue factory by `queue_v2_wiring` (queue v2 piece C).
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 

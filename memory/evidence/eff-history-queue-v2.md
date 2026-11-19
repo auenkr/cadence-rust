@@ -49,3 +49,45 @@ QueueEnv + task/processor/rescheduler/executor adapters (wiring/assembly/queue_v
 Tests: transfer/timer end-to-end via adapters, cached reader serves notified tasks w/o DB and falls back on eviction/miss, timer gate.
 - rust-ci (cadence-history): https://github.com/auenkr/cadence-rust/actions/runs/44498733522 success (head 8b18d3d07)
 - History MySQL gate: https://github.com/auenkr/cadence-rust/actions/runs/44498744144 success, `GATE SUMMARY failed: []`
+
+## Piece C/D (queue-v2-c-switch, 2026-11-19)
+Piece C: new module `wiring/assembly/queue_v2_wiring.rs`:
+- `queue_v2_config(&Config)` builds the v2 config.
+- `TracingV2Logger` is the v2 logger.
+- `QueueV2Exec` holds the v2 inputs. Its executor wrapper is active plus a standby for the current cluster, as Go `createQueuev2` builds it.
+- `is_queue_v2_enabled` / `build_queue_v2` call `queuev2::{transfer,timer}_queue_factory`. The cached reader is used per `*CachedQueueReaderMode`.
+- `EngineQueueV2` adapts v2 `Queue` to the engine `QueueProcessor`:
+  - start runs on a spawned task, and stop waits for it before stopping.
+  - notify passes the full tasks to the cached reader.
+  - failover is forwarded.
+  - handle_action returns no states, the same as Go v2 `HandleAction` returning (nil, nil).
+  - lock/unlock are no-ops, as in Go.
+  - Queue state is persisted through `RealQueueV2ShardContext` (shard `queue_states`).
+- `queues::build_queue_processors` picks per category and per shard on `history.enable{Transfer,Timer}QueueV2` (default true). When the flag is false it builds v1.
+- `queue_provider` builds the v2 inputs.
+- Gate harness: `history-mixed-gate.yml` input `queue_v2` is now a choice: false (config as is; development.yaml turns v2 on), true, or off (forces v1 in the Rust dynamic config).
+
+| check | run | result |
+|---|---|---|
+| rust-ci cadence-history (283b331ee) | https://github.com/auenkr/cadence-rust/actions/runs/44501314413 | success |
+| History gate MySQL (v2, 38b320752) | https://github.com/auenkr/cadence-rust/actions/runs/44502702719 | success, `GATE SUMMARY failed: []` |
+| History gate Postgres (v2) | https://github.com/auenkr/cadence-rust/actions/runs/44502708348 | success, `GATE SUMMARY failed: []` |
+| History gate Cassandra (v2) | https://github.com/auenkr/cadence-rust/actions/runs/44502713556 | success, `GATE SUMMARY failed: []` |
+| History gate MySQL queue_v2=off (v1) | https://github.com/auenkr/cadence-rust/actions/runs/44502719529 | success, `GATE SUMMARY failed: []` |
+| restartgate mysql, branch | https://github.com/auenkr/cadence-rust/actions/runs/44502725563 , https://github.com/auenkr/cadence-rust/actions/runs/44513227729 | failure: soak-driver-exit, zero-failed-workflows, all-started-completed ("no matching hosts in the membership ring") |
+| restartgate mysql, master 0e5c84050 | https://github.com/auenkr/cadence-rust/actions/runs/44513215209 | same failure, so it predates this branch (last restartgate run before this, 2026-11-14 43543900094, also failed) |
+
+The two-history kill/restart phase inside the mixed gates (two_history=true by default) passed on all three databases, so the v2 queue survived shard movement.
+
+Benchmark settings: 25 wf/s, 60 s, mysql_tmpfs, one pair each. Before = master 0e5c84050, after = 38b320752. Completion latency is in ms. CPU is History container CPU-seconds.
+
+| benchmark | run | Go p50/p99, CPU | Rust p50/p99, CPU |
+|---|---|---|---|
+| history-only, before | https://github.com/auenkr/cadence-rust/actions/runs/44507631170 | 94.6/1533.9, 36.8 | 52.5/210.8, 23.1 |
+| history-only, after | https://github.com/auenkr/cadence-rust/actions/runs/44507603232 | 34.7/111.0, 19.2 | 29.0/99.5, 13.1 |
+| all services, before | https://github.com/auenkr/cadence-rust/actions/runs/44507636498 | 77.6/253.3, 34.3 | 36.1/197.8, 18.1 |
+| all services, after | https://github.com/auenkr/cadence-rust/actions/runs/44507608741 | 78.8/255.6, 34.9 | 36.5/105.8, 18.4 |
+
+SELECT counts per table (mysql_digests): transfer_tasks = 13 and timer_tasks = 13 in every arm, both before and after, for Go and Rust. The digest window shows no difference in queue reads, so I can't claim a read reduction. The history-only "before" pair was noisy: its Go arm was also slow. The all-services Rust p99 dropped from 197.8 to 105.8 ms, with p50 and CPU flat. This is one pair only.
+
+Verdict: the v2 switch defaults to on, as in Go. CI and all mixed gates pass on MySQL, Postgres and Cassandra, and the v1 fallback passes too. The restart gate fails on master as well, so that failure is not from this change.
