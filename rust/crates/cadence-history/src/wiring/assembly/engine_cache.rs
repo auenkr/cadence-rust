@@ -85,6 +85,21 @@ pub(super) fn notify_needed_on_error(err: &pc::PersistenceError) -> bool {
     crate::common::is_operation_possibly_successful_error(Some(err))
 }
 
+/// Go Create/Update/ConflictResolveWorkflowExecution: errors for which the write is known to have
+/// failed. Any other error (except ShardOwnershipLost, which closes the shard) leaves the outcome
+/// unknown and makes Go renew the shard range.
+pub(super) fn write_outcome_unknown(err: &pc::PersistenceError) -> bool {
+    !matches!(
+        err,
+        pc::PersistenceError::ShardOwnershipLost { .. }
+            | pc::PersistenceError::ConditionFailed { .. }
+            | pc::PersistenceError::WorkflowAlreadyStarted { .. }
+            | pc::PersistenceError::CurrentWorkflowConditionFailed { .. }
+            | pc::PersistenceError::DuplicateRequest { .. }
+            | pc::PersistenceError::ServiceBusy { .. }
+    )
+}
+
 impl EngineCore {
     /// Go `shard.GetEngine().NotifyNewHistoryEvent`. No engine yet: nothing to wake.
     pub(super) fn notify_history_event(&self, event: crate::engine::runtime::HistoryNotification) {
@@ -322,13 +337,13 @@ impl EngineExecutionContext {
         if !state.is_dirty() {
             return Ok(());
         }
-        self.persist(&state, now, true, None, None).await
+        self.persist(&state, now, true, None, None, None).await
     }
 
     /// Go `UpdateWorkflowExecutionAsPassive`.
     pub async fn update_as_passive(&self, now: i64) -> HResult<()> {
         let state = self.load_state().await?;
-        self.persist(&state, now, false, None, None).await
+        self.persist(&state, now, false, None, None, None).await
     }
 
     /// Go `UpdateWorkflowExecutionWithNewAsActive`: persists this (terminated)
@@ -337,10 +352,11 @@ impl EngineExecutionContext {
         &self,
         now: i64,
         new_snapshot: pc::WorkflowSnapshot,
+        new_tasks: (&[pc::TransferTask], &[pc::TimerTask]),
         held_gate: &tokio::sync::OwnedMutexGuard<()>,
     ) -> HResult<()> {
         let state = self.load_state().await?;
-        self.persist(&state, now, true, Some(new_snapshot), Some(held_gate)).await
+        self.persist(&state, now, true, Some(new_snapshot), Some(new_tasks), Some(held_gate)).await
     }
 
     /// Go `UpdateWorkflowExecutionWithNewAsActive` with the new run's mutable state:
@@ -357,10 +373,11 @@ impl EngineExecutionContext {
         // Go holds the shard lock from task-id allocation through the write.
         let gate = core.shard.lock_task_writes().await;
         let (snapshot, max_read_level, transfer, timer) = crate::wiring::assembly::engine_start::snapshot_of(core, txn)?;
-        self.update_with_new_as_active(now, snapshot, &gate).await?;
+        // The new run's tasks are notified inside persist, before the read level moves
+        // (Go notifyingExecutionManager runs before updateMaxReadLevelLocked).
+        self.update_with_new_as_active(now, snapshot, (&transfer, &timer), &gate).await?;
         core.shard.update_max_read_level(max_read_level);
         drop(gate);
-        core.notify_tasks(&transfer, &timer);
         new_run.finish_transaction(size, last);
         Ok(())
     }
@@ -371,7 +388,7 @@ impl EngineExecutionContext {
         if !state.is_dirty() {
             return Ok(());
         }
-        self.persist(&state, now, false, None, None).await
+        self.persist(&state, now, false, None, None, None).await
     }
 
     /// Close the transaction, assign task ids, append the history batch and
@@ -382,6 +399,7 @@ impl EngineExecutionContext {
         now: i64,
         active: bool,
         new_snapshot: Option<pc::WorkflowSnapshot>,
+        new_tasks: Option<(&[pc::TransferTask], &[pc::TimerTask])>,
         held_gate: Option<&tokio::sync::OwnedMutexGuard<()>>,
     ) -> HResult<()> {
         let core = &self.core;
@@ -485,8 +503,12 @@ impl EngineExecutionContext {
         };
         match core.executions.update_workflow_execution(request).await {
             Ok(()) => {
-                shard.update_max_read_level(max_read_level);
+                // Go notifyingExecutionManager notifies (cache inject) before updateMaxReadLevelLocked.
                 core.notify_tasks(&txn.transfer, &txn.timer);
+                if let Some((t, tm)) = new_tasks {
+                    core.notify_tasks(t, tm);
+                }
+                shard.update_max_read_level(max_read_level);
                 state.finish_transaction(history_size, last_event_task_id);
                 // Go execution/context.go updateWorkflowExecutionWithNew: every successful
                 // mutation wakes history long polls, including close and continue-as-new.
@@ -506,8 +528,14 @@ impl EngineExecutionContext {
             }
             Err(e) => {
                 core.notify_tasks_after_failed_write(&e, &txn.transfer, &txn.timer);
+                if let Some((t, tm)) = new_tasks {
+                    core.notify_tasks_after_failed_write(&e, t, tm);
+                }
                 if matches!(e, cadence_persistence::history_contract::PersistenceError::ShardOwnershipLost { .. }) {
                     shard.close_shard(None);
+                }
+                if write_outcome_unknown(&e) {
+                    shard.renew_range_after_unknown_write_error();
                 }
                 Err(to_history_error(e))
             }

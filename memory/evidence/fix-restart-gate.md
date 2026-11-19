@@ -80,3 +80,44 @@ Validation of the fix branch:
   history logs show 29x "Fail to process task error=context deadline exceeded". Some appear before faults.
 Status: OPEN. A second queue-v2-specific issue remains. Next steps: compare restart gate with
 history.enableTransferQueueV2/enableTimerQueueV2=false on master (if green, v2 path), then per category (transfer only / timer only).
+
+## fix-v2-restart bisect (2026-11-19/20)
+Restart gate MySQL 600s, branch fix-v2-restart:
+- v1 (both v2 off): PASS 44569724164, 44569731235
+- transfer-only v2: FAIL 44569673637, 44569679791; timer-only v2: FAIL 44569687064, 44569693894
+- v2 cached reader disabled/shadow: FAIL 44576178696, 44576186728, 44576194660 (cached reader not the cause)
+- Fix efe0ad7ce (scheduled max read level held while a task write is in flight; Go shard-lock parity):
+  rust-ci cadence-history 44582621160 success; timer-only v2 PASS 44582627935, 44582633770;
+  default (both v2) FAIL 44582640507, 44582648353; transfer-only FAIL 44582654324.
+- Open: transfer v2 tasks delayed 5-10s (decision scheduled->started 9.3s). Read-level/notify ordering verified matches Go.
+- Transfer-only 44582654324 vs v1 pass 44569724164: steady-state identical (e2e p50 4065 vs 4063ms, p99 35.6s vs 34.5s).
+  v2 adds 10 failures, all inside fault windows (0 failed in first ~400): 6x result "TChannel error 1: Request timed out"/deadline,
+  4x query "must handle at least one decision task". The earlier "9s steady-state delay" was fault-window recovery, not steady state.
+
+## 2026-11-19/20: transfer v2 lost decision tasks, root cause and fix (head dca628c49)
+
+Comparison runs before the fix (bb9eb2a85):
+- restart gate, both v2, 600s: 44598123434 failed=9, 44598130499 failed=16. Failures were stuck runs (DecisionTaskScheduled only) and the result/query errors that follow from them.
+- restart gate, queue_v2=v1, 1500s: 44598137891 success.
+- restart gate, both v2, cached_reader=disabled, 600s: 44605815266 success. This narrows the fault to the v2 cached immediate queue reader.
+
+Root cause: the v2 cached immediate reader serves `[ack, maxReadLevel)` from its in-memory cache. Go injects written tasks into the cache through `notifyingExecutionManager` inside the shard lock, before `updateMaxReadLevelLocked`. Its reader then takes the shard RLock to read the level. Rust differed in two ways:
+1. It published the immediate max read level before it notified (injected), sometimes after dropping the write gate. A concurrent v2 read could cover a task ID not yet in the cache and skip that task for good.
+2. `update_workflow_execution_with_new_as_active` (engine_start) never notified the new run's tasks at all.
+
+Fixes on fix-v2-restart:
+- fa0a634c5: notify the new run's tasks after the update-with-new write.
+  - Alone, this made the gate worse: 44606414877 failed=39, from the ordering race in (1).
+- 97f7688af: notify (inject) before `update_max_read_level` on every write path.
+  - The new-run tasks are notified inside persist together with the mutation; the resetter uses `take_pending_tasks`.
+  - Cassandra mixed gate 44614353596 then failed once, with "Context timeout is too short" on RespondDecisionTaskFailed: a lost queue wake delayed the decision task.
+- dca628c49: the v2 immediate `process_new_tasks` awaits in-flight task writes (`lock_task_writes`) before reading the level. This matches Go's RLock in `getImmediateTaskMaxReadLevel`, so a wake from notify always sees the new level.
+
+Validation at dca628c49 (all success):
+- rust-ci cadence-history: https://github.com/auenkr/cadence-rust/actions/runs/44617689979
+- History mixed gate MySQL: https://github.com/auenkr/cadence-rust/actions/runs/44617697434
+- History mixed gate Cassandra: https://github.com/auenkr/cadence-rust/actions/runs/44617704654
+- Restart gate, both v2, 1500s, run A: https://github.com/auenkr/cadence-rust/actions/runs/44617711152
+- Restart gate, both v2, 1500s, run B: https://github.com/auenkr/cadence-rust/actions/runs/44617717446
+
+There is no Go-baseline restart workflow, so no Go flake rate was measured.

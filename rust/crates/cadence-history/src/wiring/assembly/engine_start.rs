@@ -601,8 +601,9 @@ impl WorkflowStartHost for EngineStartHost {
         };
         match self.core.executions.create_workflow_execution(request).await {
             Ok(_) => {
-                shard.update_max_read_level(max_read_level);
+                // Go notifyingExecutionManager notifies (cache inject) before updateMaxReadLevelLocked.
                 self.core.notify_tasks(&notify_transfer, &notify_timer);
+                shard.update_max_read_level(max_read_level);
                 new_run.state.finish_transaction(size, last);
                 ctx.set_state(new_run.state.clone());
                 Ok(())
@@ -611,6 +612,9 @@ impl WorkflowStartHost for EngineStartHost {
                 self.core.notify_tasks_after_failed_write(&e, &notify_transfer, &notify_timer);
                 if matches!(e, pc::PersistenceError::ShardOwnershipLost { .. }) {
                     shard.close_shard(None);
+                }
+                if super::engine_cache::write_outcome_unknown(&e) {
+                    shard.renew_range_after_unknown_write_error();
                 }
                 Err(to_history_error(e))
             }
@@ -630,8 +634,10 @@ impl WorkflowStartHost for EngineStartHost {
         let mut txn = state.close_transaction(now, true)?;
         let (size, last, _blob) = append_new_branch(&self.core, &mut txn, &execution_info_string(new_context)).await?;
         let gate = self.core.shard.lock_task_writes().await;
-        let (snap, max_read_level, _, _) = snapshot_of(&self.core, txn)?;
-        running_ctx.update_with_new_as_active(now, snap, &gate).await?;
+        let (snap, max_read_level, notify_transfer, notify_timer) = snapshot_of(&self.core, txn)?;
+        // Go taskNotifier also notifies the new workflow snapshot's tasks (inside persist,
+        // before the read level moves) so the cached queue reader injects them.
+        running_ctx.update_with_new_as_active(now, snap, (&notify_transfer, &notify_timer), &gate).await?;
         self.core.shard.update_max_read_level(max_read_level);
         drop(gate);
         state.finish_transaction(size, last);

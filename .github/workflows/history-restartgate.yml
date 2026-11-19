@@ -15,6 +15,16 @@ on:
       seconds:
         description: SDK load duration in seconds
         default: "1500"
+      queue_v2:
+        description: Rust History queue v2 (default = config as is; off; transfer = only transfer v2; timer = only timer v2)
+        type: choice
+        options: [default, v1, transfer, timer]
+        default: default
+      cached_reader:
+        description: Rust queue v2 cached reader mode override (default = config as is)
+        type: choice
+        options: [default, disabled, shadow, enabled]
+        default: default
 
 concurrency:
   group: history-restartgate-${{ github.ref }}-${{ github.run_id }}
@@ -72,6 +82,8 @@ jobs:
         env:
           CADENCE_GATE_SCRIPT: run-history-restartgate.py
           CADENCE_GATE_TWO_HISTORY: "true"
+          CADENCE_GATE_QUEUE_V2: ${{ inputs.queue_v2 || 'default' }}
+          CADENCE_GATE_CACHED_READER: ${{ inputs.cached_reader || 'default' }}
           RUST_BACKTRACE: 1
           RUST_LOG: warn,cadence_history::service=info,cadence_history::launcher=info,cadence_history::task::parallel_processor=info
         run: |
@@ -90,6 +102,7 @@ jobs:
           tail -40 out/gate.log | cut -c1-300
           mkdir -p out/up/logs
           for f in out/gate/run/*.log; do [ -f "$f" ] && tail -n 400 "$f" > "out/up/logs/$(basename "$f")"; done
+          for f in out/gate/run/rust-history*.log; do [ -f "$f" ] && grep -a -E "WARN|ERROR|shard|Shard" "$f" | gzip -9 > "out/up/logs/$(basename "$f").filtered.gz"; done
           cp out/gate/run/{steps.json,summary.json,restartgate-result.json,samples.jsonl,soak-driver.log,rust-binary.sha256,rust-history-binary.sha256} out/up/ 2>/dev/null || true
           cp out/head-sha.txt out/rust-binaries.sha256 out/gate.exit out/up/
           exit "$result"

@@ -284,6 +284,9 @@ impl QueueBase {
     pub fn unlock_task_processing(&self) {}
 
     pub async fn process_new_tasks(&self) -> bool {
+        if self.category.type_() == HISTORY_TASK_CATEGORY_TYPE_IMMEDIATE {
+            self.shard.wait_for_task_writes().await;
+        }
         let mut new_exclusive_max_task_key = self
             .shard
             .update_if_needed_and_get_queue_max_read_level(

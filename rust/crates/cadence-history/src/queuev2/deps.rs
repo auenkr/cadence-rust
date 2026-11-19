@@ -542,6 +542,12 @@ pub trait ShardContext: Send + Sync {
         cluster: &str,
     ) -> HistoryTaskKey;
     fn get_current_cluster_name(&self) -> String;
+    /// Go reads the immediate max read level under the shard read lock, which waits for
+    /// an in-flight task write (it holds the shard lock through notify and the level
+    /// update). Waits for such a write to finish; no-op where there is no write gate.
+    fn wait_for_task_writes(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
+        Box::pin(async {})
+    }
 }
 
 /// Constructors that live in other (not yet ported here) packages: `task.NewRescheduler`,

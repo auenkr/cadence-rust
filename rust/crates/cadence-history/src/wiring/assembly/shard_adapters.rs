@@ -413,4 +413,9 @@ impl v2::ShardContext for RealQueueV2ShardContext {
     fn get_current_cluster_name(&self) -> String {
         self.cluster.current_cluster_name()
     }
+    fn wait_for_task_writes(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
+        Box::pin(async move {
+            drop(self.shard.lock_task_writes().await);
+        })
+    }
 }

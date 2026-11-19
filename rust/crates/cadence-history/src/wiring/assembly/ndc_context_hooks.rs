@@ -141,6 +141,12 @@ impl EngineNdcContextHooks {
     pub fn new(core: Arc<EngineCore>) -> Self {
         Self { core, pending: PendingTasks::default(), task_write_gate: None }
     }
+
+    /// Hands the allocated tasks to a writer that notifies them itself (Go notifies the
+    /// new workflow snapshot's tasks with the mutation); the read level stays pending.
+    pub(super) fn take_pending_tasks(&mut self) -> (Vec<pc::TransferTask>, Vec<pc::TimerTask>) {
+        (std::mem::take(&mut self.pending.transfer), std::mem::take(&mut self.pending.timer))
+    }
 }
 
 fn internal(msg: impl Into<String>) -> HistoryError {
@@ -364,9 +370,10 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
 
     fn tasks_committed(&mut self) {
         let pending = std::mem::take(&mut self.pending);
+        // Go notifyingExecutionManager notifies (cache inject) before updateMaxReadLevelLocked.
+        self.core.notify_tasks(&pending.transfer, &pending.timer);
         self.core.shard.update_max_read_level(pending.max_read_level);
         self.task_write_gate = None;
-        self.core.notify_tasks(&pending.transfer, &pending.timer);
     }
 
     fn write_failed(&mut self, error: &HistoryError) {

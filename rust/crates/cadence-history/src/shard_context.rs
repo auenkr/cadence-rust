@@ -387,6 +387,20 @@ impl ShardContext {
         Ok(())
     }
 
+    /// Go `default:` branch of Create/Update/ConflictResolveWorkflowExecution: the write outcome is unknown,
+    /// so renew the RangeID (later reads either see that write or know it failed, and the immediate read
+    /// level moves past its task ids); if the renew fails, close the shard.
+    pub fn renew_range_after_unknown_write_error(&self) {
+        let failed = {
+            let mut g = self.inner.lock().unwrap();
+            self.renew_range_locked(&mut g, false).is_err()
+        };
+        if failed {
+            tracing::warn!(shard_id = self.shard_id, "Closing shard: write failed due to unknown error.");
+            self.close_shard(None);
+        }
+    }
+
     /// Held by a writer from transfer-id allocation until the write result and read-level update are done, so a higher
     /// read level never overtakes a lower, not yet committed task id (Go does this under the shard lock).
     pub async fn lock_task_writes(&self) -> tokio::sync::OwnedMutexGuard<()> {
@@ -415,6 +429,18 @@ impl ShardContext {
     }
 
     fn update_scheduled_task_max_read_level(&self, cluster: &str) -> HistoryTaskKey {
+        // Go advances the level under the shard lock, which every task write holds from id
+        // allocation through the DB write, so the level never passes an allocated but not yet
+        // committed timer. Here writers hold `task_write_gate` instead: while one is in flight,
+        // keep the current level (every uncommitted timer was allocated above it).
+        let _write_gate = match self.task_write_gate.try_lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                let g = self.inner.lock().unwrap();
+                let level = g.scheduled_task_max_read_level.get(cluster).copied().unwrap_or(0);
+                return HistoryTaskKey::scheduled(level, 0);
+            }
+        };
         let mut g = self.inner.lock().unwrap();
         let mut current = self.now();
         if !cluster.is_empty() && cluster != self.cluster.current_cluster_name() {

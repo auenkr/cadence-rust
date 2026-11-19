@@ -440,7 +440,8 @@ impl EngineWorkflowResetter {
                 .as_any()
                 .and_then(|a| a.downcast_ref::<EngineExecutionContext>())
                 .ok_or_else(|| HistoryError::internal("workflow resetter: current context is not an engine context"))?;
-            context.update_with_new_as_active(prepared.now, prepared.snapshot, &gate).await
+            let (transfer, timer) = hooks.take_pending_tasks();
+            context.update_with_new_as_active(prepared.now, prepared.snapshot, (&transfer, &timer), &gate).await
         } else {
             let create = pc::CreateWorkflowExecutionRequest {
                 shard_id: shard.shard_id(),
@@ -452,7 +453,12 @@ impl EngineWorkflowResetter {
                 workflow_request_mode: pc::WorkflowRequestMode::New,
                 current_timestamp_unix_nanos: prepared.now,
             };
-            core.executions.create_workflow_execution(create).await.map(|_| ()).map_err(to_history_error)
+            core.executions.create_workflow_execution(create).await.map(|_| ()).map_err(|e| {
+                if super::engine_cache::write_outcome_unknown(&e) {
+                    shard.renew_range_after_unknown_write_error();
+                }
+                to_history_error(e)
+            })
         };
         let result = match result {
             Ok(()) => {
