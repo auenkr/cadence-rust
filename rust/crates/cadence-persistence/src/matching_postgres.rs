@@ -30,7 +30,15 @@ use uuid::Uuid;
 /// runtimes where block_in_place is unavailable. Scoped threads preserve the
 /// synchronous API and borrowed transaction inputs without changing SQL behavior.
 pub(crate) fn outside_runtime<T: Send>(operation: impl FnOnce() -> T + Send) -> T {
-    if tokio::runtime::Handle::try_current().is_ok() {
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        // Multi-thread runtimes: block_in_place exits the runtime context on
+        // the current thread (hands its queue to another worker), so the
+        // driver's nested block_on is allowed without spawning an OS thread
+        // per call. Current-thread runtimes cannot block_in_place; keep the
+        // scoped-thread fallback there.
+        if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread {
+            return tokio::task::block_in_place(operation);
+        }
         std::thread::scope(|scope| match scope.spawn(operation).join() {
             Ok(result) => result,
             Err(panic) => std::panic::resume_unwind(panic),
@@ -1781,5 +1789,24 @@ mod runtime_boundary_tests {
         assert!(outside_runtime(
             || tokio::runtime::Handle::try_current().is_err()
         ));
+    }
+
+    /// Multi-thread runtimes use block_in_place (no per-call OS thread); the
+    /// sync driver's nested runtime block_on must still be allowed, including
+    /// when wrapped by history_sql_backend::blocking (nested block_in_place).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn multi_thread_boundary_allows_nested_runtime_on_same_thread() {
+        let caller = std::thread::current().id();
+        let (same_thread, value) = crate::history_sql_backend::blocking(|| {
+            outside_runtime(|| {
+                let inner = tokio::runtime::Builder::new_current_thread()
+                    .build()
+                    .expect("inner runtime");
+                let value = inner.block_on(async { 7 });
+                (std::thread::current().id() == caller, value)
+            })
+        });
+        assert!(same_thread);
+        assert_eq!(value, 7);
     }
 }
