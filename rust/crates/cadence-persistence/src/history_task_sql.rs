@@ -63,8 +63,14 @@ impl SqlHistoryTasks {
             (2, 2) => Statement::InsertTimerTask,
             _ => return Ok(()),
         };
+        // Go InsertInto{Transfer,Timer,Replication}Tasks: one sqlx NamedExec with all
+        // rows (a single multi-row INSERT), then RowsAffected must equal len(rows).
+        if tasks.is_empty() {
+            return Ok(());
+        }
+        let mut params = Vec::with_capacity(tasks.len() * 5);
         for task in tasks {
-            let mut params = vec![Value::I32(shard_id)];
+            params.push(Value::I32(shard_id));
             if category.category_type == 2 {
                 params.push(timestamp(task.visibility_timestamp_unix_nanos)?);
             }
@@ -73,12 +79,18 @@ impl SqlHistoryTasks {
                 Value::Bytes(task.data.data.clone()),
                 Value::Text(task.data.encoding.clone()),
             ]);
-            let count = tx.execute(dialect.statement(statement), &params)?;
-            if count != 1 {
-                return Err(internal(format!(
-                    "create history task inserted {count} instead of 1 rows"
-                )));
-            }
+        }
+        let single = dialect.statement(statement);
+        let count = if tasks.len() == 1 {
+            tx.execute(single, &params)?
+        } else {
+            tx.execute(&multi_row_insert(single, tasks.len()), &params)?
+        };
+        if count != tasks.len() as u64 {
+            return Err(internal(format!(
+                "create history task inserted {count} instead of {} rows",
+                tasks.len()
+            )));
         }
         Ok(())
     }
@@ -488,5 +500,58 @@ impl SqlHistoryTasks {
         }
         let query=match self.backend.dialect(){Dialect::MySql=>"DELETE FROM replication_tasks_dlq WHERE source_cluster_name=? AND shard_id=? AND task_id>=? AND task_id<?",Dialect::Postgres=>"DELETE FROM replication_tasks_dlq WHERE source_cluster_name=$1 AND shard_id=$2 AND task_id >= $3 AND task_id < $4"};
         self.backend.autocommit(|tx| tx.execute(query, &params))
+    }
+}
+
+/// Expand a single-row `INSERT ... VALUES(...)` into `rows` value tuples, renumbering
+/// Postgres `$n` placeholders (sqlx NamedExec batch expansion).
+fn multi_row_insert(single: &str, rows: usize) -> String {
+    let at = single.rfind("VALUES").expect("insert statement has VALUES");
+    let (head, tuple) = single.split_at(at + "VALUES".len());
+    let tuple = tuple.trim();
+    let width = tuple.matches('?').count() + tuple.matches('$').count();
+    let mut out = String::with_capacity(single.len() * rows);
+    out.push_str(head);
+    for row in 0..rows {
+        if row > 0 {
+            out.push(',');
+        }
+        if tuple.contains('$') {
+            let mut renumbered = String::new();
+            let mut chars = tuple.chars().peekable();
+            while let Some(c) = chars.next() {
+                if c == '$' {
+                    let mut n = String::new();
+                    while let Some(d) = chars.peek().filter(|d| d.is_ascii_digit()) {
+                        n.push(*d);
+                        chars.next();
+                    }
+                    let n: usize = n.parse().expect("placeholder index");
+                    renumbered.push_str(&format!("${}", n + row * width));
+                } else {
+                    renumbered.push(c);
+                }
+            }
+            out.push_str(&renumbered);
+        } else {
+            out.push_str(tuple);
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod multi_row_tests {
+    use super::multi_row_insert;
+    #[test]
+    fn expands_mysql_and_postgres() {
+        assert_eq!(
+            multi_row_insert("INSERT INTO t(a,b) VALUES(?,?)", 2),
+            "INSERT INTO t(a,b) VALUES(?,?),(?,?)"
+        );
+        assert_eq!(
+            multi_row_insert("INSERT INTO t(a,b) VALUES($1,$2)", 3),
+            "INSERT INTO t(a,b) VALUES($1,$2),($3,$4),($5,$6)"
+        );
     }
 }
