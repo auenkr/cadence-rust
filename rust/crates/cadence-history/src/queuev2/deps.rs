@@ -154,6 +154,10 @@ pub trait PersistenceTask: Send + Sync {
     fn is_failover_marker(&self) -> bool {
         false
     }
+    /// Concrete type access for the task-package adapters (Go type switches).
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        None
+    }
 }
 
 pub type PTask = Arc<dyn PersistenceTask>;
@@ -440,6 +444,9 @@ pub type TaskInitializer = Arc<dyn Fn(PTask) -> HTask + Send + Sync>;
 
 pub trait Processor: Send + Sync {
     fn try_submit(&self, t: HTask) -> Result<bool, DepError>;
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        None
+    }
 }
 
 pub trait Rescheduler: Send + Sync {
@@ -447,10 +454,17 @@ pub trait Rescheduler: Send + Sync {
     fn stop(&self);
     fn reschedule_task(&self, t: HTask, at: Time);
     fn reschedule_domains(&self, domain_ids: &std::collections::HashSet<String>);
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        None
+    }
 }
 
 /// `task.Executor`
-pub trait TaskExecutor: Send + Sync {}
+pub trait TaskExecutor: Send + Sync {
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        None
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QueueType {

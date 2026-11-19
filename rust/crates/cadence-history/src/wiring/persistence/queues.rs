@@ -45,6 +45,38 @@ impl SqlHistoryTask {
         self.timer.as_ref()
     }
 
+    /// Full transfer task as carried by an engine notification (no DB read).
+    pub fn from_transfer(t: pc::TransferTask) -> Self {
+        Self {
+            category_id: 1,
+            domain_id: t.domain_id.clone(),
+            workflow_id: t.workflow_id.clone(),
+            run_id: t.run_id.clone(),
+            task_id: t.task_id,
+            task_type: t.task_type,
+            version: t.version,
+            visibility_nanos: t.visibility_time_unix_nanos,
+            transfer: Some(t),
+            timer: None,
+        }
+    }
+
+    /// Full timer task as carried by an engine notification (no DB read).
+    pub fn from_timer(t: pc::TimerTask) -> Self {
+        Self {
+            category_id: 2,
+            domain_id: t.domain_id.clone(),
+            workflow_id: t.workflow_id.clone(),
+            run_id: t.run_id.clone(),
+            task_id: t.task_id,
+            task_type: t.task_type,
+            version: t.version,
+            visibility_nanos: t.visibility_timestamp_unix_nanos,
+            transfer: None,
+            timer: Some(t),
+        }
+    }
+
     fn decode(category: pc::HistoryTaskCategory, task: &pc::Task) -> Result<Self, String> {
         let value = sqlblobs::Encoding::parse(&task.data.encoding)
             .and_then(|e| e.decode(&task.data.data))
@@ -111,6 +143,9 @@ impl v2::PersistenceTask for SqlHistoryTask {
     }
     fn get_visibility_timestamp(&self) -> v2::Time {
         v2::unix_nano_time(self.visibility_nanos)
+    }
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
     }
 }
 

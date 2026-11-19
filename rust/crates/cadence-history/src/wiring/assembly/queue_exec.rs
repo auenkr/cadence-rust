@@ -40,7 +40,7 @@ impl DynamicRateLimiter {
 
     /// Go `rate.Limiter.reserveN(now, 1, maxWait)`: returns the wait before the token is usable,
     /// or `None` (consuming nothing) when it would exceed `max_wait`.
-    fn reserve(&self, now: Instant, max_wait: Duration) -> Option<Duration> {
+    pub(crate) fn reserve(&self, now: Instant, max_wait: Duration) -> Option<Duration> {
         let rps = (self.rps)();
         if rps <= 0 {
             return None;
