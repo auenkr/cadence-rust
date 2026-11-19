@@ -927,14 +927,15 @@ impl<B: WorkflowBackend> Handler<B> {
             )?;
         }
         if let Some(redirector) = &self.redirector {
-            let redirect_request = request.clone();
+            // The redirector reads the request by reference; only the
+            // dispatch continuation needs an owned copy.
             let next = |target_cluster| {
                 self.dispatch_metered(operation, request.clone(), caller, target_cluster)
             };
             return redirector
                 .invoke_with_headers(
                     operation,
-                    &redirect_request,
+                    &request,
                     &caller.original_headers,
                     Box::new(next),
                 )
