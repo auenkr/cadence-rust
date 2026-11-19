@@ -35,6 +35,9 @@ on:
       mysql_tmpfs:
         description: 'Put MySQL datadir on tmpfs (true) to remove runner disk-fsync variance; same for both arms'
         default: 'false'
+      sql_log_secs:
+        description: 'Diagnostics: capture MySQL general log for N seconds of the measurement window (0 = off)'
+        default: '0'
 concurrency:
   # Dispatches are independent samples: include run_id so parallel workers never cancel each other.
   group: sdk-matching-benchmark-${{ github.ref }}-${{ inputs.service || 'matching' }}-${{ github.run_id }}
@@ -82,6 +85,7 @@ jobs:
           REPETITION_OFFSET: ${{ inputs.repetition_offset }}
           PROFILE: ${{ inputs.profile }}
           MYSQL_TMPFS: ${{ inputs.mysql_tmpfs }}
+          SQL_LOG_SECS: ${{ inputs.sql_log_secs }}
         run: bash Benchmark/ci.sh
       - uses: actions/cache/save@v4
         if: ${{ always() && steps.bincache.outputs.cache-hit != 'true' && hashFiles('.rust-bin/cadence-server') != '' }}
