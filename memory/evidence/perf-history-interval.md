@@ -1,4 +1,4 @@
-# perf-history-interval — UNVERIFIED / PAUSED (2026-11-19)
+# perf-history-interval — CLOSED: no gap (2026-11-19)
 
 Goal: explain Rust History-lane p99 ~195 ms vs Go ~110 ms at 25/s (perf-history-tail.md).
 
@@ -35,8 +35,19 @@ Runs 44435311006 and 44435327350 (dispatched on master) were cancelled. Another 
 started History benchmarks on master, and the workflow concurrency group
 (ref + service) cancels earlier runs. Benchmark only on your own branch.
 
-## Next steps (on resume)
-1. Run 5/s 3 pairs on perf-history-interval. Optionally rerun 25/s, since pair 01 had the Go arm collapse.
-2. If parity holds, close as "no gap"; there is no code change.
-3. Run history-mixed-gate mysql/grpc and postgres/tchannel only if a code change lands.
-4. Delete /mnt/storage/service/tmp/phi-4116588.
+## Resume results (branch perf-history-interval = master 56b58c6c1, completion p99 ms, 3 pairs)
+
+| rate | run | pair 00 Go/Rust | 01 Go/Rust | 02 Go/Rust |
+|---|---|---|---|---|
+| 25/s | [44435934016](https://github.com/auenkr/cadence-rust/actions/runs/44435934016) | 212 / 195 | 2797 (Go collapsed) / 217 | 405 / 360 |
+| 25/s | [44472845239](https://github.com/auenkr/cadence-rust/actions/runs/44472845239) | 191 / 203 | 175 / 215 | 193 / 212 |
+| 5/s | [44439914369](https://github.com/auenkr/cadence-rust/actions/runs/44439914369) (noisy, both arms) | 108 / 255 | 483 / 462 | 318 / 425 |
+| 5/s | [44468013476](https://github.com/auenkr/cadence-rust/actions/runs/44468013476) | 73 / 60 | 79 / 74 | 74 / 61 |
+
+## Conclusion: no gap
+Go's p99 at 25/s is 175-212 ms on clean runners, not ~110 ms. Rust stays inside the
+same band (195-217 ms). In the clean 25/s repeat it is about 10-40 ms higher; in the first
+batch it is lower. At 5/s the clean batch has Rust at or below Go. No fixed ~200 ms
+interval exists. The audit found no timer, wakeup or retry deviation from Go.
+No code change, so no rust-ci or history-mixed-gate run is required.
+The diagnostic branch `tmp/diag-history-interval` (bd5fc9a4c) is NOT for merge.
