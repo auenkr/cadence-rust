@@ -232,14 +232,12 @@ pub struct RingpopClusterMembership(pub Arc<MatchingRingpopProvider>, pub RoleRi
 /// Per-role hash ring built once per membership snapshot instead of on every
 /// owner lookup (same hosts, same ring, same lookup result).
 #[derive(Default)]
-pub struct RoleRingCache(
-    std::sync::Mutex<
-        Vec<(
-            &'static str,
-            Arc<Vec<PeerMember>>,
-            Arc<cadence_common::membership::Ring>,
-        )>,
-    >,
+pub struct RoleRingCache(std::sync::Mutex<Vec<CachedRoleRing>>);
+
+type CachedRoleRing = (
+    &'static str,
+    Arc<Vec<PeerMember>>,
+    Arc<cadence_common::membership::Ring>,
 );
 
 impl RoleRingCache {
