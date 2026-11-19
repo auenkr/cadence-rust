@@ -1176,14 +1176,21 @@ pub(crate) struct PollGuard {
 impl Drop for PollGuard {
     fn drop(&mut self) {
         if let Ok(mut polls) = self.polls.lock() {
-            if polls.get(&self.poller).is_some_and(|(g, _)| *g == self.generation) {
+            if polls
+                .get(&self.poller)
+                .is_some_and(|(g, _)| *g == self.generation)
+            {
                 polls.remove(&self.poller);
             }
         }
     }
 }
 
-pub(crate) fn track_poll(polls: &PollPartitions, poller: &str, partition: &str) -> Option<PollGuard> {
+pub(crate) fn track_poll(
+    polls: &PollPartitions,
+    poller: &str,
+    partition: &str,
+) -> Option<PollGuard> {
     if poller.is_empty() {
         return None;
     }
@@ -1192,7 +1199,11 @@ pub(crate) fn track_poll(polls: &PollPartitions, poller: &str, partition: &str) 
         .lock()
         .ok()?
         .insert(poller.to_owned(), (generation, partition.to_owned()));
-    Some(PollGuard { polls: polls.clone(), poller: poller.to_owned(), generation })
+    Some(PollGuard {
+        polls: polls.clone(),
+        poller: poller.to_owned(),
+        generation,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1252,7 +1263,9 @@ mod poll_tracking_tests {
         };
         let mut fut = Box::pin(fut);
         let waker = std::task::Waker::noop();
-        let _ = fut.as_mut().poll(&mut std::task::Context::from_waker(waker));
+        let _ = fut
+            .as_mut()
+            .poll(&mut std::task::Context::from_waker(waker));
         assert_eq!(polls.lock().unwrap().len(), 1);
         drop(fut);
         assert!(polls.lock().unwrap().is_empty());
@@ -1290,9 +1303,21 @@ mod poll_tracking_tests {
     #[test]
     fn poll_feedback_updates_root_partition_config() {
         let lb = MatchingLoadBalancer::new(Arc::new(Dc));
-        let root = ty::TaskList { name: "tl".into(), ..Default::default() };
+        let root = ty::TaskList {
+            name: "tl".into(),
+            ..Default::default()
+        };
         let config = PartitionConfig::from_parts(4, 3, HashMap::new(), 2, HashMap::new());
-        poll_feedback(&lb, "id", "", &root, "/__cadence_sys/tl/2", 0, Some(config.clone()), None);
+        poll_feedback(
+            &lb,
+            "id",
+            "",
+            &root,
+            "/__cadence_sys/tl/2",
+            0,
+            Some(config.clone()),
+            None,
+        );
         assert_eq!(lb.provider().partition_config("id", "tl", true, 0), config);
         assert_eq!(lb.provider().number_of_read_partitions("id", "tl", true, 0), 3);
     }
