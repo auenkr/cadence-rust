@@ -25,9 +25,32 @@ git -C /tmp/cadence-benchmark-go init -q
 git -C /tmp/cadence-benchmark-go add -A
 git -C /tmp/cadence-benchmark-go -c user.email=ci@example.com -c user.name=ci commit -qm ci
 docker build -f /tmp/cadence-benchmark-go/Dockerfile --target cadence-auto-setup -t cadence-go:ci /tmp/cadence-benchmark-go > Benchmark/evidence/run/go-build.log 2>&1
-docker build --no-cache -f Benchmark/Dockerfile --build-arg GO_IMAGE=cadence-go:ci --build-arg PROFILE="${PROFILE:-0}" --build-arg RUST_PACKAGE="$rust_package" -t cadence-rust:ci "$BENCHMARK_SOURCE_DIR" > Benchmark/evidence/run/rust-build.log 2>&1
+# Rust binaries: reuse a prebuilt set (restored by the workflow from the GitHub cache, keyed on the
+# rust/ + IDL tree hashes, package and profile) or build fresh with --no-cache and export the set.
+prebuilt="$BENCHMARK_SOURCE_DIR/Benchmark/prebuilt"
+bin_stage=builder
+if [[ -n "${RUST_BIN_CACHE:-}" && -f "$RUST_BIN_CACHE/cadence-server" ]]; then
+  rm -rf "$prebuilt"; mkdir -p "$prebuilt"; cp -a "$RUST_BIN_CACHE/." "$prebuilt/"
+  bin_stage=prebuilt
+  echo "rust binaries: cache hit ($(cat "$prebuilt/cadence-server.sha256"))" | tee Benchmark/evidence/run/rust-bin-source.txt
+else
+  mkdir -p "$prebuilt"
+  echo "rust binaries: fresh build" | tee Benchmark/evidence/run/rust-bin-source.txt
+fi
+rust_args=(-f Benchmark/Dockerfile --build-arg GO_IMAGE=cadence-go:ci --build-arg PROFILE="${PROFILE:-0}" --build-arg RUST_PACKAGE="$rust_package" --build-arg JOBS="$(nproc)" --build-arg BIN_STAGE="$bin_stage")
+docker build --no-cache "${rust_args[@]}" -t cadence-rust:ci "$BENCHMARK_SOURCE_DIR" > Benchmark/evidence/run/rust-build.log 2>&1
 if [[ "$service" == all ]]; then
-  docker build -f Benchmark/Dockerfile --target history --build-arg GO_IMAGE=cadence-go:ci --build-arg PROFILE="${PROFILE:-0}" --build-arg RUST_PACKAGE=all -t cadence-rust-history:ci "$BENCHMARK_SOURCE_DIR" > Benchmark/evidence/run/rust-history-image.log 2>&1
+  docker build --target history "${rust_args[@]}" -t cadence-rust-history:ci "$BENCHMARK_SOURCE_DIR" > Benchmark/evidence/run/rust-history-image.log 2>&1
+fi
+if [[ "$bin_stage" == builder && -n "${RUST_BIN_CACHE:-}" ]]; then
+  mkdir -p "$RUST_BIN_CACHE"; cid=$(docker create cadence-rust:ci)
+  docker cp "$cid:/usr/local/bin/cadence-server" "$RUST_BIN_CACHE/cadence-server"
+  docker cp "$cid:/etc/cadence/cadence-toolchain.txt" "$RUST_BIN_CACHE/cadence-toolchain.txt"
+  docker cp "$cid:/etc/cadence/cadence-server.sha256" "$RUST_BIN_CACHE/cadence-server.sha256"
+  docker rm "$cid" > /dev/null
+  if [[ "$service" == all ]]; then
+    cid=$(docker create cadence-rust-history:ci); docker cp "$cid:/usr/local/bin/cadence-server" "$RUST_BIN_CACHE/cadence-history"; docker rm "$cid" > /dev/null
+  fi
 fi
 (cd "$BENCHMARK_SOURCE_DIR/go" && go build -p 2 -ldflags='-s -w' -o "$GITHUB_WORKSPACE/Benchmark/bin/cli" ./cmd/tools/cli)
 if [[ "${PROFILE:-0}" == 1 ]]; then

@@ -62,7 +62,8 @@ on:
         default: ""
 
 concurrency:
-  group: frontend-mixed-gate-${{ github.ref }}-${{ inputs.database }}-${{ inputs.es_flavor }}-${{ inputs.es }}-${{ inputs.gcs }}-${{ inputs.two_history_graceful }}-${{ inputs.rust_history }}-${{ inputs.two_cluster }}-${{ inputs.rust_history_side }}-${{ inputs.rust_frontend_active }}-${{ inputs.repl_rust_cluster }}-${{ inputs.repl_run_tag }}
+  # Dispatches are independent samples: include run_id so parallel workers never cancel each other.
+  group: frontend-mixed-gate-${{ github.ref }}-${{ inputs.database }}-${{ inputs.es_flavor }}-${{ inputs.es }}-${{ inputs.gcs }}-${{ inputs.two_history_graceful }}-${{ inputs.rust_history }}-${{ inputs.two_cluster }}-${{ inputs.rust_history_side }}-${{ inputs.rust_frontend_active }}-${{ inputs.repl_rust_cluster }}-${{ inputs.repl_run_tag }}-${{ github.run_id }}
   cancel-in-progress: true
 
 jobs:

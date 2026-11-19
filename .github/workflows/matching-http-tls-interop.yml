@@ -4,7 +4,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: matching-http-tls-interop-${{ github.ref }}
+  # Dispatches are independent samples: include run_id so parallel workers never cancel each other.
+  group: matching-http-tls-interop-${{ github.ref }}-${{ github.run_id }}
   cancel-in-progress: true
 
 jobs:

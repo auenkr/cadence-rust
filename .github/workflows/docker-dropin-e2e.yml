@@ -13,7 +13,8 @@ on:
         description: cadence-samples commit
         default: cc365fe999740e61b1bca45816fedd5b6adaa876
 concurrency:
-  group: docker-dropin-e2e-${{ github.ref }}
+  # Dispatches are independent samples: include run_id so parallel workers never cancel each other.
+  group: docker-dropin-e2e-${{ github.ref }}-${{ github.run_id }}
   cancel-in-progress: true
 jobs:
   e2e:

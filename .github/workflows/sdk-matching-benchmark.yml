@@ -2,6 +2,10 @@ name: SDK service fixed arrival benchmark
 on:
   workflow_dispatch:
     inputs:
+      fresh_build:
+        description: Ignore the cached Rust binaries for this tree and build with --no-cache (final evidence)
+        type: boolean
+        default: false
       service:
         description: Isolated service to replace
         type: choice
@@ -29,7 +33,8 @@ on:
         description: Starting pair index (odd runs Rust first)
         default: '0'
 concurrency:
-  group: sdk-matching-benchmark-${{ github.ref }}-${{ inputs.service || 'matching' }}
+  # Dispatches are independent samples: include run_id so parallel workers never cancel each other.
+  group: sdk-matching-benchmark-${{ github.ref }}-${{ inputs.service || 'matching' }}-${{ github.run_id }}
   cancel-in-progress: true
 jobs:
   service-pair:
@@ -50,10 +55,23 @@ jobs:
           cache-dependency-path: |
             Benchmark/go.sum
             go/go.sum
+      - name: Rust binary cache key (rust/ + IDL tree hashes, package, profile)
+        id: binkey
+        run: |
+          src=benchmark-source
+          key="bench-bin-v1-${{ inputs.service || 'matching' }}-p${{ inputs.profile || '0' }}-$(git -C $src rev-parse HEAD:rust)-$(git -C $src rev-parse HEAD:go/idls)-$(git -C $src rev-parse HEAD:go/proto)-$(sha256sum Benchmark/Dockerfile | cut -c1-16)"
+          echo "key=$key" >> "$GITHUB_OUTPUT"; echo "$key"
+      - uses: actions/cache/restore@v4
+        id: bincache
+        if: ${{ !inputs.fresh_build }}
+        with:
+          path: ${{ github.workspace }}/.rust-bin
+          key: ${{ steps.binkey.outputs.key }}
       - name: Build and benchmark (all implementation in Benchmark)
         env:
           SERVICE: ${{ inputs.service }}
           BENCHMARK_SOURCE_DIR: ${{ github.workspace }}/benchmark-source
+          RUST_BIN_CACHE: ${{ github.workspace }}/.rust-bin
           RATE: ${{ inputs.rate }}
           DURATION: ${{ inputs.duration }}
           WARMUP: ${{ inputs.warmup }}
@@ -61,6 +79,11 @@ jobs:
           REPETITION_OFFSET: ${{ inputs.repetition_offset }}
           PROFILE: ${{ inputs.profile }}
         run: bash Benchmark/ci.sh
+      - uses: actions/cache/save@v4
+        if: ${{ always() && steps.bincache.outputs.cache-hit != 'true' && hashFiles('.rust-bin/cadence-server') != '' }}
+        with:
+          path: ${{ github.workspace }}/.rust-bin
+          key: ${{ steps.binkey.outputs.key }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
