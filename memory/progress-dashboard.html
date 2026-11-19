@@ -141,7 +141,7 @@
 <li><b>Matching LB parity:</b> Go matching-client partition load balancer ported (FE polls, History add/query), task-type config filters, ReadOnlyPartition cache reset; forwarder audit clean; CI + 6 gates pass.</li>
 <li><b>Partitions:</b> 4 partitions at 30-35/s — Rust 6/6 vs Go 3/6. Ceiling (1 partition): 40/s both (MySQL commit/IO bound).</li>
 <li><b>History lane:</b> activity STS gap was ms timestamp truncation — fixed with nanosecond event clock (91b767573); decision STS gap already closed.</li>
-<li><b>Latest benchmark</b> (9592b349a, 3 pairs): Rust lower p50, CPU and RSS.</li>
+<li><b>Latest benchmark</b> (b6616d0d0, 2026-11-20, 3 pairs, tmpfs, 60 s): Rust p99 now ≤ Go in all lanes (History p99 0.91x, was 3.5x); all-Rust 25/s p50 0.55x, CPU 0.69x, RSS 0.84x; 40/s p99 107 vs 255 ms; at 60/s Go collapses, Rust 0 errors. <a href="evidence/bench-rerun-20261120.md">report</a></li>
 </ul>
 <table><thead><tr><th>Remaining gap</th><th>Rust</th><th>Go</th></tr></thead><tbody>
 <tr><td>History p99 completion @25/s (block_in_place tried, no gain)</td><td>~195 ms</td><td>~110 ms</td></tr>
