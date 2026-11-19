@@ -116,7 +116,11 @@ def mysql_snapshot(container):
        'Innodb_os_log_fsyncs','Innodb_data_fsyncs','Innodb_log_waits','Innodb_row_lock_waits',
        'Innodb_row_lock_time','Innodb_os_log_pending_fsyncs','Handler_commit',
        'Com_stmt_prepare','Com_stmt_execute','Com_stmt_close','Com_begin','Com_commit',
-       'Com_rollback','Com_set_option','Com_admin_commands','Com_stmt_reset');
+       'Com_rollback','Com_set_option','Com_admin_commands','Com_stmt_reset',
+       'Com_replace','Com_insert_select','Threads_created','Com_change_user','Com_stmt_send_long_data');
+      SELECT CONCAT('tio_ins_',OBJECT_NAME), COUNT_INSERT FROM performance_schema.table_io_waits_summary_by_table WHERE OBJECT_SCHEMA='cadence' AND COUNT_INSERT>0;
+      SELECT CONCAT('tio_upd_',OBJECT_NAME), COUNT_UPDATE FROM performance_schema.table_io_waits_summary_by_table WHERE OBJECT_SCHEMA='cadence' AND COUNT_UPDATE>0;
+      SELECT CONCAT('tio_del_',OBJECT_NAME), COUNT_DELETE FROM performance_schema.table_io_waits_summary_by_table WHERE OBJECT_SCHEMA='cadence' AND COUNT_DELETE>0;
       SELECT 'log_file_wait_ps', COALESCE(SUM(SUM_TIMER_WAIT),0)
         FROM performance_schema.file_summary_by_event_name WHERE EVENT_NAME LIKE 'wait/io/file/innodb/innodb_log_file';
       SELECT 'log_file_write_count', COALESCE(SUM(COUNT_WRITE),0)
