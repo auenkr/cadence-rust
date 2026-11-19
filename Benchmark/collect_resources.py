@@ -42,6 +42,27 @@ def _container_cgroups():
     return result
 
 
+def host_snapshot():
+    """Runner health: load, cumulative iowait/steal jiffies and IO/CPU pressure (to flag overloaded runners)."""
+    out = {}
+    try:
+        out["loadavg1"] = float(Path("/proc/loadavg").read_text().split()[0])
+        cpu = Path("/proc/stat").read_text().splitlines()[0].split()[1:]
+        out["iowait_jiffies"], out["steal_jiffies"] = int(cpu[4]), int(cpu[7])
+        out["total_jiffies"] = sum(int(v) for v in cpu[:8])
+    except (OSError, ValueError, IndexError):
+        pass
+    for kind in ("io", "cpu"):
+        try:
+            for line in Path(f"/proc/pressure/{kind}").read_text().splitlines():
+                fields = line.split()
+                if fields[0] == "some":
+                    out[f"{kind}_pressure_some_total_us"] = int(fields[4].split("=")[1])
+        except (OSError, ValueError, IndexError):
+            pass
+    return out
+
+
 def snapshot(containers):
     current = {}
     for name, (paths, version) in containers.items():
@@ -160,7 +181,7 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
     first = snapshot(selected)
     mysql_errors = []
     mysql_samples = [{"elapsed_seconds":0,"counters":mysql_snapshot(mysql_container)}] if mysql_container else []
-    timeline = [{"elapsed_seconds":0,"containers":first}]
+    timeline = [{"elapsed_seconds":0,"containers":first,"host":host_snapshot()}]
     last_timeline = last_mysql = 0
     if ready_event:
         Path(ready_event).write_text(started_at, encoding="utf-8")
@@ -179,7 +200,7 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
         now = snapshot(selected)
         elapsed = time.monotonic() - started
         if elapsed-last_timeline >= 1:
-            timeline.append({"elapsed_seconds":elapsed,"containers":now})
+            timeline.append({"elapsed_seconds":elapsed,"containers":now,"host":host_snapshot()})
             last_timeline = elapsed
         if mysql_container and elapsed-last_mysql >= 5:
             sample = mysql_sample(mysql_container, elapsed, mysql_errors)
@@ -198,7 +219,7 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
         if data["rss_bytes"] is not None:
             rss_peak[name] = max(rss_peak[name], data["rss_bytes"])
     elapsed = time.monotonic() - started
-    timeline.append({"elapsed_seconds":elapsed,"containers":last})
+    timeline.append({"elapsed_seconds":elapsed,"containers":last,"host":host_snapshot()})
     if mysql_container:
         sample = mysql_sample(mysql_container, elapsed, mysql_errors)
         if sample: mysql_samples.append(sample)
