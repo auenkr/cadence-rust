@@ -1,4 +1,4 @@
-# eff-fe-matching-cpu (2026-11-19) — PAUSED, UNVERIFIED
+# eff-fe-matching-cpu (2026-11-19) — DONE (fix verified by CI+gates; CPU gain unmeasured)
 
 Branch `eff-fe-matching-cpu` from master 56b58c6c1.
 
@@ -60,3 +60,39 @@ Raw table from first (invalid-after) pair, service container cpu_seconds / peak 
 - rust-ci a976c635c: cadence-matching 44441712799 success, cadence-frontend 44441716854 success.
 - Pinned benchmarks: before FE 44441894483 success, before MT 44441898274 success, after MT 44441839160 success,
   **after FE 44441831107 FAILURE** (not yet investigated). Table not yet extracted.
+
+## Resume 2026-11-19 (final)
+- 44441831107 (FE after) failure cause: report.py aborts on any correctness error; pairs 0/1 had 600-1100
+  deadline-exceeded timeouts in BOTH Go and Rust arms, pair 2 clean on both -> runner overload, not the change.
+- FE after rerun alone: 44468121697 (success, src 598a2b02f) but again degraded in BOTH arms (Go p99 113 ms -> 10-20 s);
+  not comparable with clean before 44441894483.
+- Gates on head 598a2b02f: matching-mixed-gate 44473225836 success (no GATE SUMMARY line printed);
+  frontend-mixed-gate 44473230543 success, `GATE SUMMARY failed: []`.
+
+### Matching (before 44441898274 src 56b58c6c1 | after 44441839160 src a976c635c), Matching container
+before src 56b58c6c1, after src a976c635c
+| pair | arm | before CPU s | before RSS MiB | before p50/p99 ms | before tput/s | after CPU s | after RSS MiB | after p50/p99 ms | after tput/s |
+|---|---|---:|---:|---|---:|---:|---:|---|---:|
+| 0 | go | 7.78 | 100.5 | 39.8/113.1 | 24.99 | 7.75 | 99.6 | 40.1/114.6 | 24.99 |
+| 0 | rust | 6.41 | 61.3 | 39.5/115.4 | 25.00 | 7.33 | 61.1 | 44.4/116.3 | 24.99 |
+| 1 | go | 7.78 | 100.2 | 40.0/114.8 | 24.98 | 7.96 | 100.2 | 41.2/117.5 | 24.98 |
+| 1 | rust | 6.13 | 61.2 | 38.4/107.8 | 24.99 | 7.02 | 60.8 | 41.9/112.9 | 24.99 |
+| 2 | go | 8.27 | 100.3 | 42.8/116.7 | 24.98 | 7.73 | 100.7 | 39.7/114.1 | 24.98 |
+| 2 | rust | 6.66 | 61.9 | 40.8/114.9 | 24.99 | 6.28 | 64.5 | 40.0/110.9 | 25.00 |
+
+### Frontend (before 44441894483 src 56b58c6c1 | after 44468121697 src 598a2b02f), Frontend container
+before src 56b58c6c1, after src 598a2b02f
+| pair | arm | before CPU s | before RSS MiB | before p50/p99 ms | before tput/s | after CPU s | after RSS MiB | after p50/p99 ms | after tput/s |
+|---|---|---:|---:|---|---:|---:|---:|---|---:|
+| 0 | go | 15.13 | 106.1 | 39.9/113.0 | 24.99 | 20.36 | 153.9 | 103.0/20354.0 | 23.18 |
+| 0 | rust | 9.16 | 72.5 | 38.3/114.6 | 24.99 | 13.28 | 97.1 | 73.7/13507.6 | 24.88 |
+| 1 | go | 15.03 | 106.5 | 40.6/115.3 | 24.98 | 18.65 | 136.4 | 87.8/14342.6 | 24.98 |
+| 1 | rust | 9.15 | 71.0 | 38.1/108.1 | 25.00 | 13.21 | 90.3 | 72.1/11992.2 | 24.99 |
+| 2 | go | 15.03 | 105.6 | 40.6/115.7 | 24.99 | 17.09 | 127.7 | 67.4/9895.6 | 24.99 |
+| 2 | rust | 9.22 | 70.6 | 38.7/111.2 | 25.00 | 13.80 | 91.4 | 74.5/12208.0 | 24.40 |
+
+### Conclusion
+Matching: no measurable change (within noise). Frontend: unmeasured; the after-run was degraded in both arms.
+Ring-cache fix is behaviour-neutral and gate-green; keep it. Remaining candidates: metrics_sink per-emit
+BTreeMap tags, serde_json Value round-trips in the redirector path. A clean FE comparison needs a quiet runner
+(before and after dispatched back to back, nothing else running).
