@@ -90,3 +90,6 @@ Restart gate MySQL 600s, branch fix-v2-restart:
   rust-ci cadence-history 44582621160 success; timer-only v2 PASS 44582627935, 44582633770;
   default (both v2) FAIL 44582640507, 44582648353; transfer-only FAIL 44582654324.
 - Open: transfer v2 tasks delayed 5-10s (decision scheduled->started 9.3s). Read-level/notify ordering verified matches Go.
+- Transfer-only 44582654324 vs v1 pass 44569724164: steady-state identical (e2e p50 4065 vs 4063ms, p99 35.6s vs 34.5s).
+  v2 adds 10 failures, all inside fault windows (0 failed in first ~400): 6x result "TChannel error 1: Request timed out"/deadline,
+  4x query "must handle at least one decision task". The earlier "9s steady-state delay" was fault-window recovery, not steady state.
