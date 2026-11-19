@@ -93,7 +93,9 @@ def mysql_snapshot(container):
       ('Threads_connected','Connections','Questions','Com_select','Com_insert',
        'Com_update','Com_delete','Aborted_connects','Threads_running',
        'Innodb_os_log_fsyncs','Innodb_data_fsyncs','Innodb_log_waits','Innodb_row_lock_waits',
-       'Innodb_row_lock_time','Innodb_os_log_pending_fsyncs','Handler_commit');
+       'Innodb_row_lock_time','Innodb_os_log_pending_fsyncs','Handler_commit',
+       'Com_stmt_prepare','Com_stmt_execute','Com_stmt_close','Com_begin','Com_commit',
+       'Com_rollback','Com_set_option','Com_admin_commands','Com_stmt_reset');
       SELECT 'log_file_wait_ps', COALESCE(SUM(SUM_TIMER_WAIT),0)
         FROM performance_schema.file_summary_by_event_name WHERE EVENT_NAME LIKE 'wait/io/file/innodb/innodb_log_file';
       SELECT 'log_file_write_count', COALESCE(SUM(COUNT_WRITE),0)
@@ -119,6 +121,32 @@ def mysql_snapshot(container):
                                   '-N','-B','-e',query], text=True,
                                  stderr=subprocess.DEVNULL, timeout=10)
     return {key: int(value) for key,value in (line.split('\t') for line in raw.splitlines())}
+
+
+DIGEST_QUERY = """SELECT COUNT_STAR, SUM_TIMER_WAIT, COALESCE(SCHEMA_NAME,''),
+  REPLACE(REPLACE(LEFT(DIGEST_TEXT,400),'\\t',' '),'\\n',' ')
+  FROM performance_schema.events_statements_summary_by_digest ORDER BY COUNT_STAR DESC LIMIT 200"""
+
+
+def mysql_digest_reset(container):
+    subprocess.run(['docker','exec',container,'mysql','-proot','-e',
+                    'TRUNCATE TABLE performance_schema.events_statements_summary_by_digest'],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, check=False)
+
+
+def mysql_digests(container):
+    """Per-statement-digest counts accumulated since mysql_digest_reset (measurement window)."""
+    try:
+        raw = subprocess.check_output(['docker','exec',container,'mysql','-proot','-N','-B','-e',DIGEST_QUERY],
+                                      text=True, stderr=subprocess.DEVNULL, timeout=20)
+    except (subprocess.SubprocessError, ValueError) as error:
+        return {"error": f"{type(error).__name__}: {error}"[:300]}
+    rows = []
+    for line in raw.splitlines():
+        parts = line.split('\t', 3)
+        if len(parts) == 4:
+            rows.append({"count": int(parts[0]), "wait_ps": int(parts[1]), "schema": parts[2], "digest": parts[3]})
+    return {"rows": rows}
 
 
 def mysql_sample(container, elapsed, errors):
@@ -158,6 +186,8 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
     started_at = datetime.now(timezone.utc).isoformat()
     started = time.monotonic()
     first = snapshot(selected)
+    if mysql_container:
+        mysql_digest_reset(mysql_container)
     mysql_errors = []
     mysql_samples = [{"elapsed_seconds":0,"counters":mysql_snapshot(mysql_container)}] if mysql_container else []
     timeline = [{"elapsed_seconds":0,"containers":first}]
@@ -199,9 +229,11 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
             rss_peak[name] = max(rss_peak[name], data["rss_bytes"])
     elapsed = time.monotonic() - started
     timeline.append({"elapsed_seconds":elapsed,"containers":last})
+    digests = None
     if mysql_container:
         sample = mysql_sample(mysql_container, elapsed, mysql_errors)
         if sample: mysql_samples.append(sample)
+        digests = mysql_digests(mysql_container)
     containers_result = {}
     for name, (_, version) in selected.items():
         try:
@@ -225,6 +257,7 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
               "interval_method": "start/end marker files" if start_event else "fixed duration",
               "containers": containers_result, "timeline": timeline,
               "mysql_samples": mysql_samples, "mysql_sample_errors": mysql_errors,
+              "mysql_digests": digests,
               "mysql_note": "Global SQL counters and total Performance Schema wait; includes observer queries. Query tail latency unavailable."}
     Path(output).write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
