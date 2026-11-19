@@ -207,13 +207,31 @@ def sql_log_stop(container, seconds):
                      "FROM mysql.general_log WHERE command_type IN ('Execute','Query')", timeout=120)
     except subprocess.SubprocessError as error:
         return {"error": f"{type(error).__name__}: {error}"[:300]}
+    # Per-table SELECT counts aggregated inside MySQL: server-side prepared executes (COM_STMT_EXECUTE,
+    # used by both the Go and Rust drivers) never reach events_statements_summary_by_digest, so the digest
+    # table only shows the collector's own probes (e.g. 13 transfer_tasks COUNT(*) samples per 60 s window).
+    # Blob parameters break line-based parsing above, so the table name is extracted with REGEXP_SUBSTR.
+    select_by_table = {}
+    try:
+        tbl = _mysql(container, "SELECT command_type, LOWER(REGEXP_SUBSTR(CONVERT(LEFT(argument,1000) USING latin1), "
+                     "'[Ff][Rr][Oo][Mm][[:space:]]+`?[A-Za-z_.`]+')) t, COUNT(*) FROM mysql.general_log "
+                     "WHERE command_type IN ('Execute','Query') AND LOWER(TRIM(CONVERT(LEFT(argument,20) USING latin1))) LIKE 'select%' "
+                     "GROUP BY command_type, t", timeout=120)
+        for line in tbl.splitlines():
+            cmd, t, n = (line.split('\t') + ['', '', '0'])[:3]
+            t = (t or 'NULL').replace('`', '')
+            t = t.split()[-1] if t.split() else t
+            key = f"{cmd} {t}"
+            select_by_table[key] = select_by_table.get(key, 0) + int(n)
+    except (subprocess.SubprocessError, ValueError) as error:
+        select_by_table = {"error": f"{type(error).__name__}: {error}"[:300]}
     counts = {}
     for line in raw.splitlines():
         cmd, _, arg = line.partition('\t')
         key = cmd + ' ' + _normalize_sql(arg)
         counts[key] = counts.get(key, 0) + 1
     rows = sorted(({"count": c, "statement": k} for k, c in counts.items()), key=lambda r: -r["count"])[:300]
-    return {"seconds": seconds, "rows": rows}
+    return {"seconds": seconds, "rows": rows, "select_by_table": select_by_table}
 
 
 def mysql_sample(container, elapsed, errors):

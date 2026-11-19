@@ -76,8 +76,8 @@ impl TimerActiveTaskExecutor {
    let now=self.base.shard.get_time_source().now();let mut changed=false;let mut resurrected=None;
    let threshold=self.dependencies.resurrection_check_min_delay(&w.domain_name());
    for sequence in w.user_timers(){let info=w.user_timer_info(sequence.event_id).ok_or_else(||TaskError::Other(format!("failed to find in user timer event ID: {}",sequence.event_id)))?;
-    if now.before(sequence.expiry){break;}
-    if now.sub(sequence.expiry)>=threshold||resurrected.is_some(){
+    if sequence.expiry.unix()>now.unix(){break;}
+    if Duration::from_secs((now.unix()-sequence.expiry.unix()) as u64)>=threshold||resurrected.is_some(){
      if resurrected.is_none(){resurrected=Some(w.resurrected_timers().await?);}
      if resurrected.as_ref().unwrap().contains(&info.timer_id){self.base.metrics_client.inc_counter("TimerQueueProcessorScope","TimerResurrectionCounter");self.base.logger.warn("Encounter resurrected timer, skip",&[]);w.delete_user_timer(&info.timer_id)?;changed=true;continue;}
     }
@@ -97,8 +97,8 @@ impl TimerActiveTaskExecutor {
    for sequence in w.activity_timers(){let Some(info)=w.activity_info(sequence.event_id) else{continue;};
    if sequence.attempt<info.attempt{continue;}
    
-   if now.before(sequence.expiry){break;}
-    if now.sub(sequence.expiry)>=threshold||resurrected.is_some(){if resurrected.is_none(){resurrected=Some(w.resurrected_activities().await?);}
+   if sequence.expiry.unix()>now.unix(){break;}
+    if Duration::from_secs((now.unix()-sequence.expiry.unix()) as u64)>=threshold||resurrected.is_some(){if resurrected.is_none(){resurrected=Some(w.resurrected_activities().await?);}
     if resurrected.as_ref().unwrap().contains(&info.schedule_id){self.base.metrics_client.inc_counter("TimerQueueProcessorScope","ActivityResurrectionCounter");self.base.logger.warn("Encounter resurrected activity, skip",&[]);w.delete_activity(info.schedule_id)?;changed=true;continue;}}
     if sequence.timer_type==TimerType::ScheduleToStart&&info.schedule_to_start_timeout>=self.dependencies.activity_max_schedule_to_start_timeout_for_retry(&domain).as_secs() as i32 {self.base.metrics_client.inc_counter("TimerActiveTaskActivityTimeoutScope","ActivityLostCounter");self.base.logger.warn("Potentially activity task lost",&[]);}
     if w.retry_activity(&info,sequence.timer_type)?{changed=true;continue;}
