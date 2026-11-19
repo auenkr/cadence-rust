@@ -274,7 +274,7 @@ impl SqlVisibilityWriter {
             time_value(d, row.scheduled_execution_time)?,
         ];
         let sql = started_sql(d);
-        self.backend.transaction(|tx: &mut dyn SqlTx| tx.execute(&sql, &params)).map(|_| ())
+        self.backend.autocommit_once(|tx: &mut dyn SqlTx| tx.execute(&sql, &params)).map(|_| ())
     }
 
     /// Go `RecordWorkflowExecutionClosed` (`ReplaceIntoVisibility`); fails with the
@@ -307,7 +307,7 @@ impl SqlVisibilityWriter {
             time_value(d, row.scheduled_execution_time)?,
         ];
         let sql = closed_sql(d);
-        let affected = self.backend.transaction(|tx: &mut dyn SqlTx| tx.execute(&sql, &params))?;
+        let affected = self.backend.autocommit_once(|tx: &mut dyn SqlTx| tx.execute(&sql, &params))?;
         if affected > 2 {
             // either adds a new row or deletes the old row and adds a new row
             return Err(PersistenceError::Internal(format!(
@@ -335,7 +335,7 @@ impl SqlVisibilityWriter {
             Dialect::Postgres => "DELETE FROM executions_visibility WHERE domain_id=$1 AND run_id=$2",
         };
         let params = vec![Value::Text(domain_id.into()), Value::Text(run_id.into())];
-        self.backend.transaction(|tx: &mut dyn SqlTx| tx.execute(sql, &params)).map(|_| ())
+        self.backend.autocommit(|tx: &mut dyn SqlTx| tx.execute(sql, &params)).map(|_| ())
     }
 
     pub async fn record_started_async(&self, row: VisibilityWriteRow) -> Result<(), PersistenceError> {

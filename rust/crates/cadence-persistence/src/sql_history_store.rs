@@ -84,6 +84,16 @@ impl GoHistoryV2Store for SqlHistoryV2Store {
             Value::Text(request.data.encoding),
         ];
         let dialect = self.backend.dialect();
+        if tree_blob.is_none() {
+            // Go's AppendHistoryNodes writes a non-new branch's node with a
+            // single non-transactional insert (txExecute only for new branches).
+            return self
+                .backend
+                .autocommit_once(|tx| {
+                    tx.execute(dialect.statement(Statement::InsertHistoryNode), &node)
+                })
+                .map(|_| ());
+        }
         self.backend.transaction(|tx| {
             let count = tx.execute(dialect.statement(Statement::InsertHistoryNode), &node)?;
             if tree_blob.is_some() && count != 1 {
@@ -130,7 +140,7 @@ impl GoHistoryV2Store for SqlHistoryV2Store {
             Value::I64(request.max_node_id),
             Value::I32(request.page_size),
         ];
-        let rows = self.backend.transaction(|tx| {
+        let rows = self.backend.autocommit(|tx| {
             tx.query(
                 self.backend
                     .dialect()
@@ -181,7 +191,7 @@ impl GoHistoryV2Store for SqlHistoryV2Store {
             Value::Bytes(data),
             Value::Text(encoding),
         ];
-        let count = self.backend.transaction(|tx| {
+        let count = self.backend.autocommit_once(|tx| {
             tx.execute(
                 self.backend
                     .dialect()
@@ -246,7 +256,7 @@ impl GoHistoryV2Store for SqlHistoryV2Store {
         request: HistoryBranchRequest,
     ) -> Result<Vec<HistoryTreeBranch>, PersistenceError> {
         let params = [Value::I32(request.shard_id), uuid(&request.tree_id)?];
-        let rows = self.backend.transaction(|tx| {
+        let rows = self.backend.autocommit(|tx| {
             tx.query(
                 self.backend.dialect().statement(Statement::GetHistoryTree),
                 &params,
@@ -281,7 +291,7 @@ impl GoHistoryV2Store for SqlHistoryV2Store {
             Value::I32(cursor.shard_id),
             Value::I32(page_size),
         ];
-        let rows = self.backend.transaction(|tx| {
+        let rows = self.backend.autocommit(|tx| {
             tx.query(
                 self.backend
                     .dialect()
