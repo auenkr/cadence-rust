@@ -76,6 +76,7 @@ pub mod sql_stats {
     pub static TRANSACTIONS: AtomicU64 = AtomicU64::new(0);
     pub static STATEMENTS: AtomicU64 = AtomicU64::new(0);
     pub static QUERIES: AtomicU64 = AtomicU64::new(0);
+    pub static AUTOCOMMITS: AtomicU64 = AtomicU64::new(0);
     pub fn enabled() -> bool {
         static INTERVAL: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
         INTERVAL
@@ -97,8 +98,9 @@ pub mod sql_stats {
     }
     pub fn line() -> String {
         format!(
-            "cadence-history sql stats: transactions={} exec={} query={}",
+            "cadence-history sql stats: transactions={} autocommit={} exec={} query={}",
             TRANSACTIONS.load(Ordering::Relaxed),
+            AUTOCOMMITS.load(Ordering::Relaxed),
             STATEMENTS.load(Ordering::Relaxed),
             QUERIES.load(Ordering::Relaxed)
         )
@@ -162,11 +164,12 @@ fn postgres_params(params: &[Value]) -> Vec<&(dyn postgres::types::ToSql + Sync)
         .collect()
 }
 /// MySQL transaction that poisons its pooled connection on connectivity errors.
-struct MySqlTx<'a, 'b> {
-    tx: mysql::Transaction<'b>,
+/// Generic over a transaction or a bare autocommit connection.
+struct MySqlTx<'a, Q: Queryable> {
+    tx: &'a mut Q,
     discard: &'a std::sync::atomic::AtomicBool,
 }
-impl MySqlTx<'_, '_> {
+impl<Q: Queryable> MySqlTx<'_, Q> {
     fn fail(&self, error: mysql::Error) -> PersistenceError {
         if error.is_connectivity_error() {
             self.discard
@@ -175,13 +178,19 @@ impl MySqlTx<'_, '_> {
         mysql_error(error)
     }
 }
-impl SqlTx for MySqlTx<'_, '_> {
+impl<Q: Queryable> SqlTx for MySqlTx<'_, Q> {
     fn execute(&mut self, sql: &str, params: &[Value]) -> Result<u64, PersistenceError> {
         sql_stats::count(&sql_stats::STATEMENTS);
-        self.tx
-            .exec_drop(sql, mysql_params(params))
-            .map_err(|e| self.fail(e))?;
-        Ok(self.tx.affected_rows())
+        let affected = match self.tx.exec_iter(sql, mysql_params(params)) {
+            Ok(result) => {
+                let affected = result.affected_rows();
+                // Dropping the result drains any remaining packets.
+                drop(result);
+                affected
+            }
+            Err(error) => return Err(self.fail(error)),
+        };
+        Ok(affected)
     }
     fn query(
         &mut self,
@@ -238,11 +247,13 @@ impl SqlTx for MySqlTx<'_, '_> {
             .collect()
     }
 }
-impl SqlTx for postgres::Transaction<'_> {
+macro_rules! postgres_sql_tx {
+    ($ty:ty) => {
+impl SqlTx for $ty {
     fn execute(&mut self, sql: &str, params: &[Value]) -> Result<u64, PersistenceError> {
         let statement = self.prepare(sql).map_err(postgres_error)?;
         let params = coerce_params(params, statement.params())?;
-        postgres::Transaction::execute(self, &statement, &postgres_params(&params))
+        <$ty>::execute(self, &statement, &postgres_params(&params))
             .map_err(postgres_error)
     }
     fn query(
@@ -253,7 +264,7 @@ impl SqlTx for postgres::Transaction<'_> {
     ) -> Result<Vec<Vec<Value>>, PersistenceError> {
         let statement = self.prepare(sql).map_err(postgres_error)?;
         let params = coerce_params(params, statement.params())?;
-        postgres::Transaction::query(self, &statement, &postgres_params(&params))
+        <$ty>::query(self, &statement, &postgres_params(&params))
             .map_err(postgres_error)?
             .into_iter()
             .map(|row| {
@@ -275,6 +286,10 @@ impl SqlTx for postgres::Transaction<'_> {
             .collect()
     }
 }
+    };
+}
+postgres_sql_tx!(postgres::Transaction<'_>);
+postgres_sql_tx!(postgres::Client);
 impl SqlBackend {
     pub fn mysql(store: &MySqlTaskStore) -> Self {
         Self(Backend::MySql(store.history_pool()))
@@ -305,6 +320,66 @@ impl SqlBackend {
             result
         })
     }
+    /// Runs statements on one pooled connection in autocommit mode (no
+    /// START TRANSACTION/COMMIT), matching Go's non-transactional
+    /// `db.SelectContext`/`ExecContext` calls for reads and single-statement
+    /// writes. Like database/sql's `maxBadConnRetries`, a connectivity
+    /// failure discards the connection and retries on another one (at most
+    /// twice); callers use this only for idempotent work.
+    pub fn autocommit<T>(
+        &self,
+        run: impl FnMut(&mut dyn SqlTx) -> Result<T, PersistenceError>,
+    ) -> Result<T, PersistenceError> {
+        self.autocommit_with_retries(2, run)
+    }
+    /// Autocommit for a non-idempotent single write (e.g. INSERT): never
+    /// re-sent after a connectivity error, whose outcome is unknown.
+    pub fn autocommit_once<T>(
+        &self,
+        run: impl FnMut(&mut dyn SqlTx) -> Result<T, PersistenceError>,
+    ) -> Result<T, PersistenceError> {
+        self.autocommit_with_retries(0, run)
+    }
+    fn autocommit_with_retries<T>(
+        &self,
+        retries: u32,
+        mut run: impl FnMut(&mut dyn SqlTx) -> Result<T, PersistenceError>,
+    ) -> Result<T, PersistenceError> {
+        sql_stats::count(&sql_stats::AUTOCOMMITS);
+        blocking(|| match &self.0 {
+            Backend::MySql(pool) => {
+                let mut attempt = 0;
+                loop {
+                    let mut conn = pool.checkout().map_err(internal)?;
+                    let discard = conn.discard_flag();
+                    let mut wrapped = MySqlTx {
+                        tx: &mut *conn as &mut mysql::Conn,
+                        discard: &discard,
+                    };
+                    match run(&mut wrapped) {
+                        Err(_)
+                            if attempt < retries
+                                && discard.load(std::sync::atomic::Ordering::Acquire) =>
+                        {
+                            attempt += 1;
+                        }
+                        result => return result,
+                    }
+                }
+            }
+            Backend::Postgres(pool) => {
+                let job = AssertSend(&mut run);
+                crate::matching_postgres::outside_runtime(move || {
+                    let job = job;
+                    AssertSend((|| {
+                        let mut conn = pool.checkout().map_err(internal)?;
+                        (job.0)(&mut *conn)
+                    })())
+                })
+                .0
+            }
+        })
+    }
     fn transaction_inner<T>(
         &self,
         run: impl FnOnce(&mut dyn SqlTx) -> Result<T, PersistenceError>,
@@ -327,7 +402,7 @@ impl SqlBackend {
                         }
                         mysql_error(error)
                     };
-                    let tx = match conn.start_transaction(mysql::TxOpts::default()) {
+                    let mut tx = match conn.start_transaction(mysql::TxOpts::default()) {
                         Ok(tx) => tx,
                         Err(error) if error.is_connectivity_error() && attempt < 2 => {
                             discard.store(true, std::sync::atomic::Ordering::Release);
@@ -337,11 +412,11 @@ impl SqlBackend {
                         Err(error) => return Err(poison(error)),
                     };
                     let mut wrapped = MySqlTx {
-                        tx,
+                        tx: &mut tx,
                         discard: &discard,
                     };
                     let result = (run.take().expect("run consumed once"))(&mut wrapped)?;
-                    wrapped.tx.commit().map_err(poison)?;
+                    tx.commit().map_err(poison)?;
                     return Ok(result);
                 }
             }
@@ -459,5 +534,16 @@ mod blocking_tests {
         let got = blocking(|| rx.recv_timeout(std::time::Duration::from_secs(5)));
         assert_eq!(got, Ok(1));
         handle.await.unwrap();
+    }
+}
+
+#[cfg(test)]
+mod sql_stats_tests {
+    #[test]
+    fn stats_line_reports_every_counter() {
+        let line = super::sql_stats::line();
+        for key in ["transactions=", "autocommit=", "exec=", "query="] {
+            assert!(line.contains(key), "{line}");
+        }
     }
 }

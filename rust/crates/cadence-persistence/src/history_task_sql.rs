@@ -124,7 +124,7 @@ impl SqlHistoryTasks {
                 } else {
                     Statement::SelectReplicationTasks
                 };
-                let rows = self.backend.transaction(|tx| {
+                let rows = self.backend.autocommit(|tx| {
                     tx.query(
                         dialect.statement(statement),
                         &[
@@ -184,7 +184,7 @@ impl SqlHistoryTasks {
                     timestamp(request.max_timestamp_unix_nanos)?,
                     Value::I32(request.page_size.wrapping_add(1)),
                 ]);
-                let rows = self.backend.transaction(|tx| {
+                let rows = self.backend.autocommit(|tx| {
                     tx.query(
                         dialect.statement(Statement::SelectTimerTasks),
                         &params,
@@ -331,7 +331,7 @@ impl SqlHistoryTasks {
             }
         };
         self.backend
-            .transaction(|tx| tx.execute(self.backend.dialect().statement(statement), &params))
+            .autocommit(|tx| tx.execute(self.backend.dialect().statement(statement), &params))
     }
     pub fn put_dlq(
         &self,
@@ -345,7 +345,7 @@ impl SqlHistoryTasks {
             .encoding
             .encode(&crate::sqlblobs::replication_task_to_struct(&task).map_err(internal)?)
             .map_err(internal)?;
-        let result = self.backend.transaction(|tx| {
+        let result = self.backend.autocommit_once(|tx| {
             tx.execute(
                 self.backend
                     .dialect()
@@ -371,7 +371,7 @@ impl SqlHistoryTasks {
         max: i64,
         page_size: i32,
     ) -> Result<Vec<ReplicationTask>, PersistenceError> {
-        let rows = self.backend.transaction(|tx| {
+        let rows = self.backend.autocommit(|tx| {
             tx.query(
                 self.backend
                     .dialect()
@@ -431,7 +431,7 @@ impl SqlHistoryTasks {
         })
     }
     pub fn dlq_size(&self, source_cluster: &str) -> Result<i64, PersistenceError> {
-        let rows = self.backend.transaction(|tx| {
+        let rows = self.backend.autocommit(|tx| {
             tx.query(
                 self.backend
                     .dialect()
@@ -448,7 +448,7 @@ impl SqlHistoryTasks {
             .integer()
     }
     pub fn delete_dlq(&self, source_cluster: &str, task_id: i64) -> Result<(), PersistenceError> {
-        self.backend.transaction(|tx| {
+        self.backend.autocommit(|tx| {
             tx.execute(
                 self.backend
                     .dialect()
@@ -477,7 +477,7 @@ impl SqlHistoryTasks {
         ];
         if page_size > 0 {
             params.push(Value::I32(page_size));
-            return self.backend.transaction(|tx| {
+            return self.backend.autocommit(|tx| {
                 tx.execute(
                     self.backend
                         .dialect()
@@ -487,6 +487,6 @@ impl SqlHistoryTasks {
             });
         }
         let query=match self.backend.dialect(){Dialect::MySql=>"DELETE FROM replication_tasks_dlq WHERE source_cluster_name=? AND shard_id=? AND task_id>=? AND task_id<?",Dialect::Postgres=>"DELETE FROM replication_tasks_dlq WHERE source_cluster_name=$1 AND shard_id=$2 AND task_id >= $3 AND task_id < $4"};
-        self.backend.transaction(|tx| tx.execute(query, &params))
+        self.backend.autocommit(|tx| tx.execute(query, &params))
     }
 }

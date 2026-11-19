@@ -688,7 +688,7 @@ impl SqlWorkflowStore {
             Value::Text(workflow.into()),
         ];
         self.backend
-            .transaction(|tx| self.current_tx(tx, &k, false))?
+            .autocommit(|tx| self.current_tx(tx, &k, false))?
             .ok_or_else(|| PersistenceError::EntityNotExists("current execution not found".into()))
     }
     pub fn get(
@@ -728,7 +728,7 @@ impl SqlWorkflowStore {
             if map == WorkflowStateMap::Activity {
                 columns.extend([Column::Bytes, Column::Timestamp]);
             }
-            let rows = self.backend.transaction(|tx| {
+            let rows = self.backend.autocommit(|tx| {
                 tx.query(
                     &workflow_state_map_statement(
                         self.backend.dialect(),
@@ -778,7 +778,7 @@ impl SqlWorkflowStore {
                 }
             }
         }
-        let events = self.backend.transaction(|tx| {
+        let events = self.backend.autocommit(|tx| {
             tx.query(
                 self.backend
                     .dialect()
@@ -796,7 +796,7 @@ impl SqlWorkflowStore {
                 })
             })
             .collect::<Result<_, PersistenceError>>()?;
-        let signals = self.backend.transaction(|tx| {
+        let signals = self.backend.autocommit(|tx| {
             tx.query(
                 self.backend
                     .dialect()
@@ -809,7 +809,7 @@ impl SqlWorkflowStore {
             .iter()
             .map(|r| r[0].text())
             .collect::<Result<_, _>>()?;
-        let rows = self.backend.transaction(|tx| {
+        let rows = self.backend.autocommit(|tx| {
             tx.query(
                 self.backend.dialect().statement(Statement::GetExecution),
                 &k,
@@ -962,7 +962,7 @@ impl GoExecutionStore for SqlWorkflowStore {
     ) -> Result<WorkflowSnapshot, PersistenceError> {
         let mut state = self.get(shard_id, &domain_id, &workflow_id, &run_id)?;
         if state.checksum.is_some() {
-            let rows = self.backend.transaction(|tx| {
+            let rows = self.backend.autocommit(|tx| {
                 tx.query(
                     &self.query("SELECT range_id FROM shards WHERE shard_id=?"),
                     &[Value::I32(shard_id)],
@@ -1035,7 +1035,7 @@ impl GoExecutionStore for SqlWorkflowStore {
                 ..Default::default()
             },
         )?;
-        self.backend.transaction(|tx| {
+        self.backend.autocommit(|tx| {
             tx.execute(
                 self.backend
                     .dialect()
@@ -1077,7 +1077,7 @@ impl GoExecutionStore for SqlWorkflowStore {
         } else {
             crate::history_tree_token::decode_execution(&filter.next_page_token)?
         };
-        let rows=self.backend.transaction(|tx|tx.query(&self.query("SELECT shard_id,domain_id,workflow_id,run_id,next_event_id,last_write_version,data,data_encoding FROM executions WHERE shard_id=? AND workflow_id>? ORDER BY workflow_id LIMIT ?"),&[Value::I32(shard),Value::Text(workflow),Value::I32(filter.page_size)],&[Column::I32,Column::Bytes,Column::Text,Column::Bytes,Column::I64,Column::I64,Column::Bytes,Column::Text]))?;
+        let rows=self.backend.autocommit(|tx|tx.query(&self.query("SELECT shard_id,domain_id,workflow_id,run_id,next_event_id,last_write_version,data,data_encoding FROM executions WHERE shard_id=? AND workflow_id>? ORDER BY workflow_id LIMIT ?"),&[Value::I32(shard),Value::Text(workflow),Value::I32(filter.page_size)],&[Column::I32,Column::Bytes,Column::Text,Column::Bytes,Column::I64,Column::I64,Column::Bytes,Column::Text]))?;
         let mut executions = Vec::new();
         for row in &rows {
             let key = crate::history_sql::WorkflowKey {
@@ -1521,7 +1521,7 @@ impl GoExecutionStore for SqlWorkflowStore {
         max_id: i64,
         batch_size: i32,
     ) -> Result<Vec<CrossClusterTask>, PersistenceError> {
-        let rows = self.backend.transaction(|tx| {
+        let rows = self.backend.autocommit(|tx| {
             tx.query(
                 self.backend
                     .dialect()
@@ -1635,7 +1635,7 @@ impl GoExecutionStore for SqlWorkflowStore {
                 ..Default::default()
             },
         )?;
-        let rows=self.backend.transaction(|tx|tx.query(&self.query("SELECT data,data_encoding FROM active_cluster_selection_policy WHERE shard_id=? AND domain_id=? AND workflow_id=? AND run_id=?"),&k,&[Column::Bytes,Column::Text]))?;
+        let rows=self.backend.autocommit(|tx|tx.query(&self.query("SELECT data,data_encoding FROM active_cluster_selection_policy WHERE shard_id=? AND domain_id=? AND workflow_id=? AND run_id=?"),&k,&[Column::Bytes,Column::Text]))?;
         rows.first()
             .map(|r| {
                 Ok(DataBlob {
@@ -1661,7 +1661,7 @@ impl GoExecutionStore for SqlWorkflowStore {
                 ..Default::default()
             },
         )?;
-        self.backend.transaction(|tx|tx.execute(&self.query("DELETE FROM active_cluster_selection_policy WHERE shard_id=? AND domain_id=? AND workflow_id=? AND run_id=?"),&k))?;
+        self.backend.autocommit(|tx|tx.execute(&self.query("DELETE FROM active_cluster_selection_policy WHERE shard_id=? AND domain_id=? AND workflow_id=? AND run_id=?"),&k))?;
         Ok(())
     }
 }
