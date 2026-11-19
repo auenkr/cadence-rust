@@ -43,3 +43,9 @@ No gates or benchmark were run: queue behaviour is unchanged (test-only diff).
 | rust-ci cadence-history (b03e0db22) | https://github.com/auenkr/cadence-rust/actions/runs/44495411634 | success |
 | History mixed gate MySQL | https://github.com/auenkr/cadence-rust/actions/runs/44495416974 | success, `GATE SUMMARY failed: []` |
 | History mixed gate Postgres | https://github.com/auenkr/cadence-rust/actions/runs/44495422534 | success, `GATE SUMMARY failed: []` |
+
+## Piece B (queue-v2-b-adapters, 2026-11-19)
+QueueEnv + task/processor/rescheduler/executor adapters (wiring/assembly/queue_v2_adapters.rs), notify full tasks -> cached reader; factory unchanged (v1 active).
+Tests: transfer/timer end-to-end via adapters, cached reader serves notified tasks w/o DB and falls back on eviction/miss, timer gate.
+- rust-ci (cadence-history): https://github.com/auenkr/cadence-rust/actions/runs/44498733522 success (head 8b18d3d07)
+- History MySQL gate: https://github.com/auenkr/cadence-rust/actions/runs/44498744144 success, `GATE SUMMARY failed: []`
