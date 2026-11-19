@@ -15,6 +15,11 @@ on:
       seconds:
         description: SDK load duration in seconds
         default: "1500"
+      queue_v2:
+        description: Rust History queue v2 (default = config as is; off; transfer = only transfer v2; timer = only timer v2)
+        type: choice
+        options: [default, off, transfer, timer]
+        default: default
 
 concurrency:
   group: history-restartgate-${{ github.ref }}-${{ github.run_id }}
@@ -72,6 +77,7 @@ jobs:
         env:
           CADENCE_GATE_SCRIPT: run-history-restartgate.py
           CADENCE_GATE_TWO_HISTORY: "true"
+          CADENCE_GATE_QUEUE_V2: ${{ inputs.queue_v2 || 'default' }}
           RUST_BACKTRACE: 1
           RUST_LOG: warn,cadence_history::service=info,cadence_history::launcher=info,cadence_history::task::parallel_processor=info
         run: |
