@@ -1319,6 +1319,9 @@ mod poll_tracking_tests {
             None,
         );
         assert_eq!(lb.provider().partition_config("id", "tl", true, 0), config);
-        assert_eq!(lb.provider().number_of_read_partitions("id", "tl", true, 0), 3);
+        assert_eq!(
+            lb.provider().number_of_read_partitions("id", "tl", true, 0),
+            3
+        );
     }
 }
