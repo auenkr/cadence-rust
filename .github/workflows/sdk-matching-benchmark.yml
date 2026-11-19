@@ -28,6 +28,9 @@ on:
       repetition_offset:
         description: Starting pair index (odd runs Rust first)
         default: '0'
+      mysql_tmpfs:
+        description: 'Put MySQL datadir on tmpfs (true) to remove runner disk-fsync variance; same for both arms'
+        default: 'false'
 concurrency:
   group: sdk-matching-benchmark-${{ github.ref }}-${{ inputs.service || 'matching' }}
   cancel-in-progress: true
@@ -60,6 +63,7 @@ jobs:
           REPETITIONS: ${{ inputs.repetitions }}
           REPETITION_OFFSET: ${{ inputs.repetition_offset }}
           PROFILE: ${{ inputs.profile }}
+          MYSQL_TMPFS: ${{ inputs.mysql_tmpfs }}
         run: bash Benchmark/ci.sh
       - uses: actions/upload-artifact@v4
         if: always()
