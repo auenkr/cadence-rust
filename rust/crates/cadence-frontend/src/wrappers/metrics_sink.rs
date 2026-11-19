@@ -105,11 +105,17 @@ impl SinkMetrics {
         }
     }
 
-    fn per_task_list(operation: &str, tags: &[MetricTag]) -> Option<BTreeMap<String, String>> {
+    /// Per-task-list tags derived from the already-built per-domain `base`
+    /// (same keys plus `tasklist`), so each emit scans the request tags once.
+    fn per_task_list(
+        operation: &str,
+        base: &BTreeMap<String, String>,
+        tags: &[MetricTag],
+    ) -> Option<BTreeMap<String, String>> {
         if !PER_TASK_LIST_OPERATIONS.contains(&operation) {
             return None;
         }
-        let mut out = Self::tags(operation, tags);
+        let mut out = base.clone();
         out.insert("tasklist".to_owned(), Self::task_list_tag(tags));
         Some(out)
     }
@@ -160,7 +166,8 @@ impl Metrics for SinkMetrics {
     }
 
     fn increment_requests_tagged(&self, operation: &str, tags: &[MetricTag]) {
-        if let Some(tl) = Self::per_task_list(operation, tags) {
+        let base = Self::tags(operation, tags);
+        if let Some(tl) = Self::per_task_list(operation, &base, tags) {
             self.emit(
                 CADENCE_REQUESTS_PER_TL,
                 MetricKind::Counter,
@@ -173,7 +180,7 @@ impl Metrics for SinkMetrics {
             CADENCE_REQUESTS,
             MetricKind::Counter,
             MetricValue::Count(1),
-            Self::tags(operation, tags),
+            base,
             None,
         );
     }
@@ -184,7 +191,8 @@ impl Metrics for SinkMetrics {
         elapsed: Duration,
         tags: &[MetricTag],
     ) {
-        if let Some(tl) = Self::per_task_list(operation, tags) {
+        let base = Self::tags(operation, tags);
+        if let Some(tl) = Self::per_task_list(operation, &base, tags) {
             self.emit(
                 CADENCE_LATENCY_PER_TL_NS,
                 MetricKind::Histogram,
@@ -197,13 +205,14 @@ impl Metrics for SinkMetrics {
             CADENCE_LATENCY_NS,
             MetricKind::Histogram,
             MetricValue::Duration(elapsed),
-            Self::tags(operation, tags),
+            base,
             Some(HistogramSpec::GoLow1ms100s),
         );
     }
 
     fn record_operation(&self, operation: &str, elapsed: Duration, tags: &[MetricTag]) {
-        if let Some(tl) = Self::per_task_list(operation, tags) {
+        let base = Self::tags(operation, tags);
+        if let Some(tl) = Self::per_task_list(operation, &base, tags) {
             self.emit(
                 CADENCE_LATENCY_PER_TL,
                 MetricKind::Timer,
@@ -216,7 +225,7 @@ impl Metrics for SinkMetrics {
             CADENCE_LATENCY,
             MetricKind::Timer,
             MetricValue::Duration(elapsed),
-            Self::tags(operation, tags),
+            base,
             None,
         );
     }

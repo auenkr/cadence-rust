@@ -140,7 +140,7 @@ impl DomainCacheResolver {
     }
 
     fn domain_id_from_token(operation: &str, request: &Value) -> Result<String, CadenceError> {
-        let token: EncodedToken = serde_json::from_value(request.clone())
+        let token = <EncodedToken as serde::Deserialize>::deserialize(request)
             .map_err(|error| CadenceError::Unknown(error.to_string()))?;
         let id = if operation == "RespondQueryTaskCompleted" {
             cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize_query_token(
