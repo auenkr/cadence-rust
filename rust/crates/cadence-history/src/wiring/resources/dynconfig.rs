@@ -98,7 +98,13 @@ fn constraint_matches(name: &str, want: &Value, f: &Filters) -> bool {
 impl DynamicClient for FileDynamicClient {
     fn get_value(&self, key: &str, filters: &Filters) -> Option<Value> {
         let map = self.entries.read().unwrap();
-        let entries = map.get(&key.to_lowercase())?;
+        // Keys are stored lowercased; skip the per-lookup allocation when the
+        // caller's key already is (the common case for registered keys).
+        let entries = if key.bytes().any(|b| b.is_ascii_uppercase()) || !key.is_ascii() {
+            map.get(&key.to_lowercase())?
+        } else {
+            map.get(key)?
+        };
         entries
             .iter()
             .filter(|e| e.constraints.iter().all(|(n, w)| constraint_matches(n, w, filters)))

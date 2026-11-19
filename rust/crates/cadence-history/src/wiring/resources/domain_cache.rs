@@ -4,7 +4,8 @@
 //! callbacks) and converts `MatchingDomainMetadata` into each module's entry type.
 //! The cache is constructed (and `start()`ed) by the assembly unit with a
 //! `DomainMetadataSource` over the configured persistence.
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use cadence_api::enums::{ArchivalStatus as ApiArchival, DomainStatus};
 use cadence_matching::matching_domain_cache::{
@@ -19,11 +20,45 @@ use crate::task::deps as task;
 #[derive(Clone)]
 pub struct HistoryDomainCache {
     inner: Arc<MatchingDomainCache>,
+    memo: Arc<Mutex<HashMap<String, Memo>>>,
+}
+
+/// Converted entries derived from one published cache snapshot entry. The
+/// conversion is pure, so it is reused until the domain cache publishes a new
+/// `Arc` for the id (every refresh does), detected with `Arc::ptr_eq`.
+struct Memo {
+    source: Arc<MatchingDomainMetadata>,
+    engine: Option<Arc<eng::DomainCacheEntry>>,
+    task: Option<Arc<task::DomainCacheEntry>>,
 }
 
 impl HistoryDomainCache {
     pub fn new(inner: Arc<MatchingDomainCache>) -> Self {
-        Self { inner }
+        Self { inner, memo: Arc::default() }
+    }
+
+    fn memoized<T>(
+        &self,
+        id: &str,
+        get: impl Fn(&Memo) -> Option<Arc<T>>,
+        set: impl FnOnce(&mut Memo, Arc<T>),
+        build: impl FnOnce(&MatchingDomainMetadata) -> T,
+    ) -> Result<Arc<T>, DomainCacheError> {
+        let source = self.inner.get_domain_by_id_shared(id)?;
+        let mut memo = self.memo.lock().expect("history domain memo lock");
+        let slot = match memo.get_mut(id) {
+            Some(slot) if Arc::ptr_eq(&slot.source, &source) => slot,
+            _ => {
+                memo.insert(id.to_string(), Memo { source: source.clone(), engine: None, task: None });
+                memo.get_mut(id).expect("just inserted")
+            }
+        };
+        if let Some(hit) = get(slot) {
+            return Ok(hit);
+        }
+        let built = Arc::new(build(&source));
+        set(slot, built.clone());
+        Ok(built)
     }
     pub fn inner(&self) -> &Arc<MatchingDomainCache> {
         &self.inner
@@ -111,8 +146,8 @@ fn task_entry(m: &MatchingDomainMetadata) -> task::DomainCacheEntry {
 
 impl eng::DomainCache for HistoryDomainCache {
     fn get_domain_by_id(&self, id: &str) -> eng::HResult<Arc<eng::DomainCacheEntry>> {
-        match self.inner.get_domain_by_id(id) {
-            Ok(m) => Ok(Arc::new(engine_entry(&m))),
+        match self.memoized(id, |m| m.engine.clone(), |m, v| m.engine = Some(v), engine_entry) {
+            Ok(entry) => Ok(entry),
             Err(e) if is_not_found(&e) => Err(eng::HistoryError::entity_not_exists(e.to_string())),
             Err(e) => Err(eng::HistoryError::internal(e.to_string())),
         }
@@ -146,7 +181,7 @@ fn task_err(e: DomainCacheError) -> task::TaskError {
 
 impl task::DomainCache for HistoryDomainCache {
     fn get_domain_by_id(&self, id: &str) -> task::Result<Arc<task::DomainCacheEntry>> {
-        self.inner.get_domain_by_id(id).map(|m| Arc::new(task_entry(&m))).map_err(task_err)
+        self.memoized(id, |m| m.task.clone(), |m, v| m.task = Some(v), task_entry).map_err(task_err)
     }
     fn get_domain(&self, name: &str) -> task::Result<Arc<task::DomainCacheEntry>> {
         self.inner.get_domain(name).map(|m| Arc::new(task_entry(&m))).map_err(task_err)
@@ -159,7 +194,7 @@ impl task::DomainCache for HistoryDomainCache {
 impl repl::DomainCache for HistoryDomainCache {
     fn get_domain_by_id(&self, id: &str) -> repl::Result<repl::DomainEntry> {
         self.inner
-            .get_domain_by_id(id)
+            .get_domain_by_id_shared(id)
             .map(|m| repl::DomainEntry {
                 name: m.info.name.clone(),
                 replication_clusters: m
