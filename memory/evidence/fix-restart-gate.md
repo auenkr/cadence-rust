@@ -33,3 +33,17 @@ Regression bisect (restart gate mysql, 600 s):
 | 6c7ce1f5a | https://github.com/auenkr/cadence-rust/actions/runs/44520409690 | FAIL 107 |
 | e480361a0 | https://github.com/auenkr/cadence-rust/actions/runs/44526321883 | pending |
 | 35d5054de | https://github.com/auenkr/cadence-rust/actions/runs/44526309933 | pending |
+
+## Update 2026-11-19: root cause 1 fixed; Issue 1 still partly open
+Remaining bisect runs (restart gate, MySQL): d1dba9370 pass (44531059100), f8eccb140 pass (44531070180), 2bd2080d3 pass (44531083142).
+
+Root cause 1 (35d5054de): events and timer expiry now carry full nanoseconds, but timer tasks fire at their visibility time truncated to ms. The Rust active executor compared `now.before(expiry)` at exact nanoseconds, so `now < expiry` by less than 1 ms. It broke out of the loop, and the user or activity timer never fired. Go uses `timerSequence.IsExpired`, which compares Unix() seconds.
+Fix: timer_active_task_executor.rs compares seconds (user and activity loops, and the resurrection delay); timer_standby_task_executor.rs does the same (Go-parity IsExpired).
+
+Validation:
+- rust-ci cadence-history: 44531343722 success, 44538972815 success (after the standby fix)
+- history-mixed-gate MySQL: 44531350818 success, `GATE SUMMARY failed: []`
+- restart gate, fix applied to 56b58c6c1 (branch fix-restart-gate-bisect-56b58-fix): 44538960577 **PASS** (without the fix: 15 failures)
+- restart gate, fix-restart-gate (master + fix): 44531357568 FAIL 54, 44538966210 FAIL 96 (master without the fix: 337)
+
+Remaining: a second regression after 56b58c6c1 (bc073c19b 27, 6c7ce1f5a 107 before the fix). Its failure modes are query "init", "must handle at least one decision task" and History TChannel timeouts, which point to stuck decision or transfer dispatch. Next step: bisect 56b58c6c1..master with this fix cherry-picked.
