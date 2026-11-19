@@ -31,4 +31,9 @@ see memory/frontend-soakfix-20261113.md).
 - rust-ci cadence-frontend: https://github.com/auenkr/cadence-rust/actions/runs/44426988643 — success
 - frontend-soak default: https://github.com/auenkr/cadence-rust/actions/runs/44426979723 — success but **`RUST OVERALL: FAIL`** — sole failing criterion start call p99 rust=123ms vs go=35ms (known tail-latency issue, memory/fe-soak-fix-deferred, unrelated to query). Query criteria all PASS: failed=0 in both lanes, query "init" rust 21346 wf/30313 attempts vs go 20929/28253; query p99 rust 33ms vs go 47ms.
 - frontend-mixed-gate default: https://github.com/auenkr/cadence-rust/actions/runs/44426984365 — success; `GATE SUMMARY failed: []`
-- frontend-soak rerun: https://github.com/auenkr/cadence-rust/actions/runs/44439992947 — RESULT_SOAK2
+- frontend-soak rerun: https://github.com/auenkr/cadence-rust/actions/runs/44439992947 — in progress at pause (unverified); result not yet recorded
+
+## Status at pause (2026-11-19)
+- Done: cause found ("init" FAIL was Go-baseline lane only, Rust lane 0 failures); parity, no code change. rust-ci and frontend-mixed-gate green.
+- Open: soak RUST OVERALL is FAIL only on start call p99 (tail latency, deferred issue, not the query path).
+- Next: read result of rerun 44439992947. If start p99 passes → done. If it fails again → note it as the known tail-latency issue (memory/fe-soak-fix-deferred) and hand it back; it's outside this task's query scope.
