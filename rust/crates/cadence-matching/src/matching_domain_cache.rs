@@ -502,7 +502,7 @@ pub type CatchUpCallback =
 
 #[derive(Default)]
 struct CacheState {
-    by_id: HashMap<String, MatchingDomainMetadata>,
+    by_id: HashMap<String, Arc<MatchingDomainMetadata>>,
     name_to_id: HashMap<String, String>,
 }
 
@@ -823,7 +823,7 @@ impl MatchingDomainCache {
 
     pub fn get_all_domains(&self) -> Vec<MatchingDomainMetadata> {
         let cache = self.cache.read().expect("domain cache lock");
-        cache.by_id.values().cloned().collect()
+        cache.by_id.values().map(|entry| (**entry).clone()).collect()
     }
 
     pub fn get_cache_size(&self) -> (usize, usize) {
@@ -856,18 +856,7 @@ impl MatchingDomainCache {
     }
 
     pub fn get_domain_by_id(&self, id: &str) -> Result<MatchingDomainMetadata, DomainCacheError> {
-        if id.is_empty() {
-            return Err(DomainCacheError::EmptyId);
-        }
-        if let Some(entry) = self.by_id(id) {
-            return Ok(entry);
-        }
-        self.source
-            .get_domain(None, Some(id), DOMAIN_CACHE_PERSISTENCE_TIMEOUT)
-            .map_err(cache_source_error)?;
-        self.refresh_after_miss(None, Some(id))?;
-        self.by_id(id)
-            .ok_or_else(|| DomainCacheError::ExistsButNotLoaded(id.to_string()))
+        self.get_domain_by_id_shared(id).map(|entry| (*entry).clone())
     }
 
     /// Lookup using the exact Go string key, deferring SQL parsing until a miss.
@@ -900,14 +889,14 @@ impl MatchingDomainCache {
     }
 
     pub fn get_domain_name(&self, id: &str) -> Result<String, DomainCacheError> {
-        Ok(self.get_domain_by_id(id)?.info.name)
+        Ok(self.get_domain_by_id_shared(id)?.info.name.clone())
     }
 
     /// Resolve a domain name from the current snapshot without querying or
     /// refreshing persistence. Callers that need Go's read-through behavior
     /// should use `get_domain_name` from a blocking worker.
     pub fn cached_domain_name(&self, id: &str) -> Option<String> {
-        self.by_id(id).map(|domain| domain.info.name)
+        self.by_id_shared(id).map(|domain| domain.info.name.clone())
     }
 
     fn by_name(&self, name: &str) -> Option<MatchingDomainMetadata> {
@@ -916,16 +905,42 @@ impl MatchingDomainCache {
             .name_to_id
             .get(name)
             .and_then(|id| cache.by_id.get(id))
-            .cloned()
+            .map(|entry| (**entry).clone())
     }
 
     fn by_id(&self, id: &str) -> Option<MatchingDomainMetadata> {
+        self.by_id_shared(id).map(|entry| (*entry).clone())
+    }
+
+    /// Shared (no deep copy) snapshot entry; a refresh publishes new `Arc`s,
+    /// so `Arc::ptr_eq` tells callers whether a derived value is still current.
+    fn by_id_shared(&self, id: &str) -> Option<Arc<MatchingDomainMetadata>> {
         self.cache
             .read()
             .expect("domain cache lock")
             .by_id
             .get(id)
             .cloned()
+    }
+
+    /// `get_domain_by_id` without copying the cached metadata (same
+    /// read-through-on-miss behaviour).
+    pub fn get_domain_by_id_shared(
+        &self,
+        id: &str,
+    ) -> Result<Arc<MatchingDomainMetadata>, DomainCacheError> {
+        if id.is_empty() {
+            return Err(DomainCacheError::EmptyId);
+        }
+        if let Some(entry) = self.by_id_shared(id) {
+            return Ok(entry);
+        }
+        self.source
+            .get_domain(None, Some(id), DOMAIN_CACHE_PERSISTENCE_TIMEOUT)
+            .map_err(cache_source_error)?;
+        self.refresh_after_miss(None, Some(id))?;
+        self.by_id_shared(id)
+            .ok_or_else(|| DomainCacheError::ExistsButNotLoaded(id.to_string()))
     }
 
     pub fn refresh_domains(&self) -> Result<(), DomainCacheError> {
@@ -943,7 +958,7 @@ impl MatchingDomainCache {
     ) -> Result<(), DomainCacheError> {
         let _refresh = self.refresh_lock.lock().expect("domain refresh lock");
         if name.is_some_and(|name| self.by_name(name).is_some())
-            || id.is_some_and(|id| self.by_id(id).is_some())
+            || id.is_some_and(|id| self.by_id_shared(id).is_some())
         {
             return Ok(());
         }
@@ -1098,7 +1113,7 @@ impl MatchingDomainCache {
             }
             next.name_to_id
                 .insert(record.info.name.clone(), record.info.uuid.clone());
-            next.by_id.insert(record.info.uuid.clone(), record);
+            next.by_id.insert(record.info.uuid.clone(), Arc::new(record));
         }
 
         // Match Go's prepare -> atomic map publication -> callback ordering.
@@ -1701,6 +1716,26 @@ mod tests {
             1
         );
         assert!(cache.by_id(&format!("{:032x}", 201)).is_some());
+    }
+
+    #[test]
+    fn shared_lookup_reuses_entry_until_refresh_publishes_new_snapshot() {
+        let source = Arc::new(FakeSource::default());
+        *source.version.lock().unwrap() = 10;
+        let clock = Arc::new(FakeClock::default());
+        let cache = cache(&source, &clock);
+        source.put(record(4, 1));
+        let id = format!("{:032x}", 4);
+        let first = cache.get_domain_by_id_shared(&id).unwrap();
+        let again = cache.get_domain_by_id_shared(&id).unwrap();
+        assert!(Arc::ptr_eq(&first, &again));
+        assert_eq!(*first, cache.get_domain_by_id(&id).unwrap());
+        assert_eq!(cache.cached_domain_name(&id).as_deref(), Some("domain-4"));
+        clock.0.store(1, Ordering::SeqCst);
+        cache.refresh_domains().unwrap();
+        let refreshed = cache.get_domain_by_id_shared(&id).unwrap();
+        assert!(!Arc::ptr_eq(&first, &refreshed));
+        assert!(cache.get_domain_by_id_shared("").is_err());
     }
 
     #[test]
