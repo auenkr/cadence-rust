@@ -43,6 +43,8 @@ def deployments(arm, service='matching'):
             for s in ('frontend', 'matching', 'history', 'worker')}
 
 
+PROFILE_FAILURES=[]
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--service', choices=('matching', 'frontend', 'history', 'all'), default='matching')
@@ -179,7 +181,10 @@ def main():
                         w1,t1=proc_cpu(sdk_worker.pid),time.monotonic()
                         (OUT/(key+'-sdkworker.json')).write_text(json.dumps({'cpu_seconds':w1-w0,'elapsed_seconds':t1-t0,'average_cpu_cores':(w1-w0)/(t1-t0),'pollers':a.worker_pollers}))
                         if fault is not None and fault.wait(timeout=30): raise RuntimeError('fault injection failed')
-                        if profiler is not None: profiler.wait(timeout=1200)
+                        if profiler is not None:
+                            pstatus=profiler.wait(timeout=1200)
+                            EVENTS.append(dict(command='profile.py '+key,exit_code=pstatus))
+                            if pstatus: PROFILE_FAILURES.append(key); raise RuntimeError(f'profiler failed (exit {pstatus}): '+(OUT/(key+'-profile.log')).read_text(errors='replace')[-1500:])
                         status=collector.wait(timeout=30)
                         if status: raise RuntimeError('resource collector failed: '+(OUT/(key+'-collector.log')).read_text(errors='replace')[-1500:])
                     finally:
@@ -187,6 +192,12 @@ def main():
                             if fault.poll() is None: fault.terminate();fault.wait(timeout=15)
                             fault_log.close()
                         if collector.poll() is None:collector.terminate();collector.wait(timeout=10)
+                        if profiler is not None and profiler.poll() is None:
+                            profiler.terminate()
+                            try: profiler.wait(timeout=15)
+                            except subprocess.TimeoutExpired: profiler.kill(); profiler.wait(timeout=15)
+                            subprocess.run(['sudo','pkill','-INT','-f',key+'-profile.perf.data'],check=False)
+                            EVENTS.append(dict(command='profile.py '+key,exit_code=profiler.returncode,termination='harness teardown'))
                         EVENTS.append(dict(command=shlex.join(collector_cmd),exit_code=collector.returncode))
                 except Exception as error:
                     (OUT/(key+'-failure.json')).write_text(json.dumps({'error':str(error)},indent=2)+'\n')
@@ -197,6 +208,9 @@ def main():
                     run(compose+['logs','--no-color'],key+'-services',env=arm_env,check=False)
                     run(compose+['down','-v','--remove-orphans'],key+'-cleanup',env=arm_env)
         run(['python3',str(ROOT/'report.py'),str(OUT)],'report')
+        if PROFILE_FAILURES:
+            (OUT/'profile-failures.json').write_text(json.dumps(PROFILE_FAILURES)+'\n')
+            raise SystemExit('PROFILE=1 requested but profiler failed for: '+', '.join(PROFILE_FAILURES))
     finally:
         run(compose+['down','-v','--remove-orphans'],'final-cleanup',env=env)
 
