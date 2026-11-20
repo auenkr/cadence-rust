@@ -738,7 +738,7 @@ async fn connection(
                         if complete {
                             let call=calls.remove(&frame.id).expect("assembled call");let id=frame.id;let writer=writer.clone();let state=state.clone();let matching=matching.clone();let ringpop=ringpop.clone();
                             let abort=tasks.spawn(async move {
-                                let trace=call.trace;let result=handle_call(writer.clone(),id,call,state,matching,ringpop,history).await;
+                                let trace=call.trace;let result=Box::pin(handle_call(writer.clone(),id,call,state,matching,ringpop,history)).await;
                                 let result=if let Err(e)=result {error(&writer,id,6,&trace,&e.to_string()).await} else {Ok(())};
                                 (id,result)
                             });aborts.insert(id,abort);
@@ -851,7 +851,7 @@ async fn serve_listener(
                 let matching = matching.clone();
                 let ringpop = ringpop.clone();
                 connections.spawn(async move {
-                    let _ = connection(stream, state, matching, ringpop, history).await;
+                    let _ = Box::pin(connection(stream, state, matching, ringpop, history)).await;
                 });
             }
             _ = connections.join_next(), if !connections.is_empty() => {}
