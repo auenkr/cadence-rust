@@ -1701,27 +1701,30 @@ async fn run_with_lifecycle(
                     };
                     let slot = state.admin.membership.clone();
                     let bypass_overlay = state.admin.dynamic_config.clone();
-                    let limiter = cadence_persistence::rate_limited::PersistenceLimiter::build_with_bypass(
-                        overlay("frontend.persistenceMaxQPS", 2000),
-                        overlay("frontend.persistenceGlobalMaxQPS", 0),
-                        std::sync::Arc::new(move || {
-                            let membership = slot.get().ok_or(())?;
-                            membership
-                                .members("cadence-frontend")
-                                .map(|members| members.len())
-                                .map_err(|_| ())
-                        }),
-                        Some(std::sync::Arc::new(move || {
-                            bypass_overlay.lock().map_or_else(
-                                |_| Vec::new(),
-                                |o| {
-                                    cadence_persistence::dynamic_config::string_list_lenient(
-                                        o.property_values("system.rateLimiterBypassCallerTypes"),
-                                    )
-                                },
-                            )
-                        })),
-                    );
+                    let limiter =
+                        cadence_persistence::rate_limited::PersistenceLimiter::build_with_bypass(
+                            overlay("frontend.persistenceMaxQPS", 2000),
+                            overlay("frontend.persistenceGlobalMaxQPS", 0),
+                            std::sync::Arc::new(move || {
+                                let membership = slot.get().ok_or(())?;
+                                membership
+                                    .members("cadence-frontend")
+                                    .map(|members| members.len())
+                                    .map_err(|_| ())
+                            }),
+                            Some(std::sync::Arc::new(move || {
+                                bypass_overlay.lock().map_or_else(
+                                    |_| Vec::new(),
+                                    |o| {
+                                        cadence_persistence::dynamic_config::string_list_lenient(
+                                            o.property_values(
+                                                "system.rateLimiterBypassCallerTypes",
+                                            ),
+                                        )
+                                    },
+                                )
+                            })),
+                        );
                     stores.history_node_store = stores.history_node_store.map(|store| {
                         cadence_persistence::rate_limited::RateLimitedNodeStore::wrap(
                             store,
