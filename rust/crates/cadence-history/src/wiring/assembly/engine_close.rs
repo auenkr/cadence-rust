@@ -458,7 +458,13 @@ impl EngineMutableState {
         if let Some(id) = last_event_task_id {
             g.pc_exec.last_event_task_id = id;
         }
-        g.hist.clear();
+        if g.exec.state == WORKFLOW_STATE_COMPLETED {
+            // The cache can still serve this execution, but a closed workflow
+            // no longer needs the allocation for its transaction events.
+            g.hist = Vec::new();
+        } else {
+            g.hist.clear();
+        }
         g.transfer_tasks.clear();
         g.timer_tasks.clear();
         g.sync_activity_tasks.clear();
@@ -528,6 +534,22 @@ mod tests {
 
     fn types(c: &ClosedTxn) -> Vec<EventType> {
         c.events.iter().filter_map(|e| e.event_type).collect()
+    }
+
+    #[test]
+    fn finished_execution_releases_history_buffer() {
+        let s = state(false, 0, 3);
+        s.inner.lock().unwrap().hist.push(HistoryEvent::default());
+        s.finish_transaction(0, None);
+        {
+            let mut g = s.inner.lock().unwrap();
+            assert!(g.hist.is_empty());
+            assert!(g.hist.capacity() > 0);
+            g.exec.state = WORKFLOW_STATE_COMPLETED;
+            g.hist.push(HistoryEvent::default());
+        }
+        s.finish_transaction(0, None);
+        assert_eq!(s.inner.lock().unwrap().hist.capacity(), 0);
     }
 
     #[test]
