@@ -1003,19 +1003,19 @@ impl p::domain_api_server::DomainApi for Frontend {
             serde_json::to_value(&input).unwrap_or_default(),
             std::time::Instant::now(),
         );
-        let result = self
-            .state
-            .domain_manager
-            .describe_domain(&input)
-            .map_err(|error| match error {
-                cadence_persistence::FrontendDomainError::NotFound(error) => {
-                    domain_not_found(error.message)
-                }
-                cadence_persistence::FrontendDomainError::Invalid(message) => {
-                    Status::invalid_argument(message)
-                }
-                error => Status::internal(error.to_string()),
-            });
+        let result =
+            self.state
+                .domain_manager
+                .describe_domain(&input)
+                .map_err(|error| match error {
+                    cadence_persistence::FrontendDomainError::NotFound(error) => {
+                        domain_not_found(error.message)
+                    }
+                    cadence_persistence::FrontendDomainError::Invalid(message) => {
+                        Status::invalid_argument(message)
+                    }
+                    error => Status::internal(error.to_string()),
+                });
         if let (Some(api), request, start) = observed {
             let code = result.as_ref().err().map(|s| s.code() as i32);
             api.observe_local("DescribeDomain", &request, start.elapsed(), code);
@@ -1039,16 +1039,16 @@ impl p::domain_api_server::DomainApi for Frontend {
             serde_json::to_value(&list_request).unwrap_or_default(),
             std::time::Instant::now(),
         );
-        let listed = self
-            .state
-            .domain_manager
-            .list_page(&list_request)
-            .map_err(|error| match error {
-                cadence_persistence::FrontendDomainError::Invalid(message) => {
-                    Status::invalid_argument(message)
-                }
-                other => Status::internal(other.to_string()),
-            });
+        let listed =
+            self.state
+                .domain_manager
+                .list_page(&list_request)
+                .map_err(|error| match error {
+                    cadence_persistence::FrontendDomainError::Invalid(message) => {
+                        Status::invalid_argument(message)
+                    }
+                    other => Status::internal(other.to_string()),
+                });
         if let (Some(api), request, start) = observed {
             let code = listed.as_ref().err().map(|s| s.code() as i32);
             api.observe_local("ListDomains", &request, start.elapsed(), code);
@@ -2287,7 +2287,8 @@ impl p::worker_api_server::WorkerApi for Frontend {
             .is_some_and(|api| api.serves("RespondActivityTaskCompletedByID"))
         {
             let r = request.into_inner();
-            let task_token = self.activity_token(&r.domain, r.workflow_execution, &r.activity_id)?;
+            let task_token =
+                self.activity_token(&r.domain, r.workflow_execution, &r.activity_id)?;
             p::worker_api_server::WorkerApi::respond_activity_task_completed(
                 self,
                 tonic::Request::new(p::RespondActivityTaskCompletedRequest {
@@ -2333,7 +2334,8 @@ impl p::worker_api_server::WorkerApi for Frontend {
             .is_some_and(|api| api.serves("RespondActivityTaskFailedByID"))
         {
             let r = request.into_inner();
-            let task_token = self.activity_token(&r.domain, r.workflow_execution, &r.activity_id)?;
+            let task_token =
+                self.activity_token(&r.domain, r.workflow_execution, &r.activity_id)?;
             p::worker_api_server::WorkerApi::respond_activity_task_failed(
                 self,
                 tonic::Request::new(p::RespondActivityTaskFailedRequest {
@@ -2380,7 +2382,8 @@ impl p::worker_api_server::WorkerApi for Frontend {
             .is_some_and(|api| api.serves("RespondActivityTaskCanceledByID"))
         {
             let r = request.into_inner();
-            let task_token = self.activity_token(&r.domain, r.workflow_execution, &r.activity_id)?;
+            let task_token =
+                self.activity_token(&r.domain, r.workflow_execution, &r.activity_id)?;
             p::worker_api_server::WorkerApi::respond_activity_task_canceled(
                 self,
                 tonic::Request::new(p::RespondActivityTaskCanceledRequest {
@@ -2422,7 +2425,8 @@ impl p::worker_api_server::WorkerApi for Frontend {
             .is_some_and(|api| api.serves("RecordActivityTaskHeartbeatByID"))
         {
             let r = request.into_inner();
-            let task_token = self.activity_token(&r.domain, r.workflow_execution, &r.activity_id)?;
+            let task_token =
+                self.activity_token(&r.domain, r.workflow_execution, &r.activity_id)?;
             let v = p::worker_api_server::WorkerApi::record_activity_task_heartbeat(
                 self,
                 tonic::Request::new(p::RecordActivityTaskHeartbeatRequest {
@@ -3331,9 +3335,7 @@ mod p1_handler_tests {
                 domain: "remote-domain".into(),
                 workflow_execution: execution.clone(),
                 activity_id: "activity".into(),
-                result: Some(p::Payload {
-                    data: vec![1, 2],
-                }),
+                result: Some(p::Payload { data: vec![1, 2] }),
                 ..Default::default()
             },
         ))

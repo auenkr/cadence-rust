@@ -321,7 +321,8 @@ pub trait FrontendDomainManager: std::fmt::Debug + Send + Sync {
         &self,
         request: &DescribeDomainRequest,
     ) -> Result<DescribeDomainResponse, FrontendDomainError> {
-        self.describe(request).map_err(FrontendDomainError::NotFound)
+        self.describe(request)
+            .map_err(FrontendDomainError::NotFound)
     }
 
     /// Go RegisterDomain: `GetDomain` errors other than EntityNotExists abort
@@ -470,7 +471,8 @@ fn ensure_primary_cluster(
 ) -> Result<(), FrontendDomainError> {
     if is_global_domain && !metadata.is_primary_cluster() {
         return Err(FrontendDomainError::Invalid(
-            "Cluster is not primary cluster, cannot do domain registration or domain update.".into(),
+            "Cluster is not primary cluster, cannot do domain registration or domain update."
+                .into(),
         ));
     }
     Ok(())
@@ -1486,8 +1488,7 @@ impl InMemoryDomainStore {
     #[must_use]
     /// Pending-active (graceful failover in progress) global domains.
     pub fn pending_active_list(&self) -> Vec<PendingActiveDomain> {
-        self
-            .list()
+        self.list()
             .domains
             .into_iter()
             .filter_map(|d| {
@@ -1758,7 +1759,10 @@ impl FrontendDomainManager for InMemoryDomainStore {
         request: &DeprecateDomainRequest,
         metadata: &cadence_common::cluster::Metadata,
     ) -> Result<(), FrontendDomainError> {
-        ensure_primary_cluster(self.record_by_name(&request.name)?.is_global_domain, metadata)?;
+        ensure_primary_cluster(
+            self.record_by_name(&request.name)?.is_global_domain,
+            metadata,
+        )?;
         InMemoryDomainStore::deprecate(self, request).map_err(Into::into)
     }
 
@@ -1782,7 +1786,8 @@ impl FrontendDomainManager for InMemoryDomainStore {
         &self,
         request: &cadence_api::service_types::ListDomainsRequest,
     ) -> Result<ListDomainsResponse, FrontendDomainError> {
-        InMemoryDomainStore::list_page(self, request).map_err(|error| FrontendDomainError::Invalid(error.message))
+        InMemoryDomainStore::list_page(self, request)
+            .map_err(|error| FrontendDomainError::Invalid(error.message))
     }
 
     fn subscribe_failover(&self, uuid: &str) -> tokio::sync::watch::Receiver<u64> {
@@ -1833,15 +1838,15 @@ impl PersistedFrontendDomainManager {
         self
     }
 
-    pub fn with_audit_ttl_seconds(
-        mut self,
-        ttl: Arc<dyn Fn(&str) -> i32 + Send + Sync>,
-    ) -> Self {
+    pub fn with_audit_ttl_seconds(mut self, ttl: Arc<dyn Fn(&str) -> i32 + Send + Sync>) -> Self {
         self.audit_ttl_seconds = ttl;
         self
     }
 
-    fn read_record(&self, request: &DescribeDomainRequest) -> Result<DomainRecord, FrontendDomainError> {
+    fn read_record(
+        &self,
+        request: &DescribeDomainRequest,
+    ) -> Result<DomainRecord, FrontendDomainError> {
         use crate::matching_domain_metadata::{DomainReadError, MatchingDomainMetadataError};
 
         let name = request.name.as_deref().filter(|value| !value.is_empty());
@@ -1859,15 +1864,15 @@ impl PersistedFrontendDomainManager {
             }
             _ => {}
         }
-        let metadata = self
-            .persistence
-            .get_domain_typed(name, id)
-            .map_err(|error| match error {
-                DomainReadError::NotFound(message) => {
-                    FrontendDomainError::NotFound(EntityNotExistsError::new(message))
-                }
-                DomainReadError::Other(message) => FrontendDomainError::Persistence(message),
-            })?;
+        let metadata =
+            self.persistence
+                .get_domain_typed(name, id)
+                .map_err(|error| match error {
+                    DomainReadError::NotFound(message) => {
+                        FrontendDomainError::NotFound(EntityNotExistsError::new(message))
+                    }
+                    DomainReadError::Other(message) => FrontendDomainError::Persistence(message),
+                })?;
         if let Some(error) = &metadata.config_decode_error {
             return Err(FrontendDomainError::Persistence(error.clone()));
         }
@@ -2185,7 +2190,8 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
         let old = self.read_record_by_name(&request.name)?;
         let before = old.to_describe_response();
         let mut updated = old.clone();
-        let (response, _) = InMemoryDomainStore::update_record(&mut updated, request, metadata, policy)?;
+        let (response, _) =
+            InMemoryDomainStore::update_record(&mut updated, request, metadata, policy)?;
         if updated.failover_version != old.failover_version {
             updated.failover_notification_version = version;
         }
@@ -2403,18 +2409,31 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
         let size = match request.page_size {
             0 => 100,
             size if size > 0 => size as usize,
-            _ => return Err(FrontendDomainError::Invalid("Page size must be positive.".into())),
-        };
-        let token = (!request.next_page_token.is_empty()).then_some(request.next_page_token.as_slice());
-        let page = self.persistence.list_domains(size, token).map_err(FrontendDomainError::Persistence)?;
-        let domains = page.domains.iter().map(|metadata| {
-            if let Some(error) = &metadata.config_decode_error {
-                return Err(FrontendDomainError::Persistence(error.clone()));
+            _ => {
+                return Err(FrontendDomainError::Invalid(
+                    "Page size must be positive.".into(),
+                ))
             }
-            let mut response = DomainRecord::from_matching_metadata(metadata).to_describe_response();
-            response.failover_info = None;
-            Ok(response)
-        }).collect::<Result<Vec<_>, _>>()?;
+        };
+        let token =
+            (!request.next_page_token.is_empty()).then_some(request.next_page_token.as_slice());
+        let page = self
+            .persistence
+            .list_domains(size, token)
+            .map_err(FrontendDomainError::Persistence)?;
+        let domains = page
+            .domains
+            .iter()
+            .map(|metadata| {
+                if let Some(error) = &metadata.config_decode_error {
+                    return Err(FrontendDomainError::Persistence(error.clone()));
+                }
+                let mut response =
+                    DomainRecord::from_matching_metadata(metadata).to_describe_response();
+                response.failover_info = None;
+                Ok(response)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(ListDomainsResponse {
             domains,
             next_page_token: page.next_page_token.unwrap_or_default(),
@@ -3267,7 +3286,8 @@ mod go_sql_frontend_manager_tests {
             .unwrap();
         let persistence = std::sync::Arc::new(
             crate::matching_domain_metadata::MatchingDomainMetadataStore::from_connection(
-                connection, "cluster-a",
+                connection,
+                "cluster-a",
             ),
         );
         let manager = PersistedFrontendDomainManager::new(
@@ -3282,7 +3302,9 @@ mod go_sql_frontend_manager_tests {
                 Some("missing"),
                 None
             ),
-            Err(crate::matching_domain_metadata::DomainReadError::NotFound(_))
+            Err(crate::matching_domain_metadata::DomainReadError::NotFound(
+                _
+            ))
         ));
     }
 
@@ -3371,7 +3393,8 @@ mod failover_notification_version_tests {
             &self,
             name: Option<&str>,
             id: Option<&str>,
-        ) -> Result<MatchingDomainMetadata, crate::matching_domain_metadata::DomainReadError> {
+        ) -> Result<MatchingDomainMetadata, crate::matching_domain_metadata::DomainReadError>
+        {
             DomainMetadataPersistence::get_domain_typed(&*self.0, name, id)
         }
         fn list_domains(
@@ -3412,10 +3435,7 @@ mod failover_notification_version_tests {
         }
     }
 
-    fn manager_with_global_domain() -> (
-        PersistedFrontendDomainManager,
-        Arc<Store>,
-    ) {
+    fn manager_with_global_domain() -> (PersistedFrontendDomainManager, Arc<Store>) {
         let connection = rusqlite::Connection::open_in_memory().unwrap();
         connection
             .execute_batch(
@@ -3459,7 +3479,9 @@ mod failover_notification_version_tests {
         let mut record = manager.cache.record_by_name("global").unwrap();
         record.info.description = "updated by another service".into();
         let version = DomainMetadataPersistence::metadata_version(&*persistence).unwrap();
-        let metadata = record.to_matching_metadata(version, "thriftrw_snappy").unwrap();
+        let metadata = record
+            .to_matching_metadata(version, "thriftrw_snappy")
+            .unwrap();
         DomainMetadataPersistence::update_domain(&*persistence, &metadata, version).unwrap();
 
         let by_id = DescribeDomainRequest {
@@ -3488,7 +3510,9 @@ mod failover_notification_version_tests {
         let mut record = manager.cache.record_by_name("global").unwrap();
         change(&mut record);
         let version = DomainMetadataPersistence::metadata_version(persistence).unwrap();
-        let metadata = record.to_matching_metadata(version, "thriftrw_snappy").unwrap();
+        let metadata = record
+            .to_matching_metadata(version, "thriftrw_snappy")
+            .unwrap();
         DomainMetadataPersistence::update_domain(persistence, &metadata, version).unwrap();
     }
 
@@ -3535,32 +3559,60 @@ mod failover_notification_version_tests {
             });
             match operation {
                 "update" => {
-                    manager.update(&UpdateDomainRequest {
-                        name: "global".into(),
-                        updated_info: Some(cadence_api::service_types::UpdateDomainInfo {
-                            owner_email: Some("owner@example.com".into()),
-                            ..Default::default()
-                        }),
-                        ..Default::default()
-                    }, &metadata, &no_cooldown()).unwrap();
+                    manager
+                        .update(
+                            &UpdateDomainRequest {
+                                name: "global".into(),
+                                updated_info: Some(cadence_api::service_types::UpdateDomainInfo {
+                                    owner_email: Some("owner@example.com".into()),
+                                    ..Default::default()
+                                }),
+                                ..Default::default()
+                            },
+                            &metadata,
+                            &no_cooldown(),
+                        )
+                        .unwrap();
                 }
                 "failover" => {
-                    manager.failover(&cadence_api::types::FailoverDomainRequest {
-                        domain_name: "global".into(),
-                        domain_active_cluster_name: Some("b".into()),
-                        ..Default::default()
-                    }, "b", &metadata, &no_cooldown()).unwrap();
+                    manager
+                        .failover(
+                            &cadence_api::types::FailoverDomainRequest {
+                                domain_name: "global".into(),
+                                domain_active_cluster_name: Some("b".into()),
+                                ..Default::default()
+                            },
+                            "b",
+                            &metadata,
+                            &no_cooldown(),
+                        )
+                        .unwrap();
                 }
-                "deprecate" => manager.deprecate(&DeprecateDomainRequest {
-                    name: "global".into(),
-                    ..Default::default()
-                }, &metadata).unwrap(),
-                "isolation" => manager.update_isolation_groups(
-                    "global", Some(Default::default()), &metadata, &no_cooldown()
-                ).unwrap(),
-                "async" => manager.update_async_workflow_config(
-                    "global", Some(Default::default()), &metadata, &no_cooldown()
-                ).unwrap(),
+                "deprecate" => manager
+                    .deprecate(
+                        &DeprecateDomainRequest {
+                            name: "global".into(),
+                            ..Default::default()
+                        },
+                        &metadata,
+                    )
+                    .unwrap(),
+                "isolation" => manager
+                    .update_isolation_groups(
+                        "global",
+                        Some(Default::default()),
+                        &metadata,
+                        &no_cooldown(),
+                    )
+                    .unwrap(),
+                "async" => manager
+                    .update_async_workflow_config(
+                        "global",
+                        Some(Default::default()),
+                        &metadata,
+                        &no_cooldown(),
+                    )
+                    .unwrap(),
                 _ => unreachable!(),
             }
             let stored = persistence.get_domain(Some("global"), None).unwrap();
@@ -3582,18 +3634,28 @@ mod failover_notification_version_tests {
             record.async_workflow_config = Some(config.clone());
         });
         assert_eq!(manager.isolation_groups("global").unwrap(), Some(groups));
-        assert_eq!(manager.async_workflow_config("global").unwrap(), Some(config));
+        assert_eq!(
+            manager.async_workflow_config("global").unwrap(),
+            Some(config)
+        );
     }
 
     #[test]
     fn persisted_failover_history_requires_the_domain_audit_store() {
         let (manager, _) = manager_with_global_domain();
         let id = manager.cache.record_by_name("global").unwrap().info.uuid;
-        manager.failover(&cadence_api::types::FailoverDomainRequest {
-            domain_name: "global".into(),
-            domain_active_cluster_name: Some("b".into()),
-            ..Default::default()
-        }, "b", &cluster_metadata(), &no_cooldown()).unwrap();
+        manager
+            .failover(
+                &cadence_api::types::FailoverDomainRequest {
+                    domain_name: "global".into(),
+                    domain_active_cluster_name: Some("b".into()),
+                    ..Default::default()
+                },
+                "b",
+                &cluster_metadata(),
+                &no_cooldown(),
+            )
+            .unwrap();
         assert!(matches!(
             manager.failover_history(&id, 50, &[]),
             Err(FrontendDomainError::Persistence(message)) if message == "DomainAuditManager not available"
@@ -3612,7 +3674,9 @@ mod failover_notification_version_tests {
             persistence.clone(),
             Arc::new(|| "thriftrw_snappy".into()),
         );
-        other.create_with_version(info, config, replication, false, 0).unwrap();
+        other
+            .create_with_version(info, config, replication, false, 0)
+            .unwrap();
 
         manager.delete("global", &cluster_metadata()).unwrap();
         assert!(persistence.get_domain(None, Some(&replacement_id)).is_err());
@@ -3638,7 +3702,9 @@ mod failover_notification_version_tests {
                 &crate::domain_update::DomainPolicy::default(),
             )
             .unwrap_err();
-        assert!(matches!(&busy, FrontendDomainError::Busy(m) if m == "Domain update too frequent."));
+        assert!(
+            matches!(&busy, FrontendDomainError::Busy(m) if m == "Domain update too frequent.")
+        );
         let busy = manager
             .update_async_workflow_config(
                 "global",

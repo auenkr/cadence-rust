@@ -1861,7 +1861,9 @@ async fn run_with_lifecycle(
                                 .expect("admin lock")
                                 .property_values("system.domainAuditLogTTL");
                             let nanos = cadence_persistence::dynamic_config::duration_domain_id(
-                                values, domain_id, 365 * 24 * 60 * 60 * 1_000_000_000,
+                                values,
+                                domain_id,
+                                365 * 24 * 60 * 60 * 1_000_000_000,
                             );
                             (nanos / 1_000_000_000) as i32
                         })

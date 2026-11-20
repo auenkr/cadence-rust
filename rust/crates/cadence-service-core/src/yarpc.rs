@@ -670,7 +670,10 @@ async fn handle_deprecate_domain(state: &AppState, body: &Struct) -> HandlerResu
             "Domain not set on request.".to_string(),
         ));
     }
-    match state.domain_manager.deprecate(&req, &state.cluster_metadata) {
+    match state
+        .domain_manager
+        .deprecate(&req, &state.cluster_metadata)
+    {
         Ok(()) => Ok(Struct { fields: vec![] }),
         Err(cadence_persistence::FrontendDomainError::NotFound(e)) => {
             Err(AppError::entity_not_exists(e.message))
@@ -3018,7 +3021,13 @@ pub async fn dispatch_with_transport(
             Ok(_) => crate::workflow_api::AdminOutcome::Ok,
             Err(e) => crate::workflow_api::AdminOutcome::from_exception(e.exc_name),
         };
-        m.admin_finish(name, admin_caller.as_str(), transport, started.elapsed(), class);
+        m.admin_finish(
+            name,
+            admin_caller.as_str(),
+            transport,
+            started.elapsed(),
+            class,
+        );
     }
     let def = find_method(method).ok_or_else(|| format!("unknown method {method}"))?;
     match outcome {

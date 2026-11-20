@@ -3479,18 +3479,24 @@ mod dynamic_config_admin_tests {
             valid_search_attributes(&admin).get("CustomKw"),
             Some(&IndexedValueType::Keyword)
         );
-        admin.dynamic_config.lock().unwrap()
-            .admin_restore(false, VALID_SEARCH_ATTRIBUTES, &[]).unwrap();
+        admin
+            .dynamic_config
+            .lock()
+            .unwrap()
+            .admin_restore(false, VALID_SEARCH_ATTRIBUTES, &[])
+            .unwrap();
         assert_eq!(
             valid_search_attributes(&admin),
             cadence_api::search_attributes::default_indexed_keys()
         );
-        admin.dynamic_config.lock().unwrap()
+        admin
+            .dynamic_config
+            .lock()
+            .unwrap()
             .admin_update(false, VALID_SEARCH_ATTRIBUTES, vec![value("{}", &[])])
             .unwrap();
         assert!(valid_search_attributes(&admin).is_empty());
     }
-
 }
 
 /// Go client/history `executeWithRedirect`: on ShardOwnershipLost the call is

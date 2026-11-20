@@ -7,7 +7,9 @@ use crate::cassandra::{
 use crate::domain_audit::{DomainAuditLog, DomainAuditLogPage};
 use crate::matching_blob::BlobEncoding;
 use crate::matching_cassandra_exec::{bound, BoundValues};
-use crate::matching_domain_metadata::{DomainMetadataPersistence, GoDomainBlob, MatchingDomainMetadata};
+use crate::matching_domain_metadata::{
+    DomainMetadataPersistence, GoDomainBlob, MatchingDomainMetadata,
+};
 use cadence_thrift::{protocol::Writer, value::write_struct, ToThrift};
 use chrono::{DateTime, Utc};
 use scylla::response::PagingState;
@@ -569,7 +571,11 @@ impl DomainMetadataPersistence for CassandraDomainMetadataPersistence {
         true
     }
 
-    fn create_domain_audit_log(&self, log: &DomainAuditLog, ttl_seconds: i32) -> Result<(), String> {
+    fn create_domain_audit_log(
+        &self,
+        log: &DomainAuditLog,
+        ttl_seconds: i32,
+    ) -> Result<(), String> {
         let domain_id = Uuid::parse_str(&log.domain_id).map_err(|error| error.to_string())?;
         let event_id = Uuid::parse_str(&log.event_id).map_err(|error| error.to_string())?;
         let values = vec![
@@ -580,8 +586,12 @@ impl DomainMetadataPersistence for CassandraDomainMetadataPersistence {
             bound(log.state_after.data.clone()),
             bound(log.state_after.encoding.clone()),
             bound(log.operation_type),
-            bound(DateTime::<Utc>::from_timestamp_nanos(log.created_time_nanos)),
-            bound(DateTime::<Utc>::from_timestamp_nanos(log.last_updated_time_nanos)),
+            bound(DateTime::<Utc>::from_timestamp_nanos(
+                log.created_time_nanos,
+            )),
+            bound(DateTime::<Utc>::from_timestamp_nanos(
+                log.last_updated_time_nanos,
+            )),
             bound(log.identity.clone()),
             bound(log.identity_type.clone()),
             bound(log.comment.clone()),
@@ -618,49 +628,69 @@ impl DomainMetadataPersistence for CassandraDomainMetadataPersistence {
                 paging_state,
             ))
             .map_err(|error| error.to_string())?;
-        let rows = result.into_rows_result().map_err(|error| error.to_string())?;
-        let rows = rows.rows::<(
-            Uuid,
-            Option<Vec<u8>>,
-            Option<String>,
-            Option<Vec<u8>>,
-            Option<String>,
-            DateTime<Utc>,
-            DateTime<Utc>,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-        )>().map_err(|error| error.to_string())?;
+        let rows = result
+            .into_rows_result()
+            .map_err(|error| error.to_string())?;
+        let rows = rows
+            .rows::<(
+                Uuid,
+                Option<Vec<u8>>,
+                Option<String>,
+                Option<Vec<u8>>,
+                Option<String>,
+                DateTime<Utc>,
+                DateTime<Utc>,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+            )>()
+            .map_err(|error| error.to_string())?;
         let blob = |data: Option<Vec<u8>>, encoding: Option<String>| GoDomainBlob {
             data: data.unwrap_or_default(),
             encoding: encoding.unwrap_or_default(),
         };
         let nanos = |time: DateTime<Utc>| {
-            time.timestamp_nanos_opt().ok_or_else(|| "domain audit timestamp out of range".to_string())
+            time.timestamp_nanos_opt()
+                .ok_or_else(|| "domain audit timestamp out of range".to_string())
         };
-        let logs = rows.map(|row| {
-            let (event, before, before_encoding, after, after_encoding, created, updated, identity, identity_type, comment) =
-                row.map_err(|error| error.to_string())?;
-            Ok(DomainAuditLog {
-                event_id: event.to_string(),
-                domain_id: id.to_string(),
-                operation_type,
-                created_time_nanos: nanos(created)?,
-                last_updated_time_nanos: nanos(updated)?,
-                identity: identity.unwrap_or_default(),
-                identity_type: identity_type.unwrap_or_default(),
-                comment: comment.unwrap_or_default(),
-                state_before: blob(before, before_encoding),
-                state_after: blob(after, after_encoding),
+        let logs = rows
+            .map(|row| {
+                let (
+                    event,
+                    before,
+                    before_encoding,
+                    after,
+                    after_encoding,
+                    created,
+                    updated,
+                    identity,
+                    identity_type,
+                    comment,
+                ) = row.map_err(|error| error.to_string())?;
+                Ok(DomainAuditLog {
+                    event_id: event.to_string(),
+                    domain_id: id.to_string(),
+                    operation_type,
+                    created_time_nanos: nanos(created)?,
+                    last_updated_time_nanos: nanos(updated)?,
+                    identity: identity.unwrap_or_default(),
+                    identity_type: identity_type.unwrap_or_default(),
+                    comment: comment.unwrap_or_default(),
+                    state_before: blob(before, before_encoding),
+                    state_after: blob(after, after_encoding),
+                })
             })
-        }).collect::<Result<Vec<_>, String>>()?;
+            .collect::<Result<Vec<_>, String>>()?;
         let next_page_token = match paging_response.into_paging_control_flow() {
             std::ops::ControlFlow::Continue(state) => {
                 state.as_bytes_slice().map(|bytes| bytes.to_vec())
             }
             std::ops::ControlFlow::Break(()) => None,
         };
-        Ok(DomainAuditLogPage { logs, next_page_token })
+        Ok(DomainAuditLogPage {
+            logs,
+            next_page_token,
+        })
     }
 
     fn metadata_version(&self) -> Result<i64, String> {
@@ -692,7 +722,9 @@ impl DomainMetadataPersistence for CassandraDomainMetadataPersistence {
         name: Option<&str>,
         id: Option<&str>,
     ) -> Result<MatchingDomainMetadata, crate::matching_domain_metadata::DomainReadError> {
-        self.metadata_reader.get_domain(name, id).map_err(Into::into)
+        self.metadata_reader
+            .get_domain(name, id)
+            .map_err(Into::into)
     }
 
     fn list_domains(

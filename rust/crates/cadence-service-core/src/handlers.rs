@@ -765,10 +765,12 @@ async fn describe_domain(
     if q.name.is_none() && q.uuid.is_none() {
         return bad_request(validation::err_domain_not_set());
     }
-    match state.domain_manager.describe_domain(&DescribeDomainRequest {
-        name: q.name,
-        uuid: q.uuid,
-    }) {
+    match state
+        .domain_manager
+        .describe_domain(&DescribeDomainRequest {
+            name: q.name,
+            uuid: q.uuid,
+        }) {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(cadence_persistence::FrontendDomainError::NotFound(error)) => entity_not_exists(error),
         Err(cadence_persistence::FrontendDomainError::Invalid(message)) => {
@@ -1040,7 +1042,10 @@ async fn deprecate_domain(
     if req.name.is_empty() {
         return bad_request(validation::err_domain_not_set());
     }
-    match state.domain_manager.deprecate(&req, &state.cluster_metadata) {
+    match state
+        .domain_manager
+        .deprecate(&req, &state.cluster_metadata)
+    {
         Ok(()) => StatusCode::OK.into_response(),
         Err(cadence_persistence::FrontendDomainError::NotFound(e)) => entity_not_exists(e),
         Err(cadence_persistence::FrontendDomainError::Invalid(message)) => {
@@ -2282,10 +2287,12 @@ async fn delete_domain(
     if req.name.is_empty() {
         return bad_request(validation::err_domain_not_set());
     }
-    let current = match state.domain_manager.describe_domain(&DescribeDomainRequest {
-        name: Some(req.name.clone()),
-        uuid: None,
-    }) {
+    let current = match state
+        .domain_manager
+        .describe_domain(&DescribeDomainRequest {
+            name: Some(req.name.clone()),
+            uuid: None,
+        }) {
         Ok(domain) => domain,
         Err(cadence_persistence::FrontendDomainError::NotFound(error)) => {
             return entity_not_exists(error);
@@ -2316,7 +2323,10 @@ async fn delete_domain(
             Err(error) => return bad_request(error),
         }
     }
-    match state.domain_manager.delete(&req.name, &state.cluster_metadata) {
+    match state
+        .domain_manager
+        .delete(&req.name, &state.cluster_metadata)
+    {
         Ok(()) => {
             state.executions.unregister_domain(&req.name);
             StatusCode::OK.into_response()

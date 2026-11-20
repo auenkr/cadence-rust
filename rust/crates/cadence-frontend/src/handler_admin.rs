@@ -538,8 +538,7 @@ mod tests {
             }))
             .unwrap();
         assert_eq!(
-            cadence_service_core::admin::valid_search_attributes(&state.admin)
-                .get("CustomShared"),
+            cadence_service_core::admin::valid_search_attributes(&state.admin).get("CustomShared"),
             Some(&IndexedValueType::Keyword)
         );
     }
