@@ -478,9 +478,15 @@ async fn handle_describe_domain(state: &AppState, body: &Struct) -> HandlerResul
             "Domain not set on request.".to_string(),
         ));
     }
-    match state.domain_manager.describe(&req) {
+    match state.domain_manager.describe_domain(&req) {
         Ok(resp) => Ok(wrap_success(&resp)),
-        Err(e) => Err(AppError::entity_not_exists(e.message)),
+        Err(cadence_persistence::FrontendDomainError::NotFound(error)) => {
+            Err(AppError::entity_not_exists(error.message))
+        }
+        Err(cadence_persistence::FrontendDomainError::Invalid(message)) => {
+            Err(AppError::bad_request(message))
+        }
+        Err(error) => Err(AppError::internal(error.to_string())),
     }
 }
 

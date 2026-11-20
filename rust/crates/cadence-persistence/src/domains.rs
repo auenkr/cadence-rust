@@ -54,6 +54,28 @@ fn initial_previous_version() -> i64 {
 }
 
 impl DomainRecord {
+    fn from_matching_metadata(
+        metadata: &crate::matching_domain_metadata::MatchingDomainMetadata,
+    ) -> Self {
+        Self {
+            info: metadata.info.clone(),
+            configuration: metadata.configuration.clone(),
+            replication: metadata.replication.clone(),
+            failover_version: metadata.failover_version,
+            notification_version: metadata.notification_version,
+            failover_notification_version: metadata.failover_notification_version,
+            is_global_domain: metadata.is_global_domain,
+            archival_bucket: metadata.archival_bucket.clone(),
+            failover_audit: Vec::new(),
+            config_version: metadata.config_version,
+            last_updated_time_nanos: metadata.last_updated_time_nanos,
+            failover_end_time: metadata.failover_end_time_nanos,
+            previous_failover_version: metadata.previous_failover_version,
+            isolation_groups: metadata.decoded_isolation_groups.clone(),
+            async_workflow_config: metadata.decoded_async_workflow_config.clone(),
+        }
+    }
+
     fn to_describe_response(&self) -> DescribeDomainResponse {
         DescribeDomainResponse {
             domain_info: Some(self.info.clone()),
@@ -292,6 +314,15 @@ pub trait FrontendDomainManager: std::fmt::Debug + Send + Sync {
         &self,
         request: &DescribeDomainRequest,
     ) -> Result<DescribeDomainResponse, EntityNotExistsError>;
+
+    /// Public DescribeDomain, which reads persistence in Go. Internal workflow
+    /// routing continues to use the domain cache through `describe`.
+    fn describe_domain(
+        &self,
+        request: &DescribeDomainRequest,
+    ) -> Result<DescribeDomainResponse, FrontendDomainError> {
+        self.describe(request).map_err(FrontendDomainError::NotFound)
+    }
 
     /// Go RegisterDomain: `GetDomain` errors other than EntityNotExists abort
     /// registration instead of being treated as "not found".
@@ -544,23 +575,7 @@ impl InMemoryDomainStore {
         if inner.by_id.contains_key(&metadata.info.uuid) {
             return;
         }
-        let record = DomainRecord {
-            info: metadata.info.clone(),
-            configuration: metadata.configuration.clone(),
-            replication: metadata.replication.clone(),
-            failover_version: metadata.failover_version,
-            notification_version: metadata.notification_version,
-            failover_notification_version: metadata.failover_notification_version,
-            is_global_domain: metadata.is_global_domain,
-            archival_bucket: metadata.archival_bucket.clone(),
-            failover_audit: Vec::new(),
-            config_version: metadata.config_version,
-            last_updated_time_nanos: metadata.last_updated_time_nanos,
-            failover_end_time: metadata.failover_end_time_nanos,
-            previous_failover_version: metadata.previous_failover_version,
-            isolation_groups: metadata.decoded_isolation_groups.clone(),
-            async_workflow_config: metadata.decoded_async_workflow_config.clone(),
-        };
+        let record = DomainRecord::from_matching_metadata(metadata);
         inner
             .by_id
             .insert(record.info.uuid.clone(), record.info.name.clone());
@@ -2028,6 +2043,42 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
         }
     }
 
+    fn describe_domain(
+        &self,
+        request: &DescribeDomainRequest,
+    ) -> Result<DescribeDomainResponse, FrontendDomainError> {
+        use crate::matching_domain_metadata::{DomainReadError, MatchingDomainMetadataError};
+
+        let name = request.name.as_deref().filter(|value| !value.is_empty());
+        let id = request.uuid.as_deref().filter(|value| !value.is_empty());
+        match (name, id) {
+            (None, None) => {
+                return Err(FrontendDomainError::Invalid(
+                    "Domain not set on request.".into(),
+                ));
+            }
+            (Some(_), Some(_)) => {
+                return Err(FrontendDomainError::Invalid(
+                    MatchingDomainMetadataError::BothIdAndName.to_string(),
+                ));
+            }
+            _ => {}
+        }
+        let metadata = self
+            .persistence
+            .get_domain_typed(name, id)
+            .map_err(|error| match error {
+                DomainReadError::NotFound(message) => {
+                    FrontendDomainError::NotFound(EntityNotExistsError::new(message))
+                }
+                DomainReadError::Other(message) => FrontendDomainError::Persistence(message),
+            })?;
+        if let Some(error) = &metadata.config_decode_error {
+            return Err(FrontendDomainError::Persistence(error.clone()));
+        }
+        Ok(DomainRecord::from_matching_metadata(&metadata).to_describe_response())
+    }
+
     fn exists_for_register(&self, name: &str) -> Result<bool, FrontendDomainError> {
         let request = DescribeDomainRequest {
             name: Some(name.to_string()),
@@ -3260,6 +3311,13 @@ mod failover_notification_version_tests {
         ) -> Result<MatchingDomainMetadata, String> {
             DomainMetadataPersistence::get_domain(&*self.0, name, id)
         }
+        fn get_domain_typed(
+            &self,
+            name: Option<&str>,
+            id: Option<&str>,
+        ) -> Result<MatchingDomainMetadata, crate::matching_domain_metadata::DomainReadError> {
+            DomainMetadataPersistence::get_domain_typed(&*self.0, name, id)
+        }
         fn create_domain(&self, m: &MatchingDomainMetadata, v: i64) -> Result<(), String> {
             DomainMetadataPersistence::create_domain(&*self.0, m, v)
         }
@@ -3326,6 +3384,37 @@ mod failover_notification_version_tests {
             .create_with_version(info, config, replication, true, 0)
             .unwrap();
         (manager, persistence)
+    }
+
+    #[test]
+    fn public_describe_reads_persisted_state_even_with_a_warm_cache() {
+        let (manager, persistence) = manager_with_global_domain();
+        let by_name = DescribeDomainRequest {
+            name: Some("global".into()),
+            uuid: None,
+        };
+        let mut record = manager.cache.record_by_name("global").unwrap();
+        record.info.description = "updated by another service".into();
+        let version = DomainMetadataPersistence::metadata_version(&*persistence).unwrap();
+        let metadata = record.to_matching_metadata(version, "thriftrw_snappy").unwrap();
+        DomainMetadataPersistence::update_domain(&*persistence, &metadata, version).unwrap();
+
+        let by_id = DescribeDomainRequest {
+            name: None,
+            uuid: Some(record.info.uuid),
+        };
+        for request in [by_name, by_id] {
+            let cached = manager.describe(&request).unwrap();
+            let described = manager.describe_domain(&request).unwrap();
+            assert_ne!(
+                cached.domain_info.unwrap().description,
+                record.info.description
+            );
+            assert_eq!(
+                described.domain_info.unwrap().description,
+                record.info.description
+            );
+        }
     }
 
     fn no_cooldown() -> crate::domain_update::DomainPolicy {
