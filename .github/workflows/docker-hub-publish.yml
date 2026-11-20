@@ -1,0 +1,84 @@
+name: Docker Hub publish (Rust Frontend/Matching/History + Go Worker)
+# Builds one image per service and pushes it to Docker Hub:
+#   <namespace>/cadence-rust-frontend:<tag>
+#   <namespace>/cadence-rust-matching:<tag>
+#   <namespace>/cadence-rust-history:<tag>
+#   <namespace>/cadence-go-worker:<tag>
+# Each image is the same layout as the upstream Go cadence-auto-setup image
+# (entrypoint, config template, schema tools); SERVICES is preset per service,
+# and can still be overridden with `-e SERVICES=...` at run time.
+# Required repo secrets: DOCKERHUB_USERNAME, DOCKERHUB_TOKEN (Docker Hub access token).
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Image tag (default = short commit SHA)
+        default: ""
+      namespace:
+        description: Docker Hub namespace (default = DOCKERHUB_USERNAME secret)
+        default: ""
+      push_latest:
+        description: Also push the `latest` tag
+        type: boolean
+        default: true
+concurrency:
+  group: docker-hub-publish-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      DOCKER_BUILDKIT: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - run: git submodule update --init go/idls
+      - name: Docker Hub login
+        env:
+          DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          test -n "$DH_USER" && test -n "$DH_TOKEN" || { echo "::error::set DOCKERHUB_USERNAME and DOCKERHUB_TOKEN repo secrets"; exit 1; }
+          echo "$DH_TOKEN" | docker login -u "$DH_USER" --password-stdin
+      - name: Resolve names
+        env:
+          DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          NS="${{ inputs.namespace }}"; NS="${NS:-$DH_USER}"
+          TAG="${{ inputs.tag }}"; TAG="${TAG:-$(git rev-parse --short=12 HEAD)}"
+          echo "NS=$NS" >> "$GITHUB_ENV"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "namespace=$NS tag=$TAG"
+      - name: Build Go base image (cadence-auto-setup)
+        run: |
+          # The Go Makefile needs git metadata at the context root (upstream go/ is the repo root).
+          mkdir /tmp/gobuild
+          rsync -a --exclude .git go/ /tmp/gobuild/
+          git -C /tmp/gobuild init -q
+          git -C /tmp/gobuild add -A >/dev/null
+          git -C /tmp/gobuild -c user.email=ci@example.com -c user.name=ci commit -qm ci
+          docker build -f /tmp/gobuild/Dockerfile --target cadence-auto-setup -t cadence-go:ci /tmp/gobuild
+      - name: Build Rust base image (single cadence-server binary)
+        run: |
+          docker build --pull=false -f rust/Dockerfile --build-arg GO_IMAGE=cadence-go:ci -t cadence-rust:ci .
+          docker run --rm --entrypoint cat cadence-rust:ci /etc/cadence/cadence-server.sha256
+      - name: Build and push per-service images
+        run: |
+          set -eu
+          build_push() { # <base> <repo> <services>
+            printf 'FROM %s\nENV SERVICES=%s\n' "$1" "$3" | docker build -t "$NS/$2:$TAG" -
+            docker push "$NS/$2:$TAG"
+            if [ "${{ inputs.push_latest }}" = "true" ]; then
+              docker tag "$NS/$2:$TAG" "$NS/$2:latest"
+              docker push "$NS/$2:latest"
+            fi
+            echo "- \`$NS/$2:$TAG\` (SERVICES=$3)" >> "$GITHUB_STEP_SUMMARY"
+          }
+          echo "### Pushed images" >> "$GITHUB_STEP_SUMMARY"
+          build_push cadence-rust:ci cadence-rust-frontend frontend
+          build_push cadence-rust:ci cadence-rust-matching matching
+          build_push cadence-rust:ci cadence-rust-history  history
+          build_push cadence-go:ci   cadence-go-worker     worker
+      - name: Logout
+        if: always()
+        run: docker logout || true
