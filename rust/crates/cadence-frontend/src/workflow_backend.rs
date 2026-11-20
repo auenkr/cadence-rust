@@ -1800,13 +1800,14 @@ pub fn build_workflow_api(
         _ => None,
     }
     .map(|(application, pinot)| {
-        crate::async_kafka::KafkaQueueConfig::for_visibility(&ctx.config.kafka, application)
-            .map(|config| {
+        crate::async_kafka::KafkaQueueConfig::for_visibility(&ctx.config.kafka, application).map(
+            |config| {
                 (
                     crate::async_kafka::KafkaProducer::new(std::sync::Arc::new(config)),
                     pinot,
                 )
-            })
+            },
+        )
     })
     .transpose()?;
     Ok(std::sync::Arc::new(HandlerApi {
