@@ -272,11 +272,7 @@ fn convert_from_data_blob(blob: Option<&DataBlob>) -> Result<serde_json::Value, 
 }
 
 fn state_to_i64(state: Option<IsolationGroupState>) -> i64 {
-    match state {
-        None | Some(IsolationGroupState::Invalid) => 0,
-        Some(IsolationGroupState::Healthy) => 1,
-        Some(IsolationGroupState::Drained) => 2,
-    }
+    state.map_or(0, |s| s as i64)
 }
 
 fn state_from_f64(v: f64) -> Option<IsolationGroupState> {
