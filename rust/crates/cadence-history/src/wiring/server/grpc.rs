@@ -216,7 +216,7 @@ pub async fn serve(
             return;
         }
     };
-    let mut server = builder;
+    let server = builder;
     let router = server
         .layer(tower::layer::layer_fn(cadence_matching::grpc_matching::CallerTypeScope))
         .add_service(svc);
