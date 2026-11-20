@@ -208,6 +208,15 @@ pub trait WorkflowApi: Send + Sync + std::fmt::Debug {
     fn admin_metrics(&self) -> Option<&dyn AdminMetrics> {
         None
     }
+    /// Publish the deletion through the configured advanced visibility manager.
+    /// None indicates there is no advanced visibility manager.
+    fn admin_delete_visibility<'a>(
+        &'a self,
+        _domain_id: &'a str,
+        _execution: &'a cadence_api::types::WorkflowExecution,
+    ) -> Pin<Box<dyn Future<Output = Option<bool>> + Send + 'a>> {
+        Box::pin(async { None })
+    }
     /// True when the operation is served by this implementation.
     fn serves(&self, operation: &str) -> bool;
     fn call<'a>(

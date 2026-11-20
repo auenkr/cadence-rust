@@ -102,6 +102,9 @@ pub struct DeleteWorkflowRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub workflow_execution: Option<crate::types::WorkflowExecution>,
+    /// Internal request option. The Go gRPC and Thrift mappers omit it.
+    #[serde(rename = "skipErrors", default, skip_serializing_if = "std::ops::Not::not")]
+    pub skip_errors: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -613,6 +616,9 @@ pub struct MaintainCorruptWorkflowRequest {
     pub domain: String,
     #[serde(rename = "execution", default, skip_serializing_if = "Option::is_none")]
     pub execution: Option<crate::types::WorkflowExecution>,
+    /// Internal request option. The Go gRPC and Thrift mappers omit it.
+    #[serde(rename = "skipErrors", default, skip_serializing_if = "std::ops::Not::not")]
+    pub skip_errors: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

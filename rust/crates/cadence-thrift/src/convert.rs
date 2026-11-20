@@ -806,6 +806,7 @@ impl ToThrift for GetWorkflowExecutionRawHistoryV2Response {
 impl FromThrift for cadence_api::admin::DeleteWorkflowRequest {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {
+            skip_errors: false,
             domain: s.req_string(10, "")?,
             workflow_execution: s.opt_struct(20)?,
         })
@@ -1337,6 +1338,7 @@ impl ToThrift for ReapplyEventsResponse {
 impl FromThrift for MaintainCorruptWorkflowRequest {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {
+            skip_errors: false,
             domain: s.req_string(10, "")?,
             execution: s.opt_struct(20)?,
         })
@@ -7067,6 +7069,7 @@ mod tests {
             events: Some(DataBlob::new(EncodingType::ThriftRW, vec![0x59])),
         });
         round_trip(&MaintainCorruptWorkflowRequest {
+            skip_errors: false,
             domain: "payments".into(),
             execution: Some(WorkflowExecution::new("wf", "run")),
         });

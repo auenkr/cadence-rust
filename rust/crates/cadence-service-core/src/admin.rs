@@ -935,6 +935,9 @@ pub async fn delete_workflow(
     .await
     {
         Ok(value) => value,
+        Err(_) if req.skip_errors => {
+            return raw_history_internal("unexpected end of JSON input".into());
+        }
         Err(response) => return response,
     };
     let mutable: DeletionMutableState =
@@ -1006,21 +1009,30 @@ pub async fn delete_workflow(
             .delete_current_workflow_execution(
                 shard_id,
                 domain_id.clone(),
-                execution.workflow_id,
+                execution.workflow_id.clone(),
                 execution.run_id.clone(),
             )
             .await;
         let executions_deleted = deleted.is_ok() && current_deleted.is_ok();
         let visibility_deleted = if executions_deleted {
-            if let Some(store) = state.visibility_store.clone() {
-                tokio::task::spawn_blocking(move || {
-                    store.admin_delete(&domain_id, &execution.run_id)
-                })
-                .await
-                .is_ok_and(|result| result.is_ok())
+            let db_deleted = if let Some(store) = state.visibility_store.clone() {
+                let domain_id = domain_id.clone();
+                let run_id = execution.run_id.clone();
+                Some(
+                    tokio::task::spawn_blocking(move || store.admin_delete(&domain_id, &run_id))
+                        .await
+                        .is_ok_and(|result| result.is_ok()),
+                )
             } else {
-                false
-            }
+                None
+            };
+            let advanced_deleted = match state.workflow_api.as_ref() {
+                Some(api) => api.admin_delete_visibility(&domain_id, &execution).await,
+                None => None,
+            };
+            (db_deleted.is_some() || advanced_deleted.is_some())
+                && db_deleted.unwrap_or(true)
+                && advanced_deleted.unwrap_or(true)
         } else {
             false
         };
@@ -2765,6 +2777,7 @@ pub async fn maintain_corrupt_workflow(
                     State(state.clone()),
                     Json(cadence_api::admin::DeleteWorkflowRequest {
                         domain: req.domain,
+                        skip_errors: req.skip_errors,
                         workflow_execution: Some(execution),
                     }),
                 )

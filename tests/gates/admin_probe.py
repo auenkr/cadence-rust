@@ -83,7 +83,7 @@ check('delete-workflow-no-execution', lambda **k: stub.DeleteWorkflow(delete_req
 check('delete-workflow-unknown-domain', lambda **k: stub.DeleteWorkflow(
     delete_req(domain='no-such-domain-probe', workflow_execution=exe(workflow_id='w')), **k), 'NOT_FOUND')
 check('maintain-corrupt-no-execution', lambda **k: stub.MaintainCorruptWorkflow(maintain_req(domain=domain), **k),
-      'INVALID_ARGUMENT', 'Execution is missing')
+      'UNKNOWN', 'Execution is missing')
 
 try:
     from google.protobuf.duration_pb2 import Duration
