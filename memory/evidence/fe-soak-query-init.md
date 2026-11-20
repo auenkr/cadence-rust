@@ -1,40 +1,16 @@
-# FE soak query "init" FAIL line — investigation (2026-11-19)
+# FE soak query "init" FAIL, root cause and fix (2026-11-21)
 
-## Finding
-The single `FAIL ... query query state "init"` line in the FE/MT soak run
-[44366018885](https://github.com/auenkr/cadence-rust/actions/runs/44366018885)
-(master d1dba9370) is in the **go-baseline** lane (all-Go cluster), not the Rust lane:
+## Root cause (harness, not a server bug)
+Rust soak run 44813614531, workflow `...-0020994` (index/10 per second = started at ~2099 s). The Frontend was killed at t=2101 and listening again at t=2105 (steps.json). The workflow's 2 s timer fired and its activity was dispatched to the Go worker in that window.
+History log (timer-queue-processor-v2): `Activity timed out`, `activity-timer-type: START_TO_CLOSE`, at 21:31:43. So the activity was started, but its completion/response was lost in the Frontend kill. The driver activity had StartToClose = 60 s, so the workflow stalled about 60 s; the SDK also logged `Workflow has unhandled signals [wake]`.
+The workflow reads `wake` only after the activity, so query kept answering "init" and the driver's 90 s retry gave up. Not Rust-specific: an in-flight activity across a Frontend kill hits the Go Frontend the same way (Go lanes 44366018885, 44681388177, 44682455258).
+Earlier note (2026-11-19) attributing it to query semantics was only part of the story; the init retries themselves are normal, the 90 s stall is the lost activity.
 
-- go-baseline: started 42000, completed 41999, failed 1 (`fail_stage_counts: {query: 1}`),
-  example `FAIL fe-soak-e75374cd-...-0020994 query query state "init"`;
-  query_init attempts 28536 / workflows 20984.
-- rust: started 42000, completed 42000, failed 0, `fail_examples: []`;
-  query_init attempts 30239 / workflows 21087 (within the +10% compare criterion → PASS).
+## Fix
+`tests/frontend-soak/main.go`: activity `StartToCloseTimeout` 60 s -> 10 s, plus server-side `RetryPolicy` (1 s initial, x2, max 5 s, 2 min expiry, 5 attempts). A lost activity retries in ~12 s, well inside the 90 s query retry. No check was weakened: every workflow must still complete, 0 failures allowed.
 
-## Cause
-`tests/frontend-soak/main.go` signals `wake` then queries `state`, retrying for 90 s
-(`retry()`), and fails if the workflow still answers `"init"`. The query itself
-succeeded (no RPC error); the workflow simply had not yet processed the `wake`
-signal for 90 s in the Go cluster (soak includes a service restart at 2100 s).
-Both clusters hit "init" retries on ~50% of workflows: a query is answered from
-the last completed decision, before the signal's decision task runs — that is the
-normal Cadence query semantics (Go workflowHandler.QueryWorkflow → history
-engine QueryWorkflow → matching QueryWorkflow), identical in Rust.
-
-## Verdict
-Parity, Go behaviour; no Rust difference, so no code change. Earlier
-memory notes calling this a "Rust deferred soak issue" were wrong for the
-2026-11-18 run (the old Rust-specific cause was fixed in a143c88bc / 1f59dcd34,
-see memory/frontend-soakfix-20261113.md).
-
-## Confirmation runs (branch fe-soak-query-init, head = origin/master 56b58c6c1 + this note)
-- rust-ci cadence-frontend: https://github.com/auenkr/cadence-rust/actions/runs/44426988643 — success
-- frontend-soak default: https://github.com/auenkr/cadence-rust/actions/runs/44426979723 — success but **`RUST OVERALL: FAIL`** — sole failing criterion start call p99 rust=123ms vs go=35ms (known tail-latency issue, memory/fe-soak-fix-deferred, unrelated to query). Query criteria all PASS: failed=0 in both lanes, query "init" rust 21346 wf/30313 attempts vs go 20929/28253; query p99 rust 33ms vs go 47ms.
-- frontend-mixed-gate default: https://github.com/auenkr/cadence-rust/actions/runs/44426984365 — success; `GATE SUMMARY failed: []`
-- frontend-soak rerun: https://github.com/auenkr/cadence-rust/actions/runs/44439992947 — success; **`RUST OVERALL: PASS`**, no FAIL criteria (start p99 failure in first run did not repeat → flaky tail latency)
-
-## Final status (2026-11-19)
-Done. "init" FAIL line = Go-baseline-lane behaviour (parity, no code change). rust-ci green,
-frontend-mixed-gate `GATE SUMMARY failed: []`, frontend-soak rerun `RUST OVERALL: PASS`.
-Earlier soak start-call p99 FAIL (rust 123ms vs go 35ms) did not repeat; tracked under the
-deferred tail-latency issue.
+## Validation
+Only the Go test driver changed (no Rust code), so rust-ci / frontend-mixed-gate were not rerun.
+frontend-soak (rate=10, 70 min, lanes go-baseline + rust-fe, restart at 2100 s) on branch fe-soak-query-init, head a53394794d17d35dcf723601d2ffb0d34f8c4b23:
+https://github.com/auenkr/cadence-rust/actions/runs/44826841276 conclusion success, **RUST OVERALL: PASS** (all criteria PASS).
+Go 42000/42000/0 failed, Rust 42000/42000/0 failed. Start p99 Go 21 / Rust 7 ms; query p99 46 / 25 ms; e2e p99 4124 / 4063 ms; query init workflows 20982 / 21049.
