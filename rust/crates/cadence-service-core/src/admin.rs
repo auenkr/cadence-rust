@@ -2407,6 +2407,7 @@ fn raw_history_internal(message: String) -> Response {
     )
 }
 
+#[allow(clippy::result_large_err)]
 async fn raw_history_version_histories(
     state: &AppState,
     domain: &str,
