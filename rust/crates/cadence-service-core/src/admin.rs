@@ -2461,13 +2461,17 @@ pub async fn get_global_isolation_groups(State(state): State<StdArc<AppState>>) 
 }
 
 /// Go returns `BadRequestError` when no store exists, any other error as is.
-fn isolation_store_error(e: cadence_persistence::isolation_group_store::IsolationStoreError) -> Response {
+fn isolation_store_error(
+    e: cadence_persistence::isolation_group_store::IsolationStoreError,
+) -> Response {
     use cadence_persistence::isolation_group_store::IsolationStoreError as E;
     match e {
         E::BadRequest(message) => bad_request(BadRequestError::new(message)),
-        E::Internal(message) => {
-            error_response("InternalServiceError", StatusCode::INTERNAL_SERVER_ERROR, message)
-        }
+        E::Internal(message) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            message,
+        ),
     }
 }
 
@@ -2483,9 +2487,11 @@ pub async fn update_global_isolation_groups(
     })
     .await
     .unwrap_or_else(|e| {
-        Err(cadence_persistence::isolation_group_store::IsolationStoreError::Internal(
-            e.to_string(),
-        ))
+        Err(
+            cadence_persistence::isolation_group_store::IsolationStoreError::Internal(
+                e.to_string(),
+            ),
+        )
     });
     match result {
         Ok(()) => ok_json(cadence_api::admin::UpdateGlobalIsolationGroupsResponse {}),
