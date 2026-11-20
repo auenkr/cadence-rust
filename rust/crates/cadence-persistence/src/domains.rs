@@ -1801,6 +1801,7 @@ pub struct PersistedFrontendDomainManager {
     mutation_lock: std::sync::Mutex<()>,
     /// Go `EnableDomainAuditLogging` (system.enableDomainAuditLogging).
     audit_logging: Arc<dyn Fn() -> bool + Send + Sync>,
+    audit_ttl_seconds: Arc<dyn Fn(&str) -> i32 + Send + Sync>,
 }
 
 impl std::fmt::Debug for PersistedFrontendDomainManager {
@@ -1822,12 +1823,21 @@ impl PersistedFrontendDomainManager {
             serialization_encoding,
             mutation_lock: std::sync::Mutex::new(()),
             audit_logging: Arc::new(|| true),
+            audit_ttl_seconds: Arc::new(|_| 365 * 24 * 60 * 60),
         }
     }
 
     /// Gate audit-row writes on the dynamic property (Go default false).
     pub fn with_audit_logging(mut self, enabled: Arc<dyn Fn() -> bool + Send + Sync>) -> Self {
         self.audit_logging = enabled;
+        self
+    }
+
+    pub fn with_audit_ttl_seconds(
+        mut self,
+        ttl: Arc<dyn Fn(&str) -> i32 + Send + Sync>,
+    ) -> Self {
+        self.audit_ttl_seconds = ttl;
         self
     }
 
@@ -1869,14 +1879,6 @@ impl PersistedFrontendDomainManager {
             name: Some(name.to_owned()),
             uuid: None,
         })
-    }
-
-    fn mutation_record(&self, name: &str) -> Result<DomainRecord, FrontendDomainError> {
-        let mut record = self.read_record_by_name(name)?;
-        if let Ok(cached) = self.cache.record_by_id(&record.info.uuid) {
-            record.failover_audit = cached.failover_audit;
-        }
-        Ok(record)
     }
 
     fn current_metadata_version(&self) -> Result<i64, FrontendDomainError> {
@@ -1930,9 +1932,7 @@ impl PersistedFrontendDomainManager {
     }
 
     /// Go `updateDomainAuditLog`: append one audit row after the domain write
-    /// commits. A nil state is stored as an empty `GetDomainResponse`. Like Go
-    /// the write is best effort; a failure never fails the domain operation.
-    /// Backends without `domain_audit_log` keep the cache-only history.
+    /// commits. A nil state is stored as an empty `GetDomainResponse`.
     fn write_audit(
         &self,
         domain_id: &str,
@@ -1965,7 +1965,9 @@ impl PersistedFrontendDomainManager {
             state_before,
             state_after,
         };
-        let _ = self.persistence.create_domain_audit_log(&log);
+        let _ = self
+            .persistence
+            .create_domain_audit_log(&log, (self.audit_ttl_seconds)(domain_id));
     }
 
     /// Go `DomainAuditOperationTypeFailover` row after the domain row commits.
@@ -2016,7 +2018,7 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
     ) -> Result<(), FrontendDomainError> {
         let _guard = self.mutation_lock.lock().expect("domain manager lock");
         let version = self.current_metadata_version()?;
-        let mut updated = self.mutation_record(name)?;
+        let mut updated = self.read_record_by_name(name)?;
         crate::domain_update::check_admin_config_update(&updated, now_nanos(), metadata, policy)
             .map_err(FailoverError::from)?;
         updated.async_workflow_config = config;
@@ -2043,7 +2045,7 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
         }
         let _guard = self.mutation_lock.lock().expect("domain manager lock");
         let version = self.current_metadata_version()?;
-        let mut updated = self.mutation_record(name)?;
+        let mut updated = self.read_record_by_name(name)?;
         crate::domain_update::check_admin_config_update(&updated, now_nanos(), metadata, policy)
             .map_err(FailoverError::from)?;
         updated.isolation_groups = groups;
@@ -2180,7 +2182,7 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
     ) -> Result<cadence_api::service_types::UpdateDomainResponse, FrontendDomainError> {
         let _guard = self.mutation_lock.lock().expect("domain manager lock");
         let version = self.current_metadata_version()?;
-        let old = self.mutation_record(&request.name)?;
+        let old = self.read_record_by_name(&request.name)?;
         let before = old.to_describe_response();
         let mut updated = old.clone();
         let (response, _) = InMemoryDomainStore::update_record(&mut updated, request, metadata, policy)?;
@@ -2219,7 +2221,7 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
     ) -> Result<cadence_api::types::FailoverDomainResponse, FrontendDomainError> {
         let _guard = self.mutation_lock.lock().expect("domain manager lock");
         let version = self.current_metadata_version()?;
-        let old = self.mutation_record(&request.domain_name)?;
+        let old = self.read_record_by_name(&request.domain_name)?;
         let before = old.to_describe_response();
         let mut updated = old.clone();
         let response = InMemoryDomainStore::failover_record(
@@ -2245,10 +2247,9 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
         page_token: &[u8],
     ) -> Result<(Vec<cadence_api::types::FailoverEvent>, Vec<u8>), FrontendDomainError> {
         if !self.persistence.supports_domain_audit_log() {
-            return self
-                .cache
-                .failover_history(domain_id, page_size, page_token)
-                .map_err(FrontendDomainError::from);
+            return Err(FrontendDomainError::Persistence(
+                "DomainAuditManager not available".into(),
+            ));
         }
         // Go reads the audit table directly (no domain lookup) and filters
         // rows with no cluster change, so restarts keep the full history.
@@ -2278,7 +2279,7 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
     ) -> Result<(), FrontendDomainError> {
         let _guard = self.mutation_lock.lock().expect("domain manager lock");
         let version = self.current_metadata_version()?;
-        let mut updated = self.mutation_record(&request.name)?;
+        let mut updated = self.read_record_by_name(&request.name)?;
         ensure_primary_cluster(updated.is_global_domain, metadata)?;
         let before_state = Self::audit_state(&updated);
         updated.info.status = Some(DomainStatus::Deprecated);
@@ -3582,6 +3583,21 @@ mod failover_notification_version_tests {
         });
         assert_eq!(manager.isolation_groups("global").unwrap(), Some(groups));
         assert_eq!(manager.async_workflow_config("global").unwrap(), Some(config));
+    }
+
+    #[test]
+    fn persisted_failover_history_requires_the_domain_audit_store() {
+        let (manager, _) = manager_with_global_domain();
+        let id = manager.cache.record_by_name("global").unwrap().info.uuid;
+        manager.failover(&cadence_api::types::FailoverDomainRequest {
+            domain_name: "global".into(),
+            domain_active_cluster_name: Some("b".into()),
+            ..Default::default()
+        }, "b", &cluster_metadata(), &no_cooldown()).unwrap();
+        assert!(matches!(
+            manager.failover_history(&id, 50, &[]),
+            Err(FrontendDomainError::Persistence(message)) if message == "DomainAuditManager not available"
+        ));
     }
 
     #[test]

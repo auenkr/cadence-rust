@@ -899,6 +899,7 @@ impl crate::matching_domain_metadata::DomainMetadataPersistence for MySqlDomainM
     fn create_domain_audit_log(
         &self,
         log: &crate::domain_audit::DomainAuditLog,
+        _ttl_seconds: i32,
     ) -> Result<(), String> {
         MySqlDomainMetadataStore::create_domain_audit_log(self, log).map_err(|e| e.to_string())
     }
