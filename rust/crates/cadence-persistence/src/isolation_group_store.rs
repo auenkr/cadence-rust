@@ -152,6 +152,17 @@ impl GlobalIsolationGroupStore {
         map_dynamic_config_response(list).map_err(wrap)
     }
 
+    /// Go's drain watcher propagates lookup errors to the task router.
+    pub(crate) fn get_for_routing(&self) -> Result<Option<IsolationGroupConfiguration>, String> {
+        let list = self
+            .get_list_value()
+            .map_err(|error| match error {
+                ListError::NotFound => "global isolation groups not found".to_string(),
+                ListError::Other(error) => error,
+            })?;
+        map_dynamic_config_response(list)
+    }
+
     /// Go `GetListValue(key, nil)` -> `getValueWithFilters`.
     fn get_list_value(&self) -> Result<Option<Vec<serde_json::Value>>, ListError> {
         let Some(snapshot) = self.snapshot() else {

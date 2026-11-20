@@ -1136,6 +1136,26 @@ impl InMemoryDomainStore {
             .clone()
     }
 
+    /// Go's isolation state watcher combines global and domain drains.
+    pub fn is_isolation_group_drained(&self, domain: &str, group: &[u8]) -> Result<bool, String> {
+        let domain_groups = self
+            .domain_isolation_groups(domain)
+            .map_err(|error| error.message)?;
+        let global_groups = match self.global_isolation_store.get() {
+            Some(Some(store)) => store.get_for_routing()?,
+            Some(None) => None,
+            None => self.global_isolation_groups(),
+        };
+        Ok(domain_groups
+            .into_iter()
+            .chain(global_groups)
+            .flat_map(|config| config.isolation_groups)
+            .any(|partition| {
+                partition.name.as_bytes() == group
+                    && partition.state == Some(cadence_api::enums::IsolationGroupState::Drained)
+            }))
+    }
+
     /// Replace the cluster-global isolation groups.
     pub fn update_global_isolation_groups(
         &self,

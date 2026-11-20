@@ -1029,10 +1029,9 @@ impl Matching {
                         let total_duration =
                             duration("matching.taskIsolationDuration", 200_000_000);
                         drop(config);
-                        let drained = name.as_deref().ok_or(()).and_then(|name| domains.domain_isolation_groups(name).map_err(|_| ())).map(|config| {
-                        config.into_iter().flat_map(|config| config.isolation_groups).any(|partition| partition.name == group && partition.state == Some(cadence_api::enums::IsolationGroupState::Drained))
-                        || domains.global_isolation_groups().into_iter().flat_map(|config| config.isolation_groups).any(|partition| partition.name == group && partition.state == Some(cadence_api::enums::IsolationGroupState::Drained))
-                    });
+                        let drained = name.as_deref().ok_or(()).and_then(|name| {
+                            domains.is_isolation_group_drained(name, group.as_bytes()).map_err(|_| ())
+                        });
                         let partition = partitions.get();
                         let partition_id = TaskListName::parse(&task_list)
                             .map(|name| name.partition() as i32)

@@ -1618,6 +1618,7 @@ async fn run_with_lifecycle(
                         "thriftrw",
                     )
                 });
+            let mut isolation_task_store = None;
             let configured_matching_stores = if (run_matching || run_frontend)
                 && !embedded_development
             {
@@ -1658,6 +1659,7 @@ async fn run_with_lifecycle(
                 .await
                 .map_err(|error| anyhow::anyhow!("joining Matching store startup: {error}"))??;
                 eprintln!("Matching startup: configured stores opened");
+                isolation_task_store = Some(stores.task_store.clone());
                 // Go wraps the raw TaskManager with the error injector before
                 // the rate limiter (persistence/client/factory.go:195-203).
                 stores.task_store = crate::matching_fault_injection::inject_task_store_errors(
@@ -1744,79 +1746,86 @@ async fn run_with_lifecycle(
                     }
                 }
             }
-            // Go resource `createConfigStoreOrDefault`: the Frontend's
-            // global isolation groups live in `cluster_config` (row type 1),
-            // polled every system.isolationGroupStateRefreshInterval.
-            if run_frontend {
-                if let Some(task_store) = configured_matching_stores
-                    .as_ref()
-                    .map(|stores| stores.task_store.clone())
-                {
-                    let client_config = {
-                        let o = state.admin.dynamic_config.lock().expect("admin lock");
-                        let nanos = |key: &str, default: i64| {
-                            std::time::Duration::from_nanos(
-                                cadence_persistence::dynamic_config::duration(
-                                    o.property_values(key),
-                                    None,
-                                    default,
-                                )
-                                .max(0) as u64,
-                            )
-                        };
-                        cadence_persistence::config_store::ClientConfig {
-                            poll_interval: nanos(
-                                "system.isolationGroupStateRefreshInterval",
-                                30_000_000_000,
-                            ),
-                            update_retry_attempts: cadence_persistence::dynamic_config::integer(
-                                o.property_values("system.isolationGroupStateUpdateRetryAttempts"),
+            // Go creates this resource even in services that only need to poll it.
+            // Reuse the raw default datastore before the Matching wrappers.
+            if !embedded_development && (run_matching || run_frontend || run_history) {
+                let client_config = {
+                    let o = state.admin.dynamic_config.lock().expect("admin lock");
+                    let nanos = |key: &str, default: i64| {
+                        std::time::Duration::from_nanos(
+                            cadence_persistence::dynamic_config::duration(
+                                o.property_values(key),
                                 None,
-                                2,
-                            ) as i32,
-                            fetch_timeout: nanos(
-                                "system.IsolationGroupStateFetchTimeout",
-                                30_000_000_000,
-                            ),
-                            update_timeout: nanos(
-                                "system.IsolationGroupStateUpdateTimeout",
-                                30_000_000_000,
-                            ),
-                        }
-                    };
-                    let created = tokio::task::spawn_blocking(move || {
-                        let write_store = task_store.clone();
-                        cadence_persistence::isolation_group_store::GlobalIsolationGroupStore::new(
-                            client_config,
-                            std::sync::Arc::new(move |row_type| {
-                                cadence_persistence::matching_task_store::MatchingTaskStore::fetch_latest_config(
-                                    &*task_store,
-                                    row_type,
-                                )
-                            }),
-                            std::sync::Arc::new(move |row_type, row| {
-                                cadence_persistence::matching_task_store::MatchingTaskStore::insert_config(
-                                    &*write_store,
-                                    row_type,
-                                    row,
-                                )
-                            }),
+                                default,
+                            )
+                            .max(0) as u64,
                         )
-                    })
-                    .await
-                    .map_err(|error| anyhow::anyhow!("joining isolation group store startup: {error}"))?;
-                    match created {
-                        Ok(store) => {
-                            let store = std::sync::Arc::new(store);
-                            store.start_polling();
-                            state.domains.attach_global_isolation_store(Some(store));
-                        }
-                        Err(error) => {
-                            eprintln!(
-                                "warning: not instantiating Isolation group config store, this feature will not be enabled: {error}"
-                            );
-                            state.domains.attach_global_isolation_store(None);
-                        }
+                    };
+                    cadence_persistence::config_store::ClientConfig {
+                        poll_interval: nanos(
+                            "system.isolationGroupStateRefreshInterval",
+                            30_000_000_000,
+                        ),
+                        update_retry_attempts: cadence_persistence::dynamic_config::integer(
+                            o.property_values("system.isolationGroupStateUpdateRetryAttempts"),
+                            None,
+                            2,
+                        ) as i32,
+                        fetch_timeout: nanos(
+                            "system.IsolationGroupStateFetchTimeout",
+                            30_000_000_000,
+                        ),
+                        update_timeout: nanos(
+                            "system.IsolationGroupStateUpdateTimeout",
+                            30_000_000_000,
+                        ),
+                    }
+                };
+                let persistence = cfg.persistence.clone();
+                let created = tokio::task::spawn_blocking(move || {
+                    let task_store = match isolation_task_store {
+                        Some(store) => store,
+                        None => crate::matching_task_store::open_configured_default_store(
+                            &persistence,
+                            "",
+                            std::sync::Arc::new(|| false),
+                            std::sync::Arc::new(|| "thriftrw".to_string()),
+                            false,
+                        )
+                        .map_err(|error| error.to_string())?
+                        .task_store,
+                    };
+                    let write_store = task_store.clone();
+                    cadence_persistence::isolation_group_store::GlobalIsolationGroupStore::new(
+                        client_config,
+                        std::sync::Arc::new(move |row_type| {
+                            cadence_persistence::matching_task_store::MatchingTaskStore::fetch_latest_config(
+                                &*task_store,
+                                row_type,
+                            )
+                        }),
+                        std::sync::Arc::new(move |row_type, row| {
+                            cadence_persistence::matching_task_store::MatchingTaskStore::insert_config(
+                                &*write_store,
+                                row_type,
+                                row,
+                            )
+                        }),
+                    )
+                })
+                .await
+                .map_err(|error| anyhow::anyhow!("joining isolation group store startup: {error}"))?;
+                match created {
+                    Ok(store) => {
+                        let store = std::sync::Arc::new(store);
+                        store.start_polling();
+                        state.domains.attach_global_isolation_store(Some(store));
+                    }
+                    Err(error) => {
+                        eprintln!(
+                            "warning: not instantiating Isolation group config store, this feature will not be enabled: {error}"
+                        );
+                        state.domains.attach_global_isolation_store(None);
                     }
                 }
             }

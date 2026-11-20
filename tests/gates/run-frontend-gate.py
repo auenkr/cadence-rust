@@ -114,6 +114,10 @@ if args.es_url:
 # development.yaml already sets system.minRetentionDays=0 and system.workflowDeletionJitterRange=1 (retention-0 archival scenario).
 (work / 'dynamic-config.yaml').write_text(dyn)
 rust_dyn = dyn
+isolation_poll_seconds = 2
+if plugin in ('mysql', 'postgres'):
+    rust_dyn += '\n' if not rust_dyn.endswith('\n') else ''
+    rust_dyn += f'system.isolationGroupStateRefreshInterval:\n  - value: "{isolation_poll_seconds}s"\n'
 if os.environ.get('CADENCE_GATE_QUEUE_V2') == 'off':
     # Force queue v1 in Rust History (history.enable{Timer,Transfer}QueueV2 = false).
     for k in ('history.enableTimerQueueV2', 'history.enableTransferQueueV2'):
@@ -542,6 +546,23 @@ try:
     time.sleep(12)  # domain cache refresh in Go History/Worker
     run('cli-describe-domain-tchannel', [*cli_t, '--domain', dom_t, 'domain', 'describe'])
     run('cli-describe-domain-grpc', [*cli_g, '--domain', dom_g, 'domain', 'describe'])
+    if plugin in ('mysql', 'postgres'):
+        group = 'gate-drain-' + secrets.token_hex(4)
+        admin = ['admin', 'isolation-groups']
+        if run('isolation-groups-update-global', [*cli_g, *admin, 'update-global', '--set-drains', group]):
+            time.sleep(isolation_poll_seconds + 1)
+            # A separate CLI process for each read opens a fresh Frontend connection.
+            for transport, cli in [('grpc', cli_g), ('tchannel', cli_t)]:
+                result = subprocess.run([*cli, *admin, 'get-global', '--format', 'json'],
+                                        capture_output=True, text=True, timeout=60)
+                expected = [{'Name': group, 'State': 2}]
+                try:
+                    actual = json.loads(result.stdout)
+                except ValueError:
+                    actual = None
+                record(f'isolation-groups-get-global-{transport}',
+                       result.returncode == 0 and actual == expected,
+                       result.stdout + result.stderr)
     dump_domain_rows('before-sdk')
     record_services_alive('before-sdk')
     marks = work / 'marks'; marks.mkdir(exist_ok=True)
