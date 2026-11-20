@@ -35,3 +35,20 @@ workflow completion p99. Check runner CPU with `Benchmark/agg.py`.
 | Fresh-target workspace clippy and tests | https://github.com/auenkr/cadence-rust/actions/runs/44702390685 |
 | MySQL mixed gate with History jemalloc | https://github.com/auenkr/cadence-rust/actions/runs/44702404911 |
 | MySQL restart gate with History jemalloc | https://github.com/auenkr/cadence-rust/actions/runs/44702417687 |
+
+## Completed validation
+
+- Allocator-only package CI passed at `657251f6f7f605ada7241e9fc0592261ca7c3398`. Package and workspace CI passed at `379ad324360b62f1a7884b46790663254cb7c9b1`. Each used `clean_target=true`.
+- The MySQL mixed gate passed at `379ad324360b62f1a7884b46790663254cb7c9b1` with two Rust History instances and the Go Worker. Build and gate exit codes were 0, and the log contained `GATE SUMMARY failed: []` (413 steps). SHA256 for History was `b3e8593ff920e7e11d134b810bc7099adf77dd50662fc1750438b75453a508cd`, and for Frontend and Matching's server binary was `35d168dd4fb3d234486d7f248f926b7a402db1d3ac6088964119d6ddcd5e442e`.
+- The initial workspace CI, mixed gate and restart gate for the allocator-only revision were cancelled after supersession by the combined implementation.
+
+## Benchmark results
+
+| Variant | Arm | Peak RSS MiB | Steady RSS MiB | History CPU s | Workflow completion p99 ms |
+|---|---|---:|---:|---:|---:|
+| Allocator only | Go | 159.74 | 149.60 | 19.27 | 111.86 |
+| Allocator only | Rust | 151.76 | 140.51 | 10.37 | 100.87 |
+
+Allocator-only run 44701569383 succeeded on Intel Xeon 6975P-C with three pairs
+and zero workflow errors in both arms. Rust binary SHA256 was
+`fb88c38757b21b42871d806f8d1d7d5e9cece33dfdfc193564c0b321bd5b0464`.
