@@ -1852,6 +1852,21 @@ async fn run_with_lifecycle(
                                 false,
                             )
                         })
+                    })
+                    .with_audit_ttl_seconds({
+                        let overlay = state.admin.dynamic_config.clone();
+                        std::sync::Arc::new(move |domain_id| {
+                            let values = overlay
+                                .lock()
+                                .expect("admin lock")
+                                .property_values("system.domainAuditLogTTL");
+                            let nanos = cadence_persistence::dynamic_config::duration_domain_id(
+                                values,
+                                domain_id,
+                                365 * 24 * 60 * 60 * 1_000_000_000,
+                            );
+                            (nanos / 1_000_000_000) as i32
+                        })
                     }),
                 );
             }

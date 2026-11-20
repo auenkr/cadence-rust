@@ -643,12 +643,10 @@ fn json_blob(value: &serde_json::Value) -> cadence_api::types::DataBlob {
     }
 }
 
-/// Shared admin state: the dynamic-config overlay plus custom (non-system)
-/// search attribute keys registered via `AddSearchAttribute`.
+/// Shared state for admin RPCs.
 #[derive(Debug, Clone, Default)]
 pub struct AdminState {
     pub dynamic_config: Arc<Mutex<DynamicConfigOverlay>>,
-    pub custom_search_attributes: Arc<Mutex<HashMap<String, cadence_api::enums::IndexedValueType>>>,
     pub membership: MembershipSlot,
     pub persistence_description: PersistenceDescription,
     /// Elasticsearch/OpenSearch mapping client; None when advanced visibility is not configured.
@@ -1006,23 +1004,25 @@ fn read_valid_attributes(
 pub fn valid_search_attributes(
     admin: &AdminState,
 ) -> std::collections::HashMap<String, cadence_api::enums::IndexedValueType> {
-    let mut keys = cadence_api::search_attributes::default_indexed_keys();
-    let configured =
-        read_valid_attributes(&admin.dynamic_config.lock().expect("admin config lock"));
-    if let Ok(configured) = configured {
-        keys.extend(configured.into_iter().filter_map(|(key, raw)| {
-            cadence_api::enums::IndexedValueType::from_i32(raw).map(|t| (key, t))
-        }));
-    }
-    keys.extend(
-        admin
-            .custom_search_attributes
-            .lock()
-            .expect("admin lock")
-            .iter()
-            .map(|(key, value_type)| (key.clone(), *value_type)),
-    );
-    keys
+    use cadence_api::enums::IndexedValueType;
+
+    let defaults = cadence_api::search_attributes::default_indexed_keys()
+        .into_iter()
+        .map(|(key, value)| (key, serde_json::Value::from(value.value())))
+        .collect();
+    let values = admin
+        .dynamic_config
+        .lock()
+        .expect("admin config lock")
+        .property_values(VALID_SEARCH_ATTRIBUTES);
+    cadence_persistence::dynamic_config::map_property(values, defaults)
+        .into_iter()
+        .filter_map(|(key, value)| {
+            serde_json::from_value::<IndexedValueType>(value)
+                .ok()
+                .map(|value_type| (key, value_type))
+        })
+        .collect()
 }
 
 /// Go admin `AddSearchAttribute`: permission check, empty check, reject system
@@ -1093,11 +1093,6 @@ pub fn add_search_attribute_core(
         crate::es_mapping::apply_search_attributes(es, attrs)
             .map_err(|crate::es_mapping::ApplyError::Internal(message)| Internal(message))?;
     }
-    admin
-        .custom_search_attributes
-        .lock()
-        .expect("admin lock")
-        .extend(attrs.iter().map(|(key, value)| (key.clone(), *value)));
     Ok(())
 }
 
@@ -2250,46 +2245,61 @@ pub fn history_admin_request<T>(payload: T) -> tonic::Request<T> {
     request
 }
 
-/// Serve one raw history page with an opaque offset cursor. Single branch:
-/// versions are accepted but ignored, mirroring the single-branch store.
+pub(crate) fn configured_raw_history(state: &AppState) -> bool {
+    state.history_node_store.is_some()
+        || state.history_admin_channel.is_some()
+        || state.admin.membership.get().is_some()
+}
+
+/// Read the selected history branch from the configured store.
 pub async fn get_workflow_execution_raw_history(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::GetWorkflowExecutionRawHistoryV2Request>,
 ) -> Response {
+    use cadence_persistence::history_reader::{self, HistoryReadError, ReadHistoryBranchRequest};
     use cadence_persistence::raw_history::{self, RawHistoryToken};
 
     if let Err(e) = raw_history::validate_request(&req) {
         return bad_request(e);
     }
     let execution = req.execution.clone().unwrap_or_default();
-    // Go's uuid.Parse accepts compact, braced and URN spellings, then the
-    // persistence layer addresses the run by the canonical UUID bytes.
     let mut persistence_execution = execution.clone();
     persistence_execution.run_id = raw_history::canonical_run_id(&persistence_execution.run_id);
     if let Some(e) = require_domain(&state, &req.domain).await {
         return e;
     }
-    let executions = match state.execution_store(&req.domain) {
-        Ok(store) => store,
-        Err(error) => return entity_not_exists(error),
-    };
+    let configured = configured_raw_history(&state);
+    let shard_id = (cadence_common::membership::fingerprint32(execution.workflow_id.as_bytes())
+        % shard_count(&state).max(1) as u32) as i32;
 
     let mut req = req;
     let mut persistence_token = Vec::new();
     let mut continuation = None;
     let histories: cadence_api::types::VersionHistories = if req.next_page_token.is_empty() {
-        match executions.mutable_state_view(&req.domain, &persistence_execution) {
-            Ok(view) => match view.version_histories {
-                Some(vh) => vh,
-                None => return bad_request(BadRequestError::new("Invalid version histories.")),
-            },
-            Err(e) => return entity_not_exists(e),
+        let result = if configured {
+            raw_history_version_histories(&state, &req.domain, &execution, shard_id).await
+        } else {
+            state
+                .execution_store(&req.domain)
+                .and_then(|store| store.mutable_state_view(&req.domain, &persistence_execution))
+                .map(|view| view.version_histories)
+                .map_err(entity_not_exists)
+        };
+        match result {
+            Ok(Some(histories)) => histories,
+            Ok(None) => return bad_request(BadRequestError::new("Invalid version histories.")),
+            Err(response) => return response,
         }
     } else {
         match RawHistoryToken::from_bytes(&req.next_page_token) {
             Ok(token) => {
                 persistence_token = token.persistence_token.clone().unwrap_or_default();
-                if let Err(error) = raw_history::validate_persistence_token(&persistence_token) {
+                let validation = if configured {
+                    Ok(())
+                } else {
+                    raw_history::validate_persistence_token(&persistence_token)
+                };
+                if let Err(error) = validation {
                     return bad_request(error);
                 }
                 let histories = token.version_histories.clone().unwrap_or_default();
@@ -2327,56 +2337,132 @@ pub async fn get_workflow_execution_raw_history(
         );
     }
 
-    match executions.raw_history(
-        &req.domain,
-        &persistence_execution,
-        req.start_event_id,
-        req.end_event_id,
-        req.maximum_page_size as usize,
-        &persistence_token,
-    ) {
-        Ok((events, new_persistence_token)) => {
-            let batch = cadence_thrift::history_blob::encode(events);
-            let next_page_token = if new_persistence_token.is_empty() {
-                Vec::new()
-            } else {
-                let new_token = RawHistoryToken {
-                    domain_name: req.domain.clone(),
-                    workflow_id: execution.workflow_id.clone(),
-                    run_id: execution.run_id.clone(),
-                    start_event_id: req.start_event_id.unwrap_or(0),
-                    start_event_version: req.start_event_version.unwrap_or(0),
-                    end_event_id: req.end_event_id.unwrap_or(0),
-                    end_event_version: req.end_event_version.unwrap_or(0),
-                    persistence_token: if new_persistence_token.is_empty() {
-                        None
-                    } else {
-                        Some(new_persistence_token)
-                    },
-                    version_histories: Some(histories.clone()),
-                };
-                new_token.to_bytes().unwrap_or_default()
-            };
-            ok_json(
-                cadence_api::admin::GetWorkflowExecutionRawHistoryV2Response {
-                    next_page_token,
-                    history_batches: vec![batch],
-                    version_history: Some(target_history),
-                },
-            )
+    let page = if configured {
+        let Some(store) = state.history_node_store.clone() else {
+            return raw_history_internal("History persistence is not configured.".into());
+        };
+        let request = ReadHistoryBranchRequest {
+            branch_token: target_history.branch_token.clone(),
+            min_event_id: req.start_event_id.unwrap_or(0) + 1,
+            max_event_id: req.end_event_id.unwrap_or(0),
+            page_size: i64::from(req.maximum_page_size),
+            next_page_token: persistence_token,
+            shard_id,
+        };
+        match tokio::task::spawn_blocking(move || {
+            history_reader::read_raw_history_branch(store.as_ref(), &request)
+        })
+        .await
+        {
+            Ok(Ok(page)) => page,
+            Ok(Err(HistoryReadError::EntityNotExists(_))) => (Vec::new(), Vec::new()),
+            Ok(Err(HistoryReadError::InvalidRequest(message))) => {
+                return bad_request(BadRequestError::new(message));
+            }
+            Ok(Err(error)) => return raw_history_internal(error.to_string()),
+            Err(error) => return raw_history_internal(error.to_string()),
         }
-        Err(e) => {
-            // Go returns empty response on EntityNotExists from DB.
-            let _ = e;
-            ok_json(
-                cadence_api::admin::GetWorkflowExecutionRawHistoryV2Response {
-                    next_page_token: Vec::new(),
-                    history_batches: vec![],
-                    version_history: Some(target_history),
-                },
-            )
+    } else {
+        let executions = match state.execution_store(&req.domain) {
+            Ok(store) => store,
+            Err(error) => return entity_not_exists(error),
+        };
+        match executions.raw_history(
+            &req.domain,
+            &persistence_execution,
+            req.start_event_id,
+            req.end_event_id,
+            req.maximum_page_size as usize,
+            &persistence_token,
+        ) {
+            Ok((events, next)) => (vec![cadence_thrift::history_blob::encode(events)], next),
+            Err(_) => (Vec::new(), Vec::new()),
         }
-    }
+    };
+    let (history_batches, persistence_token) = page;
+    let next_page_token = if persistence_token.is_empty() {
+        Vec::new()
+    } else {
+        let mut token = RawHistoryToken::new(&req, &histories);
+        token.persistence_token = Some(persistence_token);
+        match token.to_bytes() {
+            Ok(bytes) => bytes,
+            Err(error) => return bad_request(error),
+        }
+    };
+    ok_json(
+        cadence_api::admin::GetWorkflowExecutionRawHistoryV2Response {
+            next_page_token,
+            history_batches,
+            version_history: Some(target_history),
+        },
+    )
+}
+
+fn raw_history_internal(message: String) -> Response {
+    error_response(
+        "InternalServiceError",
+        StatusCode::INTERNAL_SERVER_ERROR,
+        message,
+    )
+}
+
+#[allow(clippy::result_large_err)]
+async fn raw_history_version_histories(
+    state: &AppState,
+    domain: &str,
+    execution: &cadence_api::types::WorkflowExecution,
+    shard: i32,
+) -> Result<Option<cadence_api::types::VersionHistories>, Response> {
+    use cadence_api::types::{VersionHistories, VersionHistory, VersionHistoryItem};
+    use cadence_proto::history::history_api_client::HistoryApiClient;
+
+    let domain_id = state
+        .domain_manager
+        .domain_id(domain)
+        .map_err(entity_not_exists)?;
+    let channel = history_channel_for(state, shard, None)
+        .map_err(raw_history_internal)?
+        .ok_or_else(|| raw_history_internal("History client is not configured.".into()))?;
+    let request = cadence_proto::history::GetMutableStateRequest {
+        domain_id,
+        workflow_execution: Some(cadence_proto::api::WorkflowExecution {
+            workflow_id: execution.workflow_id.clone(),
+            run_id: execution.run_id.clone(),
+        }),
+        ..Default::default()
+    };
+    let response = HistoryApiClient::new(channel)
+        .get_mutable_state(history_admin_request(request))
+        .await
+        .map_err(|status| match status.code() {
+            tonic::Code::NotFound => entity_not_exists(
+                cadence_api::errors::EntityNotExistsError::new(status.message()),
+            ),
+            tonic::Code::InvalidArgument => bad_request(BadRequestError::new(status.message())),
+            _ => raw_history_internal(status.message().into()),
+        })?;
+    Ok(response
+        .into_inner()
+        .version_histories
+        .map(|value| VersionHistories {
+            current_version_history_index: value.current_version_history_index,
+            histories: value
+                .histories
+                .into_iter()
+                .map(|history| VersionHistory {
+                    branch_token: history.branch_token,
+                    items: history
+                        .items
+                        .into_iter()
+                        .map(|item| VersionHistoryItem {
+                            event_id: item.event_id,
+                            version: item.version,
+                        })
+                        .collect(),
+                })
+                .collect(),
+        }))
 }
 
 /// Admin workflow describe: shard placement plus History's mutable-state
@@ -2577,11 +2663,16 @@ pub async fn get_domain_isolation_groups(
     if req.domain.is_empty() {
         return bad_request(BadRequestError::new("Domain is not set on request."));
     }
-    match state.domains.domain_isolation_groups(&req.domain) {
+    match state.domain_manager.isolation_groups(&req.domain) {
         Ok(groups) => ok_json(cadence_api::admin::GetDomainIsolationGroupsResponse {
             isolation_groups: groups,
         }),
-        Err(e) => entity_not_exists(e),
+        Err(cadence_persistence::FrontendDomainError::NotFound(e)) => entity_not_exists(e),
+        Err(e) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            e.to_string(),
+        ),
     }
 }
 
@@ -3468,6 +3559,34 @@ mod dynamic_config_admin_tests {
             stored["CustomKw"],
             cadence_api::enums::IndexedValueType::Keyword.value()
         );
+    }
+    #[test]
+    fn search_attributes_follow_dynamic_config_after_restore() {
+        use cadence_api::enums::IndexedValueType;
+        let admin = AdminState::default();
+        let attrs = HashMap::from([("CustomKw".to_owned(), IndexedValueType::Keyword)]);
+        add_search_attribute_core(&admin, "", Some(&attrs)).unwrap();
+        assert_eq!(
+            valid_search_attributes(&admin).get("CustomKw"),
+            Some(&IndexedValueType::Keyword)
+        );
+        admin
+            .dynamic_config
+            .lock()
+            .unwrap()
+            .admin_restore(false, VALID_SEARCH_ATTRIBUTES, &[])
+            .unwrap();
+        assert_eq!(
+            valid_search_attributes(&admin),
+            cadence_api::search_attributes::default_indexed_keys()
+        );
+        admin
+            .dynamic_config
+            .lock()
+            .unwrap()
+            .admin_update(false, VALID_SEARCH_ATTRIBUTES, vec![value("{}", &[])])
+            .unwrap();
+        assert!(valid_search_attributes(&admin).is_empty());
     }
 }
 

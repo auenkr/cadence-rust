@@ -163,7 +163,7 @@ impl Handler {
         state
             .domain_manager
             .list_page(request)
-            .map_err(DomainHandlerError::BadRequest)
+            .map_err(DomainHandlerError::from)
     }
 
     pub fn update_domain(
@@ -200,21 +200,9 @@ impl Handler {
                 cadence_api::validation::err_domain_not_set(),
             ));
         }
-        let current = state
-            .domain_manager
-            .describe(&DescribeDomainRequest {
-                name: Some(request.name.clone()),
-                uuid: None,
-            })
-            .map_err(DomainHandlerError::NotFound)?;
-        if current.is_global_domain && !state.cluster_metadata.is_primary_cluster() {
-            return Err(DomainHandlerError::BadRequest(bad(
-                "Cluster is not primary cluster, cannot do domain registration or domain update.",
-            )));
-        }
         state
             .domain_manager
-            .deprecate(request)
+            .deprecate(request, &state.cluster_metadata)
             .map_err(DomainHandlerError::from)
     }
 }

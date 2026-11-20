@@ -307,8 +307,7 @@ pub trait DomainMetadataPersistence: std::fmt::Debug + Send + Sync {
         Err("domain replication DLQ is unavailable for this persistence backend".into())
     }
 
-    /// Whether this backend writes Go's `domain_audit_log`. Frontend keeps
-    /// failover history in the cache for backends that report `false`.
+    /// Whether this backend exposes Go's `domain_audit_log`.
     fn supports_domain_audit_log(&self) -> bool {
         false
     }
@@ -316,6 +315,7 @@ pub trait DomainMetadataPersistence: std::fmt::Debug + Send + Sync {
     fn create_domain_audit_log(
         &self,
         _log: &crate::domain_audit::DomainAuditLog,
+        _ttl_seconds: i32,
     ) -> Result<(), String> {
         Err("domain audit log is unavailable for this persistence backend".into())
     }
@@ -1726,6 +1726,7 @@ impl crate::matching_domain_metadata::DomainMetadataPersistence for MatchingDoma
     fn create_domain_audit_log(
         &self,
         log: &crate::domain_audit::DomainAuditLog,
+        _ttl_seconds: i32,
     ) -> Result<(), String> {
         self.insert_domain_audit_log(log)
             .map_err(|error| error.to_string())

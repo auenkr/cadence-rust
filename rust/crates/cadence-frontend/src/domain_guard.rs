@@ -83,7 +83,10 @@ impl ClusterDescribe for LiveClusters {
         if cluster == self.current {
             let manager = self.manager.clone();
             return Ok(Box::pin(async move {
-                manager.describe(&request).ok().map(|r| r.failover_version)
+                manager
+                    .describe_domain(&request)
+                    .ok()
+                    .map(|r| r.failover_version)
             }));
         }
         let client = self
@@ -220,6 +223,82 @@ mod tests {
         assert!(matches!(
             run(vec![Ok(Some(1)), Err("no client".into())]).await,
             Err(DomainGuardError::BadRequest(m)) if m == "no client"
+        ));
+    }
+
+    #[derive(Debug)]
+    struct MissingDomain;
+
+    impl cadence_persistence::matching_domain_metadata::DomainMetadataPersistence for MissingDomain {
+        fn metadata_version(&self) -> Result<i64, String> {
+            unreachable!()
+        }
+
+        fn get_domain_typed(
+            &self,
+            _: Option<&str>,
+            _: Option<&str>,
+        ) -> Result<
+            cadence_persistence::matching_domain_metadata::MatchingDomainMetadata,
+            cadence_persistence::matching_domain_metadata::DomainReadError,
+        > {
+            Err(
+                cadence_persistence::matching_domain_metadata::DomainReadError::NotFound(
+                    "Domain no longer exists.".into(),
+                ),
+            )
+        }
+
+        fn create_domain(
+            &self,
+            _: &cadence_persistence::matching_domain_metadata::MatchingDomainMetadata,
+            _: i64,
+        ) -> Result<(), String> {
+            unreachable!()
+        }
+
+        fn update_domain(
+            &self,
+            _: &cadence_persistence::matching_domain_metadata::MatchingDomainMetadata,
+            _: i64,
+        ) -> Result<(), String> {
+            unreachable!()
+        }
+
+        fn delete_domain(&self, _: &str) -> Result<(), String> {
+            unreachable!()
+        }
+    }
+
+    #[tokio::test]
+    async fn local_graceful_failover_check_verifies_persisted_domain() {
+        let cache = cadence_persistence::InMemoryDomainStore::new();
+        cache
+            .create(
+                cadence_api::types::DomainInfo {
+                    name: "d".into(),
+                    uuid: "cached-id".into(),
+                    ..Default::default()
+                },
+                Default::default(),
+                Default::default(),
+                false,
+            )
+            .unwrap();
+        let source = LiveClusters {
+            current: "local".into(),
+            enabled: vec!["local".into()],
+            manager: Arc::new(cadence_persistence::PersistedFrontendDomainManager::new(
+                cache,
+                Arc::new(MissingDomain),
+                Arc::new(|| "thriftrw_snappy".into()),
+            )),
+            remotes: Default::default(),
+        };
+        assert!(matches!(
+            check_ongoing_failover(&source, "d").await,
+            Err(DomainGuardError::Internal(message))
+                if message == "Failed to verify failover version from all clusters"
         ));
     }
 

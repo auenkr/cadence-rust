@@ -665,6 +665,23 @@ async fn register_domain(
     if req.name.is_empty() {
         return bad_request(validation::err_domain_not_set());
     }
+    match state.domain_manager.exists_for_register(&req.name) {
+        Ok(true) => {
+            return error_response(
+                "DomainAlreadyExistsError",
+                StatusCode::CONFLICT,
+                "Domain already exists.".to_string(),
+            );
+        }
+        Ok(false) => {}
+        Err(error) => {
+            return error_response(
+                "InternalServiceError",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                error.to_string(),
+            );
+        }
+    }
     if req.name.len() > state.limits.ids.domain_max {
         return bad_request(BadRequestError::new("Domain length exceeds limit."));
     }
@@ -765,10 +782,12 @@ async fn describe_domain(
     if q.name.is_none() && q.uuid.is_none() {
         return bad_request(validation::err_domain_not_set());
     }
-    match state.domain_manager.describe_domain(&DescribeDomainRequest {
-        name: q.name,
-        uuid: q.uuid,
-    }) {
+    match state
+        .domain_manager
+        .describe_domain(&DescribeDomainRequest {
+            name: q.name,
+            uuid: q.uuid,
+        }) {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(cadence_persistence::FrontendDomainError::NotFound(error)) => entity_not_exists(error),
         Err(cadence_persistence::FrontendDomainError::Invalid(message)) => {
@@ -788,7 +807,14 @@ async fn list_domains(
 ) -> Response {
     match state.domain_manager.list_page(&request) {
         Ok(v) => Json(v).into_response(),
-        Err(e) => bad_request(e),
+        Err(cadence_persistence::FrontendDomainError::Invalid(message)) => {
+            bad_request(BadRequestError::new(message))
+        }
+        Err(error) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            error.to_string(),
+        ),
     }
 }
 
@@ -1033,21 +1059,15 @@ async fn deprecate_domain(
     if req.name.is_empty() {
         return bad_request(validation::err_domain_not_set());
     }
-    let current = match state.domain_manager.describe(&DescribeDomainRequest {
-        name: Some(req.name.clone()),
-        uuid: None,
-    }) {
-        Ok(domain) => domain,
-        Err(error) => return entity_not_exists(error),
-    };
-    if current.is_global_domain && !state.cluster_metadata.is_primary_cluster() {
-        return bad_request(BadRequestError::new(
-            "Cluster is not primary cluster, cannot do domain registration or domain update.",
-        ));
-    }
-    match state.domain_manager.deprecate(&req) {
+    match state
+        .domain_manager
+        .deprecate(&req, &state.cluster_metadata)
+    {
         Ok(()) => StatusCode::OK.into_response(),
         Err(cadence_persistence::FrontendDomainError::NotFound(e)) => entity_not_exists(e),
+        Err(cadence_persistence::FrontendDomainError::Invalid(message)) => {
+            bad_request(BadRequestError::new(message))
+        }
         Err(error) => error_response(
             "InternalServiceError",
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -2284,18 +2304,24 @@ async fn delete_domain(
     if req.name.is_empty() {
         return bad_request(validation::err_domain_not_set());
     }
-    let current = match state.domain_manager.describe(&DescribeDomainRequest {
-        name: Some(req.name.clone()),
-        uuid: None,
-    }) {
+    let current = match state
+        .domain_manager
+        .describe_domain(&DescribeDomainRequest {
+            name: Some(req.name.clone()),
+            uuid: None,
+        }) {
         Ok(domain) => domain,
-        Err(error) => return entity_not_exists(error),
+        Err(cadence_persistence::FrontendDomainError::NotFound(error)) => {
+            return entity_not_exists(error);
+        }
+        Err(error) => {
+            return error_response(
+                "InternalServiceError",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                error.to_string(),
+            );
+        }
     };
-    if current.is_global_domain && !state.cluster_metadata.is_primary_cluster() {
-        return bad_request(BadRequestError::new(
-            "Cluster is not primary cluster, cannot do domain registration or domain update.",
-        ));
-    }
     if current.domain_info.as_ref().and_then(|info| info.status) != Some(DomainStatus::Deprecated) {
         return bad_request(BadRequestError::new("Domain is not in a deprecated state."));
     }
@@ -2314,12 +2340,18 @@ async fn delete_domain(
             Err(error) => return bad_request(error),
         }
     }
-    match state.domain_manager.delete(&req.name) {
+    match state
+        .domain_manager
+        .delete(&req.name, &state.cluster_metadata)
+    {
         Ok(()) => {
             state.executions.unregister_domain(&req.name);
             StatusCode::OK.into_response()
         }
         Err(cadence_persistence::FrontendDomainError::NotFound(e)) => entity_not_exists(e),
+        Err(cadence_persistence::FrontendDomainError::Invalid(message)) => {
+            bad_request(BadRequestError::new(message))
+        }
         Err(error) => error_response(
             "InternalServiceError",
             StatusCode::INTERNAL_SERVER_ERROR,

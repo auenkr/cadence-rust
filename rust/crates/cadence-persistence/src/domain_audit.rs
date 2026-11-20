@@ -543,11 +543,11 @@ mod tests {
             ..audit_row(&new_event_id(nanos), nanos, &snapshot, &snapshot)
         };
         for nanos in [1_000_000_000_i64, 2_000_000_000, 3_000_000_000] {
-            store.create_domain_audit_log(&row(nanos, 5)).unwrap();
+            store.create_domain_audit_log(&row(nanos, 5), 0).unwrap();
         }
         // Other operation types are excluded by the operation-type filter.
         store
-            .create_domain_audit_log(&row(4_000_000_000, 2))
+            .create_domain_audit_log(&row(4_000_000_000, 2), 0)
             .unwrap();
 
         let first = store

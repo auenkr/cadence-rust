@@ -233,11 +233,16 @@ async fn handle_delete_domain(
     // Go: DescribeDomain, then require the Deprecated status before deleting.
     let current = state
         .domain_manager
-        .describe(&DescribeDomainRequest {
+        .describe_domain(&DescribeDomainRequest {
             name: Some(req.name.clone()),
             uuid: None,
         })
-        .map_err(|e| AppError::entity_not_exists(e.message))?;
+        .map_err(|error| match error {
+            cadence_persistence::FrontendDomainError::NotFound(error) => {
+                AppError::entity_not_exists(error.message)
+            }
+            other => AppError::internal(other.to_string()),
+        })?;
     if current.domain_info.as_ref().and_then(|info| info.status)
         != Some(cadence_api::enums::DomainStatus::Deprecated)
     {
@@ -274,10 +279,13 @@ async fn handle_delete_domain(
     }
     state
         .domain_manager
-        .delete(&req.name)
+        .delete(&req.name, &state.cluster_metadata)
         .map_err(|error| match error {
             cadence_persistence::FrontendDomainError::NotFound(error) => {
                 AppError::entity_not_exists(error.message)
+            }
+            cadence_persistence::FrontendDomainError::Invalid(message) => {
+                AppError::bad_request(message)
             }
             other => AppError::internal(other.to_string()),
         })?;
@@ -331,12 +339,9 @@ async fn handle_register(state: &AppState, body: &Struct) -> HandlerResult {
         ));
     }
     if state
-        .domains
-        .describe(&DescribeDomainRequest {
-            name: Some(req.name.clone()),
-            uuid: None,
-        })
-        .is_ok()
+        .domain_manager
+        .exists_for_register(&req.name)
+        .map_err(|error| AppError::internal(error.to_string()))?
     {
         return Err(AppError {
             exc_name: "DomainAlreadyExistsError",
@@ -496,7 +501,12 @@ async fn handle_list_domains(state: &AppState, body: &Struct) -> HandlerResult {
     let response = state
         .domain_manager
         .list_page(&request)
-        .map_err(|e| AppError::bad_request(e.message))?;
+        .map_err(|error| match error {
+            cadence_persistence::FrontendDomainError::Invalid(message) => {
+                AppError::bad_request(message)
+            }
+            other => AppError::internal(other.to_string()),
+        })?;
     Ok(wrap_success(&response))
 }
 
@@ -657,23 +667,16 @@ async fn handle_deprecate_domain(state: &AppState, body: &Struct) -> HandlerResu
             "Domain not set on request.".to_string(),
         ));
     }
-    let current = state
+    match state
         .domain_manager
-        .describe(&DescribeDomainRequest {
-            name: Some(req.name.clone()),
-            uuid: None,
-        })
-        .map_err(|e| AppError::entity_not_exists(e.message))?;
-    if current.is_global_domain && !state.cluster_metadata.is_primary_cluster() {
-        return Err(AppError::bad_request(
-            "Cluster is not primary cluster, cannot do domain registration or domain update."
-                .to_string(),
-        ));
-    }
-    match state.domain_manager.deprecate(&req) {
+        .deprecate(&req, &state.cluster_metadata)
+    {
         Ok(()) => Ok(Struct { fields: vec![] }),
         Err(cadence_persistence::FrontendDomainError::NotFound(e)) => {
             Err(AppError::entity_not_exists(e.message))
+        }
+        Err(cadence_persistence::FrontendDomainError::Invalid(message)) => {
+            Err(AppError::bad_request(message))
         }
         Err(error) => Err(AppError::internal(error.to_string())),
     }
@@ -2949,6 +2952,16 @@ pub async fn dispatch_with_transport(
         }
         "DescribeQueue" => handle_describe_queue(state, body).await,
         "MergeDLQMessages" => handle_merge_dlq_messages(state, body).await,
+        "GetWorkflowExecutionRawHistoryV2" if admin && crate::admin::configured_raw_history(state) => {
+            bridge_value::<_, cadence_api::admin::GetWorkflowExecutionRawHistoryV2Response, _, _>(
+                method,
+                body,
+                |req: cadence_api::admin::GetWorkflowExecutionRawHistoryV2Request| {
+                    crate::admin::get_workflow_execution_raw_history(State(shared()), Json(req))
+                },
+            )
+            .await
+        }
         "GetWorkflowExecutionRawHistoryV2" => handle_raw_history_v2(state, body),
         "DeleteWorkflow" => handle_delete_workflow(state, body),
         "RefreshWorkflowTasks" => handle_refresh_workflow_tasks(state, body),
@@ -3015,7 +3028,13 @@ pub async fn dispatch_with_transport(
             Ok(_) => crate::workflow_api::AdminOutcome::Ok,
             Err(e) => crate::workflow_api::AdminOutcome::from_exception(e.exc_name),
         };
-        m.admin_finish(name, admin_caller.as_str(), transport, started.elapsed(), class);
+        m.admin_finish(
+            name,
+            admin_caller.as_str(),
+            transport,
+            started.elapsed(),
+            class,
+        );
     }
     let def = find_method(method).ok_or_else(|| format!("unknown method {method}"))?;
     match outcome {

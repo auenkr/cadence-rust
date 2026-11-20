@@ -626,7 +626,37 @@ pub fn boolean_domain_id(values: impl PropertyValueSource, domain_id: &str, defa
             .and_then(|v| v.as_bool())
             .unwrap_or(default);
     }
-    let values = values.snapshot_values();
+    match selected_domain_id(values.snapshot_values(), domain_id).and_then(|value| value.as_bool())
+    {
+        Some(value) => value,
+        None => {
+            report_read_error("boolean", "value was missing or had the wrong type");
+            default
+        }
+    }
+}
+
+pub fn duration_domain_id(values: impl PropertyValueSource, domain_id: &str, default: i64) -> i64 {
+    let filters = BTreeMap::from([("domainID".into(), Value::String(domain_id.into()))]);
+    if let Some(result) = values.runtime_value(
+        RuntimePropertyType::Duration,
+        Value::from(default),
+        &filters,
+    ) {
+        return runtime_typed(result, default, "duration")
+            .and_then(|value| value.as_i64())
+            .unwrap_or(default);
+    }
+    selected_domain_id(values.snapshot_values(), domain_id)
+        .and_then(|value| {
+            value
+                .as_str()
+                .and_then(cadence_common::duration::parse_nanos)
+        })
+        .unwrap_or(default)
+}
+
+fn selected_domain_id(values: &[DynamicConfigValue], domain_id: &str) -> Option<Value> {
     let mut fallback = None;
     for value in values {
         if value.filters.is_empty() {
@@ -641,13 +671,7 @@ pub fn boolean_domain_id(values: impl PropertyValueSource, domain_id: &str, defa
             break;
         }
     }
-    match fallback.and_then(|value| value.as_bool()) {
-        Some(value) => value,
-        None => {
-            report_read_error("boolean", "value was missing or had the wrong type");
-            default
-        }
-    }
+    fallback
 }
 
 /// Go `GetStringProperty` without filters. An unset key is not an error.
