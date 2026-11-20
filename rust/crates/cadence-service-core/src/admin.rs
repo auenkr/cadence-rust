@@ -2577,11 +2577,16 @@ pub async fn get_domain_isolation_groups(
     if req.domain.is_empty() {
         return bad_request(BadRequestError::new("Domain is not set on request."));
     }
-    match state.domains.domain_isolation_groups(&req.domain) {
+    match state.domain_manager.isolation_groups(&req.domain) {
         Ok(groups) => ok_json(cadence_api::admin::GetDomainIsolationGroupsResponse {
             isolation_groups: groups,
         }),
-        Err(e) => entity_not_exists(e),
+        Err(cadence_persistence::FrontendDomainError::NotFound(e)) => entity_not_exists(e),
+        Err(e) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            e.to_string(),
+        ),
     }
 }
 

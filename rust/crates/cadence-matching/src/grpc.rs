@@ -1043,7 +1043,12 @@ impl p::domain_api_server::DomainApi for Frontend {
             .state
             .domain_manager
             .list_page(&list_request)
-            .map_err(|e| Status::invalid_argument(e.message));
+            .map_err(|error| match error {
+                cadence_persistence::FrontendDomainError::Invalid(message) => {
+                    Status::invalid_argument(message)
+                }
+                other => Status::internal(other.to_string()),
+            });
         if let (Some(api), request, start) = observed {
             let code = listed.as_ref().err().map(|s| s.code() as i32);
             api.observe_local("ListDomains", &request, start.elapsed(), code);

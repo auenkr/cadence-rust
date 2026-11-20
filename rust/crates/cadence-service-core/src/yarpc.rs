@@ -233,11 +233,16 @@ async fn handle_delete_domain(
     // Go: DescribeDomain, then require the Deprecated status before deleting.
     let current = state
         .domain_manager
-        .describe(&DescribeDomainRequest {
+        .describe_domain(&DescribeDomainRequest {
             name: Some(req.name.clone()),
             uuid: None,
         })
-        .map_err(|e| AppError::entity_not_exists(e.message))?;
+        .map_err(|error| match error {
+            cadence_persistence::FrontendDomainError::NotFound(error) => {
+                AppError::entity_not_exists(error.message)
+            }
+            other => AppError::internal(other.to_string()),
+        })?;
     if current.domain_info.as_ref().and_then(|info| info.status)
         != Some(cadence_api::enums::DomainStatus::Deprecated)
     {
@@ -274,10 +279,13 @@ async fn handle_delete_domain(
     }
     state
         .domain_manager
-        .delete(&req.name)
+        .delete(&req.name, &state.cluster_metadata)
         .map_err(|error| match error {
             cadence_persistence::FrontendDomainError::NotFound(error) => {
                 AppError::entity_not_exists(error.message)
+            }
+            cadence_persistence::FrontendDomainError::Invalid(message) => {
+                AppError::bad_request(message)
             }
             other => AppError::internal(other.to_string()),
         })?;
@@ -496,7 +504,12 @@ async fn handle_list_domains(state: &AppState, body: &Struct) -> HandlerResult {
     let response = state
         .domain_manager
         .list_page(&request)
-        .map_err(|e| AppError::bad_request(e.message))?;
+        .map_err(|error| match error {
+            cadence_persistence::FrontendDomainError::Invalid(message) => {
+                AppError::bad_request(message)
+            }
+            other => AppError::internal(other.to_string()),
+        })?;
     Ok(wrap_success(&response))
 }
 
@@ -657,23 +670,13 @@ async fn handle_deprecate_domain(state: &AppState, body: &Struct) -> HandlerResu
             "Domain not set on request.".to_string(),
         ));
     }
-    let current = state
-        .domain_manager
-        .describe(&DescribeDomainRequest {
-            name: Some(req.name.clone()),
-            uuid: None,
-        })
-        .map_err(|e| AppError::entity_not_exists(e.message))?;
-    if current.is_global_domain && !state.cluster_metadata.is_primary_cluster() {
-        return Err(AppError::bad_request(
-            "Cluster is not primary cluster, cannot do domain registration or domain update."
-                .to_string(),
-        ));
-    }
-    match state.domain_manager.deprecate(&req) {
+    match state.domain_manager.deprecate(&req, &state.cluster_metadata) {
         Ok(()) => Ok(Struct { fields: vec![] }),
         Err(cadence_persistence::FrontendDomainError::NotFound(e)) => {
             Err(AppError::entity_not_exists(e.message))
+        }
+        Err(cadence_persistence::FrontendDomainError::Invalid(message)) => {
+            Err(AppError::bad_request(message))
         }
         Err(error) => Err(AppError::internal(error.to_string())),
     }

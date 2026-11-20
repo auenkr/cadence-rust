@@ -361,9 +361,17 @@ pub trait FrontendDomainManager: std::fmt::Debug + Send + Sync {
         page_token: &[u8],
     ) -> Result<(Vec<cadence_api::types::FailoverEvent>, Vec<u8>), FrontendDomainError>;
 
-    fn deprecate(&self, request: &DeprecateDomainRequest) -> Result<(), FrontendDomainError>;
+    fn deprecate(
+        &self,
+        request: &DeprecateDomainRequest,
+        metadata: &cadence_common::cluster::Metadata,
+    ) -> Result<(), FrontendDomainError>;
 
-    fn delete(&self, name: &str) -> Result<(), FrontendDomainError>;
+    fn delete(
+        &self,
+        name: &str,
+        metadata: &cadence_common::cluster::Metadata,
+    ) -> Result<(), FrontendDomainError>;
 
     /// Go `DomainCache.GetAllDomain` filtered to `IsDomainPendingActive`
     /// (global domain with a failover end time) for the failover watcher.
@@ -392,7 +400,7 @@ pub trait FrontendDomainManager: std::fmt::Debug + Send + Sync {
     fn list_page(
         &self,
         request: &cadence_api::service_types::ListDomainsRequest,
-    ) -> Result<ListDomainsResponse, cadence_api::errors::BadRequestError>;
+    ) -> Result<ListDomainsResponse, FrontendDomainError>;
 
     fn subscribe_failover(&self, uuid: &str) -> tokio::sync::watch::Receiver<u64>;
 
@@ -401,6 +409,11 @@ pub trait FrontendDomainManager: std::fmt::Debug + Send + Sync {
         &self,
         name: &str,
     ) -> Result<Option<cadence_api::types::AsyncWorkflowConfiguration>, FrontendDomainError>;
+
+    fn isolation_groups(
+        &self,
+        name: &str,
+    ) -> Result<Option<cadence_api::types::IsolationGroupConfiguration>, FrontendDomainError>;
 
     /// Replace and persist a domain's async-workflow queue configuration
     /// (Go `UpdateAsyncWorkflowConfiguraton`: config version +1, domain row updated).
@@ -449,6 +462,18 @@ pub enum FrontendDomainError {
     Busy(String),
     #[error("{0}")]
     Persistence(String),
+}
+
+fn ensure_primary_cluster(
+    is_global_domain: bool,
+    metadata: &cadence_common::cluster::Metadata,
+) -> Result<(), FrontendDomainError> {
+    if is_global_domain && !metadata.is_primary_cluster() {
+        return Err(FrontendDomainError::Invalid(
+            "Cluster is not primary cluster, cannot do domain registration or domain update.".into(),
+        ));
+    }
+    Ok(())
 }
 
 impl From<FailoverError> for FrontendDomainError {
@@ -541,7 +566,12 @@ impl InMemoryDomainStore {
                 inner.by_name.remove(&old_name);
             }
         }
-        inner.by_name.insert(record.info.name.clone(), record);
+        let id = record.info.uuid.clone();
+        if let Some(old) = inner.by_name.insert(record.info.name.clone(), record) {
+            if old.info.uuid != id {
+                inner.by_id.remove(&old.info.uuid);
+            }
+        }
     }
 
     pub fn record_by_id(&self, uuid: &str) -> Result<DomainRecord, EntityNotExistsError> {
@@ -849,20 +879,23 @@ impl InMemoryDomainStore {
         metadata: &cadence_common::cluster::Metadata,
         policy: &crate::domain_update::DomainPolicy,
     ) -> Result<cadence_api::service_types::UpdateDomainResponse, FailoverError> {
-        self.update_with_notification(req, metadata, policy, true)
+        let mut inner = self.inner.write().expect("domain store lock");
+        let current = inner.by_name.get_mut(&req.name).ok_or_else(|| {
+            EntityNotExistsError::new(format!("Domain {} does not exist.", req.name))
+        })?;
+        let (response, failed_over) = Self::update_record(current, req, metadata, policy)?;
+        if failed_over {
+            self.notify_failover(current);
+        }
+        Ok(response)
     }
 
-    fn update_with_notification(
-        &self,
+    fn update_record(
+        current: &mut DomainRecord,
         req: &UpdateDomainRequest,
         metadata: &cadence_common::cluster::Metadata,
         policy: &crate::domain_update::DomainPolicy,
-        notify: bool,
-    ) -> Result<cadence_api::service_types::UpdateDomainResponse, FailoverError> {
-        let mut inner = self.inner.write().expect("domain store lock");
-        let current = inner.by_name.get(&req.name).ok_or_else(|| {
-            EntityNotExistsError::new(format!("Domain {} does not exist.", req.name))
-        })?;
+    ) -> Result<(cadence_api::service_types::UpdateDomainResponse, bool), FailoverError> {
         let prepared = crate::domain_update::prepare(current, req, metadata, now_nanos(), policy)
             .map_err(FailoverError::from)?;
         let mut candidate = prepared.record;
@@ -889,12 +922,9 @@ impl InMemoryDomainStore {
             is_global_domain: candidate.is_global_domain,
         };
         if prepared.write {
-            if prepared.failover && notify {
-                self.notify_failover(&candidate);
-            }
-            inner.by_name.insert(req.name.clone(), candidate);
+            *current = candidate;
         }
-        Ok(response)
+        Ok((response, prepared.failover && prepared.write))
     }
 
     /// Errors for domain failover, mirroring Go's domain-handler mapping:
@@ -907,18 +937,6 @@ impl InMemoryDomainStore {
         metadata: &cadence_common::cluster::Metadata,
         policy: &crate::domain_update::DomainPolicy,
     ) -> Result<cadence_api::types::FailoverDomainResponse, FailoverError> {
-        self.failover_with_notification(req, current_cluster, metadata, policy, true)
-    }
-
-    fn failover_with_notification(
-        &self,
-        req: &cadence_api::types::FailoverDomainRequest,
-        current_cluster: &str,
-        metadata: &cadence_common::cluster::Metadata,
-        policy: &crate::domain_update::DomainPolicy,
-        notify: bool,
-    ) -> Result<cadence_api::types::FailoverDomainResponse, FailoverError> {
-        use cadence_api::enums::FailoverType;
         let mut inner = self.inner.write().expect("domain store lock");
         let record = inner.by_name.get_mut(&req.domain_name).ok_or_else(|| {
             FailoverError::NotFound(EntityNotExistsError::new(format!(
@@ -926,6 +944,19 @@ impl InMemoryDomainStore {
                 req.domain_name
             )))
         })?;
+        let response = Self::failover_record(record, req, current_cluster, metadata, policy)?;
+        self.notify_failover(record);
+        Ok(response)
+    }
+
+    fn failover_record(
+        record: &mut DomainRecord,
+        req: &cadence_api::types::FailoverDomainRequest,
+        current_cluster: &str,
+        metadata: &cadence_common::cluster::Metadata,
+        policy: &crate::domain_update::DomainPolicy,
+    ) -> Result<cadence_api::types::FailoverDomainResponse, FailoverError> {
+        use cadence_api::enums::FailoverType;
         // Go `validateDomainFailoverRequest`: only global domains fail over.
         if !record.is_global_domain {
             return Err(FailoverError::Invalid(
@@ -1011,9 +1042,6 @@ impl InMemoryDomainStore {
             after_version: candidate.failover_version,
         });
         *record = candidate;
-        if notify {
-            self.notify_failover(record);
-        }
         Ok(cadence_api::types::FailoverDomainResponse {
             domain_info: Some(record.info.clone()),
             configuration: Some(record.configuration.clone()),
@@ -1623,6 +1651,13 @@ impl FrontendDomainManager for InMemoryDomainStore {
         Ok(self.domain_async_workflow_config(name)?)
     }
 
+    fn isolation_groups(
+        &self,
+        name: &str,
+    ) -> Result<Option<cadence_api::types::IsolationGroupConfiguration>, FrontendDomainError> {
+        Ok(self.domain_isolation_groups(name)?)
+    }
+
     fn update_async_workflow_config(
         &self,
         name: &str,
@@ -1718,11 +1753,21 @@ impl FrontendDomainManager for InMemoryDomainStore {
             .map_err(FrontendDomainError::from)
     }
 
-    fn deprecate(&self, request: &DeprecateDomainRequest) -> Result<(), FrontendDomainError> {
+    fn deprecate(
+        &self,
+        request: &DeprecateDomainRequest,
+        metadata: &cadence_common::cluster::Metadata,
+    ) -> Result<(), FrontendDomainError> {
+        ensure_primary_cluster(self.record_by_name(&request.name)?.is_global_domain, metadata)?;
         InMemoryDomainStore::deprecate(self, request).map_err(Into::into)
     }
 
-    fn delete(&self, name: &str) -> Result<(), FrontendDomainError> {
+    fn delete(
+        &self,
+        name: &str,
+        metadata: &cadence_common::cluster::Metadata,
+    ) -> Result<(), FrontendDomainError> {
+        ensure_primary_cluster(self.record_by_name(name)?.is_global_domain, metadata)?;
         InMemoryDomainStore::delete(self, name).map_err(Into::into)
     }
 
@@ -1736,8 +1781,8 @@ impl FrontendDomainManager for InMemoryDomainStore {
     fn list_page(
         &self,
         request: &cadence_api::service_types::ListDomainsRequest,
-    ) -> Result<ListDomainsResponse, cadence_api::errors::BadRequestError> {
-        InMemoryDomainStore::list_page(self, request)
+    ) -> Result<ListDomainsResponse, FrontendDomainError> {
+        InMemoryDomainStore::list_page(self, request).map_err(|error| FrontendDomainError::Invalid(error.message))
     }
 
     fn subscribe_failover(&self, uuid: &str) -> tokio::sync::watch::Receiver<u64> {
@@ -1786,6 +1831,54 @@ impl PersistedFrontendDomainManager {
         self
     }
 
+    fn read_record(&self, request: &DescribeDomainRequest) -> Result<DomainRecord, FrontendDomainError> {
+        use crate::matching_domain_metadata::{DomainReadError, MatchingDomainMetadataError};
+
+        let name = request.name.as_deref().filter(|value| !value.is_empty());
+        let id = request.uuid.as_deref().filter(|value| !value.is_empty());
+        match (name, id) {
+            (None, None) => {
+                return Err(FrontendDomainError::Invalid(
+                    "Domain not set on request.".into(),
+                ));
+            }
+            (Some(_), Some(_)) => {
+                return Err(FrontendDomainError::Invalid(
+                    MatchingDomainMetadataError::BothIdAndName.to_string(),
+                ));
+            }
+            _ => {}
+        }
+        let metadata = self
+            .persistence
+            .get_domain_typed(name, id)
+            .map_err(|error| match error {
+                DomainReadError::NotFound(message) => {
+                    FrontendDomainError::NotFound(EntityNotExistsError::new(message))
+                }
+                DomainReadError::Other(message) => FrontendDomainError::Persistence(message),
+            })?;
+        if let Some(error) = &metadata.config_decode_error {
+            return Err(FrontendDomainError::Persistence(error.clone()));
+        }
+        Ok(DomainRecord::from_matching_metadata(&metadata))
+    }
+
+    fn read_record_by_name(&self, name: &str) -> Result<DomainRecord, FrontendDomainError> {
+        self.read_record(&DescribeDomainRequest {
+            name: Some(name.to_owned()),
+            uuid: None,
+        })
+    }
+
+    fn mutation_record(&self, name: &str) -> Result<DomainRecord, FrontendDomainError> {
+        let mut record = self.read_record_by_name(name)?;
+        if let Ok(cached) = self.cache.record_by_id(&record.info.uuid) {
+            record.failover_audit = cached.failover_audit;
+        }
+        Ok(record)
+    }
+
     fn current_metadata_version(&self) -> Result<i64, FrontendDomainError> {
         self.persistence
             .metadata_version()
@@ -1828,19 +1921,12 @@ impl PersistedFrontendDomainManager {
 }
 
 impl PersistedFrontendDomainManager {
-    /// Snapshot of a cached domain as Go's `GetDomainResponse` audit state.
-    fn audit_state(&self, record: &DomainRecord) -> Option<crate::domain_audit::DomainAuditState> {
-        let describe = self
-            .cache
-            .describe(&DescribeDomainRequest {
-                name: Some(record.info.name.clone()),
-                uuid: None,
-            })
-            .ok()?;
-        Some(crate::domain_audit::DomainAuditState {
-            describe,
+    /// Snapshot of the domain row used for the mutation.
+    fn audit_state(record: &DomainRecord) -> crate::domain_audit::DomainAuditState {
+        crate::domain_audit::DomainAuditState {
+            describe: record.to_describe_response(),
             failover_expire_nanos: record.failover_end_time,
-        })
+        }
     }
 
     /// Go `updateDomainAuditLog`: append one audit row after the domain write
@@ -1893,14 +1979,14 @@ impl PersistedFrontendDomainManager {
             describe: before.clone(),
             failover_expire_nanos: before_failover_end,
         };
-        let state_after = self.audit_state(updated);
+        let state_after = Self::audit_state(updated);
         self.write_audit(
             &updated.info.uuid,
             crate::domain_audit::DOMAIN_AUDIT_OPERATION_TYPE_FAILOVER,
             "domain failover",
             updated.last_updated_time_nanos,
             Some(&state_before),
-            state_after.as_ref(),
+            Some(&state_after),
         );
         Ok(())
     }
@@ -1911,12 +1997,14 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
         &self,
         name: &str,
     ) -> Result<Option<cadence_api::types::AsyncWorkflowConfiguration>, FrontendDomainError> {
-        // describe() loads the persisted Go row on a cache miss.
-        self.describe(&DescribeDomainRequest {
-            name: Some(name.to_owned()),
-            uuid: None,
-        })?;
-        Ok(self.cache.domain_async_workflow_config(name)?)
+        Ok(self.read_record_by_name(name)?.async_workflow_config)
+    }
+
+    fn isolation_groups(
+        &self,
+        name: &str,
+    ) -> Result<Option<cadence_api::types::IsolationGroupConfiguration>, FrontendDomainError> {
+        Ok(self.read_record_by_name(name)?.isolation_groups)
     }
 
     fn update_async_workflow_config(
@@ -1927,24 +2015,15 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
         policy: &crate::domain_update::DomainPolicy,
     ) -> Result<(), FrontendDomainError> {
         let _guard = self.mutation_lock.lock().expect("domain manager lock");
-        self.describe(&DescribeDomainRequest {
-            name: Some(name.to_owned()),
-            uuid: None,
-        })?;
-        let old = self.cache.record_by_name(name)?;
-        crate::domain_update::check_admin_config_update(&old, now_nanos(), metadata, policy)
-            .map_err(FailoverError::from)?;
         let version = self.current_metadata_version()?;
-        self.cache
-            .update_domain_async_workflow_config(name, config)?;
-        let mut updated = self.cache.record_by_name(name)?;
+        let mut updated = self.mutation_record(name)?;
+        crate::domain_update::check_admin_config_update(&updated, now_nanos(), metadata, policy)
+            .map_err(FailoverError::from)?;
+        updated.async_workflow_config = config;
         updated.config_version += 1;
         updated.last_updated_time_nanos = now_nanos();
+        self.persist_record(&updated, version, false)?;
         self.cache.restore_record(updated.clone());
-        if let Err(error) = self.persist_record(&updated, version, false) {
-            self.cache.restore_record(old);
-            return Err(error);
-        }
         // Go UpdateAsyncWorkflowConfiguraton: global domains publish an Update task.
         self.publish_replication_task(&updated, cadence_api::enums::DomainOperation::Update)?;
         Ok(())
@@ -1963,23 +2042,15 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
             ));
         }
         let _guard = self.mutation_lock.lock().expect("domain manager lock");
-        self.describe(&DescribeDomainRequest {
-            name: Some(name.to_owned()),
-            uuid: None,
-        })?;
-        let old = self.cache.record_by_name(name)?;
-        crate::domain_update::check_admin_config_update(&old, now_nanos(), metadata, policy)
-            .map_err(FailoverError::from)?;
         let version = self.current_metadata_version()?;
-        self.cache.update_domain_isolation_groups(name, groups)?;
-        let mut updated = self.cache.record_by_name(name)?;
+        let mut updated = self.mutation_record(name)?;
+        crate::domain_update::check_admin_config_update(&updated, now_nanos(), metadata, policy)
+            .map_err(FailoverError::from)?;
+        updated.isolation_groups = groups;
         updated.config_version += 1;
         updated.last_updated_time_nanos = now_nanos();
+        self.persist_record(&updated, version, false)?;
         self.cache.restore_record(updated.clone());
-        if let Err(error) = self.persist_record(&updated, version, false) {
-            self.cache.restore_record(old);
-            return Err(error);
-        }
         // Go UpdateIsolationGroups: global domains publish an Update task.
         self.publish_replication_task(&updated, cadence_api::enums::DomainOperation::Update)?;
         Ok(())
@@ -2017,7 +2088,7 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
             "domain created",
             record.last_updated_time_nanos,
             None,
-            self.audit_state(&record).as_ref(),
+            Some(&Self::audit_state(&record)),
         );
         self.publish_replication_task(&record, cadence_api::enums::DomainOperation::Create)?;
         Ok(response)
@@ -2047,36 +2118,7 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
         &self,
         request: &DescribeDomainRequest,
     ) -> Result<DescribeDomainResponse, FrontendDomainError> {
-        use crate::matching_domain_metadata::{DomainReadError, MatchingDomainMetadataError};
-
-        let name = request.name.as_deref().filter(|value| !value.is_empty());
-        let id = request.uuid.as_deref().filter(|value| !value.is_empty());
-        match (name, id) {
-            (None, None) => {
-                return Err(FrontendDomainError::Invalid(
-                    "Domain not set on request.".into(),
-                ));
-            }
-            (Some(_), Some(_)) => {
-                return Err(FrontendDomainError::Invalid(
-                    MatchingDomainMetadataError::BothIdAndName.to_string(),
-                ));
-            }
-            _ => {}
-        }
-        let metadata = self
-            .persistence
-            .get_domain_typed(name, id)
-            .map_err(|error| match error {
-                DomainReadError::NotFound(message) => {
-                    FrontendDomainError::NotFound(EntityNotExistsError::new(message))
-                }
-                DomainReadError::Other(message) => FrontendDomainError::Persistence(message),
-            })?;
-        if let Some(error) = &metadata.config_decode_error {
-            return Err(FrontendDomainError::Persistence(error.clone()));
-        }
-        Ok(DomainRecord::from_matching_metadata(&metadata).to_describe_response())
+        Ok(self.read_record(request)?.to_describe_response())
     }
 
     fn exists_for_register(&self, name: &str) -> Result<bool, FrontendDomainError> {
@@ -2137,26 +2179,16 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
         policy: &crate::domain_update::DomainPolicy,
     ) -> Result<cadence_api::service_types::UpdateDomainResponse, FrontendDomainError> {
         let _guard = self.mutation_lock.lock().expect("domain manager lock");
-        let old = self.cache.record_by_name(&request.name)?;
-        let before = self.cache.describe(&DescribeDomainRequest {
-            name: Some(request.name.clone()),
-            uuid: None,
-        })?;
         let version = self.current_metadata_version()?;
-        let response = self
-            .cache
-            .update_with_notification(request, metadata, policy, false)
-            .map_err(FrontendDomainError::from)?;
-        let mut updated = self.cache.record_by_name(&request.name)?;
+        let old = self.mutation_record(&request.name)?;
+        let before = old.to_describe_response();
+        let mut updated = old.clone();
+        let (response, _) = InMemoryDomainStore::update_record(&mut updated, request, metadata, policy)?;
         if updated.failover_version != old.failover_version {
-            // Go domain/handler.go: failover captures the metadata notification version.
             updated.failover_notification_version = version;
-            self.cache.restore_record(updated.clone());
         }
-        if let Err(error) = self.persist_record(&updated, version, false) {
-            self.cache.restore_record(old);
-            return Err(error);
-        }
+        self.persist_record(&updated, version, false)?;
+        self.cache.restore_record(updated.clone());
         if updated.failover_version != old.failover_version {
             self.record_failover_audit(&before, old.failover_end_time, &updated)?;
             self.cache.notify_failover(&updated);
@@ -2171,7 +2203,7 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
                 "domain updated",
                 updated.last_updated_time_nanos,
                 Some(&before_state),
-                self.audit_state(&updated).as_ref(),
+                Some(&Self::audit_state(&updated)),
             );
         }
         self.publish_replication_task(&updated, cadence_api::enums::DomainOperation::Update)?;
@@ -2186,23 +2218,20 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
         policy: &crate::domain_update::DomainPolicy,
     ) -> Result<cadence_api::types::FailoverDomainResponse, FrontendDomainError> {
         let _guard = self.mutation_lock.lock().expect("domain manager lock");
-        let old = self.cache.record_by_name(&request.domain_name)?;
-        let before = self.cache.describe(&DescribeDomainRequest {
-            name: Some(request.domain_name.clone()),
-            uuid: None,
-        })?;
         let version = self.current_metadata_version()?;
-        let response = self
-            .cache
-            .failover_with_notification(request, current_cluster, metadata, policy, false)
-            .map_err(FrontendDomainError::from)?;
-        let mut updated = self.cache.record_by_name(&request.domain_name)?;
+        let old = self.mutation_record(&request.domain_name)?;
+        let before = old.to_describe_response();
+        let mut updated = old.clone();
+        let response = InMemoryDomainStore::failover_record(
+            &mut updated,
+            request,
+            current_cluster,
+            metadata,
+            policy,
+        )?;
         updated.failover_notification_version = version;
+        self.persist_record(&updated, version, false)?;
         self.cache.restore_record(updated.clone());
-        if let Err(error) = self.persist_record(&updated, version, false) {
-            self.cache.restore_record(old);
-            return Err(error);
-        }
         self.record_failover_audit(&before, old.failover_end_time, &updated)?;
         self.cache.notify_failover(&updated);
         self.publish_replication_task(&updated, cadence_api::enums::DomainOperation::Update)?;
@@ -2242,24 +2271,28 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
         Ok((events, page.next_page_token.unwrap_or_default()))
     }
 
-    fn deprecate(&self, request: &DeprecateDomainRequest) -> Result<(), FrontendDomainError> {
+    fn deprecate(
+        &self,
+        request: &DeprecateDomainRequest,
+        metadata: &cadence_common::cluster::Metadata,
+    ) -> Result<(), FrontendDomainError> {
         let _guard = self.mutation_lock.lock().expect("domain manager lock");
-        let old = self.cache.record_by_name(&request.name)?;
-        let before_state = self.audit_state(&old);
         let version = self.current_metadata_version()?;
-        self.cache.deprecate(request)?;
-        let updated = self.cache.record_by_name(&request.name)?;
-        if let Err(error) = self.persist_record(&updated, version, false) {
-            self.cache.restore_record(old);
-            return Err(error);
-        }
+        let mut updated = self.mutation_record(&request.name)?;
+        ensure_primary_cluster(updated.is_global_domain, metadata)?;
+        let before_state = Self::audit_state(&updated);
+        updated.info.status = Some(DomainStatus::Deprecated);
+        updated.config_version += 1;
+        updated.last_updated_time_nanos = now_nanos();
+        self.persist_record(&updated, version, false)?;
+        self.cache.restore_record(updated.clone());
         self.write_audit(
             &updated.info.uuid,
             crate::domain_audit::DOMAIN_AUDIT_OPERATION_TYPE_DEPRECATE,
             "domain deprecated",
             updated.last_updated_time_nanos,
-            before_state.as_ref(),
-            self.audit_state(&updated).as_ref(),
+            Some(&before_state),
+            Some(&Self::audit_state(&updated)),
         );
         self.publish_replication_task(&updated, cadence_api::enums::DomainOperation::Update)?;
         Ok(())
@@ -2294,14 +2327,19 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
         Ok(true)
     }
 
-    fn delete(&self, name: &str) -> Result<(), FrontendDomainError> {
+    fn delete(
+        &self,
+        name: &str,
+        metadata: &cadence_common::cluster::Metadata,
+    ) -> Result<(), FrontendDomainError> {
         let _guard = self.mutation_lock.lock().expect("domain manager lock");
-        let record = self.cache.record_by_name(name)?;
-        let before_state = self.audit_state(&record);
+        let record = self.read_record_by_name(name)?;
+        ensure_primary_cluster(record.is_global_domain, metadata)?;
+        let before_state = Self::audit_state(&record);
         self.persistence
             .delete_domain(&record.info.uuid)
             .map_err(FrontendDomainError::Persistence)?;
-        self.cache.delete(name).map_err(FrontendDomainError::from)?;
+        let _ = self.cache.delete(name);
         self.write_audit(
             &record.info.uuid,
             crate::domain_audit::DOMAIN_AUDIT_OPERATION_TYPE_DELETE,
@@ -2310,7 +2348,7 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_nanos() as i64)
                 .unwrap_or_default(),
-            before_state.as_ref(),
+            Some(&before_state),
             None,
         );
         self.publish_replication_task(&record, cadence_api::enums::DomainOperation::Delete)
@@ -2360,8 +2398,26 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
     fn list_page(
         &self,
         request: &cadence_api::service_types::ListDomainsRequest,
-    ) -> Result<ListDomainsResponse, cadence_api::errors::BadRequestError> {
-        self.cache.list_page(request)
+    ) -> Result<ListDomainsResponse, FrontendDomainError> {
+        let size = match request.page_size {
+            0 => 100,
+            size if size > 0 => size as usize,
+            _ => return Err(FrontendDomainError::Invalid("Page size must be positive.".into())),
+        };
+        let token = (!request.next_page_token.is_empty()).then_some(request.next_page_token.as_slice());
+        let page = self.persistence.list_domains(size, token).map_err(FrontendDomainError::Persistence)?;
+        let domains = page.domains.iter().map(|metadata| {
+            if let Some(error) = &metadata.config_decode_error {
+                return Err(FrontendDomainError::Persistence(error.clone()));
+            }
+            let mut response = DomainRecord::from_matching_metadata(metadata).to_describe_response();
+            response.failover_info = None;
+            Ok(response)
+        }).collect::<Result<Vec<_>, _>>()?;
+        Ok(ListDomainsResponse {
+            domains,
+            next_page_token: page.next_page_token.unwrap_or_default(),
+        })
     }
 
     fn subscribe_failover(&self, uuid: &str) -> tokio::sync::watch::Receiver<u64> {
@@ -3280,7 +3336,7 @@ mod go_sql_frontend_manager_tests {
             })
             .unwrap();
         assert_eq!(described.domain_info.unwrap().uuid, domain_id);
-        restarted.delete("durable").unwrap();
+        restarted.delete("durable", &Default::default()).unwrap();
         assert!(persistence.get_domain(Some("durable"), None).is_err());
     }
 }
@@ -3317,6 +3373,13 @@ mod failover_notification_version_tests {
             id: Option<&str>,
         ) -> Result<MatchingDomainMetadata, crate::matching_domain_metadata::DomainReadError> {
             DomainMetadataPersistence::get_domain_typed(&*self.0, name, id)
+        }
+        fn list_domains(
+            &self,
+            page_size: usize,
+            page_token: Option<&[u8]>,
+        ) -> Result<crate::matching_domain_metadata::MatchingDomainPage, String> {
+            DomainMetadataPersistence::list_domains(&*self.0, page_size, page_token)
         }
         fn create_domain(&self, m: &MatchingDomainMetadata, v: i64) -> Result<(), String> {
             DomainMetadataPersistence::create_domain(&*self.0, m, v)
@@ -3415,6 +3478,129 @@ mod failover_notification_version_tests {
                 record.info.description
             );
         }
+    }
+
+    fn externally_update_domain(
+        manager: &PersistedFrontendDomainManager,
+        persistence: &Store,
+        change: impl FnOnce(&mut DomainRecord),
+    ) {
+        let mut record = manager.cache.record_by_name("global").unwrap();
+        change(&mut record);
+        let version = DomainMetadataPersistence::metadata_version(persistence).unwrap();
+        let metadata = record.to_matching_metadata(version, "thriftrw_snappy").unwrap();
+        DomainMetadataPersistence::update_domain(persistence, &metadata, version).unwrap();
+    }
+
+    #[test]
+    fn list_domains_uses_persisted_rows_and_tokens() {
+        let (manager, persistence) = manager_with_global_domain();
+        externally_update_domain(&manager, &persistence, |record| {
+            record.info.description = "persisted".into();
+            record.failover_end_time = Some(1);
+        });
+        let request = cadence_api::service_types::ListDomainsRequest {
+            page_size: 1,
+            ..Default::default()
+        };
+        let first = manager.list_page(&request).unwrap();
+        let domain = &first.domains[0];
+        let info = domain.domain_info.as_ref().unwrap();
+        assert_eq!(info.description, "persisted");
+        assert!(domain.failover_info.is_none());
+        assert_eq!(
+            first.next_page_token,
+            uuid::Uuid::parse_str(&info.uuid).unwrap().as_bytes()
+        );
+        let next = manager
+            .list_page(&cadence_api::service_types::ListDomainsRequest {
+                next_page_token: first.next_page_token,
+                ..request
+            })
+            .unwrap();
+        assert!(next.domains.is_empty());
+    }
+
+    #[test]
+    fn mutations_preserve_external_domain_changes() {
+        let (manager, persistence) = manager_with_global_domain();
+        let metadata = cluster_metadata();
+        for (index, operation) in ["update", "failover", "deprecate", "isolation", "async"]
+            .into_iter()
+            .enumerate()
+        {
+            externally_update_domain(&manager, &persistence, |record| {
+                record.info.description = operation.into();
+                record.config_version = 10 * (index as i64 + 1);
+            });
+            match operation {
+                "update" => {
+                    manager.update(&UpdateDomainRequest {
+                        name: "global".into(),
+                        updated_info: Some(cadence_api::service_types::UpdateDomainInfo {
+                            owner_email: Some("owner@example.com".into()),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }, &metadata, &no_cooldown()).unwrap();
+                }
+                "failover" => {
+                    manager.failover(&cadence_api::types::FailoverDomainRequest {
+                        domain_name: "global".into(),
+                        domain_active_cluster_name: Some("b".into()),
+                        ..Default::default()
+                    }, "b", &metadata, &no_cooldown()).unwrap();
+                }
+                "deprecate" => manager.deprecate(&DeprecateDomainRequest {
+                    name: "global".into(),
+                    ..Default::default()
+                }, &metadata).unwrap(),
+                "isolation" => manager.update_isolation_groups(
+                    "global", Some(Default::default()), &metadata, &no_cooldown()
+                ).unwrap(),
+                "async" => manager.update_async_workflow_config(
+                    "global", Some(Default::default()), &metadata, &no_cooldown()
+                ).unwrap(),
+                _ => unreachable!(),
+            }
+            let stored = persistence.get_domain(Some("global"), None).unwrap();
+            assert_eq!(stored.info.description, operation);
+            assert!(stored.config_version >= 10 * (index as i64 + 1));
+        }
+    }
+
+    #[test]
+    fn admin_domain_configuration_reads_external_values() {
+        let (manager, persistence) = manager_with_global_domain();
+        let groups = cadence_api::types::IsolationGroupConfiguration::default();
+        let config = cadence_api::types::AsyncWorkflowConfiguration {
+            enabled: true,
+            ..Default::default()
+        };
+        externally_update_domain(&manager, &persistence, |record| {
+            record.isolation_groups = Some(groups.clone());
+            record.async_workflow_config = Some(config.clone());
+        });
+        assert_eq!(manager.isolation_groups("global").unwrap(), Some(groups));
+        assert_eq!(manager.async_workflow_config("global").unwrap(), Some(config));
+    }
+
+    #[test]
+    fn delete_uses_persisted_domain_identity() {
+        let (manager, persistence) = manager_with_global_domain();
+        let cached = manager.cache.record_by_name("global").unwrap();
+        DomainMetadataPersistence::delete_domain(&*persistence, &cached.info.uuid).unwrap();
+        let replacement_id = uuid::Uuid::from_u128(0x98).to_string();
+        let (info, config, replication) = super::tests::sample("global", &replacement_id);
+        let other = PersistedFrontendDomainManager::new(
+            InMemoryDomainStore::new(),
+            persistence.clone(),
+            Arc::new(|| "thriftrw_snappy".into()),
+        );
+        other.create_with_version(info, config, replication, false, 0).unwrap();
+
+        manager.delete("global", &cluster_metadata()).unwrap();
+        assert!(persistence.get_domain(None, Some(&replacement_id)).is_err());
     }
 
     fn no_cooldown() -> crate::domain_update::DomainPolicy {
