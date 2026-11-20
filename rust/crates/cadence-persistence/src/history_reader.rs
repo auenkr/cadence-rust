@@ -301,11 +301,10 @@ fn store_read(
     Ok((history, next, last_node_id, last_txn_id))
 }
 
-/// Go `ReadHistoryBranch`: page through the branch's ancestor ranges.
-pub fn read_history_branch(
+fn read_branch_page(
     store: &dyn HistoryNodeStore,
     request: &ReadHistoryBranchRequest,
-) -> Result<ReadHistoryBranchResponse> {
+) -> Result<(Vec<HistoryNodeRowData>, PagingToken)> {
     if request.page_size <= 0 || request.min_event_id >= request.max_event_id {
         return Err(HistoryReadError::InvalidRequest(format!(
             "no events can be found for pageSize {}, minEventID {}, maxEventID: {}",
@@ -380,10 +379,59 @@ pub fn read_history_branch(
             "Workflow execution history not found.".into(),
         ));
     }
-    let size: i64 = blobs.iter().map(|b| b.data.len() as i64).sum();
     token.store_token = next_store;
     token.last_node_id = last_node_id;
     token.last_transaction_id = last_txn_id;
+    Ok((blobs, token))
+}
+
+fn serialize_token(mut token: PagingToken) -> Result<Vec<u8>> {
+    if token.store_token.as_ref().is_none_or(|t| t.is_empty()) {
+        if token.current_range_index == token.final_range_index {
+            return Ok(Vec::new());
+        }
+        token.current_range_index += 1;
+    }
+    serde_json::to_vec(&token).map_err(|e| HistoryReadError::Internal(e.to_string()))
+}
+
+/// Read durable blobs without decoding their payloads or advancing event-level cursors.
+pub fn read_raw_history_branch(
+    store: &dyn HistoryNodeStore,
+    request: &ReadHistoryBranchRequest,
+) -> Result<(Vec<DataBlob>, Vec<u8>)> {
+    use cadence_api::enums::EncodingType;
+
+    let (rows, token) = read_branch_page(store, request)?;
+    let blobs = rows
+        .into_iter()
+        .map(|row| {
+            let encoding_type = match row.encoding.as_str() {
+                "thriftrw" => EncodingType::ThriftRW,
+                "json" => EncodingType::JSON,
+                other => {
+                    return Err(HistoryReadError::Internal(format!(
+                        "unsupported history encoding {other:?}"
+                    )))
+                }
+            };
+            Ok(DataBlob {
+                encoding_type: Some(encoding_type),
+                data: row.data,
+            })
+        })
+        .collect::<Result<_>>()?;
+    Ok((blobs, serialize_token(token)?))
+}
+
+/// Go `ReadHistoryBranch`: page through the branch's ancestor ranges.
+pub fn read_history_branch(
+    store: &dyn HistoryNodeStore,
+    request: &ReadHistoryBranchRequest,
+) -> Result<ReadHistoryBranchResponse> {
+    let (blobs, mut token) = read_branch_page(store, request)?;
+    let default_last_event_id = request.min_event_id - 1;
+    let size = blobs.iter().map(|blob| blob.data.len() as i64).sum();
 
     let mut batches = Vec::new();
     let mut raw_blobs = Vec::new();
@@ -419,17 +467,7 @@ pub fn read_history_branch(
         raw_blobs.push(blob.data.clone());
         batches.push(events);
     }
-    // Go `serializeToken`.
-    let next_page_token = if token.store_token.as_ref().is_none_or(|t| t.is_empty()) {
-        if token.current_range_index == token.final_range_index {
-            Vec::new()
-        } else {
-            token.current_range_index += 1;
-            serde_json::to_vec(&token).map_err(|e| HistoryReadError::Internal(e.to_string()))?
-        }
-    } else {
-        serde_json::to_vec(&token).map_err(|e| HistoryReadError::Internal(e.to_string()))?
-    };
+    let next_page_token = serialize_token(token)?;
     Ok(ReadHistoryBranchResponse {
         batches,
         raw_blobs,
@@ -569,6 +607,30 @@ mod tests {
     fn empty_history_is_not_found() {
         let err = read_history_branch(&Fixed(vec![]), &request(vec![])).unwrap_err();
         assert!(matches!(err, HistoryReadError::EntityNotExists(_)));
+    }
+
+    #[test]
+    fn raw_history_preserves_payloads_and_event_cursor() {
+        let mut first = row(1, 1, 1);
+        first.data = vec![0xff];
+        let mut second = row(2, 1, 2);
+        second.encoding = "json".into();
+        second.data = b"not decoded".to_vec();
+        let store = Fixed(vec![first, second]);
+        let mut req = request(Vec::new());
+        req.page_size = 1;
+        let (blobs, next) = read_raw_history_branch(&store, &req).unwrap();
+        assert_eq!(blobs[0].data, vec![0xff]);
+        let token: PagingToken = serde_json::from_slice(&next).unwrap();
+        assert_eq!(token.last_event_id, 0);
+        assert_eq!(token.last_event_version, EMPTY_VERSION);
+        req.next_page_token = next;
+        let (blobs, _) = read_raw_history_branch(&store, &req).unwrap();
+        assert_eq!(blobs[0].data, b"not decoded");
+        assert_eq!(
+            blobs[0].encoding_type,
+            Some(cadence_api::enums::EncodingType::JSON)
+        );
     }
 
     #[test]
