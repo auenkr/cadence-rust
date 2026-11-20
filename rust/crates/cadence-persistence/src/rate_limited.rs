@@ -9,7 +9,6 @@ use crate::history_contract::*;
 use crate::history_reader::{HistoryNodeRow, HistoryNodeStore, HistoryReadError};
 use crate::history_sql::{HistoryPersistenceError, ShardRow, ShardStore};
 use async_trait::async_trait;
-use cadence_api::types::DataBlob;
 use cadence_common::dynamic_rate_limiter::DynamicRateLimiter;
 use std::sync::Arc;
 
