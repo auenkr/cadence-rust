@@ -1734,6 +1734,14 @@ async fn run_with_lifecycle(
                             .filter_map(|desc| desc.domain_info.map(|info| (info.name, info.uuid)))
                             .collect::<Vec<_>>(),
                     );
+                    // Go Frontend owns a DefaultDomainCache (resource_impl.go)
+                    // whose refreshLoop rescans domains every
+                    // DomainCacheRefreshInterval (10s). Without Matching in this
+                    // process nothing else refreshes the store, so domain
+                    // updates/failovers made elsewhere would stay invisible.
+                    if !run_matching {
+                        start_frontend_domain_refresh(source.clone(), state.domains.clone());
+                    }
                 }
             }
             if let Some(persistence) = state.domain_metadata_persistence.clone() {
@@ -3232,4 +3240,37 @@ mod matching_http_listener_tests {
             .to_string()
             .contains("loading Matching HTTP TLS certificate/key"));
     }
+}
+
+/// Keeps the Frontend-only domain cache alive for the process lifetime (its
+/// refresh worker holds only a `Weak`).
+static FRONTEND_DOMAIN_CACHE: std::sync::OnceLock<
+    std::sync::Arc<crate::matching_domain_cache::MatchingDomainCache>,
+> = std::sync::OnceLock::new();
+
+/// Go `DefaultDomainCache.Start` + `refreshLoop` for a Frontend-only process:
+/// periodic (10s) metadata-first domain refresh feeding the Frontend store.
+fn start_frontend_domain_refresh(
+    source: std::sync::Arc<dyn crate::matching_domain_cache::DomainMetadataSource>,
+    domains: cadence_persistence::InMemoryDomainStore,
+) {
+    use crate::matching_domain_cache as dc;
+    if FRONTEND_DOMAIN_CACHE.get().is_some() {
+        return;
+    }
+    let cache = std::sync::Arc::new(dc::MatchingDomainCache::new(source));
+    let changed: dc::DomainChangeCallback =
+        std::sync::Arc::new(move |entries| domains.sync_matching_metadata(entries));
+    let prepare: dc::PrepareCallback = std::sync::Arc::new(|| {});
+    let catch_up: dc::CatchUpCallback = std::sync::Arc::new(|entries, _prepare, changed| {
+        if !entries.is_empty() {
+            changed(entries);
+        }
+    });
+    cache.register_callback("frontend-domain-store", catch_up, prepare, changed);
+    if let Err(error) = cache.start() {
+        eprintln!("warning: starting Frontend domain cache refresh: {error}");
+        return;
+    }
+    let _ = FRONTEND_DOMAIN_CACHE.set(cache);
 }
