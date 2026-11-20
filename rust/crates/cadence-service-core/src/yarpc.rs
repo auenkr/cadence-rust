@@ -121,6 +121,16 @@ impl AppError {
         }
     }
 
+    /// An error Go's Thrift mapper leaves untyped: surfaces as a transport
+    /// error with the message instead of a declared exception.
+    fn untyped(message: String) -> Self {
+        Self {
+            exc_name: "",
+            value: Struct::default(),
+            message,
+        }
+    }
+
     fn internal(message: String) -> Self {
         let error = cadence_api::errors::InternalServiceError::new(message.clone());
         Self {
@@ -2832,6 +2842,15 @@ pub async fn dispatch_with_transport(
                 },
             )
             .await
+            // Go returns a value (not pointer) BadRequestError here, which its
+            // Thrift mapper does not convert, so the client sees an untyped error.
+            .map_err(|e| {
+                if e.exc_name == "BadRequestError" && e.message == "Execution is missing" {
+                    AppError::untyped(e.message)
+                } else {
+                    e
+                }
+            })
         }
         "GetGlobalIsolationGroups" => {
             bridge_value::<_, cadence_api::admin::GetGlobalIsolationGroupsResponse, _, _>(
@@ -3021,6 +3040,7 @@ pub async fn dispatch_with_transport(
     let def = find_method(method).ok_or_else(|| format!("unknown method {method}"))?;
     match outcome {
         Ok(success) => Ok((success, None)),
+        Err(e) if e.exc_name.is_empty() => Err(e.message),
         Err(e) => {
             let field = cadence_thrift::service::exception_field(def, e.exc_name)
                 .ok_or_else(|| format!("error {} not declared for {method}", e.exc_name))?;

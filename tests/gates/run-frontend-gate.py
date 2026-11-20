@@ -768,7 +768,8 @@ try:
     # ---- admin probe: ReapplyEvents / GetCrossClusterTasks via Rust Frontend (Go History behind it)
     try:
         pr = subprocess.run([sys.executable, str(Path(__file__).resolve().parent / 'admin_probe.py'), f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', dom_t,
-                             str(Path(__file__).resolve().parents[2] / 'go' / 'idls' / 'proto'), str(work)], capture_output=True, text=True, timeout=240)
+                             str(Path(__file__).resolve().parents[2] / 'go' / 'idls' / 'proto'), str(work)], capture_output=True, text=True, timeout=240,
+                            env={**os.environ, 'ADMIN_PROBE_DB': plugin})
         (work / 'admin-probe.log').write_text(pr.stdout + pr.stderr)
         for line in pr.stdout.splitlines():
             try:
