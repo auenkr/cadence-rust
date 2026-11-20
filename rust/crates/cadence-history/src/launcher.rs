@@ -334,6 +334,12 @@ pub async fn run(bin_name: &'static str) -> anyhow::Result<()> {
     .await?;
 
     if let Some(store) = env.isolation_group_store.as_ref() {
+        // Go resource.Start performs a second fetch and starts a second ticker.
+        let second = store.clone();
+        if let Err(e) = tokio::task::spawn_blocking(move || second.update()).await? {
+            anyhow::bail!("{e}");
+        }
+        store.start_polling();
         store.start_polling();
     }
 

@@ -1805,7 +1805,7 @@ async fn run_with_lifecycle(
                         cadence_persistence::isolation_group_store::isolation_client_config(
                             duration, integer,
                         ),
-                        run_frontend.then(|| operational_config_settings(duration, integer)),
+                        (run_frontend || run_matching).then(|| operational_config_settings(duration, integer)),
                     )
                 };
                 let persistence = cfg.persistence.clone();
@@ -1839,7 +1839,7 @@ async fn run_with_lifecycle(
                         )?;
                     // Go's resource Start performs a second fetch and starts
                     // a second ticker after the constructor starts the first.
-                    if run_frontend {
+                    if run_frontend || run_matching {
                         store.update()?;
                     }
                     Ok::<_, String>(store)
@@ -1849,7 +1849,7 @@ async fn run_with_lifecycle(
                 match created {
                     Ok(store) => {
                         let store = std::sync::Arc::new(store);
-                        if run_frontend {
+                        if run_frontend || run_matching {
                             store.start_polling();
                         }
                         store.start_polling();
@@ -3385,7 +3385,7 @@ static FRONTEND_DOMAIN_CACHE: std::sync::OnceLock<
     std::sync::Arc<crate::matching_domain_cache::MatchingDomainCache>,
 > = std::sync::OnceLock::new();
 
-fn operational_config_settings(
+pub fn operational_config_settings(
     duration: impl Fn(&str, std::time::Duration) -> std::time::Duration,
     integer: impl Fn(&str, i64) -> i64,
 ) -> cadence_persistence::config_store::ClientConfig {
