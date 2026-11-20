@@ -41,3 +41,11 @@ The Go system Worker starts a scheduler SDK worker per eligible domain. At its f
 - `go/service/worker/scheduler/client_worker.go` calls SDK `worker.Start` from `defaultCreateWorker`. In Go SDK v1.4.0-rc.3, `internal/internal_worker.go`, the workflow, activity, and locally dispatched activity workers each call `verifyDomainExist`, which issues `DescribeDomain` by name.
 - Go Frontend's `api/domain_handlers.go` delegates `DescribeDomain` to `go/common/domain/handler.go`, which calls persistence `GetDomain` directly. The MySQL `getDomainByNameQuery` gives the observed predicate. Go Worker startup's direct `ensureDomainExists` queries come from the Worker IP and precede measurement.
 - Rust used the cached `describe` for the public RPC. A warm cache skipped all six persistence reads and could return a stale description following an external update. Public `DescribeDomain` now uses the configured persistent domain manager for gRPC, Thrift, and HTTP. Internal workflow routing keeps the existing cache-backed lookup. The regression test externally updates a domain with a warm Rust cache and verifies public reads by name and ID see the persisted version.
+
+## Validation
+
+Source and workflow head `9d4acef70bb5e45934498a854921ac2148efe5b0`.
+
+- Workspace Rust CI succeeded with `clean_target=true`, Clippy followed by workspace tests, and `public_describe_reads_persisted_state_even_with_a_warm_cache` passing. [Rust CI](https://github.com/auenkr/cadence-rust/actions/runs/44729413142)
+- MySQL Frontend mixed gate succeeded with `GATE SUMMARY failed: []`. Fresh binary SHA256 `8c68b76aa4f78480cfa1034750fedeae63c7b59b135856cdc84a2413be955a06`. [MySQL gate](https://github.com/auenkr/cadence-rust/actions/runs/44729425965)
+- PostgreSQL Frontend mixed gate succeeded with `GATE SUMMARY failed: []`. Fresh binary SHA256 `b5989ab7afacf8920859cd338856efb6e77e0a56a7a6c82ce75f55bb5160ddf0`. [PostgreSQL gate](https://github.com/auenkr/cadence-rust/actions/runs/44729444509)
