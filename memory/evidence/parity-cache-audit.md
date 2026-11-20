@@ -1,6 +1,6 @@
 # RPC read-source parity audit
 
-Branch `parity-cache-audit`, based on `6759d7bfe6ac935411effc9379c993a836e78a1a`. The comparison is for configured services with production dependencies installed. Domain name-to-ID lookups for workflow routing still use the domain cache. The public domain management reads use the metadata manager independently of that routing cache.
+Branch `parity-cache-audit`, based on `6759d7bfe6ac935411effc9379c993a836e78a1a`. The comparison is for configured services with production dependencies installed. Domain name-to-ID lookups for workflow routing still use the domain cache. The public domain management reads use the metadata manager independently of that routing cache. The tables cover 57 Frontend, 39 admin, 14 Matching, and 45 History RPCs. Lifecycle helpers are outside the RPC inventory.
 
 ## Frontend workflow service
 
@@ -29,8 +29,8 @@ Branch `parity-cache-audit`, based on `6759d7bfe6ac935411effc9379c993a836e78a1a`
 
 | RPC | Go source and read path | Rust source and read path | Result |
 | --- | --- | --- | --- |
-| DescribeCluster, DescribeShardDistribution | [Admin handler](../../go/service/frontend/admin/handler.go#L663), live membership, startup persistence descriptions and configured shard count | [Admin handler](../../rust/crates/cadence-service-core/src/admin.rs), membership provider, startup descriptors and shard count | Match for source. |
-| GetDomainReplicationMessages | [Domain replication queue](../../go/common/domain/replication_queue.go), durable queue and optional consumer ack | [Admin handler](../../rust/crates/cadence-service-core/src/admin.rs), durable queue and optional ack | Match for source. |
+| DescribeCluster, DescribeShardDistribution | [DescribeCluster](../../go/service/frontend/admin/handler.go#L849) and [DescribeShardDistribution](../../go/service/frontend/admin/handler.go#L663), live membership, startup persistence descriptions and configured shard count | [Admin handler](../../rust/crates/cadence-service-core/src/admin.rs), membership provider, startup descriptors and shard count | Match for source. |
+| GetDomainReplicationMessages | [Admin handler](../../go/service/frontend/admin/handler.go#L945) and [domain replication queue](../../go/common/domain/replication_queue.go), durable queue and optional consumer ack | [Admin handler](../../rust/crates/cadence-service-core/src/admin.rs), durable queue and optional ack | Match for source. |
 | GetGlobalIsolationGroups, UpdateGlobalIsolationGroups | [Isolation admin API](../../go/common/isolationgroup/isolationgroupapi/global-api-handlers.go), config store | [Admin handler](../../rust/crates/cadence-service-core/src/admin.rs), config store | Match for source. |
 | GetDomainIsolationGroups, UpdateDomainIsolationGroups, GetDomainAsyncWorkflowConfiguraton, UpdateDomainAsyncWorkflowConfiguraton | [Isolation API](../../go/common/isolationgroup/isolationgroupapi/domain-api-handlers.go) and [async API](../../go/common/asyncworkflow/queueconfigapi/handler.go), persisted domain through domain handler | [Admin handler](../../rust/crates/cadence-service-core/src/admin.rs), persisted domain manager | Fixed direct configuration reads and mutation inputs. |
 | AddSearchAttribute, GetDynamicConfig, UpdateDynamicConfig, RestoreDynamicConfig, ListDynamicConfig, GetOperationalDynamicConfig, UpdateOperationalDynamicConfig, RestoreOperationalDynamicConfig, ListOperationalDynamicConfig | [Admin handlers](../../go/service/frontend/admin), live configuration with durable updates | [Admin handler](../../rust/crates/cadence-service-core/src/admin.rs) and [dynamic configuration](../../rust/crates/cadence-persistence/src/dynamic_config.rs), live overlay and configured store | Match for source. Search-attribute reads now share the live configuration. |
@@ -38,10 +38,10 @@ Branch `parity-cache-audit`, based on `6759d7bfe6ac935411effc9379c993a836e78a1a`
 | CloseShard, DescribeHistoryHost, DescribeQueue, RemoveTask, ResetQueue, GetReplicationMessages, GetDLQReplicationMessages, ReapplyEvents, RefreshWorkflowTasks | [Admin handler](../../go/service/frontend/admin/handler.go), History | [Admin history adapter](../../rust/crates/cadence-frontend/src/handler_admin_history.rs), History | Match for production routing. |
 | CountDLQMessages, ReadDLQMessages, MergeDLQMessages, PurgeDLQMessages | [Admin handler](../../go/service/frontend/admin/handler.go#L1068), domain queue or History based on queue type | [Admin handler](../../rust/crates/cadence-service-core/src/admin.rs), domain queue or History | Match for source. |
 | GetWorkflowExecutionRawHistoryV2 | [Admin handler](../../go/service/frontend/admin/handler.go#L714), cached domain ID, History GetMutableState on the first page, token snapshot on continuation, durable raw history | [Admin handler](../../rust/crates/cadence-service-core/src/admin.rs#L2249) and [raw reader](../../rust/crates/cadence-persistence/src/history_reader.rs), remote histories and unmodified durable blobs in configured Frontend | Fixed. Both configured transports previously read the embedded execution store. |
-| ResendReplicationTasks | [Admin handler](../../go/service/frontend/admin/handler.go), remote raw-history RPC | [Admin replication](../../rust/crates/cadence-service-core/src/admin_replication.rs), remote raw-history RPC | Match for source. |
+| ResendReplicationTasks | [Admin handler](../../go/service/frontend/admin/handler.go#L1290), remote raw-history RPC | [Admin replication](../../rust/crates/cadence-service-core/src/admin_replication.rs), remote raw-history RPC | Match for source. |
 | UpdateTaskListPartitionConfig | [Admin handler](../../go/service/frontend/admin/handler.go), domain resolution and Matching | [Admin handler](../../rust/crates/cadence-service-core/src/admin.rs), domain resolution and Matching | Match for source. |
 | GetCrossClusterTasks, RespondCrossClusterTasksCompleted | [Admin handler](../../go/service/frontend/admin/handler.go), deprecated | [Admin handler](../../rust/crates/cadence-service-core/src/admin.rs), deprecated | Match for read source. |
-| DeleteWorkflow, MaintainCorruptWorkflow | [Admin handler](../../go/service/frontend/admin/handler.go#L345), live corruption checks and database mutable state from History, followed by durable deletion | [Admin handler](../../rust/crates/cadence-service-core/src/admin.rs#L849) and [Thrift dispatch](../../rust/crates/cadence-service-core/src/yarpc.rs#L1036), local execution store | Open mismatch. The production gap includes durable deletion, branch-token handling and corruption checks. The domain cache fixes do not change these paths. |
+| DeleteWorkflow, MaintainCorruptWorkflow | [Admin handler](../../go/service/frontend/admin/handler.go#L345), live corruption checks and database mutable state from History, followed by durable deletion | [Admin handler](../../rust/crates/cadence-service-core/src/admin.rs#L849) and [Thrift dispatch](../../rust/crates/cadence-service-core/src/yarpc.rs#L1036), local execution store | Open mismatch. The production gap includes durable deletion, branch-token handling and corruption checks. Go reads the database snapshot from DescribeMutableState, uses its branch tokens for history deletion, deletes both execution and current rows, and deletes visibility only after both execution deletes succeed. Rust needs that entire path wired to its configured stores, including advanced visibility and the admin SkipErrors request field. |
 
 ## Matching
 
@@ -71,6 +71,14 @@ Branch `parity-cache-audit`, based on `6759d7bfe6ac935411effc9379c993a836e78a1a`
 | DescribeHistoryHost, RemoveTask, CloseShard, ResetQueue, DescribeQueue, SyncShardStatus, NotifyFailoverMarkers, GetFailoverInfo, RatelimitUpdate, Health | [History handler](../../go/service/history/handler/handler.go), shard controller, queues, membership or live coordinator depending on RPC | [History handler](../../rust/crates/cadence-history/src/handler/handler_impl.rs), same source classes | Match for source classes. |
 | GetCrossClusterTasks, RespondCrossClusterTasksCompleted | [History handler](../../go/service/history/handler/handler.go), deprecated | [History handler](../../rust/crates/cadence-history/src/handler/handler_impl.rs), deprecated | Match for read source. |
 
+The existing Rust SQL failover-history cursor differs from Go's gob cursor. SQL reads agree on the durable source, but continuation across Go and Rust Frontends remains unverified and the cursor formats are incompatible.
+
+## Regression tests
+
+- The [domain manager tests](../../rust/crates/cadence-persistence/src/domains.rs#L3475) exercise externally changed metadata under a warm cache, durable listing and pagination, mutation identity, unavailable audit storage, and re-registration after an external delete.
+- The [domain guard](../../rust/crates/cadence-frontend/src/domain_guard.rs) and [dynamic configuration](../../rust/crates/cadence-persistence/src/dynamic_config.rs) tests exercise persisted graceful-failover state and live search-attribute changes.
+- The [raw branch reader test](../../rust/crates/cadence-persistence/src/history_reader.rs) exercises pagination with undecodable raw payloads and confirms the raw reader leaves event-level cursor fields intact. The mixed gates exercise SDK workflow behavior and public raw-history reads.
+
 ## Validation
 
 Persistence Clippy and tests passed in the formatting preparation run. The separate fmt check failed on the original input, and the runner-generated patch was applied to the touched files in `21c88617a`. [Preparation run](https://github.com/auenkr/cadence-rust/actions/runs/44741349495)
@@ -84,3 +92,18 @@ The initial fresh workspace CI and mixed SQL gates passed on `21c88617a101846d3a
 | Frontend PostgreSQL | [44742761542](https://github.com/auenkr/cadence-rust/actions/runs/44742761542) | `GATE SUMMARY failed: []` (310 steps) | `01e6fb6cbfbcf31247db9c4e1fee59d3e21cee01c8f18db3947d177b32d8f4be` |
 | History MySQL | [44742761642](https://github.com/auenkr/cadence-rust/actions/runs/44742761642) | `GATE SUMMARY failed: []` (413 steps) | Server `2efc2c26b906a40b17388b0ab9e64b5ce131793c0a1593d4a09dedf13fb5f0b7`, History `310fd50b431b038eb67bc8df3c2c1f48e5ff4fc795fca9070c352d9d69107d94` |
 | Frontend Cassandra | [44743312534](https://github.com/auenkr/cadence-rust/actions/runs/44743312534) | `GATE SUMMARY failed: []` (307 steps) | `618a4f6890ae0c2c243d3b5b2d5e56d43adaab3414d6aba76d26c3e97110b292` |
+
+The first workspace run containing configured admin raw history failed only Clippy's `result_large_err` check. The following commit applied the service-core lint allowance for returning an Axum response from a helper. [Clippy run](https://github.com/auenkr/cadence-rust/actions/runs/44744989100)
+
+The extra Frontend Cassandra gate passed on `549606b58bcd2ca512d11436935357fb1813de2b` with `GATE SUMMARY failed: []` (307 steps). Its server SHA256 is `eb8becd2e4b0eba923091904374ed9793099a3efd31064676aef5297143ceee4`. [Cassandra gate](https://github.com/auenkr/cadence-rust/actions/runs/44744988435)
+
+One PostgreSQL run on `549606b58bcd2ca512d11436935357fb1813de2b` failed the async Frontend restart check after reporting one missing message. The later PostgreSQL gate passed. [Earlier PostgreSQL run](https://github.com/auenkr/cadence-rust/actions/runs/44744989279)
+
+The required final gates all ran on `ed52b3efb71e5b42171b24126fc74eec878c3a9a`.
+
+| Lane | Run | Conclusion | Rust binary SHA256 |
+| --- | --- | --- | --- |
+| Fresh workspace Clippy and tests | [44745752386](https://github.com/auenkr/cadence-rust/actions/runs/44745752386) | Success, Clippy followed by workspace tests in the uncached runner target `cargo-target-final` | — |
+| Frontend MySQL | [44745752409](https://github.com/auenkr/cadence-rust/actions/runs/44745752409) | Success, `GATE SUMMARY failed: []` (310 steps) | `1acbd77b70d636eaca7ea8117bd4583e002f918aa3664d03e9037eb465cc8924` |
+| Frontend PostgreSQL | [44745752786](https://github.com/auenkr/cadence-rust/actions/runs/44745752786) | Success, `GATE SUMMARY failed: []` (310 steps) | `3d8c47ff20c86a05a0ef03add891f2cfa1c842b5a2424b823f3f7e9fc5db8bfb` |
+| History MySQL | [44745752269](https://github.com/auenkr/cadence-rust/actions/runs/44745752269) | Success, `GATE SUMMARY failed: []` (413 steps) | Server `7b0a6e1c51eb23a2af9c6911f7303d960cd204fb9ce08235283f8fe6faaee5e1`, History `ee8a79663d369a2fe8df887fffbd64127e93f8963191bf2bccd4ce163fb4f9f3` |
