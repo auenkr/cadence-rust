@@ -1711,7 +1711,7 @@ async fn run_with_lifecycle(
                         }
                         let backend = stores.history_sql_backend.clone()?;
                         Some(WorkflowDeletionStores {
-                            executions: Arc::new(
+                            executions: std::sync::Arc::new(
                                 cadence_persistence::sql_workflow_store::SqlWorkflowStore::new(
                                     backend.clone(),
                                     Encoding::ThriftRW,
@@ -1719,7 +1719,7 @@ async fn run_with_lifecycle(
                                     0,
                                 ),
                             ),
-                            history: Arc::new(
+                            history: std::sync::Arc::new(
                                 cadence_persistence::sql_history_store::SqlHistoryV2Store::new(
                                     backend,
                                     Encoding::ThriftRW,
