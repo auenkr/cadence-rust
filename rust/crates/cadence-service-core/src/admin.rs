@@ -519,7 +519,7 @@ impl DynamicConfigOverlay {
         name: &str,
         values: Vec<DynamicConfigValue>,
     ) -> Result<(), DynamicConfigError> {
-        use cadence_persistence::config_store as config_store;
+        use cadence_persistence::config_store;
         let (binding, timeouts, row_type) = if operational {
             let (binding, timeouts) = self
                 .operational_store
@@ -527,9 +527,17 @@ impl DynamicConfigOverlay {
                 .map_or((None, None), |(binding, fetch, update)| {
                     (Some(binding), Some((fetch, update)))
                 });
-            (binding, timeouts, config_store::CONFIG_TYPE_OPERATIONAL_DYNAMIC_CONFIG)
+            (
+                binding,
+                timeouts,
+                config_store::CONFIG_TYPE_OPERATIONAL_DYNAMIC_CONFIG,
+            )
         } else {
-            (self.store.clone(), None, config_store::CONFIG_TYPE_DYNAMIC_CONFIG)
+            (
+                self.store.clone(),
+                None,
+                config_store::CONFIG_TYPE_DYNAMIC_CONFIG,
+            )
         };
         let Some(mut binding) = binding else {
             // No durable store (file/nop provider): in-memory only.
@@ -567,7 +575,9 @@ impl DynamicConfigOverlay {
             let started = std::time::Instant::now();
             let written = (binding.write)(row_type, &row);
             if timeouts.is_some_and(|(_, update)| started.elapsed() >= update) {
-                return Err(DynamicConfigError::Internal("timeout error on update".into()));
+                return Err(DynamicConfigError::Internal(
+                    "timeout error on update".into(),
+                ));
             }
             match written {
                 Ok(()) => {
@@ -586,7 +596,9 @@ impl DynamicConfigOverlay {
                     let started = std::time::Instant::now();
                     let fetched = (binding.fetch)(row_type);
                     if timeouts.is_some_and(|(fetch, _)| started.elapsed() >= fetch) {
-                        return Err(DynamicConfigError::Internal("timeout error on fetch".into()));
+                        return Err(DynamicConfigError::Internal(
+                            "timeout error on fetch".into(),
+                        ));
                     }
                     let fetched = fetched.map_err(|e| {
                         DynamicConfigError::Internal(format!(
@@ -3331,14 +3343,18 @@ mod dynamic_config_admin_tests {
 
         let db = new_db();
         let mut overlay = load(&db, 1);
-        overlay.admin_update(false, INT, vec![value("1", &[])]).unwrap();
+        overlay
+            .admin_update(false, INT, vec![value("1", &[])])
+            .unwrap();
         overlay.attach_operational_store(
             store_with(&db, 1),
             &cs::Snapshot::default(),
             Duration::from_secs(2),
             Duration::from_secs(2),
         );
-        overlay.admin_update(true, INT, vec![value("2", &[])]).unwrap();
+        overlay
+            .admin_update(true, INT, vec![value("2", &[])])
+            .unwrap();
         assert!(overlay.admin_list(true, "").is_empty());
         let row = cs::sqlite_fetch_latest(
             &db.0.lock().unwrap(),

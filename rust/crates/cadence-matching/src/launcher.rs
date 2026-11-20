@@ -1778,19 +1778,17 @@ async fn run_with_lifecycle(
                     )
                 };
                 let persistence = cfg.persistence.clone();
-                let task_store = tokio::task::spawn_blocking(move || {
-                    match isolation_task_store {
-                        Some(store) => Ok(store),
-                        None => crate::matching_task_store::open_configured_default_store(
-                            &persistence,
-                            "",
-                            std::sync::Arc::new(|| false),
-                            std::sync::Arc::new(|| "thriftrw".to_string()),
-                            false,
-                        )
-                        .map(|stores| stores.task_store)
-                        .map_err(|error| error.to_string()),
-                    }
+                let task_store = tokio::task::spawn_blocking(move || match isolation_task_store {
+                    Some(store) => Ok(store),
+                    None => crate::matching_task_store::open_configured_default_store(
+                        &persistence,
+                        "",
+                        std::sync::Arc::new(|| false),
+                        std::sync::Arc::new(|| "thriftrw".to_string()),
+                        false,
+                    )
+                    .map(|stores| stores.task_store)
+                    .map_err(|error| error.to_string()),
                 })
                 .await
                 .map_err(|error| anyhow::anyhow!("joining config store startup: {error}"))?;
@@ -3388,7 +3386,9 @@ async fn start_operational_config_store(
                 )
             })
             .await?
-            .map_err(|error| anyhow::anyhow!("creating operational dynamic config store: {error}"))?
+            .map_err(|error| {
+                anyhow::anyhow!("creating operational dynamic config store: {error}")
+            })?
         };
         let snapshot = client.snapshot().unwrap_or_default();
         {
@@ -3414,8 +3414,7 @@ async fn start_operational_config_store(
         let overlay = overlay.clone();
         tasks.spawn(async move {
             let period = client.poll_interval();
-            let mut ticker =
-                tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+            let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
             ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 ticker.tick().await;
@@ -3430,7 +3429,9 @@ async fn start_operational_config_store(
                         .expect("admin lock")
                         .refresh_operational_store(&snapshot),
                     Ok(Ok(None)) => {}
-                    Ok(Err(error)) => eprintln!("Failed to update operational dynamic config: {error}"),
+                    Ok(Err(error)) => {
+                        eprintln!("Failed to update operational dynamic config: {error}")
+                    }
                     Err(error) => eprintln!("operational dynamic config update task: {error}"),
                 }
             }
