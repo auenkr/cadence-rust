@@ -2635,6 +2635,7 @@ pub async fn describe_workflow_execution_admin(
     }
 }
 
+#[allow(clippy::result_large_err)]
 async fn describe_workflow_execution_admin_core(
     state: &AppState,
     req: cadence_api::admin::AdminDescribeWorkflowExecutionRequest,
