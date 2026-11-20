@@ -375,8 +375,13 @@ pub async fn run(bin_name: &'static str) -> anyhow::Result<()> {
         }
     };
     // Close shards whose ownership moved on every ring change (Go controller subscription).
+    // Go `shardManagementPump`: periodic acquire ticker + ring-change events.
+    let shutting_down = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (change_tx, change_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+    // Go `controller.Start`: one synchronous acquireShards before the pump starts.
+    registry.acquire_shards(&shutting_down).await;
+    let pump_task = tokio::spawn(registry.clone().shard_management_pump(change_rx, shutting_down.clone()));
     let ownership_task = {
-        let registry = registry.clone();
         let provider = provider.clone();
         let env = env.clone();
         tokio::spawn(async move {
@@ -386,7 +391,7 @@ pub async fn run(bin_name: &'static str) -> anyhow::Result<()> {
                 refresh_from_snapshot(&env.membership, &provider, HISTORY_RINGPOP_SERVICE);
                 let now = env.membership.members();
                 if now != last {
-                    registry.on_membership_change();
+                    let _ = change_tx.send(());
                     last = now;
                 }
             }
@@ -402,6 +407,8 @@ pub async fn run(bin_name: &'static str) -> anyhow::Result<()> {
     tracing::info!("History shutdown: stopping task processor");
     queue_provider.stop().await;
     tracing::info!("History shutdown: stopping membership");
+    shutting_down.store(true, std::sync::atomic::Ordering::SeqCst);
+    pump_task.abort();
     ownership_task.abort();
     feed.abort();
     replication.stop_fetchers();

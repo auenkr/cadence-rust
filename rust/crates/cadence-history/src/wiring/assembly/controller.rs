@@ -9,6 +9,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 
 use cadence_common::membership::Host;
 use tokio::sync::OnceCell;
@@ -355,6 +356,70 @@ impl ShardRegistry {
             let owner = self.env.membership.lookup(&crate::lookup::shard_key(id as i32));
             if check_ownership(id, &who, owner.as_ref()).is_err() {
                 self.close_shard(id);
+            }
+        }
+    }
+
+    /// Go `controller.acquireShards`: eagerly acquires every shard this host owns, using
+    /// `history.acquireShardConcurrency` workers (min 1); lookup failures and creation errors are
+    /// logged and skipped. Stops early when `shutting_down` is set.
+    pub async fn acquire_shards(self: &Arc<Self>, shutting_down: &Arc<std::sync::atomic::AtomicBool>) {
+        use std::sync::atomic::Ordering;
+        tracing::info!(num_shards = self.owned_shard_ids().len(), "Acquiring shards");
+        self.metrics_scope.inc_counter("AcquireShardsCounter");
+        let _timer = scopeguard_timer(self.metrics_scope.clone(), std::time::Instant::now());
+        let next = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let concurrency = (self.env.config.acquire_shard_concurrency)().max(1) as usize;
+        let who = self.env.membership.who_am_i().to_string();
+        let mut workers = Vec::with_capacity(concurrency);
+        for _ in 0..concurrency {
+            let (reg, next, flag, who) = (self.clone(), next.clone(), shutting_down.clone(), who.clone());
+            workers.push(tokio::spawn(async move {
+                loop {
+                    let id = next.fetch_add(1, Ordering::SeqCst);
+                    if id >= reg.num_shards || flag.load(Ordering::SeqCst) {
+                        return;
+                    }
+                    let owner = reg.env.membership.lookup(&crate::lookup::shard_key(id as i32));
+                    match owner {
+                        None => tracing::error!(shard_id = id, "Error looking up host for shardID"),
+                        Some(h) if h.identity == who => {
+                            if let Err(e) = reg.engine_for_shard(id).await {
+                                tracing::error!(shard_id = id, error = %e, "Unable to create history shard engine");
+                            }
+                        }
+                        Some(_) => {}
+                    }
+                }
+            }));
+        }
+        for w in workers {
+            let _ = w.await;
+        }
+        self.metrics_scope.update_gauge("NumShardsGauge", self.owned_shard_ids().len() as f64);
+        tracing::info!(num_shards = self.owned_shard_ids().len(), "Acquired shards");
+    }
+
+    /// Go `shardManagementPump`: acquires on the periodic ticker and on membership change
+    /// (`changed` resolves once per ring change); exits when `shutting_down` is set.
+    pub async fn shard_management_pump(
+        self: Arc<Self>,
+        mut changed: tokio::sync::mpsc::UnboundedReceiver<()>,
+        shutting_down: Arc<std::sync::atomic::AtomicBool>,
+    ) {
+        let period = (self.env.config.acquire_shard_interval)().max(Duration::from_millis(1));
+        let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+        loop {
+            tokio::select! {
+                _ = ticker.tick() => self.acquire_shards(&shutting_down).await,
+                ev = changed.recv() => {
+                    if ev.is_none() { return; }
+                    self.on_membership_change();
+                    self.acquire_shards(&shutting_down).await;
+                }
+            }
+            if shutting_down.load(std::sync::atomic::Ordering::SeqCst) {
+                return;
             }
         }
     }
