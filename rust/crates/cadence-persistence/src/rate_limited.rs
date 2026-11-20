@@ -433,7 +433,7 @@ mod tests {
         )
     }
 
-    #[derive(Default)]
+    #[derive(Debug, Default)]
     struct NativeVis {
         native: bool,
         calls: std::sync::atomic::AtomicUsize,
