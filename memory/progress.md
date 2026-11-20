@@ -2037,3 +2037,11 @@ in progress, with no conclusion yet. Run 41219576105 was cancelled.
 During handoff merged documentation-only tips `origin/frontend-core2`
 (`9dc7d51a4`) and `origin/t3/frontend-workflow-api` (`04e5fcf98`); run
 41219703865 still covers unchanged Rust source SHA `834ee549388110ab1ab00de08a5c74a4179abfa4`.
+
+## 2026-11-21 status
+
+- Benchmark rerun on master `616107912` (evidence/bench-rerun-20261121.md): Rust p99 <= Go in every lane except Frontend 25 (1.03); CPU 0.53-0.87x, RSS 0.62-0.88x. Frontend start-p99 spikes resolved.
+- Frontend soak PASS on both lanes (fe-soak-query-init, fe-soak-rerun, fe-async-restart-flake: harness fixes for SIGKILL-lost activities).
+- Parity merged 2026-11-20/21: matching-cfg, maintain-corrupt, dynconfig-audit, persistence-qps (+qps-2), shard-acquire, tasklist-selects, plus eff-* efficiency merges (gains within noise).
+- Open gaps: persistence limiter caller-type bypass, visibility limiters and sampling, throttled logger; History soak stall and mutable-state JSON shape (2026-11-14).
+- Docker Hub publish workflow `.github/workflows/docker-hub-publish.yml`, run 44773608414.
