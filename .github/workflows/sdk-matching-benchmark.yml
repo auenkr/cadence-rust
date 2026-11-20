@@ -38,6 +38,12 @@ on:
       sql_log_secs:
         description: 'Diagnostics: capture MySQL general log for N seconds of the measurement window (0 = off)'
         default: '0'
+      history_sql_slow_ms:
+        description: 'Diagnostics: Rust History CADENCE_HISTORY_SQL_SLOW_MS (empty = off)'
+        default: ''
+      sql_stats_secs:
+        description: 'Diagnostics: Rust History CADENCE_SQL_STATS_SECS (empty = off)'
+        default: ''
       dynamic_config_extra:
         description: 'Extra dynamic config YAML for BOTH arms, \n-separated; replaces same top-level keys (e.g. history.enableTransferQueueV2:\n- value: false)'
         default: ''
@@ -89,6 +95,8 @@ jobs:
           PROFILE: ${{ inputs.profile }}
           MYSQL_TMPFS: ${{ inputs.mysql_tmpfs }}
           SQL_LOG_SECS: ${{ inputs.sql_log_secs }}
+          CADENCE_HISTORY_SQL_SLOW_MS: ${{ inputs.history_sql_slow_ms }}
+          CADENCE_SQL_STATS_SECS: ${{ inputs.sql_stats_secs }}
           DYNAMIC_CONFIG_EXTRA: ${{ inputs.dynamic_config_extra }}
         run: bash Benchmark/ci.sh
       - uses: actions/cache/save@v4
