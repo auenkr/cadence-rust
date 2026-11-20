@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import re
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -193,7 +194,6 @@ def sql_log_start(container):
 
 
 def _normalize_sql(text):
-    import re
     text = re.sub(r"'(?:[^'\\]|\\.)*'", "?", text)
     text = re.sub(r"\b0x[0-9a-fA-F]+\b|\b\d+(?:\.\d+)?\b", "?", text)
     text = re.sub(r"\(\s*\?(?:\s*,\s*\?)*\s*\)", "(?..)", text)
@@ -225,13 +225,34 @@ def sql_log_stop(container, seconds):
             select_by_table[key] = select_by_table.get(key, 0) + int(n)
     except (subprocess.SubprocessError, ValueError) as error:
         select_by_table = {"error": f"{type(error).__name__}: {error}"[:300]}
+    # Keep rare domain SELECTs even when the busiest 300 shapes omit them.
+    # Hex keeps binary UUID parameters from splitting log records.
+    try:
+        domain_log = _mysql(container,
+                            "SELECT command_type, HEX(argument) FROM mysql.general_log "
+                            "WHERE command_type IN ('Execute','Query') "
+                            "AND LOWER(TRIM(CONVERT(LEFT(argument,20) USING latin1))) LIKE 'select%' "
+                            "AND LOWER(CONVERT(argument USING latin1)) "
+                            "REGEXP 'from[[:space:]]+`?domains`?[[:space:]]'")
+        domain_selects = {}
+        for line in domain_log.splitlines():
+            cmd, encoded = line.split('\t')
+            statement = bytes.fromhex(encoded).decode('latin1')
+            limit = re.search(r"\bORDER BY id LIMIT (\d+)\s*$", statement, re.IGNORECASE)
+            key = cmd + ' ' + _normalize_sql(statement)
+            if limit:
+                key += ' [page size ' + limit[1] + ']'
+            domain_selects[key] = domain_selects.get(key, 0) + 1
+    except (subprocess.SubprocessError, ValueError) as error:
+        domain_selects = {"error": f"{type(error).__name__}: {error}"[:300]}
     counts = {}
     for line in raw.splitlines():
         cmd, _, arg = line.partition('\t')
         key = cmd + ' ' + _normalize_sql(arg)
         counts[key] = counts.get(key, 0) + 1
     rows = sorted(({"count": c, "statement": k} for k, c in counts.items()), key=lambda r: -r["count"])[:300]
-    return {"seconds": seconds, "rows": rows, "select_by_table": select_by_table}
+    return {"seconds": seconds, "rows": rows, "select_by_table": select_by_table,
+            "domain_select_shapes": domain_selects}
 
 
 def mysql_sample(container, elapsed, errors):
