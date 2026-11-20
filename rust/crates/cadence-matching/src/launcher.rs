@@ -1717,6 +1717,18 @@ async fn run_with_lifecycle(
                             limiter.clone(),
                         )
                     });
+                    stores.domain_metadata_persistence =
+                        stores.domain_metadata_persistence.map(|store| {
+                            cadence_persistence::rate_limited::RateLimitedDomainMetadata::wrap(
+                                store,
+                                limiter.clone(),
+                            )
+                        });
+                    stores.visibility_store = stores.visibility_store.map(|store| {
+                        cadence_persistence::rate_limited::RateLimitedVisibilityStore::wrap(
+                            store, limiter,
+                        )
+                    });
                 }
                 Some(stores)
             } else {

@@ -354,6 +354,69 @@ impl SqlVisibilityWriter {
     }
 }
 
+/// Go `ratelimited.NewVisibilityManager` around the History visibility store.
+pub struct RateLimitedVisibilityWriter {
+    inner: std::sync::Arc<dyn VisibilityWriter>,
+    limiter: std::sync::Arc<cadence_persistence::rate_limited::PersistenceLimiter>,
+}
+
+impl RateLimitedVisibilityWriter {
+    pub fn wrap(
+        inner: std::sync::Arc<dyn VisibilityWriter>,
+        limiter: Option<std::sync::Arc<cadence_persistence::rate_limited::PersistenceLimiter>>,
+    ) -> std::sync::Arc<dyn VisibilityWriter> {
+        match limiter {
+            Some(limiter) => std::sync::Arc::new(Self { inner, limiter }),
+            None => inner,
+        }
+    }
+    fn check(&self) -> Result<(), PersistenceError> {
+        if self.limiter.allow() {
+            Ok(())
+        } else {
+            Err(PersistenceError::ServiceBusy(
+                cadence_persistence::rate_limited::PERSISTENCE_LIMIT_EXCEEDED.to_owned(),
+            ))
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl VisibilityWriter for RateLimitedVisibilityWriter {
+    async fn record_started_async(&self, row: VisibilityWriteRow) -> Result<(), PersistenceError> {
+        self.check()?;
+        self.inner.record_started_async(row).await
+    }
+    async fn record_closed_async(&self, row: VisibilityWriteRow) -> Result<(), PersistenceError> {
+        self.check()?;
+        self.inner.record_closed_async(row).await
+    }
+    fn record_uninitialized(&self) -> Result<(), PersistenceError> {
+        self.check()?;
+        self.inner.record_uninitialized()
+    }
+    fn upsert(&self) -> Result<(), PersistenceError> {
+        self.check()?;
+        self.inner.upsert()
+    }
+    async fn delete_async(&self, domain_id: String, run_id: String) -> Result<(), PersistenceError> {
+        self.check()?;
+        self.inner.delete_async(domain_id, run_id).await
+    }
+    async fn record_uninitialized_row(&self, row: VisibilityWriteRow) -> Result<(), PersistenceError> {
+        self.check()?;
+        self.inner.record_uninitialized_row(row).await
+    }
+    async fn upsert_row(&self, row: VisibilityWriteRow) -> Result<(), PersistenceError> {
+        self.check()?;
+        self.inner.upsert_row(row).await
+    }
+    async fn delete_row(&self, domain_id: String, workflow_id: String, run_id: String, task_id: i64) -> Result<(), PersistenceError> {
+        self.check()?;
+        self.inner.delete_row(domain_id, workflow_id, run_id, task_id).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
