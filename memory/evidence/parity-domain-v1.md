@@ -48,4 +48,23 @@ caching. It was a parity bug:
   Go's RLock wait. Write and notify order are unchanged, so v2 is not affected.
 
 ## Validation
-(filled below)
+Code head 714e0f6d0296b4f958e92da4861b7ad8acb923d0 (all runs below on branch parity-domain-v1, all success):
+- rust-ci cadence-matching (item 1): https://github.com/auenkr/cadence-rust/actions/runs/44660597856
+- rust-ci cadence-history (item 2): https://github.com/auenkr/cadence-rust/actions/runs/44661355008
+- frontend-mixed-gate MySQL: https://github.com/auenkr/cadence-rust/actions/runs/44661419352 (`GATE SUMMARY failed: []`)
+- history-mixed-gate MySQL: https://github.com/auenkr/cadence-rust/actions/runs/44661423242 (`GATE SUMMARY failed: []`)
+- history-restartgate MySQL: https://github.com/auenkr/cadence-rust/actions/runs/44661427533 (`GATE SUMMARY failed: []`)
+- History benchmark, v2 off (rate 25, 60 s, warmup 10, 3 pairs, mysql_tmpfs, same inputs as 44644453475):
+  | run | Rust p99/max ms per pair | Go p99/max ms per pair | incorrect |
+  |---|---|---|---|
+  | https://github.com/auenkr/cadence-rust/actions/runs/44667221232 | 200/223, 199/237, 203/233 | 521/647, 1327/1463, 2950/4182 | 0 |
+  | https://github.com/auenkr/cadence-rust/actions/runs/44667224821 | 198/233, 201/267, 203/233 | 512/727, 1142/1303, 2886/3189 | 0 |
+  Before the fix (44644453475), every Rust arm had a 42–60 s tail at the end of load. After the fix, max is within ~35% of p99 in all 6 arms.
+  Both runs used EPYC 7763 runners (degraded MySQL; see bench-fe-lane.md), so do not use the Go-vs-Rust p99 ratio from them.
+  The tail result does not depend on that.
+  (Dispatches 44661393258/44661397572 used the default low rate of 150 workflows and are not used here.)
+
+## Verdict
+1. Domain cache: real deviation (the Frontend-only process had no periodic refresh), fixed. cluster_config: the Rust FE does not port the
+   configstore isolation-group store at all (in-memory only). This is a functional gap, recorded as follow-up, not changed here.
+2. v1 timeout: real Rust bug (lost transfer-task wakeup, read-level race), fixed parity-safely, confirmed by 2 reruns.
