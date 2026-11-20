@@ -2956,17 +2956,16 @@ mod tests {
         let (info, cfg, rep) = global_sample("g", "uuid-g");
         store.create(info, cfg, rep, true).unwrap();
         let mut watch = store.subscribe_failover("uuid-g");
-        let response = store
-            .failover_with_notification(
-                &failover_req("g", "standby"),
-                "standby",
-                &cluster_metadata(),
-                &test_policy(),
-                false,
-            )
-            .unwrap();
+        let mut persisted = store.record_by_name("g").unwrap();
+        let response = InMemoryDomainStore::failover_record(
+            &mut persisted,
+            &failover_req("g", "standby"),
+            "standby",
+            &cluster_metadata(),
+            &test_policy(),
+        )
+        .unwrap();
         assert!(!watch.has_changed().unwrap());
-        let persisted = store.record_by_name("g").unwrap();
         assert_eq!(response.failover_version, persisted.failover_version);
 
         store.notify_failover(&persisted);

@@ -643,12 +643,10 @@ fn json_blob(value: &serde_json::Value) -> cadence_api::types::DataBlob {
     }
 }
 
-/// Shared admin state: the dynamic-config overlay plus custom (non-system)
-/// search attribute keys registered via `AddSearchAttribute`.
+/// Shared state for admin RPCs.
 #[derive(Debug, Clone, Default)]
 pub struct AdminState {
     pub dynamic_config: Arc<Mutex<DynamicConfigOverlay>>,
-    pub custom_search_attributes: Arc<Mutex<HashMap<String, cadence_api::enums::IndexedValueType>>>,
     pub membership: MembershipSlot,
     pub persistence_description: PersistenceDescription,
     /// Elasticsearch/OpenSearch mapping client; None when advanced visibility is not configured.
@@ -1006,23 +1004,25 @@ fn read_valid_attributes(
 pub fn valid_search_attributes(
     admin: &AdminState,
 ) -> std::collections::HashMap<String, cadence_api::enums::IndexedValueType> {
-    let mut keys = cadence_api::search_attributes::default_indexed_keys();
-    let configured =
-        read_valid_attributes(&admin.dynamic_config.lock().expect("admin config lock"));
-    if let Ok(configured) = configured {
-        keys.extend(configured.into_iter().filter_map(|(key, raw)| {
-            cadence_api::enums::IndexedValueType::from_i32(raw).map(|t| (key, t))
-        }));
-    }
-    keys.extend(
-        admin
-            .custom_search_attributes
-            .lock()
-            .expect("admin lock")
-            .iter()
-            .map(|(key, value_type)| (key.clone(), *value_type)),
-    );
-    keys
+    use cadence_api::enums::IndexedValueType;
+
+    let defaults = cadence_api::search_attributes::default_indexed_keys()
+        .into_iter()
+        .map(|(key, value)| (key, serde_json::Value::from(value.value())))
+        .collect();
+    let values = admin
+        .dynamic_config
+        .lock()
+        .expect("admin config lock")
+        .property_values(VALID_SEARCH_ATTRIBUTES);
+    cadence_persistence::dynamic_config::map_property(values, defaults)
+        .into_iter()
+        .filter_map(|(key, value)| {
+            serde_json::from_value::<IndexedValueType>(value)
+                .ok()
+                .map(|value_type| (key, value_type))
+        })
+        .collect()
 }
 
 /// Go admin `AddSearchAttribute`: permission check, empty check, reject system
@@ -1093,11 +1093,6 @@ pub fn add_search_attribute_core(
         crate::es_mapping::apply_search_attributes(es, attrs)
             .map_err(|crate::es_mapping::ApplyError::Internal(message)| Internal(message))?;
     }
-    admin
-        .custom_search_attributes
-        .lock()
-        .expect("admin lock")
-        .extend(attrs.iter().map(|(key, value)| (key.clone(), *value)));
     Ok(())
 }
 
@@ -3474,6 +3469,28 @@ mod dynamic_config_admin_tests {
             cadence_api::enums::IndexedValueType::Keyword.value()
         );
     }
+    #[test]
+    fn search_attributes_follow_dynamic_config_after_restore() {
+        use cadence_api::enums::IndexedValueType;
+        let admin = AdminState::default();
+        let attrs = HashMap::from([("CustomKw".to_owned(), IndexedValueType::Keyword)]);
+        add_search_attribute_core(&admin, "", Some(&attrs)).unwrap();
+        assert_eq!(
+            valid_search_attributes(&admin).get("CustomKw"),
+            Some(&IndexedValueType::Keyword)
+        );
+        admin.dynamic_config.lock().unwrap()
+            .admin_restore(false, VALID_SEARCH_ATTRIBUTES, &[]).unwrap();
+        assert_eq!(
+            valid_search_attributes(&admin),
+            cadence_api::search_attributes::default_indexed_keys()
+        );
+        admin.dynamic_config.lock().unwrap()
+            .admin_update(false, VALID_SEARCH_ATTRIBUTES, vec![value("{}", &[])])
+            .unwrap();
+        assert!(valid_search_attributes(&admin).is_empty());
+    }
+
 }
 
 /// Go client/history `executeWithRedirect`: on ShardOwnershipLost the call is

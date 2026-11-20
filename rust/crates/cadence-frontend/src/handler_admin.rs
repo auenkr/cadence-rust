@@ -189,7 +189,6 @@ pub fn describe_cluster_response(
 #[derive(Debug, Clone, Default)]
 pub struct Handler {
     dynamic_config: Arc<Mutex<DynamicConfigOverlay>>,
-    custom_search_attributes: Arc<Mutex<std::collections::HashMap<String, IndexedValueType>>>,
     es: Option<cadence_service_core::es_mapping::EsVisibility>,
 }
 
@@ -201,7 +200,6 @@ impl Handler {
     pub fn from_app_state(state: &cadence_service_core::handlers::AppState) -> Self {
         Self {
             dynamic_config: state.admin.dynamic_config.clone(),
-            custom_search_attributes: state.admin.custom_search_attributes.clone(),
             es: state.admin.es.clone(),
         }
     }
@@ -214,7 +212,6 @@ impl Handler {
             .ok_or_else(|| AdminError::BadRequest(BadRequestError::new("Request is nil.")))?;
         let admin = cadence_service_core::admin::AdminState {
             dynamic_config: self.dynamic_config.clone(),
-            custom_search_attributes: self.custom_search_attributes.clone(),
             es: self.es.clone(),
             ..Default::default()
         };
@@ -292,7 +289,6 @@ impl Handler {
     pub fn search_attributes(&self) -> BTreeMap<String, IndexedValueType> {
         let admin = cadence_service_core::admin::AdminState {
             dynamic_config: self.dynamic_config.clone(),
-            custom_search_attributes: self.custom_search_attributes.clone(),
             ..Default::default()
         };
         cadence_service_core::admin::valid_search_attributes(&admin)
@@ -542,11 +538,7 @@ mod tests {
             }))
             .unwrap();
         assert_eq!(
-            state
-                .admin
-                .custom_search_attributes
-                .lock()
-                .unwrap()
+            cadence_service_core::admin::valid_search_attributes(&state.admin)
                 .get("CustomShared"),
             Some(&IndexedValueType::Keyword)
         );
