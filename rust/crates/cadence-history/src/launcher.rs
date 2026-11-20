@@ -378,6 +378,8 @@ pub async fn run(bin_name: &'static str) -> anyhow::Result<()> {
     // Go `shardManagementPump`: periodic acquire ticker + ring-change events.
     let shutting_down = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let (change_tx, change_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+    // Go `controller.Start`: one synchronous acquireShards before the pump starts.
+    registry.acquire_shards(&shutting_down).await;
     let pump_task = tokio::spawn(registry.clone().shard_management_pump(change_rx, shutting_down.clone()));
     let ownership_task = {
         let provider = provider.clone();
