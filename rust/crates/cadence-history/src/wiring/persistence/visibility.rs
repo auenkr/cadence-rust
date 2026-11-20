@@ -354,27 +354,6 @@ impl SqlVisibilityWriter {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sql_templates_match_go_shapes() {
-        assert!(started_sql(Dialect::MySql).starts_with("INSERT IGNORE INTO executions_visibility"));
-        assert!(started_sql(Dialect::Postgres).ends_with("ON CONFLICT (domain_id, run_id) DO NOTHING"));
-        assert!(closed_sql(Dialect::MySql).starts_with("REPLACE INTO executions_visibility"));
-        assert!(closed_sql(Dialect::Postgres).contains("$18"));
-        assert_eq!(placeholders(Dialect::MySql, 3, 0, 0), "?, ?, ?");
-    }
-
-    #[test]
-    fn zero_times_map_to_min_datetime() {
-        assert!(time_value(Dialect::MySql, 0).is_ok());
-        assert!(time_value(Dialect::Postgres, 0).is_ok());
-        assert!(time_value(Dialect::MySql, 1_700_000_000_000_000_000).is_ok());
-    }
-}
-
 /// Go `ratelimited.NewVisibilityManager` around the History visibility store.
 pub struct RateLimitedVisibilityWriter {
     inner: std::sync::Arc<dyn VisibilityWriter>,
@@ -435,5 +414,26 @@ impl VisibilityWriter for RateLimitedVisibilityWriter {
     async fn delete_row(&self, domain_id: String, workflow_id: String, run_id: String, task_id: i64) -> Result<(), PersistenceError> {
         self.check()?;
         self.inner.delete_row(domain_id, workflow_id, run_id, task_id).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sql_templates_match_go_shapes() {
+        assert!(started_sql(Dialect::MySql).starts_with("INSERT IGNORE INTO executions_visibility"));
+        assert!(started_sql(Dialect::Postgres).ends_with("ON CONFLICT (domain_id, run_id) DO NOTHING"));
+        assert!(closed_sql(Dialect::MySql).starts_with("REPLACE INTO executions_visibility"));
+        assert!(closed_sql(Dialect::Postgres).contains("$18"));
+        assert_eq!(placeholders(Dialect::MySql, 3, 0, 0), "?, ?, ?");
+    }
+
+    #[test]
+    fn zero_times_map_to_min_datetime() {
+        assert!(time_value(Dialect::MySql, 0).is_ok());
+        assert!(time_value(Dialect::Postgres, 0).is_ok());
+        assert!(time_value(Dialect::MySql, 1_700_000_000_000_000_000).is_ok());
     }
 }
