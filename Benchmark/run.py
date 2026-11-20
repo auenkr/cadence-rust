@@ -131,6 +131,19 @@ def main():
                     else:
                         raise RuntimeError('domain not ready')
                     run(compose+['up','-d','worker'],key+'-worker-up',env=arm_env)
+                    # The Go system Worker starts its system-domain workers (scheduler, batcher, async
+                    # consumers) ~60 s after process start. Without this wait that burst lands inside
+                    # the warmup/measure window and stalls decision tasks for ~10 s in either arm
+                    # (perf-fe-lane-spikes). Wait for the last of them before the SDK worker/warmup.
+                    deadline=time.time()+240
+                    while time.time()<deadline:
+                        wlog=capture(compose+['logs','--no-color','worker'],arm_env)
+                        if 'Started Activity Worker' in wlog and '"Domain":"cadence-batcher"' in wlog and 'Refreshed consumers' in wlog:
+                            break
+                        time.sleep(3)
+                    else:
+                        raise RuntimeError('system worker did not finish starting')
+                    time.sleep(5)
                     containers=[]; identities={}
                     for service,image in expected.items():
                         cid=capture(compose+['ps','-a','-q',service],arm_env)
