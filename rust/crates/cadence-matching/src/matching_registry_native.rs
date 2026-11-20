@@ -1199,6 +1199,9 @@ impl NativeQueueRegistry {
                 if deadline.is_some_and(|d| tokio::time::Instant::now() >= d) {
                     return Err(Status::internal("context deadline exceeded"));
                 }
+                if let Some(handle) = self.get_cached_fast(&key) {
+                    return Ok(handle);
+                }
                 let registry = self.clone();
                 owner_work(move |readers| registry.get_blocking(key, kind, now, readers)).await
             };
@@ -1229,6 +1232,23 @@ impl NativeQueueRegistry {
             forward_tasks: owner.forward_tasks.clone(),
             forward_rate: owner.forward_rate.clone(),
         }
+    }
+
+    /// Hot path for an already-started owner: same result as `get_blocking`'s
+    /// cached branch without a blocking-pool hop. Any other state (stopped
+    /// registry, stopped/missing owner, ownership error) takes the full path.
+    fn get_cached_fast(&self, key: &TaskListKeyBytes) -> Option<NativeQueueHandle> {
+        let lookup: Key = (key.domain_id, key.name.clone(), key.task_type);
+        let state = self.state.lock().expect("Matching registry lock");
+        if state.stopped {
+            return None;
+        }
+        let owner = state.owners.get(&lookup)?;
+        if owner.queue.is_stopped() {
+            return None;
+        }
+        self.check_task_list_ownership(&key.name, true).ok()?;
+        Some(Self::handle_of(owner))
     }
 
     fn get_blocking(
