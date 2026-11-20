@@ -952,7 +952,7 @@ async fn failover_moves_global_domain_and_lists_history() {
             filters: vec![],
         }],
     );
-    state.cluster_metadata.clusters.insert(
+    std::sync::Arc::make_mut(&mut state.cluster_metadata).clusters.insert(
         "remote".into(),
         cadence_common::cluster::ClusterInformation {
             enabled: true,

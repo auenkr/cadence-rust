@@ -622,10 +622,10 @@ mod tests {
     fn global_domain_registration_requires_primary_cluster_before_name_validation() {
         let state = cadence_service_core::handlers::AppState {
             current_cluster_name: "cluster1".into(),
-            cluster_metadata: cadence_common::cluster::Metadata {
+            cluster_metadata: std::sync::Arc::new(cadence_common::cluster::Metadata {
                 current_cluster_name: "cluster1".into(),
                 ..Default::default()
-            },
+            }),
             ..Default::default()
         };
         let request = RegisterDomainRequest {
