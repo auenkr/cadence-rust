@@ -327,6 +327,7 @@ impl MatchingHistoryClient {
             "rpc-encoding",
             tonic::metadata::MetadataValue::from_static("proto"),
         );
+        cadence_service_core::header_forwarding::apply_caller_type(request.metadata_mut());
         if let Some(timeout) = timeout {
             request.set_timeout(timeout);
         }

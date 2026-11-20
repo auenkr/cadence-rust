@@ -875,7 +875,7 @@ impl cadence_service_core::workflow_api::WorkflowApi for HandlerApi {
                 ..Default::default()
             };
             let inbound = ctx.headers.clone();
-            cadence_service_core::header_forwarding::INBOUND_DEADLINE
+            cadence_persistence::caller_type::scope_from_headers(&ctx.headers, cadence_service_core::header_forwarding::INBOUND_DEADLINE
                 .scope(
                     ctx.deadline,
                     cadence_service_core::header_forwarding::INBOUND_HEADERS.scope(
@@ -883,7 +883,7 @@ impl cadence_service_core::workflow_api::WorkflowApi for HandlerApi {
                         self.handler
                             .dispatch_with_metadata(operation, request, &caller),
                     ),
-                )
+                ))
                 .await
         })
     }

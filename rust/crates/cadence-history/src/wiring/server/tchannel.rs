@@ -399,7 +399,10 @@ async fn handle_call(w: Arc<Mutex<OwnedWriteHalf>>, id: u32, call: Call, state: 
     let remaining = (call.started + call.ttl).saturating_duration_since(Instant::now());
     let res = tokio::time::timeout(
         remaining,
-        crate::wiring::assembly::engine_decision::CLIENT_HEADERS.scope(client_headers, dispatch(&state, &procedure, &args)),
+        cadence_persistence::caller_type::scope_from_headers(
+            &app_headers,
+            crate::wiring::assembly::engine_decision::CLIENT_HEADERS.scope(client_headers, dispatch(&state, &procedure, &args)),
+        ),
     )
     .await;
     let outcome = match res {

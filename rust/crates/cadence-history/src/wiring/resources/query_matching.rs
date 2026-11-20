@@ -98,6 +98,7 @@ impl QueryMatchingClient for GrpcQueryMatchingClient {
             metadata.insert("rpc-service", tonic::metadata::MetadataValue::from_static("cadence-matching"));
             metadata.insert("rpc-caller", tonic::metadata::MetadataValue::from_static("cadence-history"));
             metadata.insert("rpc-encoding", tonic::metadata::MetadataValue::from_static("proto"));
+            cadence_service_core::header_forwarding::apply_caller_type(metadata);
         }
         grpc_request.set_timeout(std::time::Duration::from_secs(60));
         let resp = client

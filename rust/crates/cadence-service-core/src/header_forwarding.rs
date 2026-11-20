@@ -81,6 +81,17 @@ pub fn forwarded_headers(
     pending
 }
 
+/// Go `CallerInfoOutboundMiddleware` (+ default header forwarding) for tonic
+/// requests: adds `cadence-caller-type` unless already set.
+pub fn apply_caller_type(metadata: &mut tonic::metadata::MetadataMap) {
+    let existing = metadata.contains_key(cadence_persistence::caller_type::CALLER_TYPE_HEADER);
+    if let Some(value) = cadence_persistence::caller_type::outbound_header(existing)
+        .and_then(|v| tonic::metadata::MetadataValue::try_from(v).ok())
+    {
+        metadata.insert(cadence_persistence::caller_type::CALLER_TYPE_HEADER, value);
+    }
+}
+
 tokio::task_local! {
     /// Headers of the inbound RPC currently being handled (Go
     /// `yarpc.CallFromContext(ctx).HeaderNames()`).

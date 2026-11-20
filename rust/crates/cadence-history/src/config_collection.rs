@@ -96,6 +96,13 @@ impl FromDynamic for String {
         v.as_str().map(str::to_owned)
     }
 }
+/// Go `ListPropertyFn` (`[]interface{}`).
+impl FromDynamic for Vec<Value> {
+    const KIND: DynKind = DynKind::List;
+    fn from_dynamic(v: &Value) -> Option<Self> {
+        v.as_array().cloned()
+    }
+}
 impl FromDynamic for Map {
     const KIND: DynKind = DynKind::Map;
     fn from_dynamic(v: &Value) -> Option<Self> {

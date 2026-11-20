@@ -29,7 +29,10 @@ pub fn per_member(global: f64, instance: f64, member_count: Result<usize, ()>) -
 }
 
 /// Shared per-datastore limiter handed to every wrapper.
-pub struct PersistenceLimiter(DynamicRateLimiter);
+pub struct PersistenceLimiter(DynamicRateLimiter, Option<BypassTypes>);
+
+/// `system.rateLimiterBypassCallerTypes` (Go `dynamicproperties.ListPropertyFn`).
+pub type BypassTypes = Arc<dyn Fn() -> Vec<String> + Send + Sync>;
 
 impl PersistenceLimiter {
     /// Go `buildRatelimiters`: `None` when `host_qps() <= 0` at construction.
@@ -38,16 +41,35 @@ impl PersistenceLimiter {
         global_qps: Arc<dyn Fn() -> i64 + Send + Sync>,
         member_count: Arc<dyn Fn() -> Result<usize, ()> + Send + Sync>,
     ) -> Option<Arc<Self>> {
+        Self::build_with_bypass(host_qps, global_qps, member_count, None)
+    }
+
+    /// As [`Self::build`], with Go's `quotas.NewCallerBypass(RateLimiterBypassCallerTypes)`.
+    pub fn build_with_bypass(
+        host_qps: Arc<dyn Fn() -> i64 + Send + Sync>,
+        global_qps: Arc<dyn Fn() -> i64 + Send + Sync>,
+        member_count: Arc<dyn Fn() -> Result<usize, ()> + Send + Sync>,
+        bypass: Option<BypassTypes>,
+    ) -> Option<Arc<Self>> {
         if host_qps() <= 0 {
             return None;
         }
-        Some(Arc::new(Self(DynamicRateLimiter::new(Box::new(move || {
-            per_member(global_qps() as f64, host_qps() as f64, member_count())
-        })))))
+        Some(Arc::new(Self(
+            DynamicRateLimiter::new(Box::new(move || {
+                per_member(global_qps() as f64, host_qps() as f64, member_count())
+            })),
+            bypass,
+        )))
     }
 
+    /// Go `CallerBypass.AllowLimiter`: the limiter token is consumed first; a
+    /// denied request still passes when its caller type is bypassed.
     pub fn allow(&self) -> bool {
         self.0.allow()
+            || self
+                .1
+                .as_ref()
+                .is_some_and(|types| crate::caller_type::should_bypass(&types()))
     }
 }
 
@@ -458,6 +480,29 @@ mod tests {
             Err(HistoryReadError::ServiceBusy(m)) => assert_eq!(m, "Persistence Max QPS Reached."),
             other => panic!("expected ServiceBusy, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn caller_type_bypass_admits_listed_callers_after_burst() {
+        let build = |list: Vec<String>| {
+            PersistenceLimiter::build_with_bypass(
+                Arc::new(|| 1),
+                Arc::new(|| 0),
+                Arc::new(|| Ok(1)),
+                Some(Arc::new(move || list.clone())),
+            )
+            .unwrap()
+        };
+        let l = build(vec!["cli".to_owned()]);
+        assert!(l.allow());
+        // burst spent: unknown caller rejected, cli bypasses, sdk rejected.
+        assert!(!l.allow());
+        assert!(crate::caller_type::scope("cli".into(), async { l.allow() }).await);
+        assert!(!crate::caller_type::scope("sdk".into(), async { l.allow() }).await);
+        // empty default list: nobody bypasses.
+        let none = build(vec![]);
+        assert!(none.allow());
+        assert!(!crate::caller_type::scope("cli".into(), async { none.allow() }).await);
     }
 
     #[test]

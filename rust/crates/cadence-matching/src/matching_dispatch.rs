@@ -257,6 +257,7 @@ pub(crate) fn matching_yarpc_grpc_metadata<T>(request: &mut tonic::Request<T>) {
         "rpc-encoding",
         tonic::metadata::MetadataValue::from_static("proto"),
     );
+    cadence_service_core::header_forwarding::apply_caller_type(metadata);
 }
 /// Go `engine.go` poll-path `emitInfoOrDebugLog` events: the filter uses the
 /// task's own domain, the `wf-domain-id` tag the poll's domain.

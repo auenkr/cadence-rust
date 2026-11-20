@@ -266,10 +266,16 @@ where
             .map(|timeout| std::time::Instant::now() + timeout);
         let clone = self.0.clone();
         let mut inner = std::mem::replace(&mut self.0, clone);
-        Box::pin(GRPC_CALLER.scope(
-            (headers, deadline),
-            async move { inner.call(request).await },
-        ))
+        let caller_type = headers
+            .get(cadence_persistence::caller_type::CALLER_TYPE_HEADER)
+            .cloned();
+        Box::pin(async move {
+            cadence_persistence::caller_type::scope_from_header(
+                caller_type.as_deref(),
+                GRPC_CALLER.scope((headers, deadline), async move { inner.call(request).await }),
+            )
+            .await
+        })
     }
 }
 

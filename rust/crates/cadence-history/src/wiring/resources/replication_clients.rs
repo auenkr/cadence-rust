@@ -62,6 +62,7 @@ fn decorate<M>(message: M, info: &ClusterInformation, caller: &str, timeout: Dur
             r.metadata_mut().insert(k, v);
         }
     }
+    cadence_service_core::header_forwarding::apply_caller_type(r.metadata_mut());
     r
 }
 

@@ -131,6 +131,7 @@ pub async fn resend_replication_tasks(
                 raw.metadata_mut().insert(key, value);
             }
         }
+        crate::header_forwarding::apply_caller_type(raw.metadata_mut());
         let page = remote_admin
             .get_workflow_execution_raw_history_v2(raw)
             .await

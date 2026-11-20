@@ -31,6 +31,7 @@ tonic = { version = "0.12", features = ["tls"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 cadence-persistence = { path = "../cadence-persistence" }
+tower = "0.5"
 cadence-thrift = { path = "../cadence-thrift" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

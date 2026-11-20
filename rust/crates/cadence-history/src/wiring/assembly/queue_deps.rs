@@ -181,6 +181,7 @@ fn matching_metadata<T>(request: &mut tonic::Request<T>) {
     metadata.insert("rpc-service", tonic::metadata::MetadataValue::from_static("cadence-matching"));
     metadata.insert("rpc-caller", tonic::metadata::MetadataValue::from_static("cadence-history"));
     metadata.insert("rpc-encoding", tonic::metadata::MetadataValue::from_static("proto"));
+    cadence_service_core::header_forwarding::apply_caller_type(metadata);
     // Go passes a context with a deadline (taskRPCCallTimeout); yarpc rejects a request
     // without one ("missing TTL"). set_timeout emits the grpc-timeout header.
     request.set_timeout(crate::task::transfer_task_executor_base::TASK_RPC_CALL_TIMEOUT);
