@@ -11,7 +11,7 @@ Expected values mirror Go (go/service/frontend/adminHandler.go):
   ReapplyEvents unknown domain -> NOT_FOUND
   ReapplyEvents bad batch      -> INTERNAL DeserializeBatchEvents (Go History, forwarded unchanged)
 """
-import importlib, json, subprocess, sys
+import importlib, json, subprocess, sys, uuid
 from pathlib import Path
 
 addr, domain, idl, work = sys.argv[1], sys.argv[2], Path(sys.argv[3]), Path(sys.argv[4])
@@ -75,6 +75,44 @@ check('get-dlq-replication-messages-unknown-workflow', lambda **k: stub.GetDLQRe
 check('get-dlq-replication-messages-bad-type', lambda **k: stub.GetDLQReplicationMessages(
     dq(task_infos=[rti(domain_id='d', workflow_execution=exe(workflow_id='w', run_id='r'), task_type=9)]), **k),
       'OK')
+
+delete_req = svc.DeleteWorkflowRequest
+maintain_req = svc.MaintainCorruptWorkflowRequest
+check('delete-workflow-no-execution', lambda **k: stub.DeleteWorkflow(delete_req(domain=domain), **k),
+      'INVALID_ARGUMENT', 'Request is nil.')
+check('delete-workflow-unknown-domain', lambda **k: stub.DeleteWorkflow(
+    delete_req(domain='no-such-domain-probe', workflow_execution=exe(workflow_id='w')), **k), 'NOT_FOUND')
+check('maintain-corrupt-no-execution', lambda **k: stub.MaintainCorruptWorkflow(maintain_req(domain=domain), **k),
+      'UNKNOWN', 'Execution is missing')
+
+try:
+    from google.protobuf.duration_pb2 import Duration
+    tasklist = importlib.import_module('uber.cadence.api.v1.tasklist_pb2')
+    workflow = importlib.import_module('uber.cadence.api.v1.service_workflow_pb2')
+    workflow_grpc = importlib.import_module('uber.cadence.api.v1.service_workflow_pb2_grpc')
+    workflow_stub = workflow_grpc.WorkflowAPIStub(chan)
+    workflow_id = 'admin-delete-probe-' + str(uuid.uuid4())
+    started = workflow_stub.StartWorkflowExecution(workflow.StartWorkflowExecutionRequest(
+        domain=domain, workflow_id=workflow_id, request_id=str(uuid.uuid4()),
+        workflow_type=api.WorkflowType(name='AdminDeleteProbe'),
+        task_list=tasklist.TaskList(name='admin-delete-probe'),
+        execution_start_to_close_timeout=Duration(seconds=600),
+        task_start_to_close_timeout=Duration(seconds=10),
+    ), metadata=md, timeout=30)
+    execution = exe(workflow_id=workflow_id, run_id=started.run_id)
+    maintained = stub.MaintainCorruptWorkflow(
+        maintain_req(domain=domain, workflow_execution=execution), metadata=md, timeout=30)
+    results.append({'name': 'maintain-healthy-workflow', 'ok': not maintained.ListFields(),
+                    'detail': str(maintained)})
+    deleted = stub.DeleteWorkflow(delete_req(domain=domain, workflow_execution=execution),
+                                  metadata=md, timeout=30)
+    results.append({'name': 'delete-persisted-workflow',
+                    'ok': deleted.history_deleted and deleted.executions_deleted and deleted.visibility_deleted,
+                    'detail': str(deleted)})
+    check('deleted-workflow-mutable-state-missing', lambda **k: stub.DescribeWorkflowExecution(
+        svc.DescribeWorkflowExecutionRequest(domain=domain, workflow_execution=execution), **k), 'NOT_FOUND')
+except Exception as e:
+    results.append({'name': 'delete-persisted-workflow', 'ok': False, 'detail': repr(e)})
 
 for r in results:
     print(json.dumps(r))

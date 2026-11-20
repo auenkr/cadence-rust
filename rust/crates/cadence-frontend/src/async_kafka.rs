@@ -81,6 +81,37 @@ impl KafkaQueueConfig {
         Ok(cfg)
     }
 
+    pub(crate) fn for_visibility(
+        config: &cadence_service_core::config::KafkaConfig,
+        application: &str,
+    ) -> Result<Self, String> {
+        let (topic, brokers) = config.producer_target(application)?;
+        let tls = &config.tls;
+        let sasl = &config.sasl;
+        Ok(Self {
+            topic,
+            connection: ConnectionConfig {
+                brokers,
+                tls: TlsConfig {
+                    enabled: tls.enabled,
+                    cert_file: tls.cert_file.clone(),
+                    key_file: tls.key_file.clone(),
+                    ca_file: tls.ca_file.clone(),
+                    ca_files: tls.ca_files.clone(),
+                    enable_host_verification: tls.enable_host_verification,
+                    require_client_auth: tls.require_client_auth,
+                    server_name: tls.server_name.clone(),
+                },
+                sasl: SaslSettings {
+                    enabled: sasl.enabled,
+                    user: sasl.user.clone(),
+                    password: sasl.password.clone(),
+                    algorithm: sasl.algorithm.clone(),
+                },
+            },
+        })
+    }
+
     /// Go `queueConfig.ID()`.
     pub fn id(&self) -> String {
         format!(
@@ -261,16 +292,16 @@ impl KafkaProducer {
         Ok(created)
     }
 
-    async fn send(&self, message: ProducerMessage) -> anyhow::Result<()> {
+    async fn send_record(&self, partition_key: &str, record: Record) -> anyhow::Result<()> {
         if self.closed.load(Ordering::SeqCst) {
             anyhow::bail!("kafka producer is closed");
         }
         let connected = self.connected.get_or_try_init(|| self.connect()).await?;
-        let partition = sarama_partition(message.partition_key.as_bytes(), connected.partitions);
+        let partition = sarama_partition(partition_key.as_bytes(), connected.partitions);
         let client = self.partition_client(connected, partition).await?;
         // produce resolves after the broker acknowledged (acks=all default).
         if let Err(error) = client
-            .produce(vec![build_record(&message)], Compression::NoCompression)
+            .produce(vec![record], Compression::NoCompression)
             .await
         {
             // Drop the cached leader connection so the next publish re-resolves it.
@@ -284,11 +315,31 @@ impl KafkaProducer {
         }
         Ok(())
     }
+
+    pub(crate) async fn publish_visibility(&self, key: &str, value: Vec<u8>) -> anyhow::Result<()> {
+        for attempt in 0..=3 {
+            let record = Record {
+                key: Some(key.as_bytes().to_vec()),
+                value: Some(value.clone()),
+                headers: BTreeMap::new(),
+                timestamp: Utc::now(),
+            };
+            let result = self.send_record(key, record).await;
+            if result.is_ok() || attempt == 3 {
+                return result;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        unreachable!("the final publish attempt returns its result")
+    }
 }
 
 impl AsyncMessageProducer for KafkaProducer {
     fn publish<'a>(&'a self, message: ProducerMessage) -> ProducerFuture<'a> {
-        Box::pin(self.send(message))
+        Box::pin(async move {
+            self.send_record(&message.partition_key, build_record(&message))
+                .await
+        })
     }
 
     fn close(&self) -> anyhow::Result<()> {

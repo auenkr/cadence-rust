@@ -244,6 +244,7 @@ impl a::admin_api_server::AdminApi for Admin {
     ) -> Result<Response<a::DeleteWorkflowResponse>, Status> {
         let r = request.into_inner();
         let input = cadence_api::admin::DeleteWorkflowRequest {
+            skip_errors: false,
             domain: r.domain,
             workflow_execution: r.workflow_execution.map(|e| {
                 cadence_api::types::WorkflowExecution {
@@ -822,6 +823,7 @@ impl a::admin_api_server::AdminApi for Admin {
     ) -> Result<Response<a::MaintainCorruptWorkflowResponse>, Status> {
         let r = request.into_inner();
         let input = cadence_api::admin::MaintainCorruptWorkflowRequest {
+            skip_errors: false,
             domain: r.domain,
             execution: r
                 .workflow_execution
@@ -830,19 +832,19 @@ impl a::admin_api_server::AdminApi for Admin {
                     run_id: e.run_id,
                 }),
         };
-        if input.domain.is_empty() {
-            return Err(Status::invalid_argument("Domain is not set."));
-        }
-        if input
-            .execution
-            .as_ref()
-            .is_none_or(|e| e.workflow_id.is_empty())
-        {
-            return Err(Status::invalid_argument("Execution is missing"));
-        }
         let v: cadence_api::admin::MaintainCorruptWorkflowResponse = self
             .call("/api/v1/admin/workflows/maintain-corrupt", &input)
-            .await?;
+            .await
+            .map_err(|status| {
+                // Go returns a value BadRequestError here, which the gRPC mapper treats as unknown.
+                if status.code() == tonic::Code::InvalidArgument
+                    && status.message() == "Execution is missing"
+                {
+                    Status::unknown(status.message())
+                } else {
+                    status
+                }
+            })?;
         Ok(Response::new(a::MaintainCorruptWorkflowResponse {
             history_deleted: v.history_deleted,
             executions_deleted: v.executions_deleted,

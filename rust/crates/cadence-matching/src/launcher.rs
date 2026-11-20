@@ -1698,6 +1698,37 @@ async fn run_with_lifecycle(
                 .as_ref()
                 .and_then(|stores| stores.domain_metadata_persistence.clone());
             if run_frontend {
+                use cadence_persistence::sqlblobs::Encoding;
+                use cadence_service_core::admin::WorkflowDeletionStores;
+
+                state.admin.workflow_deletion =
+                    configured_matching_stores.as_ref().and_then(|stores| {
+                        if let Some(cassandra) = stores.history_cassandra.as_ref() {
+                            return Some(WorkflowDeletionStores {
+                                executions: cassandra.executions.clone(),
+                                history: cassandra.history_v2.clone(),
+                            });
+                        }
+                        let backend = stores.history_sql_backend.clone()?;
+                        Some(WorkflowDeletionStores {
+                            executions: std::sync::Arc::new(
+                                cadence_persistence::sql_workflow_store::SqlWorkflowStore::new(
+                                    backend.clone(),
+                                    Encoding::ThriftRW,
+                                    0,
+                                    0,
+                                ),
+                            ),
+                            history: std::sync::Arc::new(
+                                cadence_persistence::sql_history_store::SqlHistoryV2Store::new(
+                                    backend,
+                                    Encoding::ThriftRW,
+                                ),
+                            ),
+                        })
+                    });
+            }
+            if run_frontend {
                 if let Some(source) = configured_matching_stores
                     .as_ref()
                     .and_then(|stores| stores.domain_metadata_source.as_ref())

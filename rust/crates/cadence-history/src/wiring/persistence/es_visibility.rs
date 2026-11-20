@@ -40,7 +40,6 @@ const SCHEDULED_EXECUTION_TIME: &str = "ScheduledExecutionTime";
 
 // indexer.thrift enums.
 const MESSAGE_TYPE_INDEX: i32 = 0;
-const MESSAGE_TYPE_DELETE: i32 = 1;
 const MESSAGE_TYPE_CREATE: i32 = 2;
 const OP_RECORD_STARTED: i32 = 0;
 const OP_RECORD_CLOSED: i32 = 1;
@@ -154,13 +153,10 @@ fn uninitialized_message(row: &VisibilityWriteRow) -> (String, Vec<u8>) {
 
 /// Go `getVisibilityMessageForDeletion`.
 fn deletion_message(domain_id: &str, workflow_id: &str, run_id: &str, task_id: i64) -> (String, Vec<u8>) {
-    let row = VisibilityWriteRow {
-        domain_id: domain_id.into(),
-        workflow_id: workflow_id.into(),
-        run_id: run_id.into(),
-        ..Default::default()
-    };
-    encode_message(MESSAGE_TYPE_DELETE, &row, Some(task_id), None, None)
+    (
+        workflow_id.to_owned(),
+        cadence_thrift::encode_visibility_delete(domain_id, workflow_id, run_id, task_id),
+    )
 }
 
 /// Sarama default hash partitioner: FNV-1a 32, `int32(hash) % n`, negated when negative.

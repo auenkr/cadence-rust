@@ -329,13 +329,7 @@ impl SqlVisibilityWriter {
 
     /// Go `DeleteWorkflowExecution` (`DeleteFromVisibility`).
     pub fn delete(&self, domain_id: &str, run_id: &str) -> Result<(), PersistenceError> {
-        let d = self.backend.dialect();
-        let sql = match d {
-            Dialect::MySql => "DELETE FROM executions_visibility WHERE domain_id=? AND run_id=?",
-            Dialect::Postgres => "DELETE FROM executions_visibility WHERE domain_id=$1 AND run_id=$2",
-        };
-        let params = vec![Value::Text(domain_id.into()), Value::Text(run_id.into())];
-        self.backend.autocommit(|tx: &mut dyn SqlTx| tx.execute(sql, &params)).map(|_| ())
+        self.backend.delete_visibility(domain_id, run_id)
     }
 
     pub async fn record_started_async(&self, row: VisibilityWriteRow) -> Result<(), PersistenceError> {

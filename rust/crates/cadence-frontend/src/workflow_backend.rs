@@ -703,6 +703,7 @@ pub struct HandlerApi {
     schedule_redirect: Option<crate::wrappers::redirection_runtime::ScheduleRedirect>,
     domain_guard: crate::domain_guard::DomainGuard,
     admin_metrics: crate::wrappers::metrics_sink::SinkAdminMetrics,
+    visibility_producer: Option<(crate::async_kafka::KafkaProducer, bool)>,
 }
 
 /// Go `accesscontrolled.NewAdminHandler`: every Admin method needs
@@ -786,6 +787,40 @@ impl std::fmt::Debug for HandlerApi {
 }
 
 impl cadence_service_core::workflow_api::WorkflowApi for HandlerApi {
+    fn admin_delete_visibility<'a>(
+        &'a self,
+        domain_id: &'a str,
+        execution: &'a cadence_api::types::WorkflowExecution,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<bool>> + Send + 'a>> {
+        Box::pin(async move {
+            let (producer, pinot) = self.visibility_producer.as_ref()?;
+            let payload = if *pinot {
+                serde_json::json!({
+                    "DomainID": domain_id,
+                    "WorkflowID": execution.workflow_id,
+                    "RunID": execution.run_id,
+                    "IsDeleted": true,
+                    "EventTimeMs": chrono::Utc::now().timestamp_millis(),
+                })
+                .to_string()
+                .into_bytes()
+            } else {
+                cadence_thrift::encode_visibility_delete(
+                    domain_id,
+                    &execution.workflow_id,
+                    &execution.run_id,
+                    i64::MAX,
+                )
+            };
+            Some(
+                producer
+                    .publish_visibility(&execution.workflow_id, payload)
+                    .await
+                    .is_ok(),
+            )
+        })
+    }
+
     fn domain_validator(&self) -> Option<&dyn cadence_service_core::workflow_api::DomainValidator> {
         Some(&self.domain_guard)
     }
@@ -1759,9 +1794,27 @@ pub fn build_workflow_api(
             Some(schedule_redirect),
         )
     };
+    let visibility_producer = match ctx.config.persistence.advanced_visibility_store.as_str() {
+        "es-visibility" | "os-visibility" => Some(("visibility", false)),
+        "pinot-visibility" => Some(("pinot-visibility", true)),
+        _ => None,
+    }
+    .map(|(application, pinot)| {
+        crate::async_kafka::KafkaQueueConfig::for_visibility(&ctx.config.kafka, application).map(
+            |config| {
+                (
+                    crate::async_kafka::KafkaProducer::new(std::sync::Arc::new(config)),
+                    pinot,
+                )
+            },
+        )
+    })
+    .transpose()
+    .map_err(anyhow::Error::msg)?;
     Ok(std::sync::Arc::new(HandlerApi {
         handler,
         admin_auth: AdminAccessControl(selected_authorizer),
+        visibility_producer,
         schedule_redirect,
         domain_guard,
         admin_metrics: crate::wrappers::metrics_sink::SinkAdminMetrics::new(

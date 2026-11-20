@@ -64,13 +64,16 @@ pub struct DomainAuditLogPage {
     pub next_page_token: Option<Vec<u8>>,
 }
 
-/// Opaque cursor. Go gob-encodes `(created_time, event_id)`; clients only echo
-/// the bytes back, so the Rust layout is private to this frontend.
+/// Encode a cursor readable by the Go SQL audit store.
 pub fn encode_page_token(created_time_nanos: i64, event_id: &str) -> Vec<u8> {
-    format!("{created_time_nanos}:{event_id}").into_bytes()
+    crate::history_tree_token::encode_domain_audit(created_time_nanos, event_id)
 }
 
 pub fn decode_page_token(token: &[u8]) -> Result<(i64, String), String> {
+    if let Some(cursor) = crate::history_tree_token::decode_domain_audit(token) {
+        return Ok(cursor);
+    }
+    // Existing Rust clients may be holding a cursor from before the gob port.
     let text = std::str::from_utf8(token).map_err(|_| "unable to decode next page token")?;
     let (nanos, event_id) = text
         .split_once(':')
@@ -422,6 +425,19 @@ mod tests {
             ],
             [1, 2, 3, 4]
         );
+    }
+
+    #[test]
+    fn page_token_matches_go_sql_cursor() {
+        let token = include_bytes!("../tests/fixtures/go-domain-audit-token.gob");
+        let nanos = 1_700_000_000_123_456_789;
+        let event_id = "018bcfe5-687b-7000-8000-000000000000";
+        assert_eq!(decode_page_token(token).unwrap(), (nanos, event_id.into()));
+        assert_eq!(encode_page_token(nanos, event_id), token.as_slice());
+
+        for length in 0..token.len() {
+            assert!(decode_page_token(&token[..length]).is_err());
+        }
     }
 
     #[test]

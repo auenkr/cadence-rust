@@ -2383,7 +2383,7 @@ fn require_scheduler(state: &AppState, domain: &str) -> Option<Response> {
     ))
 }
 
-fn cadence_error_response(e: cadence_api::errors::CadenceError) -> Response {
+pub(crate) fn cadence_error_response(e: cadence_api::errors::CadenceError) -> Response {
     use cadence_api::errors::CadenceError;
     match e {
         CadenceError::BadRequest(b) => bad_request(b),

@@ -57,6 +57,12 @@ pub struct VisibilityFilter {
 
 /// Row source for one physical visibility store.
 pub trait VisibilityStore: Send + Sync + std::fmt::Debug {
+    fn admin_delete(&self, _domain_id: &str, _run_id: &str) -> Result<(), VisibilityError> {
+        Err(VisibilityError::Internal(
+            "Visibility deletion is not supported".into(),
+        ))
+    }
+
     fn select(&self, filter: &VisibilityFilter) -> Result<Vec<VisibilityRow>, VisibilityError>;
     /// `Ok(None)` is Go's `sql.ErrNoRows`.
     fn get_closed(

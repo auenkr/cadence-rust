@@ -230,6 +230,106 @@ pub fn decode_execution(token: &[u8]) -> Result<(i32, String), PersistenceError>
     })
 }
 
+// Time.GobEncode stores seconds since 0001-01-01 and fractional nanoseconds.
+const GO_UNIX_EPOCH_SECONDS: i64 = 62_135_596_800;
+
+pub(crate) fn encode_domain_audit(nanos: i64, event_id: &str) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut ty = Vec::new();
+    int(&mut ty, -64);
+    ty.extend([3, 1, 1]);
+    bytes(&mut ty, b"domainAuditLogPageToken");
+    ty.push(1);
+    int(&mut ty, 64);
+    ty.extend([0, 1, 2]);
+    for (name, id) in [(b"CreatedTime".as_slice(), 65), (b"EventID".as_slice(), 6)] {
+        ty.push(1);
+        bytes(&mut ty, name);
+        ty.push(1);
+        int(&mut ty, id);
+        ty.push(0);
+    }
+    ty.extend([0, 0]);
+    message(&mut out, &ty);
+
+    ty.clear();
+    int(&mut ty, -65);
+    ty.extend([5, 1, 1]); // wireType.GobEncoderT
+    bytes(&mut ty, b"Time");
+    ty.push(1);
+    int(&mut ty, 65);
+    ty.extend([0, 0, 0]);
+    message(&mut out, &ty);
+
+    let mut time = [0xff; 15]; // UTC offset sentinel
+    time[0] = 1;
+    time[1..9]
+        .copy_from_slice(&(nanos.div_euclid(1_000_000_000) + GO_UNIX_EPOCH_SECONDS).to_be_bytes());
+    time[9..13].copy_from_slice(&(nanos.rem_euclid(1_000_000_000) as u32).to_be_bytes());
+
+    let mut value = Vec::new();
+    int(&mut value, 64);
+    value.push(1);
+    bytes(&mut value, &time);
+    if !event_id.is_empty() {
+        value.push(1);
+        bytes(&mut value, event_id.as_bytes());
+    }
+    value.push(0);
+    message(&mut out, &value);
+    out
+}
+
+pub(crate) fn decode_domain_audit(token: &[u8]) -> Option<(i64, String)> {
+    let mut stream = Reader(token);
+    let mut record_id = None;
+    while !stream.0.is_empty() {
+        let mut message = Reader(stream.bytes()?);
+        let id = message.int()?;
+        if id < 0 {
+            // Go assigns IDs process-wide. Recognize the descriptor without
+            // depending on IDs assigned by earlier gob operations.
+            if message
+                .0
+                .starts_with(b"\x03\x01\x01\x17domainAuditLogPageToken")
+            {
+                record_id = id.checked_neg();
+            }
+            continue;
+        }
+        if Some(id) != record_id || message.uint()? != 1 {
+            return None;
+        }
+        let time = message.bytes()?;
+        if !matches!((time.first(), time.len()), (Some(1), 15) | (Some(2), 16)) {
+            return None;
+        }
+        let seconds = i64::from_be_bytes(time[1..9].try_into().ok()?);
+        let fraction = u32::from_be_bytes(time[9..13].try_into().ok()?);
+        if fraction >= 1_000_000_000 {
+            return None;
+        }
+        let nanos = i64::try_from(
+            (i128::from(seconds) - i128::from(GO_UNIX_EPOCH_SECONDS)) * 1_000_000_000
+                + i128::from(fraction),
+        )
+        .ok()?;
+        let event_id = match message.uint()? {
+            0 => String::new(),
+            1 => {
+                let event_id = std::str::from_utf8(message.bytes()?).ok()?.to_owned();
+                if message.uint()? != 0 {
+                    return None;
+                }
+                event_id
+            }
+            _ => return None,
+        };
+        return message.0.is_empty().then_some((nanos, event_id));
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

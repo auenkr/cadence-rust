@@ -651,6 +651,7 @@ pub struct AdminState {
     pub persistence_description: PersistenceDescription,
     /// Elasticsearch/OpenSearch mapping client; None when advanced visibility is not configured.
     pub es: Option<crate::es_mapping::EsVisibility>,
+    pub workflow_deletion: Option<WorkflowDeletionStores>,
 }
 
 // ---------------------------------------------------------------------------
@@ -846,36 +847,204 @@ pub async fn describe_cluster(State(state): State<StdArc<AppState>>) -> Response
 }
 
 /// Delete a workflow run's data, mirroring Go admin `DeleteWorkflow`.
+/// Persistence managers used by Frontend admin deletion after History resolves
+/// the execution and shard.
+#[derive(Clone)]
+pub struct WorkflowDeletionStores {
+    pub executions: StdArc<dyn cadence_persistence::history_contract::GoExecutionStore>,
+    pub history: StdArc<dyn cadence_persistence::history_contract::GoHistoryV2Store>,
+}
+
+impl std::fmt::Debug for WorkflowDeletionStores {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WorkflowDeletionStores")
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct DeletionMutableState {
+    execution_info: DeletionExecutionInfo,
+    version_histories: Option<DeletionVersionHistories>,
+}
+
+#[derive(serde::Deserialize)]
+struct DeletionExecutionInfo {
+    #[serde(rename = "DomainID")]
+    domain_id: String,
+    #[serde(rename = "BranchToken")]
+    branch_token: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct DeletionVersionHistories {
+    histories: Option<Vec<DeletionVersionHistory>>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct DeletionVersionHistory {
+    branch_token: Option<String>,
+}
+
 pub async fn delete_workflow(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::DeleteWorkflowRequest>,
 ) -> Response {
-    let execution = req.workflow_execution.clone().unwrap_or_default();
-    if execution.workflow_id.is_empty() {
-        return bad_request(BadRequestError::new("Execution is not set on request."));
-    }
-    if let Some(e) = require_domain(&state, &req.domain).await {
-        return e;
-    }
-    let executions = match state.execution_store(&req.domain) {
-        Ok(store) => store,
-        Err(error) => return entity_not_exists(error),
+    use base64::Engine as _;
+    use cadence_persistence::history_contract::{HistoryBranchRange, HistoryBranchRequest};
+
+    let Some(execution) = req.workflow_execution else {
+        return bad_request(validation::err_request_not_set());
     };
-    match executions.delete_run(&req.domain, &execution) {
-        Ok((history, executions, visibility)) => {
-            ok_json(cadence_api::admin::DeleteWorkflowResponse {
-                history_deleted: history,
-                executions_deleted: executions,
-                visibility_deleted: visibility,
-            })
-        }
-        Err(cadence_persistence::WorkflowMutationError::NotFound(e)) => entity_not_exists(e),
-        Err(cadence_persistence::WorkflowMutationError::AlreadyCompleted(error)) => error_response(
-            "WorkflowExecutionAlreadyCompletedError",
-            StatusCode::BAD_REQUEST,
-            error.message,
-        ),
+    if state.workflow_api.is_none() && state.admin.workflow_deletion.is_none() {
+        let executions = match state.execution_store(&req.domain) {
+            Ok(store) => store,
+            Err(error) => return entity_not_exists(error),
+        };
+        return match executions.delete_run(&req.domain, &execution) {
+            Ok((history_deleted, executions_deleted, visibility_deleted)) => {
+                ok_json(cadence_api::admin::DeleteWorkflowResponse {
+                    history_deleted,
+                    executions_deleted,
+                    visibility_deleted,
+                })
+            }
+            Err(cadence_persistence::WorkflowMutationError::NotFound(error)) => {
+                entity_not_exists(error)
+            }
+            Err(cadence_persistence::WorkflowMutationError::AlreadyCompleted(error)) => {
+                error_response(
+                    "WorkflowExecutionAlreadyCompletedError",
+                    StatusCode::BAD_REQUEST,
+                    error.message,
+                )
+            }
+        };
     }
+
+    let describe = match describe_workflow_execution_admin_core(
+        &state,
+        cadence_api::admin::AdminDescribeWorkflowExecutionRequest {
+            domain: req.domain.clone(),
+            execution: Some(execution.clone()),
+        },
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(_) if req.skip_errors => {
+            return raw_history_internal("unexpected end of JSON input".into());
+        }
+        Err(response) => return response,
+    };
+    let mutable: DeletionMutableState =
+        match serde_json::from_str(&describe.mutable_state_in_database) {
+            Ok(value) => value,
+            Err(error) => return raw_history_internal(error.to_string()),
+        };
+    let Some(stores) = state.admin.workflow_deletion.as_ref() else {
+        return raw_history_internal("Workflow deletion persistence is not configured.".into());
+    };
+
+    let shard_id = describe.shard_id;
+    let domain_id = mutable.execution_info.domain_id;
+    let tokens = match mutable.version_histories {
+        Some(histories) => histories
+            .histories
+            .unwrap_or_default()
+            .into_iter()
+            .map(|history| history.branch_token)
+            .collect(),
+        None => vec![mutable.execution_info.branch_token],
+    };
+    let mut history_deleted = tokens.is_empty();
+    let mut history_delete_failed = false;
+
+    let result = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        for token in tokens.into_iter().flatten() {
+            let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(token) else {
+                continue;
+            };
+            let Ok(branch) = cadence_persistence::history_branch::decode(&bytes) else {
+                continue;
+            };
+            let request = HistoryBranchRequest {
+                shard_id,
+                tree_id: branch.tree_id,
+                branch_id: branch.branch_id,
+                ancestors: branch
+                    .ancestors
+                    .into_iter()
+                    .map(|range| HistoryBranchRange {
+                        branch_id: range.branch_id,
+                        begin_node_id: range.begin_node_id,
+                        end_node_id: range.end_node_id,
+                    })
+                    .collect(),
+                ..Default::default()
+            };
+            match stores.history.delete_history_branch(request).await {
+                Ok(()) => history_deleted = true,
+                Err(error) => {
+                    tracing::warn!(%error, "Admin history branch deletion failed");
+                    history_delete_failed = true;
+                }
+            }
+        }
+
+        let deleted = stores
+            .executions
+            .delete_workflow_execution(
+                shard_id,
+                domain_id.clone(),
+                execution.workflow_id.clone(),
+                execution.run_id.clone(),
+            )
+            .await;
+        let current_deleted = stores
+            .executions
+            .delete_current_workflow_execution(
+                shard_id,
+                domain_id.clone(),
+                execution.workflow_id.clone(),
+                execution.run_id.clone(),
+            )
+            .await;
+        let executions_deleted = deleted.is_ok() && current_deleted.is_ok();
+        let visibility_deleted = if executions_deleted {
+            let db_deleted = if let Some(store) = state.visibility_store.clone() {
+                let domain_id = domain_id.clone();
+                let run_id = execution.run_id.clone();
+                Some(
+                    tokio::task::spawn_blocking(move || store.admin_delete(&domain_id, &run_id))
+                        .await
+                        .is_ok_and(|result| result.is_ok()),
+                )
+            } else {
+                None
+            };
+            let advanced_deleted = match state.workflow_api.as_ref() {
+                Some(api) => api.admin_delete_visibility(&domain_id, &execution).await,
+                None => None,
+            };
+            (db_deleted.is_some() || advanced_deleted.is_some())
+                && db_deleted.unwrap_or(true)
+                && advanced_deleted.unwrap_or(true)
+        } else {
+            false
+        };
+
+        cadence_api::admin::DeleteWorkflowResponse {
+            history_deleted: history_deleted && !history_delete_failed,
+            executions_deleted,
+            visibility_deleted,
+        }
+    })
+    .await;
+    ok_json(result.unwrap_or_default())
 }
 
 /// Refresh an execution's dispatch queues, mirroring Go admin
@@ -2472,38 +2641,49 @@ pub async fn describe_workflow_execution_admin(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::AdminDescribeWorkflowExecutionRequest>,
 ) -> Response {
-    let execution = req.execution.clone().unwrap_or_default();
-    if execution.workflow_id.is_empty() {
-        return bad_request(BadRequestError::new("Execution is not set on request."));
+    match describe_workflow_execution_admin_core(&state, req).await {
+        Ok(response) => ok_json(response),
+        Err(response) => response,
     }
+}
+
+#[allow(clippy::result_large_err)]
+async fn describe_workflow_execution_admin_core(
+    state: &AppState,
+    req: cadence_api::admin::AdminDescribeWorkflowExecutionRequest,
+) -> Result<cadence_api::admin::AdminDescribeWorkflowExecutionResponse, Response> {
+    if let Err(error) = validation::check_execution(req.execution.as_ref()) {
+        return Err(bad_request(error));
+    }
+    let execution = req.execution.unwrap_or_default();
     // An unconfigured History transport is retained for embedded/local
     // service-core use. Production Frontend always installs this channel.
     if state.history_admin_channel.is_none() && state.admin.membership.get().is_none() {
-        if let Some(e) = require_domain(&state, &req.domain).await {
-            return e;
+        if let Some(e) = require_domain(state, &req.domain).await {
+            return Err(e);
         }
         let executions = match state.execution_store(&req.domain) {
             Ok(store) => store,
-            Err(error) => return entity_not_exists(error),
+            Err(error) => return Err(entity_not_exists(error)),
         };
         return match executions.describe_admin(&req.domain, &execution) {
             Ok((shard_id, history_addr, state_json)) => {
-                ok_json(cadence_api::admin::AdminDescribeWorkflowExecutionResponse {
+                Ok(cadence_api::admin::AdminDescribeWorkflowExecutionResponse {
                     shard_id,
                     history_addr,
                     mutable_state_in_cache: state_json.clone(),
                     mutable_state_in_database: state_json,
                 })
             }
-            Err(e) => entity_not_exists(e),
+            Err(e) => Err(entity_not_exists(e)),
         };
     }
 
     let shard_id = (cadence_common::membership::fingerprint32(execution.workflow_id.as_bytes())
-        % shard_count(&state).max(1) as u32) as i32;
+        % shard_count(state).max(1) as u32) as i32;
     let domain_id = match state.domain_manager.domain_id(&req.domain) {
         Ok(id) => id,
-        Err(error) => return entity_not_exists(error),
+        Err(error) => return Err(entity_not_exists(error)),
     };
     let owner = match state
         .admin
@@ -2514,14 +2694,14 @@ pub async fn describe_workflow_execution_admin(
     {
         Ok(owner) => owner.flatten(),
         Err(error) => {
-            return error_response(
+            return Err(error_response(
                 "InternalServiceError",
                 StatusCode::INTERNAL_SERVER_ERROR,
                 error,
-            )
+            ));
         }
     };
-    let (history_addr, channel) = match history_channel_for(&state, shard_id, None) {
+    let (history_addr, channel) = match history_channel_for(state, shard_id, None) {
         Ok(Some(channel)) => (
             owner
                 .as_ref()
@@ -2530,18 +2710,18 @@ pub async fn describe_workflow_execution_admin(
             channel,
         ),
         Ok(None) => {
-            return error_response(
+            return Err(error_response(
                 "InternalServiceError",
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "History client is not configured.".to_string(),
-            )
+            ));
         }
         Err(error) => {
-            return error_response(
+            return Err(error_response(
                 "InternalServiceError",
                 StatusCode::INTERNAL_SERVER_ERROR,
                 error,
-            )
+            ));
         }
     };
     let request = cadence_proto::history::DescribeMutableStateRequest {
@@ -2558,18 +2738,16 @@ pub async fn describe_workflow_execution_admin(
     {
         Ok(response) => {
             let response = response.into_inner();
-            ok_json(cadence_api::admin::AdminDescribeWorkflowExecutionResponse {
+            Ok(cadence_api::admin::AdminDescribeWorkflowExecutionResponse {
                 shard_id,
                 history_addr,
                 mutable_state_in_cache: response.mutable_state_in_cache,
                 mutable_state_in_database: response.mutable_state_in_database,
             })
         }
-        Err(error) => error_response(
-            "InternalServiceError",
-            StatusCode::INTERNAL_SERVER_ERROR,
-            error.message().to_string(),
-        ),
+        Err(error) => Err(crate::handlers::cadence_error_response(
+            crate::frontend_remote_grpc::error_from_status(&error),
+        )),
     }
 }
 
@@ -2578,9 +2756,40 @@ pub async fn maintain_corrupt_workflow(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::MaintainCorruptWorkflowRequest>,
 ) -> Response {
-    let execution = req.execution.clone().unwrap_or_default();
-    if execution.workflow_id.is_empty() {
+    let Some(execution) = req.execution else {
         return bad_request(BadRequestError::new("Execution is missing"));
+    };
+    if let Some(api) = state.workflow_api.as_ref() {
+        let describe = serde_json::json!({"domain": req.domain, "execution": execution});
+        for operation in ["DescribeWorkflowExecution", "GetWorkflowExecutionHistory"] {
+            let result = api
+                .call(operation, describe.clone(), Default::default())
+                .await;
+            if result.is_err_and(|error| {
+                matches!(
+                    error.to_string().as_str(),
+                    "unable to get workflow start event"
+                        | "unable to get activity scheduled event"
+                        | "corrupted history event batch, eventID is not continuous"
+                )
+            }) {
+                let response = delete_workflow(
+                    State(state.clone()),
+                    Json(cadence_api::admin::DeleteWorkflowRequest {
+                        domain: req.domain,
+                        skip_errors: req.skip_errors,
+                        workflow_execution: Some(execution),
+                    }),
+                )
+                .await;
+                return if response.status().is_success() {
+                    response
+                } else {
+                    ok_json(cadence_api::admin::MaintainCorruptWorkflowResponse::default())
+                };
+            }
+        }
+        return ok_json(cadence_api::admin::MaintainCorruptWorkflowResponse::default());
     }
     if let Some(e) = require_domain(&state, &req.domain).await {
         return e;

@@ -806,6 +806,7 @@ impl ToThrift for GetWorkflowExecutionRawHistoryV2Response {
 impl FromThrift for cadence_api::admin::DeleteWorkflowRequest {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {
+            skip_errors: false,
             domain: s.req_string(10, "")?,
             workflow_execution: s.opt_struct(20)?,
         })
@@ -814,17 +815,14 @@ impl FromThrift for cadence_api::admin::DeleteWorkflowRequest {
 
 impl ToThrift for cadence_api::admin::DeleteWorkflowResponse {
     fn to_thrift(&self) -> Struct {
-        let mut f = Fields::new();
-        if self.history_deleted {
-            f.fields.push((10, crate::value::Value::Bool(true)));
+        // Go's Thrift mapper sets every pointer and its client dereferences each.
+        Struct {
+            fields: vec![
+                (10, Value::Bool(self.history_deleted)),
+                (20, Value::Bool(self.executions_deleted)),
+                (30, Value::Bool(self.visibility_deleted)),
+            ],
         }
-        if self.executions_deleted {
-            f.fields.push((20, crate::value::Value::Bool(true)));
-        }
-        if self.visibility_deleted {
-            f.fields.push((30, crate::value::Value::Bool(true)));
-        }
-        f.finish()
     }
 }
 
@@ -1337,6 +1335,7 @@ impl ToThrift for ReapplyEventsResponse {
 impl FromThrift for MaintainCorruptWorkflowRequest {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {
+            skip_errors: false,
             domain: s.req_string(10, "")?,
             execution: s.opt_struct(20)?,
         })
@@ -1354,11 +1353,14 @@ impl ToThrift for MaintainCorruptWorkflowRequest {
 
 impl ToThrift for MaintainCorruptWorkflowResponse {
     fn to_thrift(&self) -> Struct {
-        let mut f = Fields::new();
-        f.obool(10, self.history_deleted);
-        f.obool(20, self.executions_deleted);
-        f.obool(30, self.visibility_deleted);
-        f.finish()
+        // Go's Thrift mapper sets every pointer and its client dereferences each.
+        Struct {
+            fields: vec![
+                (10, Value::Bool(self.history_deleted)),
+                (20, Value::Bool(self.executions_deleted)),
+                (30, Value::Bool(self.visibility_deleted)),
+            ],
+        }
     }
 }
 
@@ -6911,6 +6913,18 @@ mod tests {
     }
 
     #[test]
+    fn admin_deletion_responses_encode_false_flags() {
+        for response in [
+            cadence_api::admin::DeleteWorkflowResponse::default().to_thrift(),
+            MaintainCorruptWorkflowResponse::default().to_thrift(),
+        ] {
+            for field in [10, 20, 30] {
+                assert_eq!(response.opt_bool(field).unwrap(), Some(false));
+            }
+        }
+    }
+
+    #[test]
     fn semaphore_and_cancel_activity_failed_event_attrs_round_trip() {
         round_trip(&RequestCancelActivityTaskFailedEventAttributes {
             activity_id: "a1".into(),
@@ -7067,6 +7081,7 @@ mod tests {
             events: Some(DataBlob::new(EncodingType::ThriftRW, vec![0x59])),
         });
         round_trip(&MaintainCorruptWorkflowRequest {
+            skip_errors: false,
             domain: "payments".into(),
             execution: Some(WorkflowExecution::new("wf", "run")),
         });
