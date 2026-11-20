@@ -333,6 +333,10 @@ pub async fn run(bin_name: &'static str) -> anyhow::Result<()> {
     })
     .await?;
 
+    if let Some(store) = env.isolation_group_store.as_ref() {
+        store.start_polling();
+    }
+
     let history_client = RegistryHistoryClient::new();
     let replication = Arc::new(ReplicationFactoryImpl::new(history_client.clone()));
     let queue_provider = HistoryQueueExecProvider::new(history_client.clone());

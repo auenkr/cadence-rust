@@ -12,6 +12,7 @@ use crate::config_store::{
     decode_snapshot, encode_snapshot, ClientConfig, ConfigRowFetcher, ConfigRowWriter,
     ConfigStoreRow, ConfigWriteError, Snapshot, MIN_POLL_INTERVAL,
 };
+use crate::matching_task_store::MatchingTaskStore;
 use cadence_api::admin::{DynamicConfigEntry, DynamicConfigValue};
 use cadence_api::enums::{EncodingType, IsolationGroupState};
 use cadence_api::types::{DataBlob, IsolationGroupConfiguration, IsolationGroupPartition};
@@ -34,6 +35,32 @@ pub fn go_isolation_client_config() -> ClientConfig {
         update_retry_attempts: 2,
         fetch_timeout: Duration::from_secs(30),
         update_timeout: Duration::from_secs(30),
+    }
+}
+
+/// Read the Go resource settings through the service's dynamic config client.
+pub fn isolation_client_config(
+    duration: impl Fn(&str, Duration) -> Duration,
+    integer: impl Fn(&str, i64) -> i64,
+) -> ClientConfig {
+    let defaults = go_isolation_client_config();
+    ClientConfig {
+        poll_interval: duration(
+            "system.isolationGroupStateRefreshInterval",
+            defaults.poll_interval,
+        ),
+        update_retry_attempts: integer(
+            "system.isolationGroupStateUpdateRetryAttempts",
+            i64::from(defaults.update_retry_attempts),
+        ) as i32,
+        fetch_timeout: duration(
+            "system.IsolationGroupStateFetchTimeout",
+            defaults.fetch_timeout,
+        ),
+        update_timeout: duration(
+            "system.IsolationGroupStateUpdateTimeout",
+            defaults.update_timeout,
+        ),
     }
 }
 
@@ -98,6 +125,18 @@ impl GlobalIsolationGroupStore {
         };
         store.update()?;
         Ok(store)
+    }
+
+    pub fn from_task_store(
+        config: ClientConfig,
+        task_store: Arc<dyn MatchingTaskStore>,
+    ) -> Result<Self, String> {
+        let write_store = task_store.clone();
+        Self::new(
+            config,
+            Arc::new(move |row_type| task_store.fetch_latest_config(row_type)),
+            Arc::new(move |row_type, row| write_store.insert_config(row_type, row)),
+        )
     }
 
     pub fn poll_interval(&self) -> Duration {

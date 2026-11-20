@@ -1751,35 +1751,25 @@ async fn run_with_lifecycle(
             if !embedded_development && (run_matching || run_frontend || run_history) {
                 let client_config = {
                     let o = state.admin.dynamic_config.lock().expect("admin lock");
-                    let nanos = |key: &str, default: i64| {
-                        std::time::Duration::from_nanos(
-                            cadence_persistence::dynamic_config::duration(
+                    cadence_persistence::isolation_group_store::isolation_client_config(
+                        |key, default| {
+                            std::time::Duration::from_nanos(
+                                cadence_persistence::dynamic_config::duration(
+                                    o.property_values(key),
+                                    None,
+                                    default.as_nanos() as i64,
+                                )
+                                .max(0) as u64,
+                            )
+                        },
+                        |key, default| {
+                            cadence_persistence::dynamic_config::integer(
                                 o.property_values(key),
                                 None,
                                 default,
                             )
-                            .max(0) as u64,
-                        )
-                    };
-                    cadence_persistence::config_store::ClientConfig {
-                        poll_interval: nanos(
-                            "system.isolationGroupStateRefreshInterval",
-                            30_000_000_000,
-                        ),
-                        update_retry_attempts: cadence_persistence::dynamic_config::integer(
-                            o.property_values("system.isolationGroupStateUpdateRetryAttempts"),
-                            None,
-                            2,
-                        ) as i32,
-                        fetch_timeout: nanos(
-                            "system.IsolationGroupStateFetchTimeout",
-                            30_000_000_000,
-                        ),
-                        update_timeout: nanos(
-                            "system.IsolationGroupStateUpdateTimeout",
-                            30_000_000_000,
-                        ),
-                    }
+                        },
+                    )
                 };
                 let persistence = cfg.persistence.clone();
                 let created = tokio::task::spawn_blocking(move || {
@@ -1795,22 +1785,9 @@ async fn run_with_lifecycle(
                         .map_err(|error| error.to_string())?
                         .task_store,
                     };
-                    let write_store = task_store.clone();
-                    cadence_persistence::isolation_group_store::GlobalIsolationGroupStore::new(
+                    cadence_persistence::isolation_group_store::GlobalIsolationGroupStore::from_task_store(
                         client_config,
-                        std::sync::Arc::new(move |row_type| {
-                            cadence_persistence::matching_task_store::MatchingTaskStore::fetch_latest_config(
-                                &*task_store,
-                                row_type,
-                            )
-                        }),
-                        std::sync::Arc::new(move |row_type, row| {
-                            cadence_persistence::matching_task_store::MatchingTaskStore::insert_config(
-                                &*write_store,
-                                row_type,
-                                row,
-                            )
-                        }),
+                        task_store,
                     )
                 })
                 .await
