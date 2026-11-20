@@ -161,6 +161,17 @@ if os.environ.get('ADMIN_PROBE_DB') in ('mysql', 'postgres'):
         after = db_exec(f'SELECT COUNT(*) FROM {table} WHERE tree_id = {tree}')
         results.append({'name': 'maintain-corrupt-inject', 'ok': before != after and int(after) > 0,
                         'detail': f'history_node rows before={before} after={after}'})
+        for label, call in (
+            ('describe', lambda: workflow_stub.DescribeWorkflowExecution(workflow.DescribeWorkflowExecutionRequest(
+                domain=domain, workflow_execution=execution), metadata=md, timeout=30)),
+            ('history', lambda: workflow_stub.GetWorkflowExecutionHistory(workflow.GetWorkflowExecutionHistoryRequest(
+                domain=domain, workflow_execution=execution), metadata=md, timeout=30)),
+        ):
+            try:
+                call(); got = 'OK'
+            except grpc.RpcError as e:
+                got = f'{e.code().name} {e.details()}'
+            results.append({'name': 'maintain-corrupt-observed-' + label, 'ok': True, 'detail': got})
         maintained = stub.MaintainCorruptWorkflow(
             maintain_req(domain=domain, workflow_execution=execution), metadata=md, timeout=60)
         results.append({'name': 'maintain-corrupt-deletes-workflow',
