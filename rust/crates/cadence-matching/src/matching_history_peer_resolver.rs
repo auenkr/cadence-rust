@@ -64,6 +64,7 @@ pub struct MatchingHistoryPeerResolver {
     shard_count: u32,
     named_port: NamedPort,
     membership: Arc<dyn HistoryMembership>,
+    ring_cache: Arc<std::sync::Mutex<Option<(Vec<Host>, Arc<Ring>)>>>,
 }
 
 impl MatchingHistoryPeerResolver {
@@ -81,6 +82,7 @@ impl MatchingHistoryPeerResolver {
             shard_count,
             named_port,
             membership,
+            ring_cache: Arc::default(),
         })
     }
 
@@ -145,8 +147,24 @@ impl MatchingHistoryPeerResolver {
     fn owner(&self, key: &str) -> Result<String, Status> {
         let hosts = self.membership.resolved_hosts()?;
         let ring_hosts: Vec<_> = hosts.iter().map(|peer| peer.host.clone()).collect();
-        Ring::new(ring_hosts)
-            .lookup(key)
+        // Rebuilding the 100-point-per-host ring on every lookup dominated
+        // this path; reuse it while the membership snapshot is unchanged.
+        // The cache is keyed on the exact host list, so refreshes are visible.
+        let ring = {
+            let mut cached = self
+                .ring_cache
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            match cached.as_ref() {
+                Some((snapshot, ring)) if *snapshot == ring_hosts => ring.clone(),
+                _ => {
+                    let ring = Arc::new(Ring::new(ring_hosts.clone()));
+                    *cached = Some((ring_hosts, ring.clone()));
+                    ring
+                }
+            }
+        };
+        ring.lookup(key)
             .and_then(|host| hosts.iter().find(|peer| peer.host.address == host.address))
             .map(|host| self.endpoint(host))
             .transpose()?
