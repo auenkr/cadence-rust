@@ -537,6 +537,22 @@ mod tests {
     }
 
     #[test]
+    fn finished_execution_releases_history_buffer() {
+        let s = state(false, 0, 3);
+        s.inner.lock().unwrap().hist.push(HistoryEvent::default());
+        s.finish_transaction(0, None);
+        {
+            let mut g = s.inner.lock().unwrap();
+            assert!(g.hist.is_empty());
+            assert!(g.hist.capacity() > 0);
+            g.exec.state = WORKFLOW_STATE_COMPLETED;
+            g.hist.push(HistoryEvent::default());
+        }
+        s.finish_transaction(0, None);
+        assert_eq!(s.inner.lock().unwrap().hist.capacity(), 0);
+    }
+
+    #[test]
     fn events_after_workflow_finish_rejected_only_for_active_completed() {
         let ev = |t| vec![HistoryEvent { event_type: Some(t), ..Default::default() }];
         let done = WORKFLOW_STATE_COMPLETED;
