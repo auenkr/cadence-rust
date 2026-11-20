@@ -474,3 +474,164 @@ mod tests {
         assert!(!l.allow());
     }
 }
+
+// ---- Go ratelimited.NewDomainManager / NewQueueManager / NewVisibilityManager ----
+
+use crate::matching_domain_metadata::{
+    DomainMetadataPersistence, DomainReadError, DomainReplicationDlqMessage,
+    DomainReplicationQueueMessage, MatchingDomainMetadata, MatchingDomainPage,
+};
+use crate::visibility_reader::{ListPage, VisibilityError, VisibilityFilter, VisibilityRow, VisibilityStore};
+use std::collections::HashMap;
+
+/// Domain + domain-replication-queue manager (these String-error APIs carry
+/// Go's ServiceBusy text; the busy message is returned verbatim).
+#[derive(Debug)]
+pub struct RateLimitedDomainMetadata {
+    inner: Arc<dyn DomainMetadataPersistence>,
+    limiter: Arc<PersistenceLimiter>,
+}
+impl RateLimitedDomainMetadata {
+    pub fn wrap(
+        inner: Arc<dyn DomainMetadataPersistence>,
+        limiter: Option<Arc<PersistenceLimiter>>,
+    ) -> Arc<dyn DomainMetadataPersistence> {
+        match limiter {
+            Some(limiter) => Arc::new(Self { inner, limiter }),
+            None => inner,
+        }
+    }
+    fn check(&self) -> Result<(), String> {
+        if self.limiter.allow() {
+            Ok(())
+        } else {
+            Err(PERSISTENCE_LIMIT_EXCEEDED.to_owned())
+        }
+    }
+}
+impl DomainMetadataPersistence for RateLimitedDomainMetadata {
+    fn metadata_version(&self) -> Result<i64, String> {
+        self.check()?;
+        self.inner.metadata_version()
+    }
+    fn get_domain(&self, name: Option<&str>, id: Option<&str>) -> Result<MatchingDomainMetadata, String> {
+        self.check()?;
+        self.inner.get_domain(name, id)
+    }
+    fn get_domain_typed(&self, name: Option<&str>, id: Option<&str>) -> Result<MatchingDomainMetadata, DomainReadError> {
+        self.check().map_err(DomainReadError::Other)?;
+        self.inner.get_domain_typed(name, id)
+    }
+    fn list_domains(&self, page_size: usize, page_token: Option<&[u8]>) -> Result<MatchingDomainPage, String> {
+        self.check()?;
+        self.inner.list_domains(page_size, page_token)
+    }
+    fn create_domain(&self, metadata: &MatchingDomainMetadata, expected_version: i64) -> Result<(), String> {
+        self.check()?;
+        self.inner.create_domain(metadata, expected_version)
+    }
+    fn update_domain(&self, metadata: &MatchingDomainMetadata, expected_version: i64) -> Result<(), String> {
+        self.check()?;
+        self.inner.update_domain(metadata, expected_version)
+    }
+    fn delete_domain(&self, id: &str) -> Result<(), String> {
+        self.check()?;
+        self.inner.delete_domain(id)
+    }
+    fn enqueue_domain_replication_message(&self, payload: Vec<u8>) -> Result<i64, String> {
+        self.check()?;
+        self.inner.enqueue_domain_replication_message(payload)
+    }
+    fn read_domain_replication_messages(&self, last_message_id: i64, max_count: usize) -> Result<Vec<DomainReplicationQueueMessage>, String> {
+        self.check()?;
+        self.inner.read_domain_replication_messages(last_message_id, max_count)
+    }
+    fn get_domain_replication_ack_levels(&self) -> Result<HashMap<String, i64>, String> {
+        self.check()?;
+        self.inner.get_domain_replication_ack_levels()
+    }
+    fn update_domain_replication_ack_level(&self, cluster_name: String, message_id: i64) -> Result<(), String> {
+        self.check()?;
+        self.inner.update_domain_replication_ack_level(cluster_name, message_id)
+    }
+    fn read_domain_replication_dlq(&self, first_message_id: i64, last_message_id: i64, max_count: usize) -> Result<Vec<DomainReplicationDlqMessage>, String> {
+        self.check()?;
+        self.inner.read_domain_replication_dlq(first_message_id, last_message_id, max_count)
+    }
+    fn delete_domain_replication_dlq_range(&self, first_message_id: i64, last_message_id: i64) -> Result<(), String> {
+        self.check()?;
+        self.inner.delete_domain_replication_dlq_range(first_message_id, last_message_id)
+    }
+    fn domain_replication_dlq_size(&self) -> Result<i64, String> {
+        self.check()?;
+        self.inner.domain_replication_dlq_size()
+    }
+    fn get_domain_replication_dlq_ack_levels(&self) -> Result<HashMap<String, i64>, String> {
+        self.check()?;
+        self.inner.get_domain_replication_dlq_ack_levels()
+    }
+    fn update_domain_replication_dlq_ack_level(&self, cluster_name: String, message_id: i64) -> Result<(), String> {
+        self.check()?;
+        self.inner.update_domain_replication_dlq_ack_level(cluster_name, message_id)
+    }
+    fn supports_domain_audit_log(&self) -> bool {
+        self.inner.supports_domain_audit_log()
+    }
+    fn create_domain_audit_log(&self, log: &crate::domain_audit::DomainAuditLog, ttl_seconds: i32) -> Result<(), String> {
+        self.check()?;
+        self.inner.create_domain_audit_log(log, ttl_seconds)
+    }
+    fn get_domain_audit_logs(&self, domain_id: &str, operation_type: i32, page_size: usize, page_token: Option<&[u8]>) -> Result<crate::domain_audit::DomainAuditLogPage, String> {
+        self.check()?;
+        self.inner.get_domain_audit_logs(domain_id, operation_type, page_size, page_token)
+    }
+}
+
+/// Go `ratelimited.NewVisibilityManager` (SQL/Cassandra visibility uses the
+/// datastore limiter).
+#[derive(Debug)]
+pub struct RateLimitedVisibilityStore {
+    inner: Arc<dyn VisibilityStore>,
+    limiter: Arc<PersistenceLimiter>,
+}
+impl RateLimitedVisibilityStore {
+    pub fn wrap(
+        inner: Arc<dyn VisibilityStore>,
+        limiter: Option<Arc<PersistenceLimiter>>,
+    ) -> Arc<dyn VisibilityStore> {
+        match limiter {
+            Some(limiter) => Arc::new(Self { inner, limiter }),
+            None => inner,
+        }
+    }
+    fn check(&self) -> Result<(), VisibilityError> {
+        guard!(self, VisibilityError::ServiceBusy);
+        Ok(())
+    }
+}
+impl VisibilityStore for RateLimitedVisibilityStore {
+    fn admin_delete(&self, domain_id: &str, run_id: &str) -> Result<(), VisibilityError> {
+        self.check()?;
+        self.inner.admin_delete(domain_id, run_id)
+    }
+    fn select(&self, filter: &VisibilityFilter) -> Result<Vec<VisibilityRow>, VisibilityError> {
+        self.check()?;
+        self.inner.select(filter)
+    }
+    fn get_closed(&self, domain_id: &str, run_id: &str) -> Result<Option<VisibilityRow>, VisibilityError> {
+        self.check()?;
+        self.inner.get_closed(domain_id, run_id)
+    }
+    fn get_closed_by_workflow(&self, domain_id: &str, workflow_id: &str, run_id: &str) -> Result<Option<VisibilityRow>, VisibilityError> {
+        self.check()?;
+        self.inner.get_closed_by_workflow(domain_id, workflow_id, run_id)
+    }
+    fn list_native(&self, filter: &VisibilityFilter, page_token: &[u8], earliest_time_us: i64, latest_time_us: i64) -> Option<Result<ListPage, VisibilityError>> {
+        // Charge only when the inner store handles native paging (Go: one call).
+        let result = self.inner.list_native(filter, page_token, earliest_time_us, latest_time_us)?;
+        if let Err(error) = self.check() {
+            return Some(Err(error));
+        }
+        Some(result)
+    }
+}

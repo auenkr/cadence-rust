@@ -249,7 +249,9 @@ impl HistoryEnv {
         let shard_rows = cadence_persistence::rate_limited::RateLimitedShardStore::wrap(shard_rows, persistence_limiter.clone());
         let history_nodes = cadence_persistence::rate_limited::RateLimitedNodeStore::wrap(history_nodes, persistence_limiter.clone());
         let executions = cadence_persistence::rate_limited::RateLimitedExecutionStore::wrap(executions, persistence_limiter.clone());
-        let history_v2 = cadence_persistence::rate_limited::RateLimitedHistoryV2Store::wrap(history_v2, persistence_limiter);
+        let history_v2 = cadence_persistence::rate_limited::RateLimitedHistoryV2Store::wrap(history_v2, persistence_limiter.clone());
+        let visibility: Arc<dyn crate::wiring::persistence::visibility::VisibilityWriter> =
+            crate::wiring::persistence::visibility::RateLimitedVisibilityWriter::wrap(visibility, persistence_limiter.clone());
         let persistence = HistoryPersistence {
             shard_store: Arc::new(SqlShardStore::new(shard_rows.clone())),
             shard_persistence: Arc::new(SqlShardPersistence::new(shard_rows.clone())),
@@ -271,6 +273,7 @@ impl HistoryEnv {
             .domain_metadata_persistence
             .clone()
             .ok_or_else(|| anyhow::anyhow!("configured default store has no domain metadata persistence"))?;
+        let domain_persistence = cadence_persistence::rate_limited::RateLimitedDomainMetadata::wrap(domain_persistence, persistence_limiter);
         let metrics_registry = MetricsRegistry::new();
         // Go archiver container `MetricsClient`: the cloud archivers report into this registry.
         let archiver_provider = Arc::new(

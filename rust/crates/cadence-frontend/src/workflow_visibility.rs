@@ -21,6 +21,9 @@ fn map_error(error: VisibilityError) -> CadenceError {
         }
         VisibilityError::BadRequest(m) => bad_request(m),
         VisibilityError::Internal(m) => internal(m),
+        VisibilityError::ServiceBusy(m) => {
+            CadenceError::ServiceBusy(cadence_api::errors::ServiceBusyError::new(m))
+        }
     }
 }
 
