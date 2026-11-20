@@ -428,6 +428,19 @@ mod tests {
     }
 
     #[test]
+    fn page_token_matches_go_sql_cursor() {
+        let token = include_bytes!("../tests/fixtures/go-domain-audit-token.gob");
+        let nanos = 1_700_000_000_123_456_789;
+        let event_id = "018bcfe5-687b-7000-8000-000000000000";
+        assert_eq!(decode_page_token(token).unwrap(), (nanos, event_id.into()));
+        assert_eq!(encode_page_token(nanos, event_id), token.as_slice());
+
+        for length in 0..token.len() {
+            assert!(decode_page_token(&token[..length]).is_err());
+        }
+    }
+
+    #[test]
     fn page_token_round_trips_and_rejects_garbage() {
         let token = encode_page_token(1_700_000_000_123_456_789, "0190-abc");
         assert_eq!(

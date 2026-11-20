@@ -1,4 +1,4 @@
-//! Read-only port of Go's Cassandra visibility store
+//! Port of Go's Cassandra visibility store
 //! (`common/persistence/nosql/nosql_visibility_store.go` and
 //! `nosqlplugin/cassandra/visibility{,_cql}.go`): `open_executions`,
 //! `closed_executions` and `closed_executions_v2` in the visibility keyspace.
@@ -260,6 +260,34 @@ impl CassandraVisibilityStore {
 }
 
 impl VisibilityStore for CassandraVisibilityStore {
+    fn admin_delete(&self, domain_id: &str, run_id: &str) -> Result<(), VisibilityError> {
+        let domain = Self::domain(domain_id)?;
+        let run = uuid::Uuid::parse_str(run_id).map_err(internal)?;
+        let session = self.driver.session();
+        let mut select = Statement::new(
+            "SELECT start_time FROM open_executions WHERE domain_id = ? AND domain_partition = ? AND run_id = ? ALLOW FILTERING",
+        );
+        select.set_consistency(self.driver.default_consistency());
+        let result = self
+            .driver
+            .run(session.query_unpaged(select, (domain, DOMAIN_PARTITION, run)))
+            .map_err(internal)?
+            .into_rows_result()
+            .map_err(internal)?;
+        let Some(row) = result.rows::<(CqlTimestamp,)>().map_err(internal)?.next() else {
+            return Ok(());
+        };
+        let (start_time,) = row.map_err(internal)?;
+        let mut delete = Statement::new(
+            "DELETE FROM open_executions WHERE domain_id = ? AND domain_partition = ? AND start_time = ? AND run_id = ?",
+        );
+        delete.set_consistency(Consistency::All);
+        self.driver
+            .run(session.query_unpaged(delete, (domain, DOMAIN_PARTITION, start_time, run)))
+            .map_err(internal)?;
+        Ok(())
+    }
+
     fn select(&self, _filter: &VisibilityFilter) -> Result<Vec<VisibilityRow>, VisibilityError> {
         Err(VisibilityError::Internal(
             "Cassandra visibility uses native paging".into(),

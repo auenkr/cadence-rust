@@ -1357,6 +1357,16 @@ impl crate::history_reader::HistoryNodeStore for PostgresTaskStore {
 }
 
 impl crate::visibility_reader::VisibilityStore for PostgresTaskStore {
+    fn admin_delete(
+        &self,
+        domain_id: &str,
+        run_id: &str,
+    ) -> Result<(), crate::visibility_reader::VisibilityError> {
+        crate::history_sql_backend::SqlBackend::postgres(self)
+            .delete_visibility(domain_id, run_id)
+            .map_err(|error| crate::visibility_reader::VisibilityError::Internal(error.to_string()))
+    }
+
     fn select(
         &self,
         filter: &crate::visibility_reader::VisibilityFilter,

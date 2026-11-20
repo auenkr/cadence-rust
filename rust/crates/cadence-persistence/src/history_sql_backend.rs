@@ -298,6 +298,15 @@ impl SqlTx for $ty {
 postgres_sql_tx!(postgres::Transaction<'_>);
 postgres_sql_tx!(postgres::Client);
 impl SqlBackend {
+    pub fn delete_visibility(&self, domain_id: &str, run_id: &str) -> Result<(), PersistenceError> {
+        let sql = match self.dialect() {
+            Dialect::MySql => "DELETE FROM executions_visibility WHERE domain_id=? AND run_id=?",
+            Dialect::Postgres => "DELETE FROM executions_visibility WHERE domain_id=$1 AND run_id=$2",
+        };
+        let params = vec![Value::Text(domain_id.into()), Value::Text(run_id.into())];
+        self.autocommit(|tx| tx.execute(sql, &params)).map(|_| ())
+    }
+
     pub fn mysql(store: &MySqlTaskStore) -> Self {
         Self(Backend::MySql(store.history_pool()))
     }

@@ -830,16 +830,6 @@ impl a::admin_api_server::AdminApi for Admin {
                     run_id: e.run_id,
                 }),
         };
-        if input.domain.is_empty() {
-            return Err(Status::invalid_argument("Domain is not set."));
-        }
-        if input
-            .execution
-            .as_ref()
-            .is_none_or(|e| e.workflow_id.is_empty())
-        {
-            return Err(Status::invalid_argument("Execution is missing"));
-        }
         let v: cadence_api::admin::MaintainCorruptWorkflowResponse = self
             .call("/api/v1/admin/workflows/maintain-corrupt", &input)
             .await?;

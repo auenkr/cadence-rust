@@ -1033,33 +1033,6 @@ async fn handle_merge_dlq_messages(state: &AppState, body: &Struct) -> HandlerRe
     Ok(wrap_success(&response))
 }
 
-fn handle_delete_workflow(state: &AppState, body: &Struct) -> HandlerResult {
-    let req: cadence_api::admin::DeleteWorkflowRequest =
-        decode_args(body).map_err(AppError::bad_request)?;
-    let execution = req.workflow_execution.unwrap_or_default();
-    if execution.workflow_id.is_empty() {
-        return Err(AppError::bad_request(
-            "Execution is not set on request.".to_string(),
-        ));
-    }
-    let executions = require_domain_thrift(state, &req.domain)?;
-    match executions.delete_run(&req.domain, &execution) {
-        Ok((history_deleted, executions_deleted, visibility_deleted)) => {
-            Ok(wrap_success(&cadence_api::admin::DeleteWorkflowResponse {
-                history_deleted,
-                executions_deleted,
-                visibility_deleted,
-            }))
-        }
-        Err(cadence_persistence::WorkflowMutationError::NotFound(error)) => {
-            Err(AppError::entity_not_exists(error.message))
-        }
-        Err(cadence_persistence::WorkflowMutationError::AlreadyCompleted(error)) => {
-            Err(AppError::workflow_already_completed(error.message))
-        }
-    }
-}
-
 fn handle_refresh_workflow_tasks(state: &AppState, body: &Struct) -> HandlerResult {
     let req: cadence_api::admin::RefreshWorkflowTasksRequest =
         decode_args(body).map_err(AppError::bad_request)?;
@@ -2963,7 +2936,16 @@ pub async fn dispatch_with_transport(
             .await
         }
         "GetWorkflowExecutionRawHistoryV2" => handle_raw_history_v2(state, body),
-        "DeleteWorkflow" => handle_delete_workflow(state, body),
+        "DeleteWorkflow" => {
+            bridge_value::<_, cadence_api::admin::DeleteWorkflowResponse, _, _>(
+                method,
+                body,
+                |req: cadence_api::admin::DeleteWorkflowRequest| {
+                    crate::admin::delete_workflow(State(shared()), Json(req))
+                },
+            )
+            .await
+        }
         "RefreshWorkflowTasks" => handle_refresh_workflow_tasks(state, body),
         "GetDynamicConfig" => handle_get_dynamic_config(state, body, false),
         "UpdateDynamicConfig" => handle_update_dynamic_config(state, body, false),
