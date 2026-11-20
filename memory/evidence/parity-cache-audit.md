@@ -74,3 +74,13 @@ Branch `parity-cache-audit`, based on `6759d7bfe6ac935411effc9379c993a836e78a1a`
 ## Validation
 
 Persistence Clippy and tests passed in the formatting preparation run. The separate fmt check failed on the original input, and the runner-generated patch was applied to the touched files in `21c88617a`. [Preparation run](https://github.com/auenkr/cadence-rust/actions/runs/44741349495)
+
+The initial fresh workspace CI and mixed SQL gates passed on `21c88617a101846d3a18760775512996298b6fc0`. The Cassandra run used `824f73fd285054971996d01b5bf1079bb64230cf`, with the same Rust tree. These results precede the RegisterDomain and admin raw-history fixes.
+
+| Lane | Run | Conclusion | Rust binary SHA256 |
+| --- | --- | --- | --- |
+| Fresh workspace Clippy and tests | [44742761530](https://github.com/auenkr/cadence-rust/actions/runs/44742761530) | Success | — |
+| Frontend MySQL | [44742761186](https://github.com/auenkr/cadence-rust/actions/runs/44742761186) | `GATE SUMMARY failed: []` (310 steps) | `c4bcee2771a97d90d7ffa1a67c369362010793efeb509fdaf55cf36aa6bc2c56` |
+| Frontend PostgreSQL | [44742761542](https://github.com/auenkr/cadence-rust/actions/runs/44742761542) | `GATE SUMMARY failed: []` (310 steps) | `01e6fb6cbfbcf31247db9c4e1fee59d3e21cee01c8f18db3947d177b32d8f4be` |
+| History MySQL | [44742761642](https://github.com/auenkr/cadence-rust/actions/runs/44742761642) | `GATE SUMMARY failed: []` (413 steps) | Server `2efc2c26b906a40b17388b0ab9e64b5ce131793c0a1593d4a09dedf13fb5f0b7`, History `310fd50b431b038eb67bc8df3c2c1f48e5ff4fc795fca9070c352d9d69107d94` |
+| Frontend Cassandra | [44743312534](https://github.com/auenkr/cadence-rust/actions/runs/44743312534) | `GATE SUMMARY failed: []` (307 steps) | `618a4f6890ae0c2c243d3b5b2d5e56d43adaab3414d6aba76d26c3e97110b292` |
