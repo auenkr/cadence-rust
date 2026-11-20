@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 
 /// Go `persistence.DynamicConfig` config type.
 pub const CONFIG_TYPE_DYNAMIC_CONFIG: i32 = 0;
+pub const CONFIG_TYPE_OPERATIONAL_DYNAMIC_CONFIG: i32 = 2;
 /// Go `configStoreMinPollInterval`.
 pub const MIN_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
@@ -65,6 +66,7 @@ pub struct Snapshot {
 
 pub struct ConfigStoreClient {
     fetch: ConfigRowFetcher,
+    row_type: i32,
     fetch_timeout: Duration,
     poll_interval: Duration,
     values: Mutex<Option<Snapshot>>,
@@ -74,8 +76,17 @@ impl ConfigStoreClient {
     /// Go `NewConfigStoreClient` after the datastore was opened: runs the
     /// first `update` and fails when it fails.
     pub fn new(config: &ClientConfig, fetch: ConfigRowFetcher) -> Result<Self, String> {
+        Self::for_row_type(config, fetch, CONFIG_TYPE_DYNAMIC_CONFIG)
+    }
+
+    pub fn for_row_type(
+        config: &ClientConfig,
+        fetch: ConfigRowFetcher,
+        row_type: i32,
+    ) -> Result<Self, String> {
         let client = Self {
             fetch,
+            row_type,
             fetch_timeout: config.fetch_timeout,
             poll_interval: config.poll_interval,
             values: Mutex::new(None),
@@ -91,7 +102,7 @@ impl ConfigStoreClient {
     /// Go `update`: fetch, and replace the cache when a snapshot exists.
     pub fn update(&self) -> Result<(), String> {
         let started = Instant::now();
-        let result = (self.fetch)(CONFIG_TYPE_DYNAMIC_CONFIG);
+        let result = (self.fetch)(self.row_type);
         // Go checks `ctx.Done()` after the call, so a call that outlived
         // FetchTimeout is a timeout even when it returned data.
         if started.elapsed() >= self.fetch_timeout {
