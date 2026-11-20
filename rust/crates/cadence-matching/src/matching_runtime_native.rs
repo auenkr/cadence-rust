@@ -241,9 +241,8 @@ pub fn native_queue_registry(
                         (duration("matching.taskIsolationPollerWindow", 2_000_000_000),
                          duration("matching.taskIsolationDuration", 200_000_000))
                     };
-                    let drained = selector_name.as_deref().ok_or(()).and_then(|name| selector_domains.domain_isolation_groups(name).map_err(|_| ())).map(|domain_config| {
-                        domain_config.into_iter().flat_map(|c| c.isolation_groups).any(|g| g.name.as_bytes() == requested.as_bytes() && g.state == Some(cadence_api::enums::IsolationGroupState::Drained))
-                        || selector_domains.global_isolation_groups().into_iter().flat_map(|c| c.isolation_groups).any(|g| g.name.as_bytes() == requested.as_bytes() && g.state == Some(cadence_api::enums::IsolationGroupState::Drained))
+                    let drained = selector_name.as_deref().ok_or(()).and_then(|name| {
+                        selector_domains.is_isolation_group_drained(name, requested.as_bytes()).map_err(|_| ())
                     });
                     let partition_id = cadence_common::task_list::TaskListNameBytes::parse(selector_task.as_bytes()).map(|n| n.partition() as i32).unwrap_or_default();
                     // Go PartitionReadConfig: no stored config means one default partition with no group restriction.

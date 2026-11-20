@@ -15,13 +15,16 @@ use cadence_matching::matching_task_store::open_configured_default_store;
 use cadence_persistence::history_contract::{GoExecutionStore, GoHistoryV2Store};
 use cadence_persistence::history_reader::HistoryNodeStore;
 use cadence_persistence::history_sql::ShardStore as RowShardStore;
+use cadence_persistence::isolation_group_store::{
+    go_isolation_client_config, isolation_client_config, GlobalIsolationGroupStore,
+};
 use cadence_persistence::sql_history_store::SqlHistoryV2Store;
 use cadence_persistence::sql_workflow_store::SqlWorkflowStore;
 use cadence_persistence::sqlblobs::Encoding;
 use cadence_service_core::config::PersistenceConfig;
 
 use crate::config::Config;
-use crate::config_collection::DynamicClient;
+use crate::config_collection::{Collection, DynamicClient};
 use crate::engine::deps::HistoryTaskCategory;
 use crate::engine::runtime::{
     HistoryEngine, QueueProcessor, ReplicationAckManager, ReplicationDLQHandler,
@@ -94,6 +97,8 @@ pub struct HistoryEnv {
     /// Go matching client `multiLoadBalancer` (partition selection for add-task).
     pub matching_lb: Arc<cadence_common::matching_lb::MatchingLoadBalancer>,
     pub dynamic_client: Option<Arc<dyn DynamicClient>>,
+    /// Go `resource.GetIsolationGroupStore`, shared for the service lifetime.
+    pub isolation_group_store: Option<Arc<GlobalIsolationGroupStore>>,
     pub identity: String,
     /// Go `failover.NewCoordinator` (handler-level; started by the handler).
     pub failover_coordinator: Arc<crate::failover::CoordinatorImpl>,
@@ -124,6 +129,29 @@ impl HistoryEnv {
             )
         })
         .await??;
+
+        let isolation_config = match dynamic_client.as_ref() {
+            Some(client) => {
+                let collection = Collection::new(client.clone());
+                isolation_client_config(
+                    |key, default| collection.prop(key, default)(),
+                    |key, default| collection.prop(key, default)(),
+                )
+            }
+            None => go_isolation_client_config(),
+        };
+        let task_store = stores.task_store.clone();
+        let isolation_group_store = match tokio::task::spawn_blocking(move || {
+            GlobalIsolationGroupStore::from_task_store(isolation_config, task_store)
+        })
+        .await?
+        {
+            Ok(store) => Some(Arc::new(store)),
+            Err(error) => {
+                tracing::warn!(%error, "not instantiating Isolation group config store, this feature will not be enabled");
+                None
+            }
+        };
 
         let shard_rows = stores
             .history_shard_store
@@ -245,6 +273,7 @@ impl HistoryEnv {
             archiver_client,
             dlq_host_limiter,
             semaphore_metadata,
+            isolation_group_store,
             config_adapter,
             config,
             persistence,
