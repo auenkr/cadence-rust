@@ -87,7 +87,8 @@ dropped pending measurement of the buffer release with the original allocator.
 
 | Check | Run |
 |---|---|
-| Fresh benchmark | https://github.com/auenkr/cadence-rust/actions/runs/44712011461 |
+| Fresh benchmark (degraded runner, excluded) | https://github.com/auenkr/cadence-rust/actions/runs/44712011461 |
+| Fresh benchmark rerun | https://github.com/auenkr/cadence-rust/actions/runs/44718002863 |
 | Fresh-target workspace clippy and tests | https://github.com/auenkr/cadence-rust/actions/runs/44712051751 |
 | MySQL mixed gate | https://github.com/auenkr/cadence-rust/actions/runs/44712064908 |
 | MySQL restart gate | https://github.com/auenkr/cadence-rust/actions/runs/44712079519 |
@@ -98,3 +99,14 @@ Workspace CI and the MySQL mixed gate passed on
 `ee1fe3f5ecd4af7fb0e8922344a25cac63a55b83489d43ae8da6ec1c61eebcba` for
 History and `e1f7cef24c0954cc791ad04469769d17158084d27c12975d17331d3bc2dfec4b`
 for cadence-server.
+
+
+The first buffer-only run 44712011461 succeeded on AMD EPYC 7763 with zero
+workflow errors. Its Go arm used 52.85 MySQL CPU seconds and had 1356.67 ms
+p99, so all three pairs were excluded from the qualified comparison and
+rerun with identical settings. Its Rust binary SHA256 was
+`0431ea9bbf7238103d789ee405ae78ebdd19c714ac3617c08f10630e2165e5cf`.
+As a diagnostic, comparing the two excluded EPYC runs gives Rust peak RSS
+156.83 to 140.65 MiB, steady RSS 143.03 to 129.54 MiB, History CPU 17.76 to
+16.40 s, and p99 113.08 to 107.92 ms. Go p99 differs by more than 2x across
+these runners, limiting the comparison.
