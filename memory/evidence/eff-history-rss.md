@@ -91,3 +91,10 @@ dropped pending measurement of the buffer release with the original allocator.
 | Fresh-target workspace clippy and tests | https://github.com/auenkr/cadence-rust/actions/runs/44712051751 |
 | MySQL mixed gate | https://github.com/auenkr/cadence-rust/actions/runs/44712064908 |
 | MySQL restart gate | https://github.com/auenkr/cadence-rust/actions/runs/44712079519 |
+
+Workspace CI and the MySQL mixed gate passed on
+`1354dc608f73459f02483962558f9e7e4b3ecdac`. The mixed gate reported
+`GATE SUMMARY failed: []` across 413 steps. Its SHA256 was
+`ee1fe3f5ecd4af7fb0e8922344a25cac63a55b83489d43ae8da6ec1c61eebcba` for
+History and `e1f7cef24c0954cc791ad04469769d17158084d27c12975d17331d3bc2dfec4b`
+for cadence-server.
