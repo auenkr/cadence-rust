@@ -2452,9 +2452,23 @@ pub async fn maintain_corrupt_workflow(
 
 /// Read the cluster-global isolation groups.
 pub async fn get_global_isolation_groups(State(state): State<StdArc<AppState>>) -> Response {
-    ok_json(cadence_api::admin::GetGlobalIsolationGroupsResponse {
-        isolation_groups: state.domains.global_isolation_groups(),
-    })
+    match state.domains.get_global_isolation_groups() {
+        Ok(isolation_groups) => {
+            ok_json(cadence_api::admin::GetGlobalIsolationGroupsResponse { isolation_groups })
+        }
+        Err(e) => isolation_store_error(e),
+    }
+}
+
+/// Go returns `BadRequestError` when no store exists, any other error as is.
+fn isolation_store_error(e: cadence_persistence::isolation_group_store::IsolationStoreError) -> Response {
+    use cadence_persistence::isolation_group_store::IsolationStoreError as E;
+    match e {
+        E::BadRequest(message) => bad_request(BadRequestError::new(message)),
+        E::Internal(message) => {
+            error_response("InternalServiceError", StatusCode::INTERNAL_SERVER_ERROR, message)
+        }
+    }
 }
 
 /// Replace the cluster-global isolation groups.
@@ -2462,10 +2476,21 @@ pub async fn update_global_isolation_groups(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::UpdateGlobalIsolationGroupsRequest>,
 ) -> Response {
-    state
-        .domains
-        .update_global_isolation_groups(req.isolation_groups);
-    ok_json(cadence_api::admin::UpdateGlobalIsolationGroupsResponse {})
+    let domains = state.domains.clone();
+    // The config store write is a blocking SQL call.
+    let result = tokio::task::spawn_blocking(move || {
+        domains.set_global_isolation_groups(req.isolation_groups)
+    })
+    .await
+    .unwrap_or_else(|e| {
+        Err(cadence_persistence::isolation_group_store::IsolationStoreError::Internal(
+            e.to_string(),
+        ))
+    });
+    match result {
+        Ok(()) => ok_json(cadence_api::admin::UpdateGlobalIsolationGroupsResponse {}),
+        Err(e) => isolation_store_error(e),
+    }
 }
 
 /// Read a domain's isolation-group overrides.
