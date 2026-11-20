@@ -34,9 +34,10 @@ Candidate pair 01's Start RPC p99 was 337.7 ms versus 16.6 ms. Its other pairs w
 
 Use `frontend-soak.yml` at rate 10/s for 70 minutes, with `lanes=["go-baseline","rust-fe"]` and the scheduled midpoint Frontend restart. These lanes isolate Frontend with Go Matching, History, and Worker on both sides. Save `summary.json`, `runner-cpu.txt`, and `rust-binary.sha256` from the lane artifacts and check the `soak-verdict` artifact independently of the workflow conclusion.
 
-- Baseline repeat 1. https://github.com/auenkr/cadence-rust/actions/runs/44681376673
-- Baseline repeat 2. https://github.com/auenkr/cadence-rust/actions/runs/44681388177
+- Baseline repeat 1, head `e8952d5e5d9484c0466a2cfa1001bcba95fe5da8`, workflow **success**, Rust binary SHA256 `951e7accc38dd62051fb3c214f7c10e6a448605ef8225b07aff94c43ce3d1181`. Both lanes used EPYC 7763, so their Go/Rust Start p99 of 20/15 ms is excluded from the clean-run comparison. Both completed 42,000/42,000. Overall soak verdict failed on Frontend RSS growth (5.72/10.95 MB/h). https://github.com/auenkr/cadence-rust/actions/runs/44681376673
+- Baseline repeat 2, same head and binary, workflow **success**, soak verdict **pass**. The Go lane ran on EPYC 7763 and Rust on Xeon Platinum 8573C, so their Start p99 of 19/10 ms is excluded. Rust completed 42,000/42,000. Go completed 41,999/42,000 with one query returning state `init` near the restart. https://github.com/auenkr/cadence-rust/actions/runs/44681388177
 - Candidate repeat, head `7a871a4cc089f20cca0fa54445ff45d5be02d58c`. https://github.com/auenkr/cadence-rust/actions/runs/44682455258
+- Replacements for the two 7763 comparisons, head `fa257f927c1964212e336ba19e028b680ef7487c` (same source as the candidate). https://github.com/auenkr/cadence-rust/actions/runs/44690902433 and https://github.com/auenkr/cadence-rust/actions/runs/44690920852
 - Superseded during build to capture runner CPU. https://github.com/auenkr/cadence-rust/actions/runs/44681304320 and https://github.com/auenkr/cadence-rust/actions/runs/44681317804
 
 ## Candidate validation
