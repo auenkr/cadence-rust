@@ -110,3 +110,10 @@ As a diagnostic, comparing the two excluded EPYC runs gives Rust peak RSS
 156.83 to 140.65 MiB, steady RSS 143.03 to 129.54 MiB, History CPU 17.76 to
 16.40 s, and p99 113.08 to 107.92 ms. Go p99 differs by more than 2x across
 these runners, limiting the comparison.
+
+The buffer-only restart gate passed at `1354dc608f73459f02483962558f9e7e4b3ecdac`
+with `GATE SUMMARY failed: []` (52 steps). All 4,500 workflows completed in
+the 1,500-second workload. The SHA256 was
+`dfe26c7de4b50c594f1dd08d0c599df248aaade16dc965af307dfeb7f8cd54d2` for
+History and `d7a110df37688b70a26c24bb6827d2dc3492b6781b8fb2a5aca560df3be4a1db`
+for cadence-server.
