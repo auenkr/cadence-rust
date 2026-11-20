@@ -1805,7 +1805,8 @@ async fn run_with_lifecycle(
                         cadence_persistence::isolation_group_store::isolation_client_config(
                             duration, integer,
                         ),
-                        (run_frontend || run_matching).then(|| operational_config_settings(duration, integer)),
+                        (run_frontend || run_matching)
+                            .then(|| operational_config_settings(duration, integer)),
                     )
                 };
                 let persistence = cfg.persistence.clone();
