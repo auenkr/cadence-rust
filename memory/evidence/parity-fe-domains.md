@@ -19,4 +19,25 @@ python3 Benchmark/agg.py <root>
 jq '.mysql_general_log | {domain_select_shapes, domains: .select_by_table["Execute domains"]}' <resources.json>
 ```
 
-The diagnostic benchmark is running at source and workflow head `1c2b9836483cde51f203dc6771fe6fb3a23a4551`. [Diagnostic benchmark](https://github.com/auenkr/cadence-rust/actions/runs/44723509027)
+## Baseline query shapes
+
+The diagnostic run succeeded on AMD EPYC 9V45 at source and workflow head `1c2b9836483cde51f203dc6771fe6fb3a23a4551`. All six arms completed 1,500 SDK workflows without errors. Rust binary SHA256 `31fd89bf963887b3c9c690bbc6e8b06e4ffe0b97df156f46b4a03c8699b21e51`. [Three-pair diagnostic benchmark](https://github.com/auenkr/cadence-rust/actions/runs/44723509027)
+
+| MySQL Execute shape after `FROM domains` | Go, pairs 00/01/02 | Rust Frontend arm, pairs 00/01/02 |
+|---|---:|---:|
+| `WHERE shard_id=? ORDER BY id LIMIT 200` (Go) | 24/24/25 | 18/18/18 |
+| `WHERE shard_id = ? ORDER BY id LIMIT 200` (Rust, with timeout hint) | 0/0/0 | 6/6/6 |
+| `WHERE shard_id=? AND name = ?` (Go) | 6/6/6 | 0/0/0 |
+| Total | 30/30/31 | 24/24/24 |
+
+The lone additional Go scan in pair 02 coincided with one additional `domain_metadata` read. Each mixed arm scanned 24 times across the four services. All recorded scans used page size 200 and the first-page predicate.
+
+A one-pair attribution run succeeded on Intel Xeon 6975P-C at source and workflow head `98443137514af84f8e6dcfd967c3e41420876fa8` using the same Rust binary. In `00-go-resources.json`, `mysql_general_log.domain_name_lookups` grouped the six reads under `172.18.0.4`, the Frontend container IP in `00-go-identities.json`. The two keys were `cadence-system` and `cadence-batcher`, with three reads apiece. The Rust arm's lookup map was empty. [Client attribution benchmark](https://github.com/auenkr/cadence-rust/actions/runs/44727856976)
+
+## Source path and fix
+
+The Go system Worker starts a scheduler SDK worker per eligible domain. At its first 1-minute refresh, it starts the workers for the newly registered system domains. In the attribution pair the Go arm measured 11:31:58–11:32:58 UTC and started the two scheduler workers at 11:32:44, within the window. The mixed arm did the same at 11:34:32 within its 11:33:45–11:34:46 window. See the paired `*-services.log`, `*.start`, and `*.end` files.
+
+- `go/service/worker/scheduler/client_worker.go` calls SDK `worker.Start` from `defaultCreateWorker`. In Go SDK v1.4.0-rc.3, `internal/internal_worker.go`, the workflow, activity, and locally dispatched activity workers each call `verifyDomainExist`, which issues `DescribeDomain` by name.
+- Go Frontend's `api/domain_handlers.go` delegates `DescribeDomain` to `go/common/domain/handler.go`, which calls persistence `GetDomain` directly. The MySQL `getDomainByNameQuery` gives the observed predicate. Go Worker startup's direct `ensureDomainExists` queries come from the Worker IP and precede measurement.
+- Rust used the cached `describe` for the public RPC. A warm cache skipped all six persistence reads and could return a stale description following an external update. Public `DescribeDomain` now uses the configured persistent domain manager for gRPC, Thrift, and HTTP. Internal workflow routing keeps the existing cache-backed lookup. The regression test externally updates a domain with a warm Rust cache and verifies public reads by name and ID see the persisted version.

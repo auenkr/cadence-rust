@@ -1006,8 +1006,16 @@ impl p::domain_api_server::DomainApi for Frontend {
         let result = self
             .state
             .domain_manager
-            .describe(&input)
-            .map_err(|e| Status::not_found(e.message));
+            .describe_domain(&input)
+            .map_err(|error| match error {
+                cadence_persistence::FrontendDomainError::NotFound(error) => {
+                    domain_not_found(error.message)
+                }
+                cadence_persistence::FrontendDomainError::Invalid(message) => {
+                    Status::invalid_argument(message)
+                }
+                error => Status::internal(error.to_string()),
+            });
         if let (Some(api), request, start) = observed {
             let code = result.as_ref().err().map(|s| s.code() as i32);
             api.observe_local("DescribeDomain", &request, start.elapsed(), code);

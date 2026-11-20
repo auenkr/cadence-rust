@@ -149,8 +149,8 @@ impl Handler {
         }
         state
             .domain_manager
-            .describe(request)
-            .map_err(DomainHandlerError::NotFound)
+            .describe_domain(request)
+            .map_err(DomainHandlerError::from)
     }
 
     pub fn list_domains(

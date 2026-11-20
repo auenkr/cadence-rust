@@ -765,12 +765,20 @@ async fn describe_domain(
     if q.name.is_none() && q.uuid.is_none() {
         return bad_request(validation::err_domain_not_set());
     }
-    match state.domain_manager.describe(&DescribeDomainRequest {
+    match state.domain_manager.describe_domain(&DescribeDomainRequest {
         name: q.name,
         uuid: q.uuid,
     }) {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
-        Err(e) => entity_not_exists(e),
+        Err(cadence_persistence::FrontendDomainError::NotFound(error)) => entity_not_exists(error),
+        Err(cadence_persistence::FrontendDomainError::Invalid(message)) => {
+            bad_request(BadRequestError::new(message))
+        }
+        Err(error) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            error.to_string(),
+        ),
     }
 }
 
