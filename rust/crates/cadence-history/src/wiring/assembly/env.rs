@@ -141,6 +141,42 @@ impl HistoryEnv {
             None => go_isolation_client_config(),
         };
         let task_store = stores.task_store.clone();
+        // Go creates the operational config store in every service
+        // (dynamicconfigfx) and polls it from both the constructor and
+        // resource.Start; reuse Matching's settings and the shared client.
+        let operational_config = match dynamic_client.as_ref() {
+            Some(client) => {
+                let collection = Collection::new(client.clone());
+                cadence_matching::launcher::operational_config_settings(
+                    |key, default| collection.prop(key, default)(),
+                    |key, default| collection.prop(key, default)(),
+                )
+            }
+            None => cadence_matching::launcher::operational_config_settings(|_, d| d, |_, d| d),
+        };
+        {
+            use cadence_persistence::config_store as store;
+            let fetch_store = task_store.clone();
+            let fetch: store::ConfigRowFetcher = Arc::new(move |row_type| fetch_store.fetch_latest_config(row_type));
+            for _ in 0..2 {
+                let (fetch, config) = (fetch.clone(), operational_config.clone());
+                let client = tokio::task::spawn_blocking(move || {
+                    store::ConfigStoreClient::for_row_type(&config, fetch, store::CONFIG_TYPE_OPERATIONAL_DYNAMIC_CONFIG)
+                })
+                .await?;
+                match client {
+                    Ok(client) => {
+                        let _ = std::thread::Builder::new().name("operational-config-store".into()).spawn(move || loop {
+                            std::thread::sleep(client.poll_interval());
+                            if let Err(e) = client.update() {
+                                eprintln!("Failed to update operational dynamic config: {e}");
+                            }
+                        });
+                    }
+                    Err(error) => tracing::warn!(%error, "creating operational dynamic config store"),
+                }
+            }
+        }
         let isolation_group_store = match tokio::task::spawn_blocking(move || {
             GlobalIsolationGroupStore::from_task_store(isolation_config, task_store)
         })
