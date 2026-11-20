@@ -898,8 +898,9 @@ impl DomainReplicationLookup for Validation {
         Ok(DomainReplication { domain_id: e.info.id.clone(), name: e.info.name.clone(), clusters: e.clusters.clone() })
     }
 
-    fn cross_cluster_operations_enabled(&self, _source_domain_name: &str) -> bool {
-        false
+    fn cross_cluster_operations_enabled(&self, source_domain_name: &str) -> bool {
+        // Go `config.EnableCrossClusterOperationsForDomain(sourceDomainEntry.GetInfo().Name)`.
+        (self.config.enable_cross_cluster_operations_for_domain)(source_domain_name)
     }
 }
 
