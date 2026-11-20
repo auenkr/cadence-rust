@@ -746,7 +746,7 @@ impl MatchingRuntime {
                         match std::fs::metadata(&path).and_then(|metadata| metadata.modified()) {
                             Ok(modified) if modified > last_poll => {
                                 match crate::admin::DynamicConfigOverlay::from_file(&path) {
-                                    Ok(snapshot) => if let Ok(mut current) = overlay.lock() { *current = snapshot; },
+                                    Ok(snapshot) => if let Ok(mut current) = overlay.lock() { current.replace_normal_values(snapshot); },
                                     Err(error) => eprintln!("warning: reloading dynamic config {:?}: {error}", path),
                                 }
                             }
@@ -790,7 +790,7 @@ impl MatchingRuntime {
                         .await;
                         match updated {
                             Ok(Ok(Some(snapshot))) => if let Ok(mut current) = overlay.lock() {
-                                *current = crate::admin::DynamicConfigOverlay::from_config_store(&snapshot);
+                                current.replace_normal_values(crate::admin::DynamicConfigOverlay::from_config_store(&snapshot));
                             },
                             Ok(Ok(None)) => {}
                             Ok(Err(error)) => eprintln!("error: Failed to update dynamic config: {error}"),

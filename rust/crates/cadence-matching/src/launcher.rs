@@ -1748,53 +1748,79 @@ async fn run_with_lifecycle(
             }
             // Go creates this resource even in services that only need to poll it.
             // Reuse the raw default datastore before the Matching wrappers.
-            if !embedded_development && (run_matching || run_frontend || run_history) {
-                let client_config = {
+            let _operational_config_watch = if !embedded_development
+                && (run_matching || run_frontend || run_history)
+            {
+                let (client_config, operational_config) = {
                     let o = state.admin.dynamic_config.lock().expect("admin lock");
-                    cadence_persistence::isolation_group_store::isolation_client_config(
-                        |key, default| {
-                            std::time::Duration::from_nanos(
-                                cadence_persistence::dynamic_config::duration(
-                                    o.property_values(key),
-                                    None,
-                                    default.as_nanos() as i64,
-                                )
-                                .max(0) as u64,
-                            )
-                        },
-                        |key, default| {
-                            cadence_persistence::dynamic_config::integer(
+                    let duration = |key: &str, default: std::time::Duration| {
+                        std::time::Duration::from_nanos(
+                            cadence_persistence::dynamic_config::duration(
                                 o.property_values(key),
                                 None,
-                                default,
+                                default.as_nanos() as i64,
                             )
-                        },
+                            .max(0) as u64,
+                        )
+                    };
+                    let integer = |key: &str, default| {
+                        cadence_persistence::dynamic_config::integer(
+                            o.property_values(key),
+                            None,
+                            default,
+                        )
+                    };
+                    (
+                        cadence_persistence::isolation_group_store::isolation_client_config(
+                            duration, integer,
+                        ),
+                        run_frontend.then(|| operational_config_settings(duration, integer)),
                     )
                 };
                 let persistence = cfg.persistence.clone();
-                let created = tokio::task::spawn_blocking(move || {
-                    let task_store = match isolation_task_store {
-                        Some(store) => store,
-                        None => crate::matching_task_store::open_configured_default_store(
-                            &persistence,
-                            "",
-                            std::sync::Arc::new(|| false),
-                            std::sync::Arc::new(|| "thriftrw".to_string()),
-                            false,
-                        )
-                        .map_err(|error| error.to_string())?
-                        .task_store,
-                    };
-                    cadence_persistence::isolation_group_store::GlobalIsolationGroupStore::from_task_store(
-                        client_config,
-                        task_store,
+                let task_store = tokio::task::spawn_blocking(move || match isolation_task_store {
+                    Some(store) => Ok(store),
+                    None => crate::matching_task_store::open_configured_default_store(
+                        &persistence,
+                        "",
+                        std::sync::Arc::new(|| false),
+                        std::sync::Arc::new(|| "thriftrw".to_string()),
+                        false,
                     )
+                    .map(|stores| stores.task_store)
+                    .map_err(|error| error.to_string()),
+                })
+                .await
+                .map_err(|error| anyhow::anyhow!("joining config store startup: {error}"))?;
+                let operational_watch = if let (Some(config), Ok(task_store)) =
+                    (operational_config, task_store.as_ref())
+                {
+                    let overlay = state.admin.dynamic_config.clone();
+                    Some(start_operational_config_store(overlay, task_store.clone(), config).await?)
+                } else {
+                    None
+                };
+                let created = tokio::task::spawn_blocking(move || {
+                    let store =
+                        cadence_persistence::isolation_group_store::GlobalIsolationGroupStore::from_task_store(
+                            client_config,
+                            task_store?,
+                        )?;
+                    // Go's resource Start performs a second fetch and starts
+                    // a second ticker after the constructor starts the first.
+                    if run_frontend {
+                        store.update()?;
+                    }
+                    Ok::<_, String>(store)
                 })
                 .await
                 .map_err(|error| anyhow::anyhow!("joining isolation group store startup: {error}"))?;
                 match created {
                     Ok(store) => {
                         let store = std::sync::Arc::new(store);
+                        if run_frontend {
+                            store.start_polling();
+                        }
                         store.start_polling();
                         state.domains.attach_global_isolation_store(Some(store));
                     }
@@ -1805,7 +1831,10 @@ async fn run_with_lifecycle(
                         state.domains.attach_global_isolation_store(None);
                     }
                 }
-            }
+                operational_watch
+            } else {
+                None
+            };
             if let Some(persistence) = state.domain_metadata_persistence.clone() {
                 state.domain_manager = std::sync::Arc::new(
                     cadence_persistence::PersistedFrontendDomainManager::new(
@@ -3309,6 +3338,107 @@ mod matching_http_listener_tests {
 static FRONTEND_DOMAIN_CACHE: std::sync::OnceLock<
     std::sync::Arc<crate::matching_domain_cache::MatchingDomainCache>,
 > = std::sync::OnceLock::new();
+
+fn operational_config_settings(
+    duration: impl Fn(&str, std::time::Duration) -> std::time::Duration,
+    integer: impl Fn(&str, i64) -> i64,
+) -> cadence_persistence::config_store::ClientConfig {
+    use std::time::Duration;
+
+    let default = Duration::from_secs(2);
+    cadence_persistence::isolation_group_store::validated(
+        cadence_persistence::config_store::ClientConfig {
+            poll_interval: duration("system.operationalConfigStorePollInterval", default),
+            update_retry_attempts: integer("system.operationalConfigStoreUpdateRetryAttempts", 1)
+                as i32,
+            fetch_timeout: duration("system.operationalConfigStoreFetchTimeout", default),
+            update_timeout: duration("system.operationalConfigStoreUpdateTimeout", default),
+        },
+    )
+}
+
+async fn start_operational_config_store(
+    overlay: std::sync::Arc<std::sync::Mutex<crate::admin::DynamicConfigOverlay>>,
+    task_store: std::sync::Arc<dyn cadence_persistence::matching_task_store::MatchingTaskStore>,
+    config: cadence_persistence::config_store::ClientConfig,
+) -> anyhow::Result<tokio::task::JoinSet<()>> {
+    use cadence_persistence::config_store as store;
+    use std::sync::Arc;
+
+    let fetch: store::ConfigRowFetcher = {
+        let task_store = task_store.clone();
+        Arc::new(move |row_type| task_store.fetch_latest_config(row_type))
+    };
+    let write: store::ConfigRowWriter =
+        Arc::new(move |row_type, row| task_store.insert_config(row_type, row));
+    let mut tasks = tokio::task::JoinSet::new();
+    // Go calls startUpdate from NewConfigStoreClient and again from resource.Start.
+    // Both tickers remain active until resource shutdown.
+    for _ in 0..2 {
+        let client = {
+            let fetch = fetch.clone();
+            let config = config.clone();
+            tokio::task::spawn_blocking(move || {
+                store::ConfigStoreClient::for_row_type(
+                    &config,
+                    fetch,
+                    store::CONFIG_TYPE_OPERATIONAL_DYNAMIC_CONFIG,
+                )
+            })
+            .await?
+            .map_err(|error| {
+                anyhow::anyhow!("creating operational dynamic config store: {error}")
+            })?
+        };
+        let snapshot = client.snapshot().unwrap_or_default();
+        {
+            let mut current = overlay.lock().expect("admin lock");
+            if tasks.is_empty() {
+                current.attach_operational_store(
+                    crate::admin::StoreBinding {
+                        fetch: fetch.clone(),
+                        write: write.clone(),
+                        update_retry_attempts: config.update_retry_attempts,
+                        version: 0,
+                        schema_version: 0,
+                    },
+                    &snapshot,
+                    config.fetch_timeout,
+                    config.update_timeout,
+                );
+            } else {
+                current.refresh_operational_store(&snapshot);
+            }
+        }
+        let client = Arc::new(client);
+        let overlay = overlay.clone();
+        tasks.spawn(async move {
+            let period = client.poll_interval();
+            let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                ticker.tick().await;
+                let client = client.clone();
+                match tokio::task::spawn_blocking(move || {
+                    client.update().map(|()| client.snapshot())
+                })
+                .await
+                {
+                    Ok(Ok(Some(snapshot))) => overlay
+                        .lock()
+                        .expect("admin lock")
+                        .refresh_operational_store(&snapshot),
+                    Ok(Ok(None)) => {}
+                    Ok(Err(error)) => {
+                        eprintln!("Failed to update operational dynamic config: {error}")
+                    }
+                    Err(error) => eprintln!("operational dynamic config update task: {error}"),
+                }
+            }
+        });
+    }
+    Ok(tasks)
+}
 
 /// Go `DefaultDomainCache.Start` + `refreshLoop` for a Frontend-only process:
 /// periodic (10s) metadata-first domain refresh feeding the Frontend store.

@@ -47,6 +47,7 @@ pub struct DynamicConfigOverlay {
     operational: HashMap<String, Vec<DynamicConfigValue>>,
     runtime_provider: Option<Arc<dyn RuntimePropertyProvider>>,
     store: Option<StoreBinding>,
+    operational_store: Option<(StoreBinding, std::time::Duration, std::time::Duration)>,
 }
 
 /// Durable config-store binding (Go `configStoreClient`): fetch/write closures
@@ -380,8 +381,41 @@ impl DynamicConfigOverlay {
         let mut binding = binding;
         binding.version = snapshot.version;
         binding.schema_version = snapshot.schema_version;
-        *self = Self::from_config_store(snapshot);
+        self.normal = Self::from_config_store(snapshot).normal;
         self.store = Some(binding);
+    }
+
+    pub fn attach_operational_store(
+        &mut self,
+        mut binding: StoreBinding,
+        snapshot: &cadence_persistence::config_store::Snapshot,
+        fetch_timeout: std::time::Duration,
+        update_timeout: std::time::Duration,
+    ) {
+        binding.version = snapshot.version;
+        binding.schema_version = snapshot.schema_version;
+        self.operational = Self::from_config_store(snapshot).normal;
+        self.operational_store = Some((binding, fetch_timeout, update_timeout));
+    }
+
+    pub fn refresh_operational_store(
+        &mut self,
+        snapshot: &cadence_persistence::config_store::Snapshot,
+    ) {
+        if let Some((binding, _, _)) = &mut self.operational_store {
+            // Independent polls can finish out of order.
+            if snapshot.version >= binding.version {
+                binding.version = snapshot.version;
+                binding.schema_version = snapshot.schema_version;
+                self.operational = Self::from_config_store(snapshot).normal;
+            }
+        }
+    }
+
+    pub fn replace_normal_values(&mut self, mut snapshot: Self) {
+        snapshot.operational = std::mem::take(&mut self.operational);
+        snapshot.operational_store = self.operational_store.take();
+        *self = snapshot;
     }
 
     /// Go `GetValue`/`GetValueWithFilters` as called by admin `GetDynamicConfig`:
@@ -485,7 +519,27 @@ impl DynamicConfigOverlay {
         name: &str,
         values: Vec<DynamicConfigValue>,
     ) -> Result<(), DynamicConfigError> {
-        let Some(mut binding) = self.store.clone().filter(|_| !operational) else {
+        use cadence_persistence::config_store;
+        let (binding, timeouts, row_type) = if operational {
+            let (binding, timeouts) = self
+                .operational_store
+                .clone()
+                .map_or((None, None), |(binding, fetch, update)| {
+                    (Some(binding), Some((fetch, update)))
+                });
+            (
+                binding,
+                timeouts,
+                config_store::CONFIG_TYPE_OPERATIONAL_DYNAMIC_CONFIG,
+            )
+        } else {
+            (
+                self.store.clone(),
+                None,
+                config_store::CONFIG_TYPE_DYNAMIC_CONFIG,
+            )
+        };
+        let Some(mut binding) = binding else {
             // No durable store (file/nop provider): in-memory only.
             if values.is_empty() {
                 self.map_mut(operational).remove(name);
@@ -496,7 +550,7 @@ impl DynamicConfigOverlay {
         };
         let mut retries = binding.update_retry_attempts;
         loop {
-            let mut next = self.normal.clone();
+            let mut next = self.map(operational).clone();
             if values.is_empty() {
                 next.remove(name);
             } else {
@@ -518,23 +572,35 @@ impl DynamicConfigOverlay {
                 ),
                 encoding: "thriftrw".into(),
             };
-            match (binding.write)(
-                cadence_persistence::config_store::CONFIG_TYPE_DYNAMIC_CONFIG,
-                &row,
-            ) {
+            let started = std::time::Instant::now();
+            let written = (binding.write)(row_type, &row);
+            if timeouts.is_some_and(|(_, update)| started.elapsed() >= update) {
+                return Err(DynamicConfigError::Internal(
+                    "timeout error on update".into(),
+                ));
+            }
+            match written {
                 Ok(()) => {
-                    binding.version = row.version;
-                    self.normal = next;
-                    self.store = Some(binding);
+                    // Go leaves the operational cache at the last fetched
+                    // revision until a poll or a conflict fetch observes the write.
+                    if !operational {
+                        binding.version = row.version;
+                        self.normal = next;
+                        self.store = Some(binding);
+                    }
                     return Ok(());
                 }
                 Err(cadence_persistence::config_store::ConfigWriteError::ConditionFailed(_))
                     if retries > 0 =>
                 {
-                    let fetched = (binding.fetch)(
-                        cadence_persistence::config_store::CONFIG_TYPE_DYNAMIC_CONFIG,
-                    )
-                    .map_err(|e| {
+                    let started = std::time::Instant::now();
+                    let fetched = (binding.fetch)(row_type);
+                    if timeouts.is_some_and(|(fetch, _)| started.elapsed() >= fetch) {
+                        return Err(DynamicConfigError::Internal(
+                            "timeout error on fetch".into(),
+                        ));
+                    }
+                    let fetched = fetched.map_err(|e| {
                         DynamicConfigError::Internal(format!(
                             "failed to fetch dynamic config snapshot {e}"
                         ))
@@ -548,7 +614,11 @@ impl DynamicConfigOverlay {
                             })?;
                         binding.version = snapshot.version;
                         binding.schema_version = snapshot.schema_version;
-                        self.normal = Self::from_config_store(&snapshot).normal;
+                        if operational {
+                            self.refresh_operational_store(&snapshot);
+                        } else {
+                            self.normal = Self::from_config_store(&snapshot).normal;
+                        }
                     }
                     retries -= 1;
                 }
@@ -3265,6 +3335,50 @@ mod dynamic_config_admin_tests {
         let mut o = DynamicConfigOverlay::default();
         o.attach_store(store_with(db, retries), &snapshot);
         o
+    }
+
+    #[test]
+    fn operational_store_uses_its_own_row_type_and_publishes_on_refresh() {
+        use std::time::Duration;
+
+        let db = new_db();
+        let mut overlay = load(&db, 1);
+        overlay
+            .admin_update(false, INT, vec![value("1", &[])])
+            .unwrap();
+        overlay.attach_operational_store(
+            store_with(&db, 1),
+            &cs::Snapshot::default(),
+            Duration::from_secs(2),
+            Duration::from_secs(2),
+        );
+        overlay
+            .admin_update(true, INT, vec![value("2", &[])])
+            .unwrap();
+        assert!(overlay.admin_list(true, "").is_empty());
+        let row = cs::sqlite_fetch_latest(
+            &db.0.lock().unwrap(),
+            cs::CONFIG_TYPE_OPERATIONAL_DYNAMIC_CONFIG,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(row.version, 1);
+        overlay.refresh_operational_store(&cs::decode_snapshot(&row).unwrap());
+        assert_eq!(overlay.admin_get(false, INT, &[]).unwrap().data, b"1");
+        assert_eq!(overlay.admin_get(true, INT, &[]).unwrap().data, b"2");
+        overlay.replace_normal_values(DynamicConfigOverlay::default());
+        overlay.refresh_operational_store(&cs::Snapshot::default());
+        assert_eq!(overlay.admin_get(true, INT, &[]).unwrap().data, b"2");
+        overlay.admin_restore(true, INT, &[]).unwrap();
+        let row = cs::sqlite_fetch_latest(
+            &db.0.lock().unwrap(),
+            cs::CONFIG_TYPE_OPERATIONAL_DYNAMIC_CONFIG,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(row.version, 2);
+        overlay.refresh_operational_store(&cs::decode_snapshot(&row).unwrap());
+        assert!(overlay.admin_list(true, "").is_empty());
     }
 
     #[test]

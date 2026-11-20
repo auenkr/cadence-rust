@@ -113,6 +113,7 @@ jobs:
           echo $? > res/gate.exit
           echo "lane exit $(cat res/gate.exit)"; tail -n 80 res/gate.log | cut -c1-300
           mkdir -p res/up/logs; tail -n 300 res/gate.log > res/up/gate-tail.log
+          LC_ALL=C lscpu | tee res/up/runner-cpu.txt
           python3 tests/gates/soak-analyze.py run --dir res/lane/run --label "${{ matrix.mode }}" \
             --restart-at "$SOAK_RESTART_AT" --out res/analysis || true
           cp res/analysis/* res/up/ 2>/dev/null; cp res/lane/run/{steps.json,soak-driver.log,rust-binary.sha256} res/up/ 2>/dev/null || true
