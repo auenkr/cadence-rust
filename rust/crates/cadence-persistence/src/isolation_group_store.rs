@@ -163,8 +163,8 @@ impl GlobalIsolationGroupStore {
             .entries
             .iter()
             .flatten()
-            .filter(|e| e.name == GLOBAL_MAPPING_KEY)
-            .last()
+            .rev()
+            .find(|e| e.name == GLOBAL_MAPPING_KEY)
         {
             for value in &entry.values {
                 if value.filters.is_empty() {
