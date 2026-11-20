@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.uber.org/cadence"
 	"go.uber.org/cadence/.gen/go/cadence/workflowserviceclient"
 	"go.uber.org/cadence/.gen/go/shared"
 	"go.uber.org/cadence/client"
@@ -25,7 +26,10 @@ import (
 
 func EchoActivity(_ context.Context, in string) (string, error) { return in, nil }
 func EchoWorkflow(ctx workflow.Context, in string) (string, error) {
-	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{ScheduleToStartTimeout: time.Minute, StartToCloseTimeout: time.Minute})
+	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{ScheduleToStartTimeout: time.Minute, StartToCloseTimeout: 10 * time.Second,
+		// A kill -9 of the Frontend can swallow an already-started activity task's delivery (Go behaves the
+		// same); the standard SDK remedy is a short StartToClose plus an activity retry policy.
+		RetryPolicy: &cadence.RetryPolicy{InitialInterval: time.Second, BackoffCoefficient: 1, MaximumAttempts: 5}})
 	var out string
 	err := workflow.ExecuteActivity(ctx, EchoActivity, in).Get(ctx, &out)
 	return out, err
