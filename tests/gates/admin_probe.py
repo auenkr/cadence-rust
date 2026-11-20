@@ -172,15 +172,27 @@ if os.environ.get('ADMIN_PROBE_DB') in ('mysql', 'postgres'):
             except grpc.RpcError as e:
                 got = f'{e.code().name} {e.details()}'
             results.append({'name': 'maintain-corrupt-observed-' + label, 'ok': True, 'detail': got})
+        # Go parity: the admin handler's Frontend client sees the metered wrapper's
+        # "cadence internal error, msg: ..." text (metered.go handleErr), which never equals Go's
+        # exact corruption messages, so Go returns an empty response and keeps the run.
+        results.append({'name': 'maintain-corrupt-history-error-prefixed',
+                        'ok': got.startswith('INTERNAL') and 'cadence internal error, msg: corrupted history event batch, eventID is not continuous' in got,
+                        'detail': got})
         maintained = stub.MaintainCorruptWorkflow(
             maintain_req(domain=domain, workflow_execution=execution), metadata=md, timeout=60)
-        results.append({'name': 'maintain-corrupt-deletes-workflow',
-                        'ok': maintained.history_deleted and maintained.executions_deleted and maintained.visibility_deleted,
+        results.append({'name': 'maintain-corrupt-keeps-workflow-like-go', 'ok': not maintained.ListFields(),
                         'detail': str(maintained)})
-        check('maintain-corrupt-workflow-gone', lambda **k: stub.DescribeWorkflowExecution(
+        left = db_exec(f'SELECT COUNT(*) FROM {table} WHERE tree_id = {tree}')
+        results.append({'name': 'maintain-corrupt-history-rows-kept', 'ok': left == after, 'detail': f'rows left={left}'})
+        # The admin DeleteWorkflow path still removes the corrupted run (history, execution, visibility).
+        deleted = stub.DeleteWorkflow(delete_req(domain=domain, workflow_execution=execution), metadata=md, timeout=60)
+        results.append({'name': 'delete-corrupt-workflow',
+                        'ok': deleted.history_deleted and deleted.executions_deleted and deleted.visibility_deleted,
+                        'detail': str(deleted)})
+        check('delete-corrupt-workflow-gone', lambda **k: stub.DescribeWorkflowExecution(
             svc.DescribeWorkflowExecutionRequest(domain=domain, workflow_execution=execution), **k), 'NOT_FOUND')
         left = db_exec(f'SELECT COUNT(*) FROM {table} WHERE tree_id = {tree}')
-        results.append({'name': 'maintain-corrupt-history-rows-removed', 'ok': left == '0', 'detail': f'rows left={left}'})
+        results.append({'name': 'delete-corrupt-history-rows-removed', 'ok': left == '0', 'detail': f'rows left={left}'})
     except Exception as e:
         results.append({'name': 'maintain-corrupt-deletes-workflow', 'ok': False, 'detail': repr(e)})
 
