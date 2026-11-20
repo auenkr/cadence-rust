@@ -17,3 +17,15 @@ Downloaded the gate and service logs from the failed run at `549606b58bcd2ca512d
 ## Mixed-cluster validation
 
 The Frontend gate probe starts a fresh workflow, checks that MaintainCorruptWorkflow keeps healthy executions, deletes it through the admin gRPC API, and checks that History can no longer load the execution. It also checks the errors for missing execution and unknown domain.
+
+## Final validation on head `2ee7dbda719cf85e03f7e5144b691a4a060d69e3`
+
+Earlier heads failed: compile errors (`admin_delete` result alias, missing `Arc` import, `result_large_err` clippy) were fixed on `b652ea2da`/`da29c3baf`; gates on `da29c3baf` then failed `sdk-api-admin-workflow-fix-corruption-tchannel` because the Go CLI mapper dereferences all three bool fields, which Rust omitted when false (runs 44764743900, 44764757891). Fixed by `2ee7dbda7` (always emit all three flags, as Go's From mapper does).
+
+- rust-ci workspace (clippy + tests): [44766594797](https://github.com/auenkr/cadence-rust/actions/runs/44766594797) success
+- Frontend gate PostgreSQL run 1: [44766613119](https://github.com/auenkr/cadence-rust/actions/runs/44766613119) `GATE SUMMARY failed: []`
+- Frontend gate PostgreSQL run 2: [44766606908](https://github.com/auenkr/cadence-rust/actions/runs/44766606908) `GATE SUMMARY failed: []`
+- Frontend gate MySQL: [44766601305](https://github.com/auenkr/cadence-rust/actions/runs/44766601305) `GATE SUMMARY failed: []`
+- History mixed gate MySQL: [44766621557](https://github.com/auenkr/cadence-rust/actions/runs/44766621557) `GATE SUMMARY failed: []`
+
+The PostgreSQL lost-message failure did not recur in two reruns, consistent with the Go-side timeout finding above.
