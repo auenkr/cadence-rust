@@ -458,7 +458,13 @@ impl EngineMutableState {
         if let Some(id) = last_event_task_id {
             g.pc_exec.last_event_task_id = id;
         }
-        g.hist.clear();
+        if g.exec.state == WORKFLOW_STATE_COMPLETED {
+            // The cache can still serve this execution, but a closed workflow
+            // no longer needs the allocation for its transaction events.
+            g.hist = Vec::new();
+        } else {
+            g.hist.clear();
+        }
         g.transfer_tasks.clear();
         g.timer_tasks.clear();
         g.sync_activity_tasks.clear();
