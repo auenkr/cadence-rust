@@ -1684,6 +1684,40 @@ async fn run_with_lifecycle(
                         crate::matching_persistence::limit_domain_source(source, limiter.clone())
                     });
                 }
+                if run_frontend {
+                    // Go frontend/service.go: the Frontend persistence factory
+                    // limits every manager by frontend.persistenceMaxQPS and
+                    // frontend.persistenceGlobalMaxQPS (per-member averaged).
+                    let overlay = |key: &'static str, default: i64| {
+                        let overlay = state.admin.dynamic_config.clone();
+                        std::sync::Arc::new(move || {
+                            let overlay = overlay.lock().expect("admin lock");
+                            cadence_persistence::dynamic_config::integer(
+                                overlay.property_values(key),
+                                None,
+                                default,
+                            )
+                        }) as std::sync::Arc<dyn Fn() -> i64 + Send + Sync>
+                    };
+                    let slot = state.admin.membership.clone();
+                    let limiter = cadence_persistence::rate_limited::PersistenceLimiter::build(
+                        overlay("frontend.persistenceMaxQPS", 2000),
+                        overlay("frontend.persistenceGlobalMaxQPS", 0),
+                        std::sync::Arc::new(move || {
+                            let membership = slot.get().ok_or(())?;
+                            membership
+                                .members("cadence-frontend")
+                                .map(|members| members.len())
+                                .map_err(|_| ())
+                        }),
+                    );
+                    stores.history_node_store = stores.history_node_store.map(|store| {
+                        cadence_persistence::rate_limited::RateLimitedNodeStore::wrap(
+                            store,
+                            limiter.clone(),
+                        )
+                    });
+                }
                 Some(stores)
             } else {
                 None

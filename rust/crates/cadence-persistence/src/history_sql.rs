@@ -27,6 +27,8 @@ pub enum HistoryPersistenceError {
     AlreadyExists(String),
     InternalDataInconsistency(String),
     Internal(String),
+    /// Go `ratelimited.ErrPersistenceLimitExceeded`.
+    ServiceBusy(String),
 }
 
 impl std::fmt::Display for HistoryPersistenceError {
@@ -39,7 +41,8 @@ impl std::fmt::Display for HistoryPersistenceError {
             | Self::EntityNotExists(message)
             | Self::AlreadyExists(message)
             | Self::InternalDataInconsistency(message)
-            | Self::Internal(message) => f.write_str(message),
+            | Self::Internal(message)
+            | Self::ServiceBusy(message) => f.write_str(message),
         }
     }
 }

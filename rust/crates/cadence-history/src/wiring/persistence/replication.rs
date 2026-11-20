@@ -55,6 +55,7 @@ fn map_read_error(e: HistoryReadError) -> ReplicationError {
         HistoryReadError::EntityNotExists(m) => ReplicationError::EntityNotExists(m),
         HistoryReadError::DataInconsistency(m) => ReplicationError::InternalDataInconsistency(m),
         HistoryReadError::InvalidRequest(m) => ReplicationError::BadRequest(m),
+        HistoryReadError::ServiceBusy(m) => ReplicationError::ServiceBusy(m),
         HistoryReadError::Internal(m) => ReplicationError::Transient(m),
     }
 }
