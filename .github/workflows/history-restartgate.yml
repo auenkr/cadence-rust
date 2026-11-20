@@ -7,6 +7,10 @@ on:
     paths: ['.github/workflows/history-restartgate.yml', 'tests/gates/run-history-restartgate.py']
   workflow_dispatch:
     inputs:
+      history_jemalloc:
+        description: Build standalone History with jemalloc (as in the SDK benchmark)
+        type: boolean
+        default: false
       database:
         description: Persistence lane
         type: choice
@@ -64,9 +68,15 @@ jobs:
           python3 -m py_compile tests/gates/run-history-restartgate.py
           bash -n tests/gates/run-frontend-${{ matrix.database }}-lane.sh
       - name: Build Rust services in fresh target directory
+        env:
+          HISTORY_JEMALLOC: ${{ inputs.history_jemalloc }}
         run: |
           set +e
-          cargo build --release --manifest-path rust/Cargo.toml -p cadence-server -p cadence-history > out/cargo-build.log 2>&1
+          features=()
+          if [[ "$HISTORY_JEMALLOC" == true ]]; then
+            features=(--features cadence-history/jemalloc-default)
+          fi
+          cargo build --release --manifest-path rust/Cargo.toml -p cadence-server -p cadence-history "${features[@]}" > out/cargo-build.log 2>&1
           result=$?
           echo "$result" > out/cargo-build.exit
           tail -40 out/cargo-build.log
