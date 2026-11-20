@@ -2294,10 +2294,13 @@ pub async fn get_workflow_execution_raw_history(
         match RawHistoryToken::from_bytes(&req.next_page_token) {
             Ok(token) => {
                 persistence_token = token.persistence_token.clone().unwrap_or_default();
-                if !configured {
-                    if let Err(error) = raw_history::validate_persistence_token(&persistence_token) {
-                        return bad_request(error);
-                    }
+                let validation = if configured {
+                    Ok(())
+                } else {
+                    raw_history::validate_persistence_token(&persistence_token)
+                };
+                if let Err(error) = validation {
+                    return bad_request(error);
                 }
                 let histories = token.version_histories.clone().unwrap_or_default();
                 continuation = Some(token);
@@ -2387,11 +2390,13 @@ pub async fn get_workflow_execution_raw_history(
             Err(error) => return bad_request(error),
         }
     };
-    ok_json(cadence_api::admin::GetWorkflowExecutionRawHistoryV2Response {
-        next_page_token,
-        history_batches,
-        version_history: Some(target_history),
-    })
+    ok_json(
+        cadence_api::admin::GetWorkflowExecutionRawHistoryV2Response {
+            next_page_token,
+            history_batches,
+            version_history: Some(target_history),
+        },
+    )
 }
 
 fn raw_history_internal(message: String) -> Response {
@@ -2411,7 +2416,10 @@ async fn raw_history_version_histories(
     use cadence_api::types::{VersionHistories, VersionHistory, VersionHistoryItem};
     use cadence_proto::history::history_api_client::HistoryApiClient;
 
-    let domain_id = state.domain_manager.domain_id(domain).map_err(entity_not_exists)?;
+    let domain_id = state
+        .domain_manager
+        .domain_id(domain)
+        .map_err(entity_not_exists)?;
     let channel = history_channel_for(state, shard, None)
         .map_err(raw_history_internal)?
         .ok_or_else(|| raw_history_internal("History client is not configured.".into()))?;
@@ -2433,24 +2441,27 @@ async fn raw_history_version_histories(
             tonic::Code::InvalidArgument => bad_request(BadRequestError::new(status.message())),
             _ => raw_history_internal(status.message().into()),
         })?;
-    Ok(response.into_inner().version_histories.map(|value| VersionHistories {
-        current_version_history_index: value.current_version_history_index,
-        histories: value
-            .histories
-            .into_iter()
-            .map(|history| VersionHistory {
-                branch_token: history.branch_token,
-                items: history
-                    .items
-                    .into_iter()
-                    .map(|item| VersionHistoryItem {
-                        event_id: item.event_id,
-                        version: item.version,
-                    })
-                    .collect(),
-            })
-            .collect(),
-    }))
+    Ok(response
+        .into_inner()
+        .version_histories
+        .map(|value| VersionHistories {
+            current_version_history_index: value.current_version_history_index,
+            histories: value
+                .histories
+                .into_iter()
+                .map(|history| VersionHistory {
+                    branch_token: history.branch_token,
+                    items: history
+                        .items
+                        .into_iter()
+                        .map(|item| VersionHistoryItem {
+                            event_id: item.event_id,
+                            version: item.version,
+                        })
+                        .collect(),
+                })
+                .collect(),
+        }))
 }
 
 /// Admin workflow describe: shard placement plus History's mutable-state
