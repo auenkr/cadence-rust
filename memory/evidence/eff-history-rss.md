@@ -5,6 +5,7 @@ Allocator-only source `657251f6f7f605ada7241e9fc0592261ca7c3398`.
 Combined benchmark source `8de933ffa697de7ce8285f85644e88736d8cfba2`.
 Validation source `379ad324360b62f1a7884b46790663254cb7c9b1` adds the
 capacity regression test to the combined implementation.
+The buffer-release-only candidate restores the baseline allocator configuration.
 
 ## Allocation audit
 
@@ -48,6 +49,8 @@ workflow completion p99. Check runner CPU with `Benchmark/agg.py`.
 
 | Variant | Arm | Peak RSS MiB | Steady RSS MiB | History CPU s | Workflow completion p99 ms |
 |---|---|---:|---:|---:|---:|
+| Baseline rerun | Go | 154.89 | 151.14 | 27.28 | 133.43 |
+| Baseline rerun | Rust | 154.03 | 147.22 | 14.86 | 103.96 |
 | Allocator only | Go | 159.74 | 149.60 | 19.27 | 111.86 |
 | Allocator only | Rust | 151.76 | 140.51 | 10.37 | 100.87 |
 | Combined | Go | 159.78 | 152.56 | 28.53 | 151.60 |
@@ -69,3 +72,22 @@ Initial baseline run 44701337483 succeeded on AMD EPYC 7763, but Go p99 was
 were excluded from the before/after comparison and the baseline was rerun
 with identical settings. The discarded run's Rust binary SHA256 was
 `f5d42a074ec5626806e56f1fcf21360df5792ea55a6b20acf79de4d076cecaab`.
+
+
+The baseline rerun 44706794088 succeeded on Intel Xeon Platinum 8370C, the
+same CPU model as the combined run. It had three pairs and zero workflow
+errors in both arms. Its Rust binary SHA256 was
+`9a1458fb2656f5ce46eee1f6e4d75535e6b970e9d989aeea1959c309987d9f41`.
+The combined variant reduced Rust peak RSS by 15%, but Rust CPU rose from
+14.86 to 16.74 seconds (Rust/Go 0.54 to 0.59), and absolute Rust p99 rose
+from 103.96 to 106.13 ms (Rust/Go 0.78 to 0.70). The allocator tuning was
+dropped pending measurement of the buffer release with the original allocator.
+
+## Buffer-release-only follow-up
+
+| Check | Run |
+|---|---|
+| Fresh benchmark | https://github.com/auenkr/cadence-rust/actions/runs/44712011461 |
+| Fresh-target workspace clippy and tests | https://github.com/auenkr/cadence-rust/actions/runs/44712051751 |
+| MySQL mixed gate | https://github.com/auenkr/cadence-rust/actions/runs/44712064908 |
+| MySQL restart gate | https://github.com/auenkr/cadence-rust/actions/runs/44712079519 |
