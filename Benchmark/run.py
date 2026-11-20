@@ -75,7 +75,14 @@ def main():
     if os.environ.get('DYNAMIC_CONFIG_EXTRA'):
         base=subprocess.check_output(['docker','run','--rm','--entrypoint','cat','cadence-go:ci','/etc/cadence/dynamicconfig/development.yaml'],text=True)
         dyn=OUT/'development.yaml'
-        dyn.write_text(base.rstrip('\n')+'\n'+os.environ['DYNAMIC_CONFIG_EXTRA'].replace('\\n','\n')+'\n')
+        extra=os.environ['DYNAMIC_CONFIG_EXTRA'].replace('\\n','\n')
+        # Extra top-level keys replace the same keys in the base file (YAML duplicate keys are ambiguous).
+        keys={l.split(':',1)[0] for l in extra.splitlines() if l and not l[0].isspace() and not l.startswith('-')}
+        kept,skip=[],False
+        for l in base.splitlines():
+            if l and not l[0].isspace() and not l.startswith('-'):skip=l.split(':',1)[0] in keys
+            if not skip:kept.append(l)
+        dyn.write_text('\n'.join(kept).rstrip('\n')+'\n'+extra+'\n')
         for s in ('frontend','matching','history','worker'):svc[s]['volumes']=[f'{dyn}:/etc/cadence/dynamicconfig/development.yaml:ro']
     override = OUT / 'limits.yml'
     override.write_text(json.dumps({'services':svc},indent=1))
