@@ -83,7 +83,7 @@ pub struct AppState {
     pub scheduler_enabled: bool,
     pub semaphore_enabled: bool,
     pub current_cluster_name: String,
-    pub cluster_metadata: cadence_common::cluster::Metadata,
+    pub cluster_metadata: Arc<cadence_common::cluster::Metadata>,
     /// Outbound History API channel used by Frontend Admin operations. The
     /// configured Go History service remains the source of queue state.
     pub history_admin_channel: Option<tonic::transport::Channel>,
@@ -147,7 +147,7 @@ impl Default for AppState {
             scheduler_enabled: false,
             semaphore_enabled: false,
             current_cluster_name: "cluster0".to_string(),
-            cluster_metadata: cadence_common::cluster::Metadata::default(),
+            cluster_metadata: Arc::new(cadence_common::cluster::Metadata::default()),
             history_admin_channel: None,
             history_admin_tls: None,
             grpc_max_message_size: 4 * 1024 * 1024,

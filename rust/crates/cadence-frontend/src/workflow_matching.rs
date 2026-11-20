@@ -103,7 +103,7 @@ impl HistoryAccess {
                     .await
                     .map_err(|e| internal(format!("history read task failed: {e}")))?
                     .map_err(read_error)?;
-            events.extend(response.events());
+            events.extend(response.batches.into_iter().flatten());
             if events.len() as i64 >= request.page_size || response.next_page_token.is_empty() {
                 return Ok((events, response.next_page_token));
             }

@@ -1068,7 +1068,7 @@ async fn run_with_lifecycle(
             state
                 .current_cluster_name
                 .clone_from(&metadata.current_cluster_name);
-            state.cluster_metadata = metadata.metadata();
+            state.cluster_metadata = std::sync::Arc::new(metadata.metadata());
             let frontend_rpc = cfg.services.get("frontend").map(|s| &s.rpc);
             if let Some(limit) = frontend_rpc
                 .map(|r| r.grpc_max_msg_size)
@@ -1918,7 +1918,7 @@ async fn run_with_lifecycle(
                     let interval_overlay = overlay.clone();
                     cadence_service_core::domain_failover_watcher::spawn(
                         state.domain_manager.clone(),
-                        state.cluster_metadata.clone(),
+                        (*state.cluster_metadata).clone(),
                         matching_metric_sink.clone(),
                         state.history_admin_channel.clone().map(|channel| {
                             let handle = tokio::runtime::Handle::current();
