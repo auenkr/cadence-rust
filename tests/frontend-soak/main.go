@@ -35,7 +35,10 @@ func SoakWorkflow(ctx workflow.Context, in string) (string, error) {
 	if err := workflow.Sleep(ctx, 2*time.Second); err != nil {
 		return "", err
 	}
-	ao := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{ScheduleToStartTimeout: time.Minute, StartToCloseTimeout: time.Minute})
+	ao := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{ScheduleToStartTimeout: time.Minute, StartToCloseTimeout: 10 * time.Second,
+		// An activity in flight while the Frontend is killed can lose its completion; a short
+		// StartToClose plus server-side retry recovers it well inside the driver's 90s query retry.
+		RetryPolicy: &workflow.RetryPolicy{InitialInterval: time.Second, BackoffCoefficient: 2, MaximumInterval: 5 * time.Second, ExpirationInterval: 2 * time.Minute, MaximumAttempts: 5}})
 	var out string
 	if err := workflow.ExecuteActivity(ao, EchoActivity, in).Get(ctx, &out); err != nil {
 		return "", err
