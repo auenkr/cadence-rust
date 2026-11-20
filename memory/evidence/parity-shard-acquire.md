@@ -12,3 +12,11 @@ Gated SHA 731adce535a4b8324d4acc1bddd7b1cd0978e9e1 (code commit; evidence file a
 - rust-ci workspace: https://github.com/auenkr/cadence-rust/actions/runs/44825791232 success
 - history-mixed-gate mysql: https://github.com/auenkr/cadence-rust/actions/runs/44825796291 success, failedSteps []
 - history-restartgate mysql: https://github.com/auenkr/cadence-rust/actions/runs/44825800216 success, failedSteps []
+
+## Startup acquire (Go controller.Start)
+Added an eager, awaited `registry.acquire_shards(&shutting_down)` in `launcher.rs` before the pump is spawned (Go controller.go:172-180 order); it respects the shutdown flag. Head/gated SHA def33ed169e7aff2345c4520ac66ca9200cf88e3.
+- rust-ci cadence-history: success https://github.com/auenkr/cadence-rust/actions/runs/44832329395
+- rust-ci workspace: success https://github.com/auenkr/cadence-rust/actions/runs/44832342538
+- history-mixed-gate MySQL: success, failedSteps [] https://github.com/auenkr/cadence-rust/actions/runs/44832352648
+- history-restartgate MySQL: success, failedSteps [] https://github.com/auenkr/cadence-rust/actions/runs/44832356808
+No reruns or flakes.
