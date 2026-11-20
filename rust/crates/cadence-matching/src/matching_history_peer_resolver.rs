@@ -64,8 +64,10 @@ pub struct MatchingHistoryPeerResolver {
     shard_count: u32,
     named_port: NamedPort,
     membership: Arc<dyn HistoryMembership>,
-    ring_cache: Arc<std::sync::Mutex<Option<(Vec<Host>, Arc<Ring>)>>>,
+    ring_cache: Arc<std::sync::Mutex<RingCache>>,
 }
+
+type RingCache = Option<(Vec<Host>, Arc<Ring>)>;
 
 impl MatchingHistoryPeerResolver {
     pub fn new(
