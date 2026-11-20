@@ -234,6 +234,9 @@ pub trait ShardContext: Send + Sync {
         self.now()
     }
     async fn get_history_tasks(&self, req: GetHistoryTasksRequest) -> Result<GetHistoryTasksResponse, QueueError>;
+    /// Go readers take the shard RLock in `getImmediateTaskMaxReadLevel`, so they wait for an
+    /// in-flight task write (which notifies before `updateMaxReadLevelLocked`) to finish.
+    async fn wait_in_flight_task_writes(&self) {}
 }
 
 /// Go `task.Processor`. TODO(link): replace by task::Processor

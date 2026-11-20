@@ -166,6 +166,9 @@ impl q::ShardContext for RealQueueShardContext {
         }
         q::ShardContext::get_history_tasks(self.tasks.as_ref(), req).await
     }
+    async fn wait_in_flight_task_writes(&self) {
+        drop(self.shard.lock_task_writes().await);
+    }
 }
 
 #[async_trait]

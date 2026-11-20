@@ -363,6 +363,8 @@ impl TransferQueueProcessorBase {
                 Some(q) => (q.id, q.state().read_level(), q.state().max_level(), q.state().domain_filter().clone()),
             };
 
+            // Go getImmediateTaskMaxReadLevel blocks on the shard lock held by an in-flight write.
+            self.base.shard.wait_in_flight_task_writes().await;
             let max_read_level = min_task_key(max_level, (self.base.update_max_read_level)());
 
             if !read_level.less(&max_read_level) {
