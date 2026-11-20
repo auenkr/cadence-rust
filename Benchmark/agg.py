@@ -6,6 +6,8 @@ for path in sorted(glob.glob(sys.argv[1] + '/*/*/report.json')):
     svc = man['service']; rate = man['rate']
     rid = path.split('/')[-3]
     print(f'\n## {svc} rate={rate} run {rid}')
+    cpu = next((l.split(':', 1)[1].strip() for l in man.get('hardware', '').splitlines() if l.startswith('Model name')), '?')
+    print(f'Runner CPU: {cpu}' + (' (WARNING: EPYC 7763 runners have shown ~2x MySQL CPU and Go p99 >1s at 25/s; check MySQL CPU s before comparing p99)' if '7763' in cpu else ''))
     agg = {}
     for arm in ('go', 'rust'):
         rs = [v for k, v in runs.items() if k.endswith(arm)]
