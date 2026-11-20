@@ -204,25 +204,45 @@ impl VirtualSliceImpl {
     }
 
     fn merge_by_range(left: &VirtualSliceImpl, right: &VirtualSliceImpl) -> VirtualSliceImpl {
-        let (mut l, mut r) = (left.parts(), right.parts());
-        let mut left = left;
-        if l.state.range.inclusive_min_task_key.compare(&r.state.range.inclusive_min_task_key) > 0 {
-            std::mem::swap(&mut l, &mut r);
-            left = right;
+        let (mut left, mut right) = (left, right);
+        if left.get_state().range.inclusive_min_task_key.compare(&right.get_state().range.inclusive_min_task_key) > 0 {
+            std::mem::swap(&mut left, &mut right);
         }
+        // Go mergeVirtualSlicesByRange reuses left.pendingTaskTracker and adds only right's tasks
+        // (the merged slice replaces both). Take left's tracker instead of rebuilding from clones.
+        let (l_state, l_progress, mut tracker) = {
+            let mut inner = left.inner.lock().unwrap();
+            let tracker = std::mem::replace(&mut inner.pending_task_tracker, new_pending_task_tracker());
+            (inner.state.clone(), inner.progress.clone(), tracker)
+        };
+        let (r_state, r_progress) = {
+            let inner = right.inner.lock().unwrap();
+            for t in inner.pending_task_tracker.get_tasks().values() {
+                tracker.add_task(t.clone());
+            }
+            (inner.state.clone(), inner.progress.clone())
+        };
         let merged_state = VirtualSliceState {
             range: Range {
-                inclusive_min_task_key: l.state.range.inclusive_min_task_key,
+                inclusive_min_task_key: l_state.range.inclusive_min_task_key,
                 exclusive_max_task_key: max_history_task_key(
-                    l.state.range.exclusive_max_task_key,
-                    r.state.range.exclusive_max_task_key,
+                    l_state.range.exclusive_max_task_key,
+                    r_state.range.exclusive_max_task_key,
                 ),
             },
-            predicate: l.state.predicate.clone(),
+            predicate: l_state.predicate.clone(),
         };
-        let tasks = l.tasks.into_iter().chain(r.tasks).map(|(_, t)| t);
-        let merged_progress = merge_get_task_progress_with_same_predicate(&l.progress, &r.progress);
-        left.build(merged_state, tasks, merged_progress)
+        let merged_progress = merge_get_task_progress_with_same_predicate(&l_progress, &r_progress);
+        VirtualSliceImpl {
+            task_initializer: left.task_initializer.clone(),
+            queue_reader: left.queue_reader.clone(),
+            logger: left.logger.clone(),
+            inner: Mutex::new(Inner {
+                state: merged_state,
+                pending_task_tracker: tracker,
+                progress: merged_progress,
+            }),
+        }
     }
 
     fn merge_by_predicate(this: &VirtualSliceImpl, that: &VirtualSliceImpl) -> VirtualSliceImpl {
