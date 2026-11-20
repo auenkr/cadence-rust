@@ -54,6 +54,32 @@ fn initial_previous_version() -> i64 {
 }
 
 impl DomainRecord {
+    fn new_registered(
+        info: DomainInfo,
+        configuration: DomainConfiguration,
+        replication: DomainReplicationConfiguration,
+        is_global_domain: bool,
+        failover_version: i64,
+    ) -> Self {
+        Self {
+            info,
+            configuration,
+            replication,
+            failover_version,
+            notification_version: 0,
+            failover_notification_version: 0,
+            is_global_domain,
+            archival_bucket: String::new(),
+            failover_audit: Vec::new(),
+            config_version: 0,
+            last_updated_time_nanos: now_nanos(),
+            failover_end_time: None,
+            previous_failover_version: -1,
+            isolation_groups: None,
+            async_workflow_config: None,
+        }
+    }
+
     fn from_matching_metadata(
         metadata: &crate::matching_domain_metadata::MatchingDomainMetadata,
     ) -> Self {
@@ -776,26 +802,18 @@ impl InMemoryDomainStore {
                 message: format!("Domain {} already exists.", info.name),
             });
         }
-        let record = DomainRecord {
-            info: info.clone(),
+        let record = DomainRecord::new_registered(
+            info,
             configuration,
             replication,
-            failover_version,
-            notification_version: 0,
-            failover_notification_version: 0,
             is_global_domain,
-            archival_bucket: String::new(),
-            failover_audit: Vec::new(),
-            config_version: 0,
-            last_updated_time_nanos: now_nanos(),
-            failover_end_time: None,
-            previous_failover_version: -1,
-            isolation_groups: None,
-            async_workflow_config: None,
-        };
+            failover_version,
+        );
         let resp = record.to_describe_response();
-        inner.by_id.insert(info.uuid.clone(), info.name.clone());
-        inner.by_name.insert(info.name, record);
+        inner
+            .by_id
+            .insert(record.info.uuid.clone(), record.info.name.clone());
+        inner.by_name.insert(record.info.name.clone(), record);
         Ok(resp)
     }
 
@@ -2073,22 +2091,16 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
     ) -> Result<DescribeDomainResponse, FrontendDomainError> {
         let _guard = self.mutation_lock.lock().expect("domain manager lock");
         let version = self.current_metadata_version()?;
-        let name = info.name.clone();
-        let response = self.cache.create_with_version(
+        let record = DomainRecord::new_registered(
             info,
             configuration,
             replication,
             is_global_domain,
             failover_version,
-        )?;
-        let record = self
-            .cache
-            .record_by_name(&name)
-            .map_err(FrontendDomainError::NotFound)?;
-        if let Err(error) = self.persist_record(&record, version, true) {
-            let _ = self.cache.delete(&name);
-            return Err(error);
-        }
+        );
+        self.persist_record(&record, version, true)?;
+        let response = record.to_describe_response();
+        self.cache.restore_record(record.clone());
         self.write_audit(
             &record.info.uuid,
             crate::domain_audit::DOMAIN_AUDIT_OPERATION_TYPE_CREATE,
@@ -2129,21 +2141,11 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
     }
 
     fn exists_for_register(&self, name: &str) -> Result<bool, FrontendDomainError> {
-        let request = DescribeDomainRequest {
-            name: Some(name.to_string()),
-            uuid: None,
-        };
-        if self.cache.describe(&request).is_ok() {
-            return Ok(true);
-        }
         if name.is_empty() {
             return Ok(false);
         }
         match self.persistence.get_domain_typed(Some(name), None) {
-            Ok(metadata) => {
-                self.cache.insert_matching_metadata_if_missing(&metadata);
-                Ok(true)
-            }
+            Ok(_) => Ok(true),
             Err(crate::matching_domain_metadata::DomainReadError::NotFound(_)) => Ok(false),
             Err(crate::matching_domain_metadata::DomainReadError::Other(message)) => {
                 Err(FrontendDomainError::Persistence(message))
@@ -3660,6 +3662,26 @@ mod failover_notification_version_tests {
             manager.failover_history(&id, 50, &[]),
             Err(FrontendDomainError::Persistence(message)) if message == "DomainAuditManager not available"
         ));
+    }
+
+    #[test]
+    fn register_uses_persisted_existence_after_external_delete() {
+        let (manager, persistence) = manager_with_global_domain();
+        assert!(manager.exists_for_register("global").unwrap());
+        let cached = manager.cache.record_by_name("global").unwrap();
+        DomainMetadataPersistence::delete_domain(&*persistence, &cached.info.uuid).unwrap();
+        assert!(manager.cache.record_by_name("global").is_ok());
+        assert!(!manager.exists_for_register("global").unwrap());
+
+        let replacement_id = uuid::Uuid::from_u128(0x98).to_string();
+        let (info, config, replication) = super::tests::sample("global", &replacement_id);
+        manager
+            .create_with_version(info, config, replication, false, 0)
+            .unwrap();
+
+        assert_eq!(manager.domain_id("global").unwrap(), replacement_id);
+        assert!(manager.cache.record_by_id(&cached.info.uuid).is_err());
+        assert!(manager.exists_for_register("global").unwrap());
     }
 
     #[test]

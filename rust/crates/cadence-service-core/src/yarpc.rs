@@ -339,12 +339,9 @@ async fn handle_register(state: &AppState, body: &Struct) -> HandlerResult {
         ));
     }
     if state
-        .domains
-        .describe(&DescribeDomainRequest {
-            name: Some(req.name.clone()),
-            uuid: None,
-        })
-        .is_ok()
+        .domain_manager
+        .exists_for_register(&req.name)
+        .map_err(|error| AppError::internal(error.to_string()))?
     {
         return Err(AppError {
             exc_name: "DomainAlreadyExistsError",

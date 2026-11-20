@@ -665,6 +665,23 @@ async fn register_domain(
     if req.name.is_empty() {
         return bad_request(validation::err_domain_not_set());
     }
+    match state.domain_manager.exists_for_register(&req.name) {
+        Ok(true) => {
+            return error_response(
+                "DomainAlreadyExistsError",
+                StatusCode::CONFLICT,
+                "Domain already exists.".to_string(),
+            );
+        }
+        Ok(false) => {}
+        Err(error) => {
+            return error_response(
+                "InternalServiceError",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                error.to_string(),
+            );
+        }
+    }
     if req.name.len() > state.limits.ids.domain_max {
         return bad_request(BadRequestError::new("Domain length exceeds limit."));
     }
