@@ -458,7 +458,7 @@ pub fn read_history_branch(
             && (default_last_event_id == 0 || token.last_event_id != default_last_event_id)
         {
             return Err(HistoryReadError::DataInconsistency(
-                "Corrupted history".into(),
+                "corrupted history event batch, eventID is not continuous".into(),
             ));
         }
         token.last_event_version = first.version;

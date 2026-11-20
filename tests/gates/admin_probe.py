@@ -87,6 +87,7 @@ check('maintain-corrupt-no-execution', lambda **k: stub.MaintainCorruptWorkflow(
 
 try:
     from google.protobuf.duration_pb2 import Duration
+    tasklist = importlib.import_module('uber.cadence.api.v1.tasklist_pb2')
     workflow = importlib.import_module('uber.cadence.api.v1.service_workflow_pb2')
     workflow_grpc = importlib.import_module('uber.cadence.api.v1.service_workflow_pb2_grpc')
     workflow_stub = workflow_grpc.WorkflowAPIStub(chan)
@@ -94,7 +95,7 @@ try:
     started = workflow_stub.StartWorkflowExecution(workflow.StartWorkflowExecutionRequest(
         domain=domain, workflow_id=workflow_id, request_id=str(uuid.uuid4()),
         workflow_type=api.WorkflowType(name='AdminDeleteProbe'),
-        task_list=api.TaskList(name='admin-delete-probe'),
+        task_list=tasklist.TaskList(name='admin-delete-probe'),
         execution_start_to_close_timeout=Duration(seconds=600),
         task_start_to_close_timeout=Duration(seconds=10),
     ), metadata=md, timeout=30)

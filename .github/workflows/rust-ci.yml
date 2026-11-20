@@ -107,17 +107,6 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v5
-      - name: Format audit parity files
-        if: inputs.format_all == true
-        run: |
-          rustfmt --edition 2021 rust/crates/cadence-service-core/src/admin.rs rust/crates/cadence-matching/src/launcher.rs rust/crates/cadence-persistence/src/history_tree_token.rs
-          git diff --binary > audit-format.patch
-      - uses: actions/upload-artifact@v5
-        if: inputs.format_all == true
-        with:
-          name: audit-format
-          path: audit-format.patch
-          retention-days: 3
       - name: Enforced rustfmt checks
         working-directory: rust
         run: bash ../scripts/ci/rust-fmt-check.sh all
@@ -735,9 +724,6 @@ jobs:
           echo "$result" > postgres-pool-test.exit
           cat postgres-pool-test.log
           exit "$result"
-      - name: Print Go SQL domain audit cursor fixture
-        if: env.PKG == 'cadence-persistence'
-        run: GO111MODULE=off go run tests/domain-audit-token-oracle.go | xxd -p -c 256
       - name: Decode Rust async payloads with original Go consumer codec
         if: env.PKG == 'cadence-frontend' || env.PKG == ''
         working-directory: go

@@ -263,9 +263,8 @@ pub(crate) fn encode_domain_audit(nanos: i64, event_id: &str) -> Vec<u8> {
 
     let mut time = [0xff; 15]; // UTC offset sentinel
     time[0] = 1;
-    time[1..9].copy_from_slice(
-        &(nanos.div_euclid(1_000_000_000) + GO_UNIX_EPOCH_SECONDS).to_be_bytes(),
-    );
+    time[1..9]
+        .copy_from_slice(&(nanos.div_euclid(1_000_000_000) + GO_UNIX_EPOCH_SECONDS).to_be_bytes());
     time[9..13].copy_from_slice(&(nanos.rem_euclid(1_000_000_000) as u32).to_be_bytes());
 
     let mut value = Vec::new();
@@ -290,7 +289,10 @@ pub(crate) fn decode_domain_audit(token: &[u8]) -> Option<(i64, String)> {
         if id < 0 {
             // Go assigns IDs process-wide. Recognize the descriptor without
             // depending on IDs assigned by earlier gob operations.
-            if message.0.starts_with(b"\x03\x01\x01\x17domainAuditLogPageToken") {
+            if message
+                .0
+                .starts_with(b"\x03\x01\x01\x17domainAuditLogPageToken")
+            {
                 record_id = id.checked_neg();
             }
             continue;

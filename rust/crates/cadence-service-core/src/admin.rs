@@ -857,7 +857,8 @@ pub struct WorkflowDeletionStores {
 
 impl std::fmt::Debug for WorkflowDeletionStores {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WorkflowDeletionStores").finish_non_exhaustive()
+        f.debug_struct("WorkflowDeletionStores")
+            .finish_non_exhaustive()
     }
 }
 
@@ -936,10 +937,11 @@ pub async fn delete_workflow(
         Ok(value) => value,
         Err(response) => return response,
     };
-    let mutable: DeletionMutableState = match serde_json::from_str(&describe.mutable_state_in_database) {
-        Ok(value) => value,
-        Err(error) => return raw_history_internal(error.to_string()),
-    };
+    let mutable: DeletionMutableState =
+        match serde_json::from_str(&describe.mutable_state_in_database) {
+            Ok(value) => value,
+            Err(error) => return raw_history_internal(error.to_string()),
+        };
     let Some(stores) = state.admin.workflow_deletion.as_ref() else {
         return raw_history_internal("Workflow deletion persistence is not configured.".into());
     };
@@ -1011,9 +1013,11 @@ pub async fn delete_workflow(
         let executions_deleted = deleted.is_ok() && current_deleted.is_ok();
         let visibility_deleted = if executions_deleted {
             if let Some(store) = state.visibility_store.clone() {
-                tokio::task::spawn_blocking(move || store.admin_delete(&domain_id, &execution.run_id))
-                    .await
-                    .is_ok_and(|result| result.is_ok())
+                tokio::task::spawn_blocking(move || {
+                    store.admin_delete(&domain_id, &execution.run_id)
+                })
+                .await
+                .is_ok_and(|result| result.is_ok())
             } else {
                 false
             }
@@ -2745,7 +2749,9 @@ pub async fn maintain_corrupt_workflow(
     if let Some(api) = state.workflow_api.as_ref() {
         let describe = serde_json::json!({"domain": req.domain, "execution": execution});
         for operation in ["DescribeWorkflowExecution", "GetWorkflowExecutionHistory"] {
-            let result = api.call(operation, describe.clone(), Default::default()).await;
+            let result = api
+                .call(operation, describe.clone(), Default::default())
+                .await;
             if result.is_err_and(|error| {
                 matches!(
                     error.to_string().as_str(),
