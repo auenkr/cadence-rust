@@ -1,6 +1,6 @@
 //! History event cache, blob index, and notification pub/sub ported from Go.
 use cadence_api::{service_types::HistoryEvent, types::{DataBlob, VersionHistories}};
-use std::{collections::{HashMap,VecDeque}, sync::{Arc, Mutex, atomic::{AtomicI32, Ordering}}, time::{Duration,Instant}};
+use std::{collections::{BTreeMap,HashMap}, sync::{Arc, Mutex, atomic::{AtomicI32, Ordering}}, time::{Duration,Instant}};
 use uuid::Uuid;
 use tokio::sync::mpsc;
 
@@ -17,13 +17,18 @@ pub struct EventCacheError(pub String);
 impl std::fmt::Display for EventCacheError{fn fmt(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(&self.0)}} impl std::error::Error for EventCacheError{}
 pub const ERR_EVENT_NOT_FOUND_IN_BATCH:&str="History event not found within expected batch";
 pub trait HistoryEventReader:Send+Sync {fn read_event(&self,shard_id:i32,domain_id:&str,first_event_id:i64,event_id:i64,branch_token:&[u8])->Result<HistoryEvent,EventCacheError>;}
-struct CachedEvent{event:Arc<HistoryEvent>,inserted:Instant,weight:u64}
-struct EventCacheState{events:HashMap<EventKey,CachedEvent>,lru:VecDeque<EventKey>}
+struct CachedEvent{event:Arc<HistoryEvent>,inserted:Instant,weight:u64,seq:u64}
+/// LRU ordered by access sequence (oldest first); O(log n) per operation like Go's list-based lru.
+struct EventCacheState{events:HashMap<EventKey,CachedEvent>,lru:BTreeMap<u64,EventKey>,next_seq:u64,total_weight:u64}
+impl EventCacheState{
+ fn touch(&mut self,key:&EventKey){let seq=self.next_seq;if let Some(e)=self.events.get_mut(key){self.lru.remove(&e.seq);e.seq=seq;self.lru.insert(seq,key.clone());self.next_seq+=1;}}
+ fn remove(&mut self,key:&EventKey){if let Some(e)=self.events.remove(key){self.lru.remove(&e.seq);self.total_weight-=e.weight;}}
+}
 pub trait EventCachePolicy:Send+Sync { fn size_based(&self)->bool; fn max_size(&self)->u64; fn event_byte_size(&self,event:&HistoryEvent)->u64; }
 pub trait EventCacheObserver:Send+Sync {fn request(&self,_operation:&str){} fn miss(&self){} fn failure(&self,_error:&EventCacheError){} fn latency(&self,_operation:&str,_elapsed:Duration){}}
 struct NoopEventCacheObserver;impl EventCacheObserver for NoopEventCacheObserver{}
 pub struct EventCache<R>{policy:Option<Arc<dyn EventCachePolicy>>,observer:Arc<dyn EventCacheObserver>,reader:Arc<R>,state:Mutex<EventCacheState>,max_count:usize,ttl:Duration,disabled:bool}
-impl<R:HistoryEventReader> EventCache<R>{pub fn new(reader:Arc<R>,max_count:usize)->Self{Self::new_with_ttl(reader,max_count,Duration::from_secs(300))}pub fn new_with_ttl(reader:Arc<R>,max_count:usize,ttl:Duration)->Self{Self{policy:None,observer:Arc::new(NoopEventCacheObserver),reader,state:Mutex::new(EventCacheState{events:HashMap::new(),lru:VecDeque::new()}),max_count,ttl,disabled:false}}
+impl<R:HistoryEventReader> EventCache<R>{pub fn new(reader:Arc<R>,max_count:usize)->Self{Self::new_with_ttl(reader,max_count,Duration::from_secs(300))}pub fn new_with_ttl(reader:Arc<R>,max_count:usize,ttl:Duration)->Self{Self{policy:None,observer:Arc::new(NoopEventCacheObserver),reader,state:Mutex::new(EventCacheState{events:HashMap::new(),lru:BTreeMap::new(),next_seq:0,total_weight:0}),max_count,ttl,disabled:false}}
  pub fn with_policy(mut self,policy:Arc<dyn EventCachePolicy>)->Self{self.policy=Some(policy);self} pub fn with_observer(mut self,observer:Arc<dyn EventCacheObserver>)->Self{self.observer=observer;self}
  pub fn disabled(mut self,disabled:bool)->Self{self.disabled=disabled;self}
  #[allow(clippy::too_many_arguments)]
@@ -33,18 +38,17 @@ impl<R:HistoryEventReader> EventCache<R>{pub fn new(reader:Arc<R>,max_count:usiz
  /// Cache-only lookup (no store read); `None` when disabled, missing or expired.
  pub fn get_cached(&self,domain_id:&str,workflow_id:&str,run_id:&str,event_id:i64)->Option<Arc<HistoryEvent>>{if self.disabled{return None}self.cached(&EventKey{domain_id:domain_id.into(),workflow_id:workflow_id.into(),run_id:run_id.into(),event_id})}
  pub fn put_event(&self,domain_id:&str,workflow_id:&str,run_id:&str,event_id:i64,event:HistoryEvent){let started=Instant::now();self.observer.request("PutEvent");self.put(EventKey{domain_id:domain_id.into(),workflow_id:workflow_id.into(),run_id:run_id.into(),event_id},Arc::new(event));self.observer.latency("PutEvent",started.elapsed());}
- fn cached(&self,key:&EventKey)->Option<Arc<HistoryEvent>>{let mut c=self.state.lock().unwrap();if let Some(entry)=c.events.get(key){if self.ttl.is_zero() || entry.inserted.elapsed()<=self.ttl{let event=entry.event.clone();c.lru.retain(|k|k!=key);c.lru.push_back(key.clone());return Some(event)}}c.events.remove(key);c.lru.retain(|k|k!=key);None}
+ fn cached(&self,key:&EventKey)->Option<Arc<HistoryEvent>>{let mut c=self.state.lock().unwrap();if let Some(entry)=c.events.get(key){if self.ttl.is_zero() || entry.inserted.elapsed()<=self.ttl{let event=entry.event.clone();c.touch(key);return Some(event)}}c.remove(key);None}
  fn put(&self,key:EventKey,event:Arc<HistoryEvent>){
  let mut c=self.state.lock().unwrap();
- if !self.ttl.is_zero(){c.events.retain(|_,e|e.inserted.elapsed()<=self.ttl);let live:std::collections::HashSet<_>=c.events.keys().cloned().collect();c.lru.retain(|k|live.contains(k));}
  let size_based=self.policy.as_ref().is_some_and(|p|p.size_based());
  let weight=self.policy.as_ref().map_or(1,|p|p.event_byte_size(&event));
  let configured_max=self.policy.as_ref().map_or(0,|p|p.max_size());
  if size_based && weight>configured_max{return}
- c.lru.retain(|k|k!=&key);c.events.insert(key.clone(),CachedEvent{event,inserted:Instant::now(),weight});c.lru.push_back(key);
+ c.remove(&key);let seq=c.next_seq;c.next_seq+=1;c.total_weight+=weight;c.events.insert(key.clone(),CachedEvent{event,inserted:Instant::now(),weight,seq});c.lru.insert(seq,key);
  let max_size=if configured_max==0{1<<30}else{configured_max};
- loop{let full=if size_based{c.events.values().map(|e|e.weight).sum::<u64>()>max_size}else{c.events.len()>self.max_count};if !full&&c.events.len()<=1<<25{break}
-if let Some(oldest)=c.lru.pop_front(){c.events.remove(&oldest);}else{break}}
+ loop{let full=if size_based{c.total_weight>max_size}else{c.events.len()>self.max_count};if !full&&c.events.len()<=1<<25{break}
+if let Some((_,oldest))=c.lru.pop_first(){if let Some(e)=c.events.remove(&oldest){c.total_weight-=e.weight;}}else{break}}
  }
 
 }
@@ -97,5 +101,29 @@ impl<S: HistoryBranchStore> HistoryEventReader for StoreEventReader<S> {
         })();
         self.0.store_latency(started.elapsed());
         result
+    }
+}
+
+#[cfg(test)]
+mod lru_order_tests {
+    use super::*;
+    #[test]
+    fn evicts_least_recently_accessed_and_expires_on_read() {
+        let c = new_shard_events_cache(2, Duration::from_secs(3600));
+        c.put_event("d", "w", "r", 1, HistoryEvent::default());
+        c.put_event("d", "w", "r", 2, HistoryEvent::default());
+        assert!(c.get_cached("d", "w", "r", 1).is_some()); // 1 becomes most recent
+        c.put_event("d", "w", "r", 3, HistoryEvent::default());
+        assert!(c.get_cached("d", "w", "r", 2).is_none());
+        assert!(c.get_cached("d", "w", "r", 1).is_some());
+        assert!(c.get_cached("d", "w", "r", 3).is_some());
+        c.put_event("d", "w", "r", 3, HistoryEvent::default()); // re-put keeps count
+        assert_eq!(c.state.lock().unwrap().events.len(), 2);
+        assert_eq!(c.state.lock().unwrap().lru.len(), 2);
+        let z = new_shard_events_cache(4, Duration::from_nanos(1));
+        z.put_event("d", "w", "r", 1, HistoryEvent::default());
+        std::thread::sleep(Duration::from_millis(2));
+        assert!(z.get_cached("d", "w", "r", 1).is_none());
+        assert!(z.state.lock().unwrap().lru.is_empty());
     }
 }

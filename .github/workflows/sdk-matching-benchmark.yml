@@ -38,6 +38,9 @@ on:
       sql_log_secs:
         description: 'Diagnostics: capture MySQL general log for N seconds of the measurement window (0 = off)'
         default: '0'
+      dynamic_config_extra:
+        description: 'Extra dynamic config YAML for BOTH arms, \n-separated; replaces same top-level keys (e.g. history.enableTransferQueueV2:\n- value: false)'
+        default: ''
 concurrency:
   # Dispatches are independent samples: include run_id so parallel workers never cancel each other.
   group: sdk-matching-benchmark-${{ github.ref }}-${{ inputs.service || 'matching' }}-${{ github.run_id }}
@@ -86,6 +89,7 @@ jobs:
           PROFILE: ${{ inputs.profile }}
           MYSQL_TMPFS: ${{ inputs.mysql_tmpfs }}
           SQL_LOG_SECS: ${{ inputs.sql_log_secs }}
+          DYNAMIC_CONFIG_EXTRA: ${{ inputs.dynamic_config_extra }}
         run: bash Benchmark/ci.sh
       - uses: actions/cache/save@v4
         if: ${{ always() && steps.bincache.outputs.cache-hit != 'true' && hashFiles('.rust-bin/cadence-server') != '' }}
