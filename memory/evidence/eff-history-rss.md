@@ -117,3 +117,33 @@ the 1,500-second workload. The SHA256 was
 `dfe26c7de4b50c594f1dd08d0c599df248aaade16dc965af307dfeb7f8cd54d2` for
 History and `d7a110df37688b70a26c24bb6827d2dc3492b6781b8fb2a5aca560df3be4a1db`
 for cadence-server.
+
+### Qualified before/after result
+
+Both runs used fresh builds on standard hosted runners. The baseline used
+Intel Xeon Platinum 8370C and the buffer-release rerun used AMD EPYC 9V74.
+Both completed three pairs with zero workflow errors.
+
+| Variant | Arm | Peak RSS MiB | Steady RSS MiB | History CPU s | Workflow completion p99 ms |
+|---|---|---:|---:|---:|---:|
+| Baseline rerun | Go | 154.89 | 151.14 | 27.28 | 133.43 |
+| Baseline rerun | Rust | 154.03 | 147.22 | 14.86 | 103.96 |
+| Closed-workflow buffer release | Go | 156.86 | 151.45 | 26.31 | 115.59 |
+| Closed-workflow buffer release | Rust | 138.65 | 131.79 | 14.24 | 104.32 |
+
+Rust peak RSS dropped 10.0% and steady RSS dropped 10.5%. The corresponding
+Rust/Go ratios moved from 0.99 to 0.88 and 0.97 to 0.87. Rust CPU fell 4.2%
+and the paired CPU ratio was about 0.54 in both runs. Rust p99 increased
+0.36 ms (0.35%); the baseline's three Rust p99s ranged from 103.19 to 110.28 ms
+and the candidate's from 103.60 to 106.54 ms. Two candidate Go arms had p99
+near 115 ms and one reached 875 ms, so the per-arm median is used as specified.
+The small Rust p99 difference and differing runner CPU models limit the
+latency conclusion to no clear regression in these samples.
+
+Run 44718002863 succeeded with source `1354dc608f73459f02483962558f9e7e4b3ecdac`
+and SHA256 `0431ea9bbf7238103d789ee405ae78ebdd19c714ac3617c08f10630e2165e5cf`.
+For reproduction, download each qualified run's benchmark artifact and use
+`Benchmark/agg.py` for CPU model, CPU seconds, peak RSS, and p99. For steady
+RSS, find the History container in each arm's `resources.timeline`, take
+the median `rss_bytes` at `30 <= elapsed_seconds <= 60`, convert to MiB,
+then take the median across the three arms with the same implementation.
