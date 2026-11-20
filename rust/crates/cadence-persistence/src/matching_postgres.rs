@@ -1361,7 +1361,7 @@ impl crate::visibility_reader::VisibilityStore for PostgresTaskStore {
         &self,
         domain_id: &str,
         run_id: &str,
-    ) -> Result<(), crate::visibility_reader::VisibilityError> {
+    ) -> std::result::Result<(), crate::visibility_reader::VisibilityError> {
         crate::history_sql_backend::SqlBackend::postgres(self)
             .delete_visibility(domain_id, run_id)
             .map_err(|error| crate::visibility_reader::VisibilityError::Internal(error.to_string()))
