@@ -1809,7 +1809,8 @@ pub fn build_workflow_api(
             },
         )
     })
-    .transpose()?;
+    .transpose()
+    .map_err(anyhow::Error::msg)?;
     Ok(std::sync::Arc::new(HandlerApi {
         handler,
         admin_auth: AdminAccessControl(selected_authorizer),
