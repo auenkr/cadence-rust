@@ -377,17 +377,17 @@ mod tests {
 
 /// Go `ratelimited.NewVisibilityManager` around the History visibility store.
 pub struct RateLimitedVisibilityWriter {
-    inner: Arc<dyn VisibilityWriter>,
-    limiter: Arc<cadence_persistence::rate_limited::PersistenceLimiter>,
+    inner: std::sync::Arc<dyn VisibilityWriter>,
+    limiter: std::sync::Arc<cadence_persistence::rate_limited::PersistenceLimiter>,
 }
 
 impl RateLimitedVisibilityWriter {
     pub fn wrap(
-        inner: Arc<dyn VisibilityWriter>,
-        limiter: Option<Arc<cadence_persistence::rate_limited::PersistenceLimiter>>,
-    ) -> Arc<dyn VisibilityWriter> {
+        inner: std::sync::Arc<dyn VisibilityWriter>,
+        limiter: Option<std::sync::Arc<cadence_persistence::rate_limited::PersistenceLimiter>>,
+    ) -> std::sync::Arc<dyn VisibilityWriter> {
         match limiter {
-            Some(limiter) => Arc::new(Self { inner, limiter }),
+            Some(limiter) => std::sync::Arc::new(Self { inner, limiter }),
             None => inner,
         }
     }
