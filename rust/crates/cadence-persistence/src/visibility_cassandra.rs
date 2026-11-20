@@ -294,6 +294,10 @@ impl VisibilityStore for CassandraVisibilityStore {
         ))
     }
 
+    fn supports_native(&self) -> bool {
+        true
+    }
+
     fn list_native(
         &self,
         filter: &VisibilityFilter,

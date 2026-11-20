@@ -433,6 +433,52 @@ mod tests {
         )
     }
 
+    #[derive(Default)]
+    struct NativeVis {
+        native: bool,
+        calls: std::sync::atomic::AtomicUsize,
+    }
+    impl VisibilityStore for NativeVis {
+        fn select(&self, _: &VisibilityFilter) -> Result<Vec<VisibilityRow>, VisibilityError> {
+            Ok(Vec::new())
+        }
+        fn get_closed(&self, _: &str, _: &str) -> Result<Option<VisibilityRow>, VisibilityError> {
+            Ok(None)
+        }
+        fn supports_native(&self) -> bool {
+            self.native
+        }
+        fn list_native(&self, _: &VisibilityFilter, _: &[u8], _: i64, _: i64) -> Option<Result<ListPage, VisibilityError>> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.native.then(|| Ok(ListPage::default()))
+        }
+    }
+
+    #[test]
+    fn list_native_checks_limiter_before_inner_call() {
+        let inner = Arc::new(NativeVis { native: true, ..Default::default() });
+        let wrapped = RateLimitedVisibilityStore::wrap(inner.clone(), limiter(1, 0, 1));
+        let filter = VisibilityFilter::default();
+        let mut busy = 0;
+        for _ in 0..50 {
+            if matches!(wrapped.list_native(&filter, &[], 0, 0), Some(Err(VisibilityError::ServiceBusy(_)))) {
+                busy += 1;
+            }
+        }
+        assert!(busy > 0);
+        assert_eq!(inner.calls.load(Ordering::SeqCst) + busy, 50);
+    }
+
+    #[test]
+    fn list_native_none_for_non_native_store_without_charging() {
+        let inner = Arc::new(NativeVis::default());
+        let wrapped = RateLimitedVisibilityStore::wrap(inner.clone(), limiter(1, 0, 1));
+        for _ in 0..50 {
+            assert!(wrapped.list_native(&VisibilityFilter::default(), &[], 0, 0).is_none());
+        }
+        assert_eq!(inner.calls.load(Ordering::SeqCst), 0);
+    }
+
     #[test]
     fn per_member_matches_go() {
         assert_eq!(per_member(0.0, 100.0, Ok(4)), 100.0);
@@ -627,11 +673,16 @@ impl VisibilityStore for RateLimitedVisibilityStore {
         self.inner.get_closed_by_workflow(domain_id, workflow_id, run_id)
     }
     fn list_native(&self, filter: &VisibilityFilter, page_token: &[u8], earliest_time_us: i64, latest_time_us: i64) -> Option<Result<ListPage, VisibilityError>> {
-        // Charge only when the inner store handles native paging (Go: one call).
-        let result = self.inner.list_native(filter, page_token, earliest_time_us, latest_time_us)?;
+        // Go checks the limiter before every call; `None` stays "no native paging".
+        if !self.inner.supports_native() {
+            return None;
+        }
         if let Err(error) = self.check() {
             return Some(Err(error));
         }
-        Some(result)
+        self.inner.list_native(filter, page_token, earliest_time_us, latest_time_us)
+    }
+    fn supports_native(&self) -> bool {
+        self.inner.supports_native()
     }
 }

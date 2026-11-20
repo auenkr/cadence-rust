@@ -81,6 +81,11 @@ pub trait VisibilityStore: Send + Sync + std::fmt::Debug {
     ) -> Result<Option<VisibilityRow>, VisibilityError> {
         self.get_closed(domain_id, run_id)
     }
+    /// True when `list_native` pages natively (Cassandra). Lets wrappers act
+    /// (e.g. rate limit) before calling the store, as Go does.
+    fn supports_native(&self) -> bool {
+        false
+    }
     /// Stores with native paging (Cassandra) return the whole page here;
     /// `None` selects the SQL time/run-id token scheme.
     fn list_native(
