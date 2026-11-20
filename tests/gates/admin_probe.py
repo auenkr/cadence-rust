@@ -11,7 +11,7 @@ Expected values mirror Go (go/service/frontend/adminHandler.go):
   ReapplyEvents unknown domain -> NOT_FOUND
   ReapplyEvents bad batch      -> INTERNAL DeserializeBatchEvents (Go History, forwarded unchanged)
 """
-import importlib, json, subprocess, sys, uuid
+import importlib, json, os, subprocess, sys, uuid
 from pathlib import Path
 
 addr, domain, idl, work = sys.argv[1], sys.argv[2], Path(sys.argv[3]), Path(sys.argv[4])
@@ -113,6 +113,65 @@ try:
         svc.DescribeWorkflowExecutionRequest(domain=domain, workflow_execution=execution), **k), 'NOT_FOUND')
 except Exception as e:
     results.append({'name': 'delete-persisted-workflow', 'ok': False, 'detail': repr(e)})
+
+# Corrupt mutable state: remove a middle history_node batch row directly in the database
+# (Go's "eventID is not continuous" corruption), then MaintainCorruptWorkflow must delete the
+# run like Go. Needs DB access via the harness env; Cassandra lanes are skipped (see below).
+def db_exec(stmt):
+    plugin = os.environ.get('ADMIN_PROBE_DB', '')
+    prefix = 'CADENCE_' + plugin.upper()
+    container = os.environ.get(prefix + '_DOCKER_CONTAINER')
+    if plugin == 'mysql':
+        cmd = ['docker', 'exec', container, 'mysql', '-uroot', '-p' + os.environ.get(prefix + '_PASSWORD', 'cadence'),
+               '-h127.0.0.1', '-N', '-B', '-e', stmt]
+    elif plugin == 'postgres':
+        cmd = ['docker', 'exec', container, 'psql', '-U', os.environ.get(prefix + '_USER', 'postgres'), '-d', 'cadence', '-At', '-c', stmt]
+    else:
+        raise RuntimeError('no SQL database')
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    if r.returncode != 0:
+        raise RuntimeError(r.stdout + r.stderr)
+    return r.stdout.strip()
+
+if os.environ.get('ADMIN_PROBE_DB') in ('mysql', 'postgres'):
+    try:
+        from google.protobuf.duration_pb2 import Duration
+        tasklist = importlib.import_module('uber.cadence.api.v1.tasklist_pb2')
+        workflow = importlib.import_module('uber.cadence.api.v1.service_workflow_pb2')
+        workflow_grpc = importlib.import_module('uber.cadence.api.v1.service_workflow_pb2_grpc')
+        workflow_stub = workflow_grpc.WorkflowAPIStub(chan)
+        wid = 'admin-maintain-corrupt-' + str(uuid.uuid4())
+        started = workflow_stub.StartWorkflowExecution(workflow.StartWorkflowExecutionRequest(
+            domain=domain, workflow_id=wid, request_id=str(uuid.uuid4()),
+            workflow_type=api.WorkflowType(name='AdminMaintainCorrupt'),
+            task_list=tasklist.TaskList(name='admin-maintain-corrupt'),
+            execution_start_to_close_timeout=Duration(seconds=600),
+            task_start_to_close_timeout=Duration(seconds=10),
+        ), metadata=md, timeout=30)
+        execution = exe(workflow_id=wid, run_id=started.run_id)
+        for n in range(2):  # no worker polls this task list: each signal is its own history batch (events 3, 4)
+            workflow_stub.SignalWorkflowExecution(workflow.SignalWorkflowExecutionRequest(
+                domain=domain, workflow_execution=execution, identity='admin-probe',
+                request_id=str(uuid.uuid4()), signal_name='corrupt-' + str(n)), metadata=md, timeout=30)
+        tree = "'" + started.run_id.replace('-', '') + "'"
+        tree = f"UNHEX({tree})" if os.environ['ADMIN_PROBE_DB'] == 'mysql' else f"decode({tree},'hex')"
+        table = 'cadence.history_node' if os.environ['ADMIN_PROBE_DB'] == 'mysql' else 'history_node'
+        before = db_exec(f'SELECT COUNT(*) FROM {table} WHERE tree_id = {tree}')
+        db_exec(f'DELETE FROM {table} WHERE tree_id = {tree} AND node_id = 3')
+        after = db_exec(f'SELECT COUNT(*) FROM {table} WHERE tree_id = {tree}')
+        results.append({'name': 'maintain-corrupt-inject', 'ok': before != after and int(after) > 0,
+                        'detail': f'history_node rows before={before} after={after}'})
+        maintained = stub.MaintainCorruptWorkflow(
+            maintain_req(domain=domain, workflow_execution=execution), metadata=md, timeout=60)
+        results.append({'name': 'maintain-corrupt-deletes-workflow',
+                        'ok': maintained.history_deleted and maintained.executions_deleted and maintained.visibility_deleted,
+                        'detail': str(maintained)})
+        check('maintain-corrupt-workflow-gone', lambda **k: stub.DescribeWorkflowExecution(
+            svc.DescribeWorkflowExecutionRequest(domain=domain, workflow_execution=execution), **k), 'NOT_FOUND')
+        left = db_exec(f'SELECT COUNT(*) FROM {table} WHERE tree_id = {tree}')
+        results.append({'name': 'maintain-corrupt-history-rows-removed', 'ok': left == '0', 'detail': f'rows left={left}'})
+    except Exception as e:
+        results.append({'name': 'maintain-corrupt-deletes-workflow', 'ok': False, 'detail': repr(e)})
 
 for r in results:
     print(json.dumps(r))
