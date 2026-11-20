@@ -27,7 +27,8 @@ workflow completion p99. Check runner CPU with `Benchmark/agg.py`.
 
 | Check | Run |
 |---|---|
-| Baseline | https://github.com/auenkr/cadence-rust/actions/runs/44701337483 |
+| Baseline (degraded runner, excluded) | https://github.com/auenkr/cadence-rust/actions/runs/44701337483 |
+| Fresh baseline rerun | https://github.com/auenkr/cadence-rust/actions/runs/44706794088 |
 | Allocator only | https://github.com/auenkr/cadence-rust/actions/runs/44701569383 |
 | Allocator and closed-workflow buffer release | https://github.com/auenkr/cadence-rust/actions/runs/44702306762 |
 | Allocator-only fresh-target History clippy and tests | https://github.com/auenkr/cadence-rust/actions/runs/44701582094 |
@@ -48,7 +49,22 @@ workflow completion p99. Check runner CPU with `Benchmark/agg.py`.
 |---|---|---:|---:|---:|---:|
 | Allocator only | Go | 159.74 | 149.60 | 19.27 | 111.86 |
 | Allocator only | Rust | 151.76 | 140.51 | 10.37 | 100.87 |
+| Combined | Go | 159.78 | 152.56 | 28.53 | 151.60 |
+| Combined | Rust | 130.89 | 127.52 | 16.74 | 106.13 |
 
 Allocator-only run 44701569383 succeeded on Intel Xeon 6975P-C with three pairs
 and zero workflow errors in both arms. Rust binary SHA256 was
 `fb88c38757b21b42871d806f8d1d7d5e9cece33dfdfc193564c0b321bd5b0464`.
+
+
+Combined run 44702306762 succeeded on Intel Xeon Platinum 8370C with three pairs
+and zero workflow errors in both arms. Rust binary SHA256 was
+`94e8b2b510d6be30a716a618b9fc443cca66db6d5784a3645009b5b037659d6c`.
+The Rust/Go ratios were 0.82 for peak RSS, 0.84 for steady RSS, 0.59 for
+History CPU, and 0.70 for workflow completion p99.
+
+Initial baseline run 44701337483 succeeded on AMD EPYC 7763, but Go p99 was
+3097.91 ms and MySQL used 56.90 CPU seconds in the Go arm. All three pairs
+were excluded from the before/after comparison and the baseline was rerun
+with identical settings. The discarded run's Rust binary SHA256 was
+`f5d42a074ec5626806e56f1fcf21360df5792ea55a6b20acf79de4d076cecaab`.
