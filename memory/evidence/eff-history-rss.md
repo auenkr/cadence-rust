@@ -41,6 +41,7 @@ workflow completion p99. Check runner CPU with `Benchmark/agg.py`.
 
 - Allocator-only package CI passed at `657251f6f7f605ada7241e9fc0592261ca7c3398`. Package and workspace CI passed at `379ad324360b62f1a7884b46790663254cb7c9b1`. Each used `clean_target=true`.
 - The MySQL mixed gate passed at `379ad324360b62f1a7884b46790663254cb7c9b1` with two Rust History instances and the Go Worker. Build and gate exit codes were 0, and the log contained `GATE SUMMARY failed: []` (413 steps). SHA256 for History was `b3e8593ff920e7e11d134b810bc7099adf77dd50662fc1750438b75453a508cd`, and for Frontend and Matching's server binary was `35d168dd4fb3d234486d7f248f926b7a402db1d3ac6088964119d6ddcd5e442e`.
+- The MySQL restart gate passed at `379ad324360b62f1a7884b46790663254cb7c9b1` with `GATE SUMMARY failed: []` (52 steps). It completed all 4,500 workflows across 1,500 seconds of load and injected faults. SHA256 for History was `4f7a0238a57635cb10a5efba21fffc138dd74f33e6903519806aa0d6faefb1a3`, and for cadence-server was `61a9d65e4bf87ea1dce08128236186e662ac01892ac95627243f83bdc639e063`.
 - The initial workspace CI, mixed gate and restart gate for the allocator-only revision were cancelled after supersession by the combined implementation.
 
 ## Benchmark results
