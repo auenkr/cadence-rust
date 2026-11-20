@@ -1744,6 +1744,82 @@ async fn run_with_lifecycle(
                     }
                 }
             }
+            // Go resource `createConfigStoreOrDefault`: the Frontend's
+            // global isolation groups live in `cluster_config` (row type 1),
+            // polled every system.isolationGroupStateRefreshInterval.
+            if run_frontend {
+                if let Some(task_store) = configured_matching_stores
+                    .as_ref()
+                    .map(|stores| stores.task_store.clone())
+                {
+                    let client_config = {
+                        let o = state.admin.dynamic_config.lock().expect("admin lock");
+                        let nanos = |key: &str, default: i64| {
+                            std::time::Duration::from_nanos(
+                                cadence_persistence::dynamic_config::duration(
+                                    o.property_values(key),
+                                    None,
+                                    default,
+                                )
+                                .max(0) as u64,
+                            )
+                        };
+                        cadence_persistence::config_store::ClientConfig {
+                            poll_interval: nanos(
+                                "system.isolationGroupStateRefreshInterval",
+                                30_000_000_000,
+                            ),
+                            update_retry_attempts: cadence_persistence::dynamic_config::integer(
+                                o.property_values("system.isolationGroupStateUpdateRetryAttempts"),
+                                None,
+                                2,
+                            ) as i32,
+                            fetch_timeout: nanos(
+                                "system.IsolationGroupStateFetchTimeout",
+                                30_000_000_000,
+                            ),
+                            update_timeout: nanos(
+                                "system.IsolationGroupStateUpdateTimeout",
+                                30_000_000_000,
+                            ),
+                        }
+                    };
+                    let created = tokio::task::spawn_blocking(move || {
+                        let write_store = task_store.clone();
+                        cadence_persistence::isolation_group_store::GlobalIsolationGroupStore::new(
+                            client_config,
+                            std::sync::Arc::new(move |row_type| {
+                                cadence_persistence::matching_task_store::MatchingTaskStore::fetch_latest_config(
+                                    &*task_store,
+                                    row_type,
+                                )
+                            }),
+                            std::sync::Arc::new(move |row_type, row| {
+                                cadence_persistence::matching_task_store::MatchingTaskStore::insert_config(
+                                    &*write_store,
+                                    row_type,
+                                    row,
+                                )
+                            }),
+                        )
+                    })
+                    .await
+                    .map_err(|error| anyhow::anyhow!("joining isolation group store startup: {error}"))?;
+                    match created {
+                        Ok(store) => {
+                            let store = std::sync::Arc::new(store);
+                            store.start_polling();
+                            state.domains.attach_global_isolation_store(Some(store));
+                        }
+                        Err(error) => {
+                            eprintln!(
+                                "warning: not instantiating Isolation group config store, this feature will not be enabled: {error}"
+                            );
+                            state.domains.attach_global_isolation_store(None);
+                        }
+                    }
+                }
+            }
             if let Some(persistence) = state.domain_metadata_persistence.clone() {
                 state.domain_manager = std::sync::Arc::new(
                     cadence_persistence::PersistedFrontendDomainManager::new(

@@ -256,6 +256,12 @@ struct Inner {
 pub struct InMemoryDomainStore {
     inner: Arc<RwLock<Inner>>,
     failover_notifications: Arc<std::sync::Mutex<HashMap<String, tokio::sync::watch::Sender<u64>>>>,
+    /// Go `resource.GetIsolationGroupStore()`: set once a process with
+    /// configured persistence tried to create the config store. `None`
+    /// inside means creation failed (Go: nil store, feature unsupported).
+    global_isolation_store: Arc<
+        std::sync::OnceLock<Option<Arc<crate::isolation_group_store::GlobalIsolationGroupStore>>>,
+    >,
 }
 
 /// Snapshot of a pending-active (graceful failover in progress) domain.
@@ -1120,6 +1126,9 @@ impl InMemoryDomainStore {
     pub fn global_isolation_groups(
         &self,
     ) -> Option<cadence_api::types::IsolationGroupConfiguration> {
+        if self.global_isolation_store.get().is_some() {
+            return self.get_global_isolation_groups().ok().flatten();
+        }
         self.inner
             .read()
             .expect("domain store lock")
@@ -1136,6 +1145,52 @@ impl InMemoryDomainStore {
             .write()
             .expect("domain store lock")
             .global_isolation_groups = groups;
+    }
+
+    /// Bind the persisted global isolation-group store (Go
+    /// `createConfigStoreOrDefault`); `None` records a failed creation.
+    pub fn attach_global_isolation_store(
+        &self,
+        store: Option<Arc<crate::isolation_group_store::GlobalIsolationGroupStore>>,
+    ) {
+        let _ = self.global_isolation_store.set(store);
+    }
+
+    /// Go `isolationgroupapi.GetGlobalState`; falls back to the in-memory
+    /// value when no store was attached (embedded/in-memory deployments).
+    pub fn get_global_isolation_groups(
+        &self,
+    ) -> Result<
+        Option<cadence_api::types::IsolationGroupConfiguration>,
+        crate::isolation_group_store::IsolationStoreError,
+    > {
+        use crate::isolation_group_store::{IsolationStoreError, NOT_SUPPORTED};
+        match self.global_isolation_store.get() {
+            Some(Some(store)) => store.get(),
+            Some(None) => Err(IsolationStoreError::BadRequest(NOT_SUPPORTED.into())),
+            None => Ok(self
+                .inner
+                .read()
+                .expect("domain store lock")
+                .global_isolation_groups
+                .clone()),
+        }
+    }
+
+    /// Go `isolationgroupapi.UpdateGlobalState`.
+    pub fn set_global_isolation_groups(
+        &self,
+        groups: Option<cadence_api::types::IsolationGroupConfiguration>,
+    ) -> Result<(), crate::isolation_group_store::IsolationStoreError> {
+        use crate::isolation_group_store::{IsolationStoreError, NOT_SUPPORTED};
+        match self.global_isolation_store.get() {
+            Some(Some(store)) => store.set(groups),
+            Some(None) => Err(IsolationStoreError::BadRequest(NOT_SUPPORTED.into())),
+            None => {
+                self.update_global_isolation_groups(groups);
+                Ok(())
+            }
+        }
     }
 
     /// Read a domain's isolation-group overrides, mirroring Go's domain
