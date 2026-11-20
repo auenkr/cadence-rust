@@ -115,6 +115,7 @@ impl HistoryEnv {
     pub async fn build(params: HistoryEnvParams) -> anyhow::Result<Arc<Self>> {
         let HistoryEnvParams { config, persistence, cluster, who_am_i, hosts, matching_resolver, dynamic_client, archiver_provider, kafka } =
             params;
+        let membership = Arc::new(MembershipResolver::new(who_am_i.clone(), hosts));
         let advanced_visibility_store = persistence.advanced_visibility_store.clone();
         let active = cluster.current_cluster_name.clone();
         let semaphore_metadata = cadence_matching::matching_task_store::open_configured_semaphore_store(&persistence).await?;
@@ -234,6 +235,21 @@ impl HistoryEnv {
             },
         )
         .await?;
+        // Go persistence/client/factory.go: every manager is wrapped by the
+        // datastore limiter built from history.persistenceMaxQPS/GlobalMaxQPS.
+        let persistence_limiter = {
+            use cadence_persistence::rate_limited::PersistenceLimiter;
+            let (host, global, members) = (config.clone(), config.clone(), membership.clone());
+            PersistenceLimiter::build(
+                Arc::new(move || (host.persistence_max_qps)()),
+                Arc::new(move || (global.persistence_global_max_qps)()),
+                Arc::new(move || Ok(members.members().len())),
+            )
+        };
+        let shard_rows = cadence_persistence::rate_limited::RateLimitedShardStore::wrap(shard_rows, persistence_limiter.clone());
+        let history_nodes = cadence_persistence::rate_limited::RateLimitedNodeStore::wrap(history_nodes, persistence_limiter.clone());
+        let executions = cadence_persistence::rate_limited::RateLimitedExecutionStore::wrap(executions, persistence_limiter.clone());
+        let history_v2 = cadence_persistence::rate_limited::RateLimitedHistoryV2Store::wrap(history_v2, persistence_limiter);
         let persistence = HistoryPersistence {
             shard_store: Arc::new(SqlShardStore::new(shard_rows.clone())),
             shard_persistence: Arc::new(SqlShardPersistence::new(shard_rows.clone())),
@@ -273,7 +289,6 @@ impl HistoryEnv {
             persistence.executions.clone(),
             config.number_of_shards.clamp(1, i64::from(i32::MAX)) as i32,
         ));
-        let membership = Arc::new(MembershipResolver::new(who_am_i.clone(), hosts));
         let failover_coordinator = super::failover::build_failover_coordinator(super::failover::FailoverDeps {
             domain_manager: Arc::new(crate::wiring::resources::failover_domain_manager::PersistenceDomainManager::new(
                 domain_persistence,

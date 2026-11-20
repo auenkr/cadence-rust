@@ -761,6 +761,7 @@ impl EngineMutableState {
         .map_err(|e| match e {
             // Go keeps EntityNotExists typed so the task processor drops the task instead of retrying forever.
             HistoryReadError::EntityNotExists(m) => HistoryError::entity_not_exists(format!("read history branch ({ctx}): {m}")),
+            HistoryReadError::ServiceBusy(m) => cadence_api::errors::ServiceBusyError::new(m).into(),
             e => HistoryError::internal(format!("read history branch ({ctx}): {e}")),
         })
     }

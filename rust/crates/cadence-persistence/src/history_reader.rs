@@ -16,6 +16,8 @@ pub enum HistoryReadError {
     DataInconsistency(String),
     InvalidRequest(String),
     Internal(String),
+    /// Go `ratelimited.ErrPersistenceLimitExceeded` (`types.ServiceBusyError`).
+    ServiceBusy(String),
 }
 
 impl std::fmt::Display for HistoryReadError {
@@ -24,7 +26,8 @@ impl std::fmt::Display for HistoryReadError {
             Self::EntityNotExists(m)
             | Self::DataInconsistency(m)
             | Self::InvalidRequest(m)
-            | Self::Internal(m) => f.write_str(m),
+            | Self::Internal(m)
+            | Self::ServiceBusy(m) => f.write_str(m),
         }
     }
 }

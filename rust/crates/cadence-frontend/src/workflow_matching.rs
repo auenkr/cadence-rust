@@ -50,6 +50,7 @@ fn read_error(error: HistoryReadError) -> CadenceError {
             CadenceError::EntityNotExists(EntityNotExistsError::new(m))
         }
         HistoryReadError::InvalidRequest(m) => bad_request(m),
+        HistoryReadError::ServiceBusy(m) => CadenceError::ServiceBusy(cadence_api::errors::ServiceBusyError::new(m)),
         HistoryReadError::DataInconsistency(m) | HistoryReadError::Internal(m) => internal(m),
     }
 }
