@@ -16,3 +16,9 @@ tests/frontend-gate/main.go EchoWorkflow: activity StartToClose 10s + RetryPolic
 
 ## Validation
 (see run URLs appended below)
+
+Gated SHA 1b1319b12da84031273f24ec42a089b5fa328781 (frontend-mixed-gate, mysql, kafka=true), all success with failedSteps []:
+- https://github.com/auenkr/cadence-rust/actions/runs/44835179584
+- https://github.com/auenkr/cadence-rust/actions/runs/44835183701
+- https://github.com/auenkr/cadence-rust/actions/runs/44835187763
+rust-ci (workspace, no Rust code changed): https://github.com/auenkr/cadence-rust/actions/runs/44835191813 success
