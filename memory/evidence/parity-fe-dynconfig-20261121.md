@@ -24,4 +24,6 @@ No code change was warranted ("no logic change beyond matching Go"). CI/gate bel
 The audit was grep/script based; not every call-site default of all 76 keys was verified individually.
 
 ## CI
-(run URLs filled below)
+Head SHA: 81e343ee02c9148a4a5ec36448524d084ccd2e53 (branch parity-fe-dynconfig; frontend-mixed-gate has no source_ref input, dispatched on the branch ref).
+- rust-ci.yml package=cadence-frontend: success https://github.com/auenkr/cadence-rust/actions/runs/44848168074
+- frontend-mixed-gate.yml database=mysql: success https://github.com/auenkr/cadence-rust/actions/runs/44848184635
