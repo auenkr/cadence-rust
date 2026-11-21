@@ -4240,15 +4240,51 @@ where
             .get(cadence_persistence::caller_type::CALLER_TYPE_HEADER)
             .and_then(|v| v.to_str().ok())
             .map(str::to_owned);
+        let inbound = inbound_headers(request.headers());
         let clone = self.0.clone();
         let mut inner = std::mem::replace(&mut self.0, clone);
         Box::pin(async move {
             cadence_persistence::caller_type::scope_from_header(
                 caller_type.as_deref(),
-                async move { inner.call(request).await },
+                cadence_service_core::header_forwarding::INBOUND_HEADERS
+                    .scope(inbound, async move { inner.call(request).await }),
             )
             .await
         })
+    }
+}
+
+/// Go `yarpc.CallFromContext(ctx).HeaderNames()` for an inbound gRPC request.
+pub fn inbound_headers(
+    headers: &axum::http::HeaderMap,
+) -> std::collections::HashMap<String, String> {
+    headers
+        .iter()
+        .filter_map(|(name, value)| {
+            Some((name.as_str().to_ascii_lowercase(), value.to_str().ok()?.to_owned()))
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod inbound_header_tests {
+    use super::inbound_headers;
+
+    #[tokio::test]
+    async fn captured_inbound_headers_are_forwarded_on_outbound_calls() {
+        let mut h = axum::http::HeaderMap::new();
+        h.insert("X-Trace", "t1".parse().unwrap());
+        h.insert("grpc-timeout", "5S".parse().unwrap());
+        let inbound = inbound_headers(&h);
+        assert_eq!(inbound.get("x-trace").map(String::as_str), Some("t1"));
+        let mut m = tonic::metadata::MetadataMap::new();
+        cadence_service_core::header_forwarding::INBOUND_HEADERS
+            .scope(inbound, async {
+                cadence_service_core::header_forwarding::apply_caller_type(&mut m);
+            })
+            .await;
+        assert_eq!(m.get("x-trace").unwrap().to_str().unwrap(), "t1");
+        assert!(m.get("grpc-timeout").is_none());
     }
 }
 
