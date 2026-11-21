@@ -2347,7 +2347,13 @@ mod typed_codec_tests {
                 let method = String::from_utf8(take_arg(&payload, &mut cursor)).unwrap();
                 assert_eq!(method, format!("HistoryService::{expected_method}"));
                 let metadata = take_arg(&payload, &mut cursor);
-                assert_eq!(metadata, [0, 0]); // no application headers
+                // Go's outbound middleware adds `cadence-caller-type: internal`
+                // outside an inbound request.
+                let mut expected_meta = vec![0, 1, 0, 19];
+                expected_meta.extend_from_slice(b"cadence-caller-type");
+                expected_meta.extend_from_slice(&[0, 8]);
+                expected_meta.extend_from_slice(b"internal");
+                assert_eq!(metadata, expected_meta);
                 let request = decode_typed_struct(&take_arg(&payload, &mut cursor)).unwrap();
                 assert!(matches!(
                     typed_field(&request, 1),
