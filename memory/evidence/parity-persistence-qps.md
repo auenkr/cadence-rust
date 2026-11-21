@@ -23,12 +23,24 @@ Gated SHA 2c0bf0402dfa9a99ee824b0bb5388a2c5376f478 (later commits only edit this
 Wrapped with the same per-service limiter (Go factory.go: domain, visibility, queue/domain-replication use `ds.ratelimit`):
 - Frontend (`cadence-matching/src/launcher.rs`): `RateLimitedDomainMetadata` (domain + domain replication queue/DLQ + audit log) and `RateLimitedVisibilityStore` (new `VisibilityError::ServiceBusy`, mapped to ServiceBusyError in `workflow_visibility.rs`).
 - History (`wiring/assembly/env.rs`): `RateLimitedDomainMetadata` and `RateLimitedVisibilityWriter` (`wiring/persistence/visibility.rs`).
-- Frontend has no Rust task/queue store; the History domain-cache source (`DomainMetadataSource`) is a different trait and is not wrapped.
+- Frontend has no Rust task/queue store; the History domain-cache source (`DomainMetadataSource`) was wrapped in parity-qps-cleanup (below).
 - Caller-type bypass (`system.rateLimiterBypassCallerTypes`): still a gap, store calls carry no caller type.
-- Deviation: `RateLimitedVisibilityStore::list_native` charges after the inner call (cannot tell beforehand whether the store pages natively), so a rejected native list still reaches the store.
+- Deviation (fixed in parity-qps-cleanup): `list_native` used to charge after the inner call.
 - Two clippy fixes on the way (missing Arc path, items_after_test_module); failed runs 44830479646, 44831529875.
 ### CI (gated SHA b03f6f11c71e8ca3a5eed8e77fcce7e1165e01cd; later commits only edit this file)
 - rust-ci workspace: https://github.com/auenkr/cadence-rust/actions/runs/44832958464 success
 - rust-ci cadence-history: .../runs/44832136473 success; cadence-persistence (earlier commit): .../runs/44829742608 success; frontend/matching (earlier commit): .../runs/44830474934, .../runs/44830484000 success (covered again by the workspace run)
 - history-mixed-gate mysql: https://github.com/auenkr/cadence-rust/actions/runs/44832962256 success, failedSteps []
 - frontend-mixed-gate mysql: https://github.com/auenkr/cadence-rust/actions/runs/44832967902 success, failedSteps []
+
+## Follow-up: parity-qps-cleanup
+- `VisibilityStore::supports_native()` (default false; Cassandra true; wrapper delegates). `RateLimitedVisibilityStore::list_native` now returns `None` for non-native stores without charging, otherwise checks the limiter BEFORE the inner call (Go order). The Frontend wrapper is the same type, so it is covered.
+- History `RateLimitedDomainSource` (`wiring/resources/domain_source.rs`) wraps the domain-cache `DomainMetadataSource` with the same History limiter in `assembly/env.rs`; rejection = transient "Persistence Max QPS Reached." (ServiceBusy is transient in Go's cache retry).
+- Unit tests: rate_limited.rs (limiter-before-inner, non-native not charged), domain_source.rs (reject before inner, disabled limiter passthrough).
+### CI (gated SHA 9fd8796fa52a18244ba173b677079df3aad6f949; later commits only edit this file)
+- First attempts on 0b130bb failed (test helper missing Debug derive): runs 44838783288, 44838797294.
+- rust-ci cadence-persistence: https://github.com/auenkr/cadence-rust/actions/runs/44839832981 success
+- rust-ci cadence-history: https://github.com/auenkr/cadence-rust/actions/runs/44839841725 success
+- rust-ci workspace: https://github.com/auenkr/cadence-rust/actions/runs/44840546393 success
+- history-mixed-gate mysql: https://github.com/auenkr/cadence-rust/actions/runs/44840554877 success, failedSteps []
+- frontend-mixed-gate mysql: https://github.com/auenkr/cadence-rust/actions/runs/44840563717 success, failedSteps []
