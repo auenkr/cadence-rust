@@ -49,6 +49,7 @@ fn yarpc_grpc_request<T>(message: T) -> tonic::Request<T> {
         "rpc-encoding",
         tonic::metadata::MetadataValue::from_static("proto"),
     );
+    cadence_service_core::header_forwarding::apply_caller_type(metadata);
     request
 }
 

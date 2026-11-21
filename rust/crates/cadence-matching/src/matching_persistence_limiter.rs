@@ -659,10 +659,26 @@ impl MatchingPersistenceLimiter {
             state.last_refresh_nanos = now;
         }
         let allowed = state.limiter.allow(now);
+        drop(state);
+        // Go `CallerBypass.AllowLimiter`: a denied request still passes when its
+        // caller type is in `system.rateLimiterBypassCallerTypes`.
+        if !allowed && self.bypasses_caller() {
+            return true;
+        }
         if !allowed {
             self.rejected.fetch_add(1, Ordering::Relaxed);
         }
         allowed
+    }
+
+    fn bypasses_caller(&self) -> bool {
+        let types = cadence_persistence::dynamic_config::string_list_lenient(
+            self.overlay
+                .lock()
+                .expect("admin dynamic config lock")
+                .property_values("system.rateLimiterBypassCallerTypes"),
+        );
+        cadence_persistence::caller_type::should_bypass(&types)
     }
 
     pub fn rejected(&self) -> u64 {

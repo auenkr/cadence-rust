@@ -239,11 +239,17 @@ impl HistoryEnv {
         // datastore limiter built from history.persistenceMaxQPS/GlobalMaxQPS.
         let persistence_limiter = {
             use cadence_persistence::rate_limited::PersistenceLimiter;
-            let (host, global, members) = (config.clone(), config.clone(), membership.clone());
-            PersistenceLimiter::build(
+            let (host, global, members, bypass) = (config.clone(), config.clone(), membership.clone(), config.clone());
+            PersistenceLimiter::build_with_bypass(
                 Arc::new(move || (host.persistence_max_qps)()),
                 Arc::new(move || (global.persistence_global_max_qps)()),
                 Arc::new(move || Ok(members.members().len())),
+                Some(Arc::new(move || {
+                    (bypass.rate_limiter_bypass_caller_types)()
+                        .iter()
+                        .filter_map(|v| v.as_str().map(str::to_owned))
+                        .collect()
+                })),
             )
         };
         let shard_rows = cadence_persistence::rate_limited::RateLimitedShardStore::wrap(shard_rows, persistence_limiter.clone());

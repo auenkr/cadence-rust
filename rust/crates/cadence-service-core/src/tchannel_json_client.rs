@@ -277,10 +277,19 @@ pub async fn call_thrift(
             None => connect_and_init(addr).await?,
         };
 
-        let encoded_headers: Vec<_> = headers
+        let mut encoded_headers: Vec<_> = headers
             .iter()
             .map(|(key, value)| (key.as_str(), value.as_str()))
             .collect();
+        // Go `CallerInfoOutboundMiddleware`: internal-origin calls are tagged.
+        let has_caller_type = headers.iter().any(|(key, _)| {
+            key.eq_ignore_ascii_case(cadence_persistence::caller_type::CALLER_TYPE_HEADER)
+        });
+        if let Some(internal) =
+            cadence_persistence::caller_type::outbound_internal_default(has_caller_type)
+        {
+            encoded_headers.push((cadence_persistence::caller_type::CALLER_TYPE_HEADER, internal));
+        }
         let arg2 = headers16(&encoded_headers)?;
         let mut head = vec![1];
         head.extend(

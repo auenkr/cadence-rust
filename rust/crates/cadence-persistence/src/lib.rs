@@ -23,6 +23,7 @@ pub mod history_execution_cassandra_write;
 pub mod history_v2_cassandra;
 pub mod history_visibility_cassandra;
 pub mod history_reader;
+pub mod caller_type;
 pub mod rate_limited;
 pub mod history_sql;
 pub mod history_state_maps_sql;

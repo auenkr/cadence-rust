@@ -4173,6 +4173,7 @@ async fn serve_with_listener_tls_inner(
         .build_v1()?;
     let native = matching.native_service().cloned();
     let server = crate::grpc_tls::server_builder(tls)?
+        .layer(tower::layer::layer_fn(CallerTypeScope))
         .add_service(reflection)
         .add_service(
             p::meta_api_server::MetaApiServer::new(matching.clone())
@@ -4205,6 +4206,50 @@ async fn serve_with_listener_tls_inner(
         server.serve_with_incoming(incoming).await?;
     }
     Ok(())
+}
+
+/// Go `rpc.CallerInfoMiddleware`: scope the `cadence-caller-type` request
+/// header (missing = `unknown`) around every inbound gRPC call so persistence
+/// limiter bypass can read it.
+#[derive(Clone)]
+pub struct CallerTypeScope<S>(pub S);
+
+impl<S, B> tower::Service<axum::http::Request<B>> for CallerTypeScope<S>
+where
+    S: tower::Service<axum::http::Request<B>> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+    S::Response: Send + 'static,
+    S::Error: Send + 'static,
+    B: Send + 'static,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future =
+        std::pin::Pin<Box<dyn std::future::Future<Output = Result<S::Response, S::Error>> + Send>>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.0.poll_ready(cx)
+    }
+
+    fn call(&mut self, request: axum::http::Request<B>) -> Self::Future {
+        let caller_type = request
+            .headers()
+            .get(cadence_persistence::caller_type::CALLER_TYPE_HEADER)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+        let clone = self.0.clone();
+        let mut inner = std::mem::replace(&mut self.0, clone);
+        Box::pin(async move {
+            cadence_persistence::caller_type::scope_from_header(
+                caller_type.as_deref(),
+                async move { inner.call(request).await },
+            )
+            .await
+        })
+    }
 }
 
 pub fn no_identity_tls_incoming(

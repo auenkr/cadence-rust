@@ -246,6 +246,7 @@ impl ArchivalSignaler for FrontendArchivalSignaler {
                 r.metadata_mut().insert(k, v);
             }
         }
+        cadence_service_core::header_forwarding::apply_caller_type(r.metadata_mut());
         let mut c = cadence_proto::api::workflow_api_client::WorkflowApiClient::new(channel);
         c.signal_with_start_workflow_execution(r).await.map(|_| ()).map_err(|s| s.message().to_string())
     }

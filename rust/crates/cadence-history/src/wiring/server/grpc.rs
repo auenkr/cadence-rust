@@ -216,8 +216,10 @@ pub async fn serve(
             return;
         }
     };
-    let mut server = builder;
-    let router = server.add_service(svc);
+    let server = builder;
+    let router = server
+        .layer(tower::layer::layer_fn(cadence_matching::grpc_matching::CallerTypeScope))
+        .add_service(svc);
     let result = if let Some(config) = custom_tls {
         let acceptor = tokio_rustls::TlsAcceptor::from(config);
         let incoming = cadence_matching::grpc_matching::no_identity_tls_incoming(listener, acceptor);
