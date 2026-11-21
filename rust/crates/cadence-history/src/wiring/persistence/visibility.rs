@@ -392,11 +392,10 @@ impl VisibilityWriter for RateLimitedVisibilityWriter {
         self.inner.record_closed_async(row).await
     }
     fn record_uninitialized(&self) -> Result<(), PersistenceError> {
-        self.check()?;
+        // Sync no-op variant: no store call, Go charges only real manager calls.
         self.inner.record_uninitialized()
     }
     fn upsert(&self) -> Result<(), PersistenceError> {
-        self.check()?;
         self.inner.upsert()
     }
     async fn delete_async(&self, domain_id: String, run_id: String) -> Result<(), PersistenceError> {

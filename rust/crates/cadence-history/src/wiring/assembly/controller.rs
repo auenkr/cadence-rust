@@ -343,13 +343,9 @@ impl ShardRegistry {
     }
 
     /// Call after the membership ring changed: closes shards this host no longer owns.
-    pub fn on_membership_change(&self) {
+    pub fn on_membership_change(&self, (added, removed, updated): (usize, usize, usize)) {
         self.metrics_scope.inc_counter("MembershipChangedCounter");
-        tracing::info!("Ring membership changed");
-        // Go `acquireShards`.
-        let acquire_start = std::time::Instant::now();
-        self.metrics_scope.inc_counter("AcquireShardsCounter");
-        let _acquire = scopeguard_timer(self.metrics_scope.clone(), acquire_start);
+        tracing::info!(hosts_added = added, hosts_removed = removed, hosts_updated = updated, "Ring membership changed");
         let who = self.env.membership.who_am_i().to_string();
         let ids: Vec<u32> = self.entries.lock().unwrap().keys().copied().collect();
         for id in ids {
@@ -404,17 +400,19 @@ impl ShardRegistry {
     /// (`changed` resolves once per ring change); exits when `shutting_down` is set.
     pub async fn shard_management_pump(
         self: Arc<Self>,
-        mut changed: tokio::sync::mpsc::UnboundedReceiver<()>,
+        mut changed: tokio::sync::mpsc::UnboundedReceiver<(usize, usize, usize)>,
         shutting_down: Arc<std::sync::atomic::AtomicBool>,
     ) {
         let period = (self.env.config.acquire_shard_interval)().max(Duration::from_millis(1));
         let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+        // Go `time.Ticker` drops ticks missed while a pass runs.
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
                 _ = ticker.tick() => self.acquire_shards(&shutting_down).await,
                 ev = changed.recv() => {
-                    if ev.is_none() { return; }
-                    self.on_membership_change();
+                    let Some(counts) = ev else { return };
+                    self.on_membership_change(counts);
                     self.acquire_shards(&shutting_down).await;
                 }
             }
