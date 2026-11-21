@@ -261,6 +261,7 @@ impl HistoryEnv {
             history_nodes,
         };
 
+        let source = crate::wiring::resources::domain_source::RateLimitedDomainSource::wrap(source, persistence_limiter.clone());
         let matching_domain_cache = Arc::new(MatchingDomainCache::new(source));
         {
             let cache = matching_domain_cache.clone();
