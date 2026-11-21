@@ -377,7 +377,7 @@ pub async fn run(bin_name: &'static str) -> anyhow::Result<()> {
     // Close shards whose ownership moved on every ring change (Go controller subscription).
     // Go `shardManagementPump`: periodic acquire ticker + ring-change events.
     let shutting_down = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let (change_tx, change_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+    let (change_tx, change_rx) = tokio::sync::mpsc::unbounded_channel::<(usize, usize, usize)>();
     // Go `controller.Start`: one synchronous acquireShards before the pump starts.
     registry.acquire_shards(&shutting_down).await;
     let pump_task = tokio::spawn(registry.clone().shard_management_pump(change_rx, shutting_down.clone()));
@@ -391,7 +391,10 @@ pub async fn run(bin_name: &'static str) -> anyhow::Result<()> {
                 refresh_from_snapshot(&env.membership, &provider, HISTORY_RINGPOP_SERVICE);
                 let now = env.membership.members();
                 if now != last {
-                    let _ = change_tx.send(());
+                    // Go `membership.ChangedEvent`: HostsAdded / HostsRemoved / HostsUpdated counts.
+                    let added = now.iter().filter(|h| !last.iter().any(|o| o.identity == h.identity)).count();
+                    let removed = last.iter().filter(|o| !now.iter().any(|h| h.identity == o.identity)).count();
+                    let _ = change_tx.send((added, removed, 0));
                     last = now;
                 }
             }
@@ -408,8 +411,14 @@ pub async fn run(bin_name: &'static str) -> anyhow::Result<()> {
     queue_provider.stop().await;
     tracing::info!("History shutdown: stopping membership");
     shutting_down.store(true, std::sync::atomic::Ordering::SeqCst);
-    pump_task.abort();
+    // Go `controller.Stop`: stop the pump, wait (shutdownWG, 1 min) for it and its in-flight acquire
+    // workers, then shut every shard down. Aborting the ownership task drops the change channel
+    // sender, which makes the pump exit; `acquire_shards` joins its workers before the pump returns.
     ownership_task.abort();
+    if tokio::time::timeout(Duration::from_secs(60), pump_task).await.is_err() {
+        tracing::warn!("History shutdown: shard controller pump did not stop within 1m");
+    }
+    registry.close_all();
     feed.abort();
     replication.stop_fetchers();
     provider.stop().await.map_err(|e| anyhow::anyhow!("stopping History Ringpop membership: {e}"))?;
