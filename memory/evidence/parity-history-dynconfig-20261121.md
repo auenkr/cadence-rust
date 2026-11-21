@@ -13,3 +13,7 @@ Results:
 Conclusion: no keys needed porting; no code change made. CI/gate runs below validate the branch head (identical to master code) .
 
 CI runs: see section appended below.
+
+## CI results (head SHA bd0fad62e37318d3bc0a2fc0bbf7188d34ad683c, branch parity-history-dynconfig)
+- rust-ci.yml package=cadence-history: https://github.com/auenkr/cadence-rust/actions/runs/44849440777 — success
+- history-mixed-gate.yml database=mysql: https://github.com/auenkr/cadence-rust/actions/runs/44849453455 — success, log has `GATE SUMMARY failed: []`
