@@ -987,6 +987,20 @@ async fn run_with_lifecycle(
                     .expect("dynamic config lock")
                     .set_runtime_provider(Some(provider));
             }
+            {
+                // Go rpc.NewParams: dynamic admin.HeaderForwardingRules, static fallback.
+                cadence_service_core::header_forwarding::set_static_rules(
+                    cfg.header_forwarding_rules.clone(),
+                );
+                let dynamic = {
+                    let overlay = state.admin.dynamic_config.lock().expect("admin lock");
+                    cadence_persistence::dynamic_config::json_list(
+                        overlay.property_values("admin.HeaderForwardingRules"),
+                    )
+                };
+                cadence_service_core::header_forwarding::install_from_dynamic(dynamic.as_deref())
+                    .map_err(anyhow::Error::msg)?;
+            }
             // Go reads these once while constructing the clients
             // (persistence/client/factory.go:195-199, client/clientfactory.go:183-185,
             // handler/engine.go:1593 for EnableDebugMode at config build).
