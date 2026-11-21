@@ -237,6 +237,11 @@ impl HistoryEnv {
         .await?;
         // Go persistence/client/factory.go: every manager is wrapped by the
         // datastore limiter built from history.persistenceMaxQPS/GlobalMaxQPS.
+        {
+            let rules = (config.header_forwarding_rules)();
+            cadence_service_core::header_forwarding::install_from_dynamic(Some(&rules))
+                .map_err(anyhow::Error::msg)?;
+        }
         let persistence_limiter = {
             use cadence_persistence::rate_limited::PersistenceLimiter;
             let (host, global, members, bypass) = (config.clone(), config.clone(), membership.clone(), config.clone());

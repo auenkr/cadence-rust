@@ -41,6 +41,8 @@ pub struct Config {
     pub persistence_global_max_qps: Prop<i64>,
     /// `system.rateLimiterBypassCallerTypes` (Go `RateLimiterBypassCallerTypes`).
     pub rate_limiter_bypass_caller_types: Prop<Vec<serde_json::Value>>,
+    /// `admin.HeaderForwardingRules` (read once at startup).
+    pub header_forwarding_rules: Prop<Vec<serde_json::Value>>,
     pub shutdown_drain_duration: Prop<Duration>,
     pub enable_visibility_sampling: Prop<bool>,
     pub enable_read_from_closed_execution_v2: Prop<bool>,
@@ -306,6 +308,7 @@ impl Config {
             persistence_max_qps: dc.prop::<i64>("history.persistenceMaxQPS", 9000i64),
             persistence_global_max_qps: dc.prop::<i64>("history.persistenceGlobalMaxQPS", 0i64),
             rate_limiter_bypass_caller_types: dc.prop::<Vec<serde_json::Value>>("system.rateLimiterBypassCallerTypes", Vec::<serde_json::Value>::new()),
+            header_forwarding_rules: dc.prop::<Vec<serde_json::Value>>("admin.HeaderForwardingRules", vec![serde_json::json!({"Add": true, "Match": ""}), serde_json::json!({"Add": false, "Match": "^grpc-.*"})]),
             shutdown_drain_duration: dc.prop::<Duration>("history.shutdownDrainDuration", Duration::from_nanos(0)),
             enable_visibility_sampling: dc.prop::<bool>("system.enableVisibilitySampling", false),
             enable_read_from_closed_execution_v2: dc.prop::<bool>("system.enableReadFromClosedExecutionV2", false),

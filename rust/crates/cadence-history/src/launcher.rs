@@ -266,6 +266,7 @@ pub async fn run(bin_name: &'static str) -> anyhow::Result<()> {
     }
     let root = cli.root.clone().map(std::path::PathBuf::from).unwrap_or(std::env::current_dir()?);
     let cfg = load_config(cli.config, cli.env, cli.zone, cli.root)?;
+    cadence_service_core::header_forwarding::set_static_rules(cfg.header_forwarding_rules.clone());
     let metadata = cfg
         .cluster_metadata
         .as_ref()

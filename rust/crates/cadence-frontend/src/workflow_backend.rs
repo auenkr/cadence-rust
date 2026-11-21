@@ -1207,14 +1207,12 @@ pub fn build_workflow_api(
                 )
             })
         };
-        let mut rules = match dynamic {
-            Some(items) => cadence_service_core::header_forwarding::rules_from_dynamic(&items)
-                .map_err(anyhow::Error::msg)?,
-            None => cadence_service_core::header_forwarding::default_dynamic_rules(),
-        };
-        if rules.is_empty() {
-            rules = ctx.config.header_forwarding_rules.clone();
-        }
+        let rules = cadence_service_core::header_forwarding::resolve_rules(
+            dynamic.as_deref(),
+            &ctx.config.header_forwarding_rules,
+        )
+        .map_err(anyhow::Error::msg)?;
+        cadence_service_core::header_forwarding::install_rules(rules.clone());
         rules
     };
     let mut backend = ProductionBackend::new(history, matching)
