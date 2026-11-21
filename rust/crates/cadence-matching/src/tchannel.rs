@@ -580,14 +580,22 @@ async fn handle_call(
     let result = tokio::time::timeout(remaining, async {
         match matching {
             Some(matching) => {
-                crate::thrift_matching::dispatch_with_context(
-                    &matching,
-                    procedure,
-                    &request,
-                    deadline,
-                    matching_metric_context(&call),
-                )
-                .await
+                let inbound = app_headers
+                    .iter()
+                    .map(|(k, v)| (k.to_ascii_lowercase(), v.clone()))
+                    .collect();
+                cadence_service_core::header_forwarding::INBOUND_HEADERS
+                    .scope(
+                        inbound,
+                        crate::thrift_matching::dispatch_with_context(
+                            &matching,
+                            procedure,
+                            &request,
+                            deadline,
+                            matching_metric_context(&call),
+                        ),
+                    )
+                    .await
             }
             None => {
                 if definition.service == "HistoryService" {

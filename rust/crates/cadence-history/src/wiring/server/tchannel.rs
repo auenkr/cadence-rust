@@ -401,7 +401,10 @@ async fn handle_call(w: Arc<Mutex<OwnedWriteHalf>>, id: u32, call: Call, state: 
         remaining,
         cadence_persistence::caller_type::scope_from_headers(
             &app_headers,
-            crate::wiring::assembly::engine_decision::CLIENT_HEADERS.scope(client_headers, dispatch(&state, &procedure, &args)),
+            cadence_service_core::header_forwarding::INBOUND_HEADERS.scope(
+                app_headers.iter().map(|(k, v)| (k.to_ascii_lowercase(), v.clone())).collect(),
+                crate::wiring::assembly::engine_decision::CLIENT_HEADERS.scope(client_headers, dispatch(&state, &procedure, &args)),
+            ),
         ),
     )
     .await;

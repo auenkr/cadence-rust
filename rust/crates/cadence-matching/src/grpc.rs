@@ -269,10 +269,14 @@ where
         let caller_type = headers
             .get(cadence_persistence::caller_type::CALLER_TYPE_HEADER)
             .cloned();
+        let inbound = headers.clone();
         Box::pin(async move {
             cadence_persistence::caller_type::scope_from_header(
                 caller_type.as_deref(),
-                GRPC_CALLER.scope((headers, deadline), async move { inner.call(request).await }),
+                cadence_service_core::header_forwarding::INBOUND_HEADERS.scope(
+                    inbound,
+                    GRPC_CALLER.scope((headers, deadline), async move { inner.call(request).await }),
+                ),
             )
             .await
         })
