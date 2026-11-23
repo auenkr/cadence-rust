@@ -1675,21 +1675,15 @@ pub async fn read_dlq_messages(
         }
     };
     let ack_level = ack_levels.get("domainReplication").copied().unwrap_or(-1);
-    let first_message_id = match decode_domain_dlq_page_token(&req.next_page_token) {
-        Ok(Some(id)) => id,
-        Ok(None) => ack_level,
-        Err(error) => {
-            return crate::handlers::error_response(
-                "InternalServiceError",
-                StatusCode::INTERNAL_SERVER_ERROR,
-                error,
-            )
-        }
-    };
     let end_message_id = req.inclusive_end_message_id.unwrap_or(i64::MAX - 1);
     let page_size = read_dlq_page_size(req.maximum_page_size);
-    match persistence.read_domain_replication_dlq(first_message_id, end_message_id, page_size) {
-        Ok(rows) => {
+    match persistence.read_domain_replication_dlq_page(
+        ack_level,
+        end_message_id,
+        page_size,
+        &req.next_page_token,
+    ) {
+        Ok((rows, next_page_token)) => {
             let mut tasks = Vec::with_capacity(rows.len());
             for row in &rows {
                 let task = (|| {
@@ -1711,11 +1705,6 @@ pub async fn read_dlq_messages(
                     }
                 }
             }
-            let next_page_token = if rows.len() >= page_size {
-                encode_domain_dlq_page_token(rows.last().map_or(first_message_id, |row| row.id))
-            } else {
-                vec![]
-            };
             ok_json(serde_json::json!({
                 "replicationTasks": tasks,
                 "nextPageToken": next_page_token,
@@ -1790,6 +1779,7 @@ pub async fn purge_dlq_messages(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn decode_domain_dlq_page_token(token: &[u8]) -> Result<Option<i64>, String> {
     if token.is_empty() {
         return Ok(None);
@@ -1809,6 +1799,7 @@ pub(crate) fn decode_domain_dlq_page_token(token: &[u8]) -> Result<Option<i64>, 
     )))
 }
 
+#[cfg(test)]
 pub(crate) fn encode_domain_dlq_page_token(message_id: i64) -> Vec<u8> {
     message_id.to_le_bytes().to_vec()
 }
@@ -1867,13 +1858,16 @@ pub fn merge_domain_dlq_messages(
     })?;
     let ack_levels = persistence.get_domain_replication_dlq_ack_levels()?;
     let ack_level = ack_levels.get("domainReplication").copied().unwrap_or(-1);
-    let first_message_id = decode_domain_dlq_page_token(&req.next_page_token)?.unwrap_or(ack_level);
     let end_message_id = req.inclusive_end_message_id.unwrap_or(i64::MAX - 1);
     // Go passes MergeDLQMessages.MaximumPageSize through unchanged. Unlike
     // ReadDLQMessages, it does not apply the 1000-message read default.
     let page_size = req.maximum_page_size.max(0) as usize;
-    let rows =
-        persistence.read_domain_replication_dlq(first_message_id, end_message_id, page_size)?;
+    let (rows, next_page_token) = persistence.read_domain_replication_dlq_page(
+        ack_level,
+        end_message_id,
+        page_size,
+        &req.next_page_token,
+    )?;
     // Go starts ackedMessageID at 0 and always range-deletes and updates the
     // ack level, even when no message was merged (persistence ignores stale levels).
     let mut last_processed = 0_i64;
@@ -1912,11 +1906,6 @@ pub fn merge_domain_dlq_messages(
     // Go treats acknowledgement metadata as best-effort after delete.
     let _ = persistence
         .update_domain_replication_dlq_ack_level("domainReplication".into(), last_processed);
-    let next_page_token = if rows.len() >= page_size {
-        encode_domain_dlq_page_token(rows.last().map_or(first_message_id, |row| row.id))
-    } else {
-        Vec::new()
-    };
     Ok(cadence_api::admin::MergeDLQMessagesResponse { next_page_token })
 }
 
@@ -3078,6 +3067,67 @@ mod tests {
     }
 
     #[test]
+    fn domain_dlq_read_passes_opaque_backend_token_through() {
+        #[derive(Debug)]
+        struct P;
+        impl cadence_persistence::matching_domain_metadata::DomainMetadataPersistence for P {
+            fn metadata_version(&self) -> Result<i64, String> {
+                Ok(0)
+            }
+            fn create_domain(
+                &self,
+                _: &cadence_persistence::matching_domain_metadata::MatchingDomainMetadata,
+                _: i64,
+            ) -> Result<(), String> {
+                unimplemented!()
+            }
+            fn update_domain(
+                &self,
+                _: &cadence_persistence::matching_domain_metadata::MatchingDomainMetadata,
+                _: i64,
+            ) -> Result<(), String> {
+                unimplemented!()
+            }
+            fn delete_domain(&self, _: &str) -> Result<(), String> {
+                unimplemented!()
+            }
+            fn get_domain_replication_dlq_ack_levels(
+                &self,
+            ) -> Result<std::collections::HashMap<String, i64>, String> {
+                Ok(Default::default())
+            }
+            fn read_domain_replication_dlq_page(
+                &self,
+                first: i64,
+                _last: i64,
+                _page: usize,
+                token: &[u8],
+            ) -> Result<
+                (
+                    Vec<cadence_persistence::matching_domain_metadata::DomainReplicationDlqMessage>,
+                    Vec<u8>,
+                ),
+                String,
+            > {
+                assert_eq!(first, -1);
+                assert_eq!(token, b"cassandra-page-state");
+                Ok((Vec::new(), b"next-opaque-state".to_vec()))
+            }
+        }
+        let mut state = crate::handlers::AppState::default();
+        state.domain_metadata_persistence = Some(std::sync::Arc::new(P));
+        let response = super::read_domain_dlq_messages(
+            &state,
+            cadence_api::admin::ReadDLQMessagesRequest {
+                next_page_token: b"cassandra-page-state".to_vec(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(response.next_page_token, b"next-opaque-state");
+    }
+
+    #[test]
     fn domain_dlq_page_token_error_matches_go_format() {
         assert_eq!(
             super::decode_domain_dlq_page_token(&[1, 2, 3]).unwrap_err(),
@@ -3968,12 +4018,14 @@ pub fn read_domain_dlq_messages(
     })?;
     let ack_levels = persistence.get_domain_replication_dlq_ack_levels()?;
     let ack_level = ack_levels.get("domainReplication").copied().unwrap_or(-1);
-    let first_message_id =
-        decode_domain_dlq_page_token(&request.next_page_token)?.unwrap_or(ack_level);
     let end_message_id = request.inclusive_end_message_id.unwrap_or(i64::MAX - 1);
     let page_size = read_dlq_page_size(request.maximum_page_size);
-    let rows =
-        persistence.read_domain_replication_dlq(first_message_id, end_message_id, page_size)?;
+    let (rows, next_page_token) = persistence.read_domain_replication_dlq_page(
+        ack_level,
+        end_message_id,
+        page_size,
+        &request.next_page_token,
+    )?;
     let mut tasks = Vec::with_capacity(rows.len());
     for row in &rows {
         let thrift = decode_thriftrw_payload(&row.payload)?;
@@ -3985,11 +4037,6 @@ pub fn read_domain_dlq_messages(
         task.source_task_id = Some(row.id);
         tasks.push(task);
     }
-    let next_page_token = if rows.len() >= page_size {
-        encode_domain_dlq_page_token(rows.last().map_or(first_message_id, |row| row.id))
-    } else {
-        Vec::new()
-    };
     Ok(cadence_api::admin::ReadDLQMessagesResponse {
         dlq_type: None,
         replication_tasks: tasks,
