@@ -817,6 +817,23 @@ impl GoSqlDomainPersistence for CassandraFrontendDomainPersistence {
     }
 }
 
+fn cassandra_list_domains_paging(
+    page_size: i32,
+    next_page_token: Option<&[u8]>,
+) -> Result<(Option<i32>, scylla::response::PagingState), MatchingDomainMetadataError> {
+    use scylla::response::PagingState;
+
+    if page_size == 0 {
+        return Err(MatchingDomainMetadataError::InvalidPageSize);
+    }
+    // gocql omits negative page sizes and their empty paging states.
+    let paging_state = next_page_token
+        .filter(|token| page_size > 0 || !token.is_empty())
+        .map(PagingState::new_from_raw_bytes)
+        .unwrap_or_else(PagingState::start);
+    Ok(((page_size > 0).then_some(page_size), paging_state))
+}
+
 impl CassandraDomainMetadataStore {
     pub fn new(
         driver: std::sync::Arc<crate::cassandra::CassandraBlockingSession>,
@@ -938,27 +955,20 @@ impl CassandraDomainMetadataStore {
             CassandraDomainConfigUdt, CassandraDomainReplicationConfigUdt,
             CassandraNullableDomainUdt,
         };
-        use scylla::{response::PagingState, statement::Statement};
-        if page_size == 0 {
-            return Err(MatchingDomainMetadataError::InvalidPageSize);
-        }
+        use scylla::statement::Statement;
+        let (page_size, paging_state) = cassandra_list_domains_paging(page_size, next_page_token)?;
         let session = self.driver.session();
         let mut query = Statement::new("SELECT name, domain, config, replication_config, is_global_domain, config_version, failover_version, failover_notification_version, previous_failover_version, failover_end_time, last_updated_time, notification_version FROM domains_by_name_v2 WHERE domains_partition=?");
-        let paging_state = next_page_token
-            .filter(|token| page_size > 0 || !token.is_empty())
-            .map(|token| PagingState::new_from_raw_bytes(token.to_vec()))
-            .unwrap_or_else(PagingState::start);
-        let (result, paging_response) = if page_size < 0 {
-            // gocql omits the page size but still sends any nonempty paging state.
+        let (result, paging_response) = if let Some(page_size) = page_size {
+            query.set_page_size(page_size);
+            self.driver
+                .run(session.query_single_page(query, (0_i32,), paging_state))
+        } else {
             self.driver.run(session.query_unpaged_with_paging_state(
                 query,
                 (0_i32,),
                 paging_state,
             ))
-        } else {
-            query.set_page_size(page_size);
-            self.driver
-                .run(session.query_single_page(query, (0_i32,), paging_state))
         }
         .map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?;
         let rows = result
@@ -2284,6 +2294,33 @@ mod tests {
     use super::*;
     use cadence_thrift::protocol::Writer;
     use cadence_thrift::value::write_struct;
+
+    #[test]
+    fn cassandra_list_domains_uses_the_sign_of_the_page_size() {
+        let token = [0xff, 0x00, 0x12];
+        for page_size in [-1, i32::MIN] {
+            let (size, state) = cassandra_list_domains_paging(page_size, Some(&token)).unwrap();
+            assert_eq!(size, None);
+            assert_eq!(
+                state.as_bytes_slice().map(AsRef::as_ref),
+                Some(token.as_slice())
+            );
+
+            for empty_token in [None, Some(&[][..])] {
+                let (size, state) = cassandra_list_domains_paging(page_size, empty_token).unwrap();
+                assert_eq!(size, None);
+                assert!(state.as_bytes_slice().is_none());
+            }
+        }
+
+        let (size, state) = cassandra_list_domains_paging(i32::MAX, Some(&[])).unwrap();
+        assert_eq!(size, Some(i32::MAX));
+        assert_eq!(state.as_bytes_slice().map(AsRef::as_ref), Some(&[][..]));
+        assert!(matches!(
+            cassandra_list_domains_paging(0, Some(&token)),
+            Err(MatchingDomainMetadataError::InvalidPageSize)
+        ));
+    }
 
     #[test]
     fn go_sql_domain_metadata_encoder_round_trips_the_domain_row() {

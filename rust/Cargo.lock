@@ -452,6 +452,7 @@ dependencies = [
  "snap",
  "tokio",
  "tonic",
+ "tracing",
  "tracing-subscriber",
  "uuid",
 ]

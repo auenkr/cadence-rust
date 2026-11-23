@@ -12,7 +12,7 @@ use crate::matching_domain_metadata::{
 };
 use cadence_thrift::{protocol::Writer, value::write_struct, ToThrift};
 use chrono::{DateTime, Utc};
-use scylla::response::PagingState;
+use scylla::response::{PagingState, PagingStateResponse};
 use scylla::statement::{
     batch::{Batch, BatchType},
     Statement,
@@ -247,11 +247,7 @@ impl CassandraDomainMetadataPersistence {
         let page_size = i32::try_from(page_size).map_err(|error| error.to_string())?;
         let mut statement = Statement::new(DOMAIN_DLQ_READ_PAGED);
         statement.set_page_size(page_size);
-        let paging_state = if page_token.is_empty() {
-            PagingState::start()
-        } else {
-            PagingState::new_from_raw_bytes(page_token.to_vec())
-        };
+        let paging_state = domain_dlq_paging_state(page_token);
         let session = self.driver.session();
         let (result, paging_response) = self
             .driver
@@ -265,12 +261,7 @@ impl CassandraDomainMetadataPersistence {
                 paging_state,
             ))
             .map_err(|error| error.to_string())?;
-        let next = match paging_response.into_paging_control_flow() {
-            std::ops::ControlFlow::Continue(state) => {
-                state.as_bytes_slice().map(|b| b.to_vec()).unwrap_or_default()
-            }
-            std::ops::ControlFlow::Break(()) => Vec::new(),
-        };
+        let next = domain_dlq_next_page_token(paging_response);
         let rows = result
             .into_rows_result()
             .map_err(|error| error.to_string())?;
@@ -979,10 +970,47 @@ impl DomainMetadataPersistence for CassandraDomainMetadataPersistence {
     }
 }
 
+fn domain_dlq_paging_state(page_token: &[u8]) -> PagingState {
+    if page_token.is_empty() {
+        PagingState::start()
+    } else {
+        PagingState::new_from_raw_bytes(page_token.to_vec())
+    }
+}
+
+fn domain_dlq_next_page_token(paging_response: PagingStateResponse) -> Vec<u8> {
+    match paging_response.into_paging_control_flow() {
+        std::ops::ControlFlow::Continue(state) => {
+            state.as_bytes_slice().map(|b| b.to_vec()).unwrap_or_default()
+        }
+        std::ops::ControlFlow::Break(()) => Vec::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use cadence_api::types::{DomainConfiguration, DomainInfo, DomainReplicationConfiguration};
+
+    #[test]
+    fn dlq_next_page_token_round_trips_opaque_cassandra_bytes() {
+        let raw_token = [0x00, 0xff, 0x21, 0x00];
+        let response = PagingStateResponse::new_from_raw_bytes(Some(&raw_token));
+        let token = domain_dlq_next_page_token(response);
+        assert_eq!(token, raw_token);
+        let resumed = domain_dlq_paging_state(&token);
+        assert_eq!(
+            resumed.as_bytes_slice().map(AsRef::as_ref),
+            Some(raw_token.as_slice())
+        );
+    }
+
+    #[test]
+    fn dlq_final_page_returns_an_empty_token() {
+        let token = domain_dlq_next_page_token(PagingStateResponse::NoMorePages);
+        assert!(token.is_empty());
+        assert!(domain_dlq_paging_state(&token).as_bytes_slice().is_none());
+    }
 
     #[test]
     fn domain_blobs_carry_go_thriftrw_version_preamble() {
