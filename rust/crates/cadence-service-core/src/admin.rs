@@ -710,6 +710,16 @@ pub trait ClusterMembership: Send + Sync {
             }))
     }
 
+    /// Resolve a Matching ring member by its address (Go `membership.Resolver`
+    /// host lookup, used to read the member's `grpc` label).
+    fn matching_host(
+        &self,
+        address: &str,
+    ) -> Result<Option<cadence_common::membership::Host>, String> {
+        let _ = address;
+        Ok(None)
+    }
+
     /// Resolve the owner of a task list name on the live Matching ring (Go client
     /// routes Matching RPCs by task list on the `cadence-matching` hashring).
     fn matching_owner(

@@ -278,6 +278,21 @@ impl cadence_service_core::admin::ClusterMembership for RingpopClusterMembership
             })
             .and_then(|member| member.matching_host("cadence-history")))
     }
+    fn matching_host(
+        &self,
+        address: &str,
+    ) -> Result<Option<cadence_common::membership::Host>, String> {
+        Ok(self
+            .0
+            .snapshot()
+            .members
+            .iter()
+            .find(|member| {
+                member.address == address
+                    || member.tchannel_address().as_deref() == Some(address)
+            })
+            .and_then(|member| member.matching_host("cadence-matching")))
+    }
     fn history_owner(
         &self,
         shard: i32,

@@ -390,9 +390,18 @@ impl ProductionBackend {
         timeout: Duration,
     ) -> Result<Struct, CadenceError> {
         if let Some(grpc) = &self.grpc {
+            let member_grpc = self.membership.get().and_then(|resolver| {
+                let host = if service == HISTORY_SERVICE {
+                    resolver.history_host(addr)
+                } else {
+                    resolver.matching_host(addr)
+                };
+                host.ok().flatten().map(|h| h.grpc_address)
+            });
             if let Some(result) = grpc
                 .try_call(
                     addr,
+                    member_grpc.as_deref(),
                     service,
                     method,
                     &envelope,
