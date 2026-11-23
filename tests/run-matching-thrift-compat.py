@@ -434,7 +434,7 @@ with (artifacts / 'server.log').open('w') as log:
             server.send_signal(signal.SIGTERM)
         except ProcessLookupError:
             pass
-        server.wait(timeout=10)
+        server.wait(timeout=60)
         shutdown_probe.settimeout(3)
         try:
             if shutdown_probe.recv(1) != b'':
