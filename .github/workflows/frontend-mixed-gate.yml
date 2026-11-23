@@ -79,7 +79,7 @@ jobs:
         with:
           ref: ${{ inputs.rust_ref || github.ref_name }}
           path: rustsrc
-          submodules: true
+          submodules: recursive
       - name: IDL submodule
         run: git submodule update --init --recursive go && scripts/go-overlay.sh
       - uses: actions/setup-go@v5
