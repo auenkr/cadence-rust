@@ -254,7 +254,19 @@ func TestRustMatchingNativeThrift(t *testing.T) {
 			}
 			step("query-poll-returned")
 			if query.Query.GetQueryType() != "ping" {
-				t.Fatalf("query payload changed: %v", query)
+				diag, diagCancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer diagCancel()
+				info, infoErr := matching.DescribeTaskList(diag, &m.DescribeTaskListRequest{DomainUUID: common.StringPtr(domainID), DescRequest: &s.DescribeTaskListRequest{TaskList: queryList, TaskListType: s.TaskListTypeDecision.Ptr()}})
+				var queryOutcome string
+				select {
+				case v := <-result:
+					queryOutcome = fmt.Sprintf("result=%v", v)
+				case e := <-queryErrors:
+					queryOutcome = fmt.Sprintf("error=%T %v", e, e)
+				case <-diag.Done():
+					queryOutcome = "QueryWorkflow still blocked"
+				}
+				t.Fatalf("query payload changed: %v; describe=%v err=%v; query %s", query, info, infoErr, queryOutcome)
 			}
 			var token struct {
 				TaskID   string `json:"TaskID"`
