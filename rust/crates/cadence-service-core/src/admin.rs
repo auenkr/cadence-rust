@@ -3013,9 +3013,12 @@ mod tests {
     #[tokio::test]
     async fn resend_resolves_domain_before_field_validation() {
         use axum::extract::State;
-        let mut state = crate::handlers::AppState::default();
-        state.history_admin_channel =
-            Some(tonic::transport::Channel::from_static("http://127.0.0.1:1").connect_lazy());
+        let state = crate::handlers::AppState {
+            history_admin_channel: Some(
+                tonic::transport::Channel::from_static("http://127.0.0.1:1").connect_lazy(),
+            ),
+            ..Default::default()
+        };
         let req = cadence_api::admin::ResendReplicationTasksRequest {
             domain_id: "no-such-domain".into(),
             workflow_id: "wf".into(),
@@ -3070,7 +3073,6 @@ mod tests {
         let req = cadence_api::admin::AdminDescribeWorkflowExecutionRequest {
             domain: "no-such-domain".into(),
             execution: Some(cadence_api::types::WorkflowExecution::new("w", "")),
-            ..Default::default()
         };
         let err = super::describe_workflow_execution_admin_core(&state, req)
             .await
@@ -3130,8 +3132,10 @@ mod tests {
                 Ok((Vec::new(), b"next-opaque-state".to_vec()))
             }
         }
-        let mut state = crate::handlers::AppState::default();
-        state.domain_metadata_persistence = Some(std::sync::Arc::new(P));
+        let state = crate::handlers::AppState {
+            domain_metadata_persistence: Some(std::sync::Arc::new(P)),
+            ..Default::default()
+        };
         let response = super::read_domain_dlq_messages(
             &state,
             cadence_api::admin::ReadDLQMessagesRequest {
