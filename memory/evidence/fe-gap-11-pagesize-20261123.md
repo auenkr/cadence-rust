@@ -8,4 +8,19 @@ Go defaults zero to 100 in `go/common/domain/handler.go` and passes every other 
 
 Unit regressions cover a negative signed value with an opaque cursor through the persisted Frontend manager and an unbounded result with no cursor in memory. Existing positive-page tests cover continuation.
 
-CI is dispatched on `fe-gap-11-pagesize` for `cadence-persistence`, `cadence-matching`, the clean workspace, and the Frontend mixed gate. See the [branch runs](https://github.com/auenkr/cadence-rust/actions?query=branch%3Afe-gap-11-pagesize).
+## CI evidence
+
+Validated implementation commit: `1d308c7d0b57891427d7bda593d8ca652a920b0b`.
+
+| Check | Conclusion | Run |
+| --- | --- | --- |
+| `rust-ci.yml package=cadence-persistence` | Success, including both negative-size regressions | [45196609084](https://github.com/auenkr/cadence-rust/actions/runs/45196609084) |
+| `rust-ci.yml package=cadence-matching` | Success | [45196608958](https://github.com/auenkr/cadence-rust/actions/runs/45196608958) |
+| `rust-ci.yml clean_target=true` | Success, with workspace clippy before workspace tests | [45196608735](https://github.com/auenkr/cadence-rust/actions/runs/45196608735) |
+| `frontend-mixed-gate.yml` (MySQL) | Success, `GATE SUMMARY failed: []` | [45196608983](https://github.com/auenkr/cadence-rust/actions/runs/45196608983) |
+| `frontend-mixed-gate.yml database=cassandra` | Success, `GATE SUMMARY failed: []` | [45196608825](https://github.com/auenkr/cadence-rust/actions/runs/45196608825) |
+| `rust-ci.yml package=scylla` | Standalone vendored test targets failed to compile because Cargo did not link upstream test dependencies, including `assert_matches` and `scylla_proxy`. The scoped Persistence run compiled the vendored library and the Cassandra gate exercised it as part of Cadence. | [45196608928](https://github.com/auenkr/cadence-rust/actions/runs/45196608928) |
+
+Both mixed runs built a fresh Rust server. The MySQL binary SHA256 was `19561e763f8879431ce21e5b4aa9829dce95766aee2f3fdb2bbad2167594aff3`. The Cassandra binary SHA256 was `d3a93e5c3c34743ba46b729a3f72a34e661ae10f217de05eae557ecc70733871`. The mixed SDK gate exercises regular ListDomains pagination. The negative-size cases were covered by the Rust unit tests and the Cassandra wire behavior by source inspection.
+
+See the [branch runs](https://github.com/auenkr/cadence-rust/actions?query=branch%3Afe-gap-11-pagesize) for validation on the evidence commit.
