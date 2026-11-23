@@ -1026,7 +1026,10 @@ mod tests {
         .unwrap();
         let field = execution_field_name("GetWorkflowExecutionHistory");
         assert_eq!(req[field]["workflowId"], "w");
-        assert_eq!(execution_field_name("SignalWorkflowExecution"), "workflowExecution");
+        assert_eq!(
+            execution_field_name("SignalWorkflowExecution"),
+            "workflowExecution"
+        );
     }
 
     #[test]
@@ -1299,9 +1302,7 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("unknown cluster name: b"));
+        assert!(err.to_string().contains("unknown cluster name: b"));
         assert!(calls.lock().unwrap().is_empty());
     }
 }
