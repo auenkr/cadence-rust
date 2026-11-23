@@ -1450,15 +1450,13 @@ async fn run_with_lifecycle(
             };
             let frontend_ringpop_provider = if let Some(listener) = &frontend_tchannel_listener {
                 let mut frontend_ringpop = cfg.ringpop.clone();
-                if embedded_development {
+                if embedded_development && !wanted.contains(&service::ServiceName::History) {
                     // The development config bootstraps at the default 7933-7935
-                    // ports (where Go's development.yaml services listen). When
-                    // CLI flags move the Frontend TChannel port, add its actual
-                    // address so the one-node dev ring can still join itself.
-                    let own = listener.local_addr()?.to_string();
-                    if !frontend_ringpop.bootstrap_hosts.contains(&own) {
-                        frontend_ringpop.bootstrap_hosts.push(own);
-                    }
+                    // ports, where Go's development.yaml History/Worker live.
+                    // Without History in this process nothing listens there, so
+                    // the one-node dev ring bootstraps from itself only (join
+                    // lists exclude the local address, as in Go).
+                    frontend_ringpop.bootstrap_hosts = vec![listener.local_addr()?.to_string()];
                 }
                 Some(std::sync::Arc::new(
                     crate::matching_ringpop_provider::MatchingRingpopProvider::new(
