@@ -910,17 +910,19 @@ impl CassandraDomainMetadataStore {
         }
         let session = self.driver.session();
         let mut query = Statement::new("SELECT name, domain, config, replication_config, is_global_domain, config_version, failover_version, failover_notification_version, previous_failover_version, failover_end_time, last_updated_time, notification_version FROM domains_by_name_v2 WHERE domains_partition=?");
+        let paging_state = next_page_token
+            .filter(|token| page_size > 0 || !token.is_empty())
+            .map(|token| PagingState::new_from_raw_bytes(token.to_vec()))
+            .unwrap_or_else(PagingState::start);
         let (result, paging_response) = if page_size < 0 {
-            // gocql omits nonpositive page sizes. Cassandra executes the
-            // query unpaged and does not resume from the supplied cursor.
-            self.driver
-                .run(session.query_unpaged(query, (0_i32,)))
-                .map(|result| (result, scylla::response::PagingStateResponse::NoMorePages))
+            // gocql omits the page size but still sends any nonempty paging state.
+            self.driver.run(session.query_unpaged_with_paging_state(
+                query,
+                (0_i32,),
+                paging_state,
+            ))
         } else {
             query.set_page_size(page_size);
-            let paging_state = next_page_token
-                .map(|token| PagingState::new_from_raw_bytes(token.to_vec()))
-                .unwrap_or_else(PagingState::start);
             self.driver
                 .run(session.query_single_page(query, (0_i32,), paging_state))
         }
