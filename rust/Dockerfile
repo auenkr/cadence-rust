@@ -17,12 +17,14 @@ COPY go/proto go/proto
 COPY rust rust
 WORKDIR /src/rust
 ENV OPENSSL_STATIC=1 OPENSSL_DIR=/usr CARGO_PROFILE_RELEASE_DEBUG=0 CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
-RUN cargo build --release -p cadence-server --features jemalloc-default -j2 \
-    && sha256sum target/release/cadence-server > /cadence-server.sha256
+RUN cargo build --release -p cadence-server -p cadence-history --features jemalloc-default,cadence-history/jemalloc-default -j2 \
+    && sha256sum target/release/cadence-server target/release/cadence-history > /cadence-server.sha256
 
 FROM ${GO_IMAGE} AS final
 USER root
-COPY --from=builder --chown=cadence:cadence /src/rust/target/release/cadence-server /usr/local/bin/cadence-server
+COPY --from=builder --chown=cadence:cadence /src/rust/target/release/cadence-server /usr/local/bin/cadence-server-real
+COPY --from=builder --chown=cadence:cadence /src/rust/target/release/cadence-history /usr/local/bin/cadence-history
+COPY --chown=cadence:cadence rust/docker/cadence-server-dispatch.sh /usr/local/bin/cadence-server
 COPY --from=builder /cadence-server.sha256 /etc/cadence/cadence-server.sha256
 COPY --chown=cadence:cadence rust/docker/cadence-auto-setup.sh /usr/local/bin/cadence-auto-setup.sh
 ENV CADENCE_SCHEMA_HELPER=/usr/local/bin/cadence-auto-setup.sh
