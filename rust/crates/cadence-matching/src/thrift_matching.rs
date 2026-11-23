@@ -1044,17 +1044,27 @@ async fn http_handler(
         }
     };
     let deadline = crate::yarpc::ttl_deadline(&headers, std::time::Duration::from_secs(60));
+    // Go serves yarpc HTTP through the same inbound middleware: capture the
+    // inbound headers for forwarding and the caller type.
+    let inbound = crate::grpc_matching::inbound_headers(&headers);
+    let caller_type = header(cadence_persistence::caller_type::CALLER_TYPE_HEADER);
     match tokio::time::timeout(
         deadline.saturating_duration_since(Instant::now()),
-        dispatch_with_context(
-            &matching,
-            procedure,
-            &args,
-            deadline,
-            crate::matching_metrics::InboundMetricContext {
-                caller: header("Rpc-Caller").map(str::to_owned),
-                transport: Some("http".to_owned()),
-            },
+        cadence_persistence::caller_type::scope_from_header(
+            caller_type,
+            cadence_service_core::header_forwarding::INBOUND_HEADERS.scope(
+                inbound,
+                dispatch_with_context(
+                    &matching,
+                    procedure,
+                    &args,
+                    deadline,
+                    crate::matching_metrics::InboundMetricContext {
+                        caller: header("Rpc-Caller").map(str::to_owned),
+                        transport: Some("http".to_owned()),
+                    },
+                ),
+            ),
         ),
     )
     .await

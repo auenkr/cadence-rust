@@ -584,8 +584,9 @@ async fn handle_call(
                     .iter()
                     .map(|(k, v)| (k.to_ascii_lowercase(), v.clone()))
                     .collect();
-                cadence_service_core::header_forwarding::INBOUND_HEADERS
-                    .scope(
+                cadence_persistence::caller_type::scope_from_headers(
+                    &app_headers,
+                    cadence_service_core::header_forwarding::INBOUND_HEADERS.scope(
                         inbound,
                         crate::thrift_matching::dispatch_with_context(
                             &matching,
@@ -594,8 +595,9 @@ async fn handle_call(
                             deadline,
                             matching_metric_context(&call),
                         ),
-                    )
-                    .await
+                    ),
+                )
+                .await
             }
             None => {
                 if definition.service == "HistoryService" {
@@ -1077,5 +1079,45 @@ mod tests {
             request.tags.get("transport").map(String::as_str),
             Some("tchannel")
         );
+    }
+}
+
+#[cfg(test)]
+mod inbound_header_forwarding_tests {
+    use std::collections::HashMap;
+
+    /// Mirrors the TChannel inbound scoping: app headers captured lowercase,
+    /// then forwarded on outbound calls per the default rules.
+    #[tokio::test]
+    async fn captured_inbound_headers_are_forwarded_on_outbound_calls() {
+        let app_headers: HashMap<String, String> = HashMap::from([
+            ("X-Trace".to_owned(), "t1".to_owned()),
+            ("grpc-timeout".to_owned(), "5S".to_owned()),
+            (
+                cadence_persistence::caller_type::CALLER_TYPE_HEADER.to_owned(),
+                "cli".to_owned(),
+            ),
+        ]);
+        let inbound = app_headers
+            .iter()
+            .map(|(k, v)| (k.to_ascii_lowercase(), v.clone()))
+            .collect();
+        let mut m = tonic::metadata::MetadataMap::new();
+        cadence_persistence::caller_type::scope_from_headers(
+            &app_headers,
+            cadence_service_core::header_forwarding::INBOUND_HEADERS.scope(inbound, async {
+                cadence_service_core::header_forwarding::apply_caller_type(&mut m);
+            }),
+        )
+        .await;
+        assert_eq!(m.get("x-trace").unwrap().to_str().unwrap(), "t1");
+        assert_eq!(
+            m.get(cadence_persistence::caller_type::CALLER_TYPE_HEADER)
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "cli"
+        );
+        assert!(m.get("grpc-timeout").is_none());
     }
 }
