@@ -222,21 +222,36 @@ impl EsVisibility {
     ) -> Result<ListResult, QueryError> {
         let page_size = Self::page_size(page_size);
         let token = PageToken::decode(next_page_token)?;
-        let resp = if token.scroll_id.is_empty() {
-            let body = es_query::dsl_for_scan(query, domain_id, page_size)?;
+        let fresh_scroll = || -> Result<Value, String> {
+            let body = es_query::dsl_for_scan(query, domain_id, page_size)
+                .map_err(|e| format!("{e:?}"))?;
             self.client.call(
                 "POST",
                 &format!("/{}/_search?scroll=5m", self.index),
                 Some(body),
             )
+        };
+        let resp = if token.scroll_id.is_empty() {
+            es_query::dsl_for_scan(query, domain_id, page_size)?;
+            fresh_scroll().map_err(|e| internal("ScanWorkflowExecutions failed, ", e))?
         } else {
-            self.client.call(
+            match self.client.call(
                 "POST",
                 "/_search/scroll",
                 Some(json!({"scroll": "5m", "scroll_id": token.scroll_id}).to_string()),
-            )
-        }
-        .map_err(|e| internal("ScanWorkflowExecutions failed, ", e))?;
+            ) {
+                Ok(r) => r,
+                // Go isNodeUnavailableError: retry once with a fresh scroll.
+                Err(e) if e.contains("node") && e.contains("not available") => {
+                    fresh_scroll().map_err(|_| {
+                        QueryError::Internal(format!(
+                            "ScanByQuery failed after fresh scroll. Error: {e}"
+                        ))
+                    })?
+                }
+                Err(e) => return Err(internal("ScanWorkflowExecutions failed, ", e)),
+            }
+        };
         let hits = parse_hits(&resp);
         let scroll_id = if hits.scroll_id.is_empty() {
             token.scroll_id.clone()
@@ -406,6 +421,21 @@ mod tests {
         let (f, v) = fake(vec![Ok(json!({"count": 7}))]);
         assert_eq!(v.count("d", "WorkflowID = 'x'").unwrap(), 7);
         assert_eq!(f.calls.lock().unwrap()[0].1, "/idx/_count");
+    }
+
+    #[test]
+    fn scan_retries_fresh_scroll_on_node_unavailable() {
+        let tok = PageToken { scroll_id: "old".into(), ..Default::default() }.encode();
+        let (f, v) = fake(vec![
+            Err("node [x] not available".into()),
+            Ok(json!({"_scroll_id": "new", "hits": {"hits": [hit("a", 0)]}})),
+        ]);
+        let (infos, _) = v.scan("d", "", 5, &tok).unwrap();
+        assert_eq!(infos.len(), 1);
+        assert_eq!(f.calls.lock().unwrap()[1].1, "/idx/_search?scroll=5m");
+        let (_, v) = fake(vec![Err("node 1 not available".into()), Err("boom".into())]);
+        let err = v.scan("d", "", 5, &tok).unwrap_err();
+        assert!(format!("{err:?}").contains("ScanByQuery failed after fresh scroll. Error: node 1 not available"));
     }
 
     #[test]
