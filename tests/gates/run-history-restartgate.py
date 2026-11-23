@@ -284,6 +284,8 @@ frontend_env = {
     **os.environ,
     'CADENCE_HISTORY_TCHANNEL_ADDR': f'127.0.0.1:{ports["HISTORY_PORT"]}',
     'CADENCE_MATCHING_TCHANNEL_ADDR': f'127.0.0.1:{ports["RUST_MATCHING_PORT"]}',
+    'CADENCE_HISTORY_GRPC_PORT': ports['HISTORY_PORT_GRPC'],
+    'CADENCE_MATCHING_GRPC_PORT': ports['RUST_MATCHING_PORT_GRPC'],
 }
 cli_t = [args.go_cli, '--address', f'127.0.0.1:{ports["FRONTEND_PORT"]}', '--transport', 'tchannel']
 cli_g = [args.go_cli, '--address', f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', '--transport', 'grpc']
