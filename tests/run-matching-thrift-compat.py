@@ -740,6 +740,11 @@ def run_sql_stack():
             if result.returncode != 0:
                 failures.append(pattern)
         if failures:
+            for log_name in ('rust-matching.log',):
+                lines = (work / log_name).read_text(errors='replace').splitlines()
+                print(f'--- {log_name}: {len(lines)} lines, last 40 and query lines ---', flush=True)
+                print('\n'.join(l[:300] for l in lines[-40:]), flush=True)
+                print('\n'.join(l[:300] for l in [x for x in lines if 'uer' in x][-40:]), flush=True)
             raise RuntimeError(f'real-stack Go tests failed: {failures}')
         for proc in procs:
             if proc.poll() is not None:
