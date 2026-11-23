@@ -267,8 +267,31 @@ impl DomainRecord {
         let task = self.to_domain_replication_task(operation)?;
         let mut writer = Writer::new();
         write_struct(&mut writer, &task.to_thrift());
-        Ok(writer.into_bytes())
+        // Go's ThriftRWEncoder prefixes the payload with preambleVersion0.
+        let body = writer.into_bytes();
+        let mut out = Vec::with_capacity(1 + body.len());
+        out.push(THRIFTRW_PREAMBLE_VERSION0);
+        out.extend_from_slice(&body);
+        Ok(out)
     }
+}
+
+/// Go `codec` preambleVersion0 (0x59): first byte of every ThriftRW payload.
+pub const THRIFTRW_PREAMBLE_VERSION0: u8 = 0x59;
+
+/// Decode a queue / DLQ payload as Go's `ThriftRWEncoder.Decode` does.
+/// Compatibility fallback (read side only): rows written by earlier Rust
+/// builds carry no prefix. A bare Thrift struct starts with a field-type byte
+/// (never 0x59), so such rows are decoded as-is instead of failing.
+pub fn decode_thriftrw_payload(payload: &[u8]) -> Result<cadence_thrift::value::Struct, String> {
+    let body = match payload.first() {
+        Some(&THRIFTRW_PREAMBLE_VERSION0) => &payload[1..],
+        Some(&b) if b != 0 && b > 16 => return Err("InvalidBinaryEncodingVersion".to_string()),
+        Some(_) => payload, // legacy unprefixed Rust row
+        None => return Err("MissingBinaryEncodingVersion".to_string()),
+    };
+    cadence_thrift::value::read_struct(&mut cadence_thrift::protocol::Reader::new(body))
+        .map_err(|e| e.to_string())
 }
 
 /// A recorded domain failover, mirroring Go's domain audit log rows for
@@ -2606,9 +2629,8 @@ mod tests {
         let encoded = record
             .encode_domain_replication_task(cadence_api::enums::DomainOperation::Update)
             .unwrap();
-        let mut reader = cadence_thrift::protocol::Reader::new(&encoded);
-        let decoded = cadence_thrift::value::read_struct(&mut reader).unwrap();
-        assert_eq!(reader.remaining(), 0);
+        assert_eq!(encoded[0], 0x59);
+        let decoded = decode_thriftrw_payload(&encoded).unwrap();
         assert!(matches!(
             decoded.get(10),
             Some(cadence_thrift::value::Value::I32(0))
@@ -3803,5 +3825,35 @@ mod failover_notification_version_tests {
         let after = persistence.get_domain(Some("global"), None).unwrap();
         assert_eq!(after.failover_notification_version, version);
         assert!(after.failover_version > 0);
+    }
+}
+
+#[cfg(test)]
+mod thriftrw_prefix_tests {
+    use super::*;
+    use cadence_thrift::{protocol::Writer, value::write_struct, ToThrift};
+
+    fn task() -> cadence_api::types::ReplicationTask {
+        cadence_api::types::ReplicationTask::default()
+    }
+
+    #[test]
+    fn prefixed_payload_round_trips() {
+        let mut w = Writer::new();
+        write_struct(&mut w, &task().to_thrift());
+        let body = w.into_bytes();
+        // Go-encoded bytes: 0x59 followed by the bare struct.
+        let mut go = vec![0x59];
+        go.extend_from_slice(&body);
+        let a = decode_thriftrw_payload(&go).unwrap();
+        // legacy Rust row without prefix still decodes to the same value
+        let b = decode_thriftrw_payload(&body).unwrap();
+        assert_eq!(format!("{a:?}"), format!("{b:?}"));
+    }
+
+    #[test]
+    fn rejects_unknown_version_and_empty() {
+        assert!(decode_thriftrw_payload(&[0x60, 0]).is_err());
+        assert!(decode_thriftrw_payload(&[]).is_err());
     }
 }

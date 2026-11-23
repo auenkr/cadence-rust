@@ -275,6 +275,40 @@ struct DecisionTask {
     auto_config_hint: Option<ty::AutoConfigHint>,
 }
 
+/// Go `PollMutableStateRequest` fields: domain(10), execution(20),
+/// expectedNextEventID(30), currentBranchToken(40), versionHistoryItem(50).
+/// Go forwards the continuation token's item so History can detect a branch
+/// switch (CurrentBranchChangedError).
+fn poll_mutable_state_fields(
+    domain_id: &str,
+    execution: &ty::WorkflowExecution,
+    expected_next_event_id: i64,
+    current_branch_token: &[u8],
+    version_history_item: Option<&ty::VersionHistoryItem>,
+) -> Vec<(i16, Value)> {
+    let mut fields = vec![
+        (10, Value::Bytes(domain_id.as_bytes().to_vec())),
+        (20, Value::Struct(execution.to_thrift())),
+        (30, Value::I64(expected_next_event_id)),
+    ];
+    if !current_branch_token.is_empty() {
+        fields.push((40, Value::Bytes(current_branch_token.to_vec())));
+    }
+    if let Some(item) = version_history_item {
+        fields.push((50, Value::Struct(item.to_thrift())));
+    }
+    fields
+}
+
+fn token_version_history_item(
+    token: &crate::handler_workflow_history::HistoryContinuationToken,
+) -> Option<ty::VersionHistoryItem> {
+    token
+        .version_history_item
+        .as_ref()
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+}
+
 fn thrift_err(what: &str, e: impl std::fmt::Display) -> CadenceError {
     internal(format!("invalid {what}: {e}"))
 }
@@ -866,16 +900,16 @@ impl ProductionBackend {
         execution: &ty::WorkflowExecution,
         expected_next_event_id: i64,
         current_branch_token: &[u8],
+        version_history_item: Option<&ty::VersionHistoryItem>,
         long_poll: bool,
     ) -> Result<MutableState, CadenceError> {
-        let mut fields = vec![
-            (10, Value::Bytes(domain_id.as_bytes().to_vec())),
-            (20, Value::Struct(execution.to_thrift())),
-            (30, Value::I64(expected_next_event_id)),
-        ];
-        if !current_branch_token.is_empty() {
-            fields.push((40, Value::Bytes(current_branch_token.to_vec())));
-        }
+        let fields = poll_mutable_state_fields(
+            domain_id,
+            execution,
+            expected_next_event_id,
+            current_branch_token,
+            version_history_item,
+        );
         let timeout = if long_poll {
             POLL_TIMEOUT
         } else {
@@ -971,12 +1005,14 @@ impl ProductionBackend {
                 } else {
                     token.next_event_id
                 };
+                let token_item = token_version_history_item(&token);
                 let state = self
                     .poll_mutable_state(
                         &domain_id,
                         &execution,
                         query_next,
                         token.branch_token.as_deref().unwrap_or_default(),
+                        token_item.as_ref(),
                         true,
                     )
                     .await?;
@@ -996,7 +1032,7 @@ impl ProductionBackend {
                 FIRST_EVENT_ID
             };
             let state = self
-                .poll_mutable_state(&domain_id, &execution, query_next, &[], false)
+                .poll_mutable_state(&domain_id, &execution, query_next, &[], None, false)
                 .await?;
             token.branch_token = Some(state.branch_token);
             last_first_event_id = state.last_first_event_id;
@@ -1110,7 +1146,7 @@ impl crate::archive_readers::ExecutionProbe for ProductionBackend {
                 run_id: run_id.to_owned(),
             };
             match self
-                .poll_mutable_state(domain_id, &execution, FIRST_EVENT_ID, &[], false)
+                .poll_mutable_state(domain_id, &execution, FIRST_EVENT_ID, &[], None, false)
                 .await
             {
                 Ok(_) => Ok(true),
@@ -1326,5 +1362,38 @@ mod poll_tracking_tests {
             lb.provider().number_of_read_partitions("id", "tl", true, 0),
             3
         );
+    }
+}
+
+#[cfg(test)]
+mod poll_version_history_item_tests {
+    use super::*;
+
+    #[test]
+    fn poll_mutable_state_forwards_continuation_version_history_item() {
+        let exec = ty::WorkflowExecution::default();
+        let item = ty::VersionHistoryItem {
+            event_id: 9,
+            version: 3,
+        };
+        let f = poll_mutable_state_fields("d", &exec, 5, b"bt", Some(&item));
+        let (id, v) = f.last().unwrap();
+        assert_eq!(*id, 50);
+        let Value::Struct(st) = v else { panic!() };
+        assert_eq!(st.opt_i64(10).unwrap(), Some(9));
+        assert_eq!(st.opt_i64(20).unwrap(), Some(3));
+        assert!(poll_mutable_state_fields("d", &exec, 5, b"", None)
+            .iter()
+            .all(|(id, _)| *id != 50));
+    }
+
+    #[test]
+    fn token_item_is_decoded_for_forwarding() {
+        let t = crate::handler_workflow_history::HistoryContinuationToken {
+            version_history_item: Some(serde_json::json!({"eventID": 2, "version": 7})),
+            ..Default::default()
+        };
+        let i = token_version_history_item(&t).unwrap();
+        assert_eq!((i.event_id, i.version), (2, 7));
     }
 }
