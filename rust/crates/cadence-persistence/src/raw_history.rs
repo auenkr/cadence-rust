@@ -158,6 +158,32 @@ impl RawHistoryToken {
             .map_err(|_| cadence_api::errors::BadRequestError::new("Invalid pagination token."))
     }
 
+    /// Go `deserializeRawHistoryToken`: the `json.Unmarshal` error is returned
+    /// as-is, so the Admin handler maps it to InternalServiceError (not
+    /// BadRequest). Returns the Go-style decode message.
+    pub fn from_bytes_go(bytes: &[u8]) -> std::result::Result<Self, String> {
+        serde_json::from_slice(bytes).map_err(|error| {
+            use serde_json::error::Category;
+            match error.classify() {
+                Category::Eof => "unexpected end of JSON input".to_string(),
+                Category::Syntax => {
+                    let offset = error.column().saturating_sub(1);
+                    match bytes.get(offset.min(bytes.len().saturating_sub(1))) {
+                        Some(b) if error.line() == 1 && offset == 0 => format!(
+                            "invalid character '{}' looking for beginning of value",
+                            *b as char
+                        ),
+                        Some(b) if error.line() == 1 => {
+                            format!("invalid character '{}' after top-level value", *b as char)
+                        }
+                        _ => error.to_string(),
+                    }
+                }
+                _ => format!("json: cannot unmarshal into Go value of type admin.getWorkflowRawHistoryV2Token: {error}"),
+            }
+        })
+    }
+
     pub fn validate(&self, request: &Request) -> Result<()> {
         let execution = request.execution.clone().unwrap_or_default();
         if request.domain != self.domain_name
@@ -177,6 +203,19 @@ impl RawHistoryToken {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn malformed_admin_token_reports_go_json_error_text() {
+        assert_eq!(
+            RawHistoryToken::from_bytes_go(b"{\"domainName\":").unwrap_err(),
+            "unexpected end of JSON input"
+        );
+        assert_eq!(
+            RawHistoryToken::from_bytes_go(b"xyz").unwrap_err(),
+            "invalid character 'x' looking for beginning of value"
+        );
+        assert!(RawHistoryToken::from_bytes_go(b"{}").is_ok());
+    }
     use cadence_api::types::WorkflowExecution;
 
     #[test]

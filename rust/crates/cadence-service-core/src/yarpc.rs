@@ -1104,8 +1104,8 @@ fn handle_raw_history_v2(state: &AppState, body: &Struct) -> HandlerResult {
         view.version_histories
             .ok_or_else(|| AppError::bad_request("Invalid version histories.".to_string()))?
     } else {
-        let token = RawHistoryToken::from_bytes(&req.next_page_token)
-            .map_err(|error| AppError::bad_request(error.message))?;
+        let token = RawHistoryToken::from_bytes_go(&req.next_page_token)
+            .map_err(AppError::internal)?;
         persistence_token = token.persistence_token.clone().unwrap_or_default();
         raw_history::validate_persistence_token(&persistence_token)
             .map_err(|error| AppError::bad_request(error.message))?;

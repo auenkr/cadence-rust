@@ -2448,7 +2448,7 @@ pub async fn get_workflow_execution_raw_history(
             Err(response) => return response,
         }
     } else {
-        match RawHistoryToken::from_bytes(&req.next_page_token) {
+        match RawHistoryToken::from_bytes_go(&req.next_page_token) {
             Ok(token) => {
                 persistence_token = token.persistence_token.clone().unwrap_or_default();
                 let validation = if configured {
@@ -2463,7 +2463,13 @@ pub async fn get_workflow_execution_raw_history(
                 continuation = Some(token);
                 histories
             }
-            Err(e) => return bad_request(e),
+            Err(message) => {
+                return error_response(
+                    "InternalServiceError",
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    message,
+                )
+            }
         }
     };
     if histories.histories.is_empty() {
