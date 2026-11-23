@@ -2418,7 +2418,13 @@ pub struct RawHistoryJsonRequest {
 
 impl<'de> serde::Deserialize<'de> for RawHistoryJsonRequest {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let value = serde_json::Value::deserialize(d)?;
+        let mut value = serde_json::Value::deserialize(d)?;
+        // Go decodes JSON null into a nil slice, same as an absent field.
+        if let Some(object) = value.as_object_mut() {
+            if object.get("nextPageToken").is_some_and(|t| t.is_null()) {
+                object.remove("nextPageToken");
+            }
+        }
         let token_present = value
             .get("nextPageToken")
             .is_some_and(|token| !token.is_null());
