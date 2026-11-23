@@ -714,7 +714,8 @@ def run_sql_stack():
     server_bin = str(args.server_bin.resolve())
     try:
         matching_proc = launch('rust-matching', [server_bin, 'start', '--config', work / 'rust.yaml', '--root', work, '--services', 'matching',
-            '--port', '0', '--history-grpc-port', h_g, '--matching-grpc-port', m_g, '--matching-tchannel-port', m_t, '--data-dir', work / 'matching-data'])
+            '--port', '0', '--history-grpc-port', h_g, '--matching-grpc-port', m_g, '--matching-tchannel-port', m_t, '--data-dir', work / 'matching-data'],
+            env={**os.environ, 'RUST_LOG': os.environ.get('RUST_LOG', 'info,cadence_matching=debug')})
         frontend_proc = launch('rust-frontend', [server_bin, 'start', '--config', work / 'rust.yaml', '--root', work, '--services', 'frontend',
             '--history-grpc-port', h_g, '--grpc-port', fe_g, '--tchannel-port', fe_t, '--data-dir', work / 'frontend-data'],
             env={**os.environ, 'CADENCE_HISTORY_TCHANNEL_ADDR': f'127.0.0.1:{h_t}', 'CADENCE_MATCHING_TCHANNEL_ADDR': f'127.0.0.1:{m_t}'})
