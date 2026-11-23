@@ -78,6 +78,8 @@ func TestRustMatchingNativeThrift(t *testing.T) {
 			frontend := workflowserviceclient.New(dispatcher.ClientConfig("cadence-frontend"))
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
+			start := time.Now()
+			step := func(name string) { t.Logf("step %s at %v", name, time.Since(start)) }
 			health, err := metaclient.New(dispatcher.ClientConfig("cadence-matching")).Health(ctx)
 			if err != nil || !health.GetOk() {
 				t.Fatalf("health: %v %v", health, err)
@@ -96,6 +98,7 @@ func TestRustMatchingNativeThrift(t *testing.T) {
 			// a Matching call within that window of a fresh Frontend registration
 			// returns "domain exists but cannot be loaded" in Go as well.
 			time.Sleep(1500 * time.Millisecond)
+			step("domain-ready")
 			list := &s.TaskList{Name: common.StringPtr("tasks-" + uuid.NewString()), Kind: s.TaskListKindNormal.Ptr()}
 			// The Go handler/engine oracle records both absent and empty task-list
 			// shapes as successful DescribeTaskList calls with no pollers.
@@ -143,6 +146,7 @@ func TestRustMatchingNativeThrift(t *testing.T) {
 			if err != nil || len(decision.TaskToken) == 0 || decision.GetStartedEventId() == 0 || decision.WorkflowExecution.GetRunId() != run.GetRunId() {
 				t.Fatalf("decision delivery: %v %v", decision, err)
 			}
+			step("decision-polled")
 			activityDecision := func(id, input string) *s.Decision {
 				return &s.Decision{DecisionType: s.DecisionTypeScheduleActivityTask.Ptr(), ScheduleActivityTaskDecisionAttributes: &s.ScheduleActivityTaskDecisionAttributes{
 					ActivityId: common.StringPtr(id), ActivityType: &s.ActivityType{Name: common.StringPtr("echo")}, TaskList: list,
@@ -197,6 +201,7 @@ func TestRustMatchingNativeThrift(t *testing.T) {
 			} else if err != nil || string(activity.Input) != "input" || activity.GetActivityId() != "activity" {
 				t.Fatalf("Rust-enqueued activity delivery: %v %v", activity, err)
 			}
+			step("activity-polled")
 			if path := os.Getenv("CADENCE_MATCHING_SQLITE_DB"); path != "" {
 				assertGoQueuedActivityTaskConsumed(t, path, domainID, list.GetName())
 			}
@@ -236,6 +241,7 @@ func TestRustMatchingNativeThrift(t *testing.T) {
 					result <- v
 				}
 			}()
+			step("query-dispatched")
 			var query *m.PollForDecisionTaskResponse
 			select {
 			case query = <-pollDone:
@@ -246,8 +252,9 @@ func TestRustMatchingNativeThrift(t *testing.T) {
 			case <-ctx.Done():
 				t.Fatal(ctx.Err())
 			}
+			step("query-poll-returned")
 			if query.Query.GetQueryType() != "ping" {
-				t.Fatal("query payload changed")
+				t.Fatalf("query payload changed: %v", query)
 			}
 			var token struct {
 				TaskID   string `json:"TaskID"`
