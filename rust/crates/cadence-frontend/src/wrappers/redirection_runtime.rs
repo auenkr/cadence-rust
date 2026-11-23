@@ -1300,7 +1300,9 @@ mod tests {
         let ok = local_reply_to_result(Ok((Struct { fields: vec![] }, None)), &captured);
         assert!(matches!(
             ok,
-            Ok(cadence_service_core::workflow_api::RedirectedReply::Local(_))
+            Ok(cadence_service_core::workflow_api::RedirectedReply::Local(
+                _
+            ))
         ));
         assert!(captured.lock().unwrap().is_none());
         let err = local_reply_to_result(Err("boom".into()), &captured);
@@ -1364,9 +1366,11 @@ mod tests {
                             captured,
                         )
                     } else {
-                        Ok(cadence_service_core::workflow_api::RedirectedReply::Forwarded(
-                            Value::Null,
-                        ))
+                        Ok(
+                            cadence_service_core::workflow_api::RedirectedReply::Forwarded(
+                                Value::Null,
+                            ),
+                        )
                     }
                 }
             },
