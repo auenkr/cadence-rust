@@ -1809,9 +1809,7 @@ pub fn build_workflow_api(
         version_check_enabled,
         std::sync::Arc::new(crate::wrappers::versioncheck::GoVersionChecker),
     );
-    let redirection_is_noop =
-        redirection_policy == crate::wrappers::clusterredirection::ForwardingPolicy::Noop;
-    let (handler, schedule_redirect) = if redirection_is_noop {
+    let (handler, schedule_redirect) = if !wraps_cluster_redirection(metadata) {
         (handler, None)
     } else {
         let overlay = ctx.state.admin.dynamic_config.clone();
@@ -2548,5 +2546,29 @@ mod async_publisher_install_tests {
         assert!(!plain.has_async_publisher());
         let installed = install_async_publisher(plain, Arc::new(NoDomains), Default::default());
         assert!(installed.has_async_publisher());
+    }
+}
+
+/// Go `service.go:158`: the redirection wrapper is installed whenever a
+/// policy is configured, including an explicit `noop`, so its task-token and
+/// domain validation still runs before dispatch.
+fn wraps_cluster_redirection(metadata: &cadence_common::cluster::GroupMetadata) -> bool {
+    metadata.cluster_redirection_policy.is_some()
+}
+
+#[cfg(test)]
+mod redirection_wrap_tests {
+    use super::wraps_cluster_redirection;
+
+    #[test]
+    fn wraps_only_when_policy_configured_even_if_noop() {
+        let mut metadata = cadence_common::cluster::GroupMetadata::default();
+        assert!(!wraps_cluster_redirection(&metadata));
+        metadata.cluster_redirection_policy =
+            Some(cadence_common::cluster::ClusterRedirectionPolicy {
+                policy: "noop".into(),
+                ..Default::default()
+            });
+        assert!(wraps_cluster_redirection(&metadata));
     }
 }

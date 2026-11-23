@@ -71,7 +71,11 @@ impl RemoteFrontendClient {
 
     /// Inbound headers to forward on this call (existing outbound names win).
     fn forwarded(&self, existing: &[(String, String)]) -> Vec<(String, String)> {
-        crate::header_forwarding::forward_for_current_call(&self.header_rules, existing)
+        let extra = crate::header_forwarding::forward_for_current_call(&self.header_rules, existing);
+        let inbound = crate::header_forwarding::INBOUND_HEADERS
+            .try_with(Clone::clone)
+            .unwrap_or_default();
+        apply_forwarded_isolation(extra, &inbound)
     }
 
     /// Go `NewCrossDCOutbounds` with `authorizationProvider.enable`: every call
@@ -203,6 +207,90 @@ impl RemoteFrontendClient {
             )),
         })?;
         decode_client_response(operation, response.application_error, &response.body)
+    }
+}
+
+const PARTITION_CONFIG_HEADER: &str = "cadence-workflow-partition-config";
+const WORKER_ISOLATION_GROUP_HEADER: &str = "cadence-worker-isolation-group";
+const CLIENT_ISOLATION_GROUP_HEADER: &str = "cadence-client-isolation-group";
+const ISOLATION_GROUP_KEY: &str = "isolation-group";
+
+/// Go `ForwardPartitionConfigMiddleware.Call`: the two forwarded isolation
+/// headers always come from the resolved request context (client isolation
+/// header, or the forwarded headers of an already-forwarded request), never
+/// from generic header rules. They are written when set and removed otherwise.
+fn apply_forwarded_isolation(
+    mut extra: Vec<(String, String)>,
+    inbound: &std::collections::HashMap<String, String>,
+) -> Vec<(String, String)> {
+    let get = |name: &str| inbound.get(name).map(String::as_str).unwrap_or_default();
+    let mut group = String::new();
+    let mut config: std::collections::HashMap<String, String> = Default::default();
+    let zone = get(CLIENT_ISOLATION_GROUP_HEADER);
+    if !zone.is_empty() {
+        group = zone.to_owned();
+        config.insert(ISOLATION_GROUP_KEY.to_owned(), zone.to_owned());
+    }
+    if inbound.contains_key(AUTOFORWARDING_CLUSTER_HEADER) {
+        let blob = get(PARTITION_CONFIG_HEADER);
+        config = if blob.is_empty() {
+            Default::default()
+        } else {
+            serde_json::from_str::<Option<std::collections::HashMap<String, String>>>(blob)
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+        };
+        group = get(WORKER_ISOLATION_GROUP_HEADER).to_owned();
+    }
+    extra.retain(|(k, _)| {
+        !k.eq_ignore_ascii_case(PARTITION_CONFIG_HEADER)
+            && !k.eq_ignore_ascii_case(WORKER_ISOLATION_GROUP_HEADER)
+    });
+    if !config.is_empty() {
+        if let Ok(blob) = serde_json::to_string(&config) {
+            extra.push((PARTITION_CONFIG_HEADER.to_owned(), blob));
+        }
+    }
+    if !group.is_empty() {
+        extra.push((WORKER_ISOLATION_GROUP_HEADER.to_owned(), group));
+    }
+    extra
+}
+
+#[cfg(test)]
+mod isolation_forward_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn map(items: &[(&str, &str)]) -> HashMap<String, String> {
+        items.iter().map(|(k, v)| ((*k).into(), (*v).into())).collect()
+    }
+
+    #[test]
+    fn client_isolation_header_is_carried_as_group_and_config() {
+        let out = apply_forwarded_isolation(
+            vec![],
+            &map(&[(CLIENT_ISOLATION_GROUP_HEADER, "blue")]),
+        );
+        assert!(out.contains(&(WORKER_ISOLATION_GROUP_HEADER.into(), "blue".into())));
+        assert!(out.contains(&(
+            PARTITION_CONFIG_HEADER.into(),
+            r#"{"isolation-group":"blue"}"#.into()
+        )));
+    }
+
+    #[test]
+    fn forwarded_request_keeps_forwarded_values_and_clears_when_empty() {
+        let out = apply_forwarded_isolation(
+            vec![(PARTITION_CONFIG_HEADER.into(), "stale".into())],
+            &map(&[
+                (AUTOFORWARDING_CLUSTER_HEADER, "a"),
+                (CLIENT_ISOLATION_GROUP_HEADER, "ignored"),
+                (WORKER_ISOLATION_GROUP_HEADER, "green"),
+            ]),
+        );
+        assert_eq!(out, vec![(WORKER_ISOLATION_GROUP_HEADER.into(), "green".into())]);
     }
 }
 
