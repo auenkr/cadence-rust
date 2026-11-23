@@ -949,25 +949,27 @@ async fn handle_reset_queue(state: &AppState, body: &Struct) -> HandlerResult {
 async fn handle_resend_replication_tasks(state: &AppState, body: &Struct) -> HandlerResult {
     let req: cadence_api::admin::ResendReplicationTasksRequest =
         decode_args(body).map_err(AppError::bad_request)?;
-    if req.domain_id.is_empty() || req.workflow_id.is_empty() || req.run_id.is_empty() {
-        return Err(AppError::bad_request(
-            "Workflow execution is not set on request.".to_string(),
-        ));
-    }
-    if req.remote_cluster.is_empty() {
-        return Err(AppError::bad_request(
-            "Remote cluster is not set on request.".to_string(),
-        ));
-    }
     if state.history_admin_channel.is_some() {
         crate::admin_replication::resend_replication_tasks(state, req)
             .await
             .map_err(proxy_app_error)?;
-    } else if req.remote_cluster != state.current_cluster_name {
-        return Err(AppError::bad_request(format!(
-            "Unknown remote cluster {:?}.",
-            req.remote_cluster
-        )));
+    } else {
+        if req.domain_id.is_empty() || req.workflow_id.is_empty() || req.run_id.is_empty() {
+            return Err(AppError::bad_request(
+                "Workflow execution is not set on request.".to_string(),
+            ));
+        }
+        if req.remote_cluster.is_empty() {
+            return Err(AppError::bad_request(
+                "Remote cluster is not set on request.".to_string(),
+            ));
+        }
+        if req.remote_cluster != state.current_cluster_name {
+            return Err(AppError::bad_request(format!(
+                "Unknown remote cluster {:?}.",
+                req.remote_cluster
+            )));
+        }
     }
     Ok(wrap_success(
         &cadence_api::admin::ResendReplicationTasksResponse {},

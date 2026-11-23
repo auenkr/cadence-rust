@@ -1920,6 +1920,14 @@ pub async fn resend_replication_tasks(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::ResendReplicationTasksRequest>,
 ) -> Response {
+    // Go performs no field validation here: the resender resolves the domain
+    // first and leaves execution/cluster validation to downstream calls.
+    if state.history_admin_channel.is_some() {
+        return match crate::admin_replication::resend_replication_tasks(&state, req).await {
+            Ok(()) => ok_json(cadence_api::admin::ResendReplicationTasksResponse {}),
+            Err(error) => proxy_error_response(error),
+        };
+    }
     if req.domain_id.is_empty() || req.workflow_id.is_empty() || req.run_id.is_empty() {
         return bad_request(BadRequestError::new(
             "Workflow execution is not set on request.",
@@ -1929,12 +1937,6 @@ pub async fn resend_replication_tasks(
         return bad_request(BadRequestError::new(
             "Remote cluster is not set on request.",
         ));
-    }
-    if state.history_admin_channel.is_some() {
-        return match crate::admin_replication::resend_replication_tasks(&state, req).await {
-            Ok(()) => ok_json(cadence_api::admin::ResendReplicationTasksResponse {}),
-            Err(error) => proxy_error_response(error),
-        };
     }
     if req.remote_cluster != state.current_cluster_name {
         return bad_request(BadRequestError::new(format!(
@@ -3004,6 +3006,27 @@ mod tests {
         };
         let t = text(super::describe_queue(State(state), axum::Json(d)).await).await;
         assert!(t.contains("Request is nil."), "{t}");
+    }
+
+    #[tokio::test]
+    async fn resend_resolves_domain_before_field_validation() {
+        use axum::extract::State;
+        let mut state = crate::handlers::AppState::default();
+        state.history_admin_channel = Some(
+            tonic::transport::Channel::from_static("http://127.0.0.1:1").connect_lazy(),
+        );
+        let req = cadence_api::admin::ResendReplicationTasksRequest {
+            domain_id: "no-such-domain".into(),
+            workflow_id: "wf".into(),
+            run_id: String::new(),
+            remote_cluster: String::new(),
+            ..Default::default()
+        };
+        let resp = super::resend_replication_tasks(State(std::sync::Arc::new(state)), axum::Json(req)).await;
+        let body = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+        let text = String::from_utf8_lossy(&body);
+        assert!(text.contains("getting domain"), "{text}");
+        assert!(!text.contains("Workflow execution is not set"), "{text}");
     }
 
     #[test]
