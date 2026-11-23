@@ -61,6 +61,8 @@ pub struct ProductionBackend {
     /// pollerID -> partition polled, so a cancellation reaches the same
     /// partition (Go rewrites the request task list to the partition).
     pub(crate) poll_partitions: crate::workflow_matching::PollPartitions,
+    /// Go `system.enableGRPCOutbound`: gRPC transport for mapped methods.
+    grpc: Option<crate::grpc_outbound::GrpcOutbound>,
 }
 
 impl std::fmt::Debug for ProductionBackend {
@@ -235,7 +237,14 @@ impl ProductionBackend {
             header_rules: Default::default(),
             matching_lb: None,
             poll_partitions: Default::default(),
+            grpc: None,
         }
+    }
+
+    /// Honour `system.enableGRPCOutbound` (see `grpc_outbound`).
+    pub fn with_grpc_outbound(mut self, grpc: crate::grpc_outbound::GrpcOutbound) -> Self {
+        self.grpc = Some(grpc);
+        self
     }
 
     /// Install Go's matching-client partition load balancer.
@@ -380,6 +389,14 @@ impl ProductionBackend {
         envelope: Struct,
         timeout: Duration,
     ) -> Result<Struct, CadenceError> {
+        if let Some(grpc) = &self.grpc {
+            if let Some(result) = grpc
+                .try_call(addr, service, method, &envelope, timeout, &self.header_rules)
+                .await
+            {
+                return result;
+            }
+        }
         let args = Struct {
             fields: vec![(1, Value::Struct(envelope))],
         };
@@ -1222,6 +1239,30 @@ pub fn build_workflow_api(
         "CADENCE_MATCHING_TCHANNEL_ADDR",
         7935,
     );
+    let grpc_port = |service: &str, default: u16| {
+        ctx.config
+            .services
+            .get(service)
+            .map(|s| s.rpc.grpc_port)
+            .filter(|p| *p != 0)
+            .unwrap_or(default)
+    };
+    let grpc_outbound = crate::grpc_outbound::GrpcOutbound::new(
+        {
+            let overlay = ctx.state.admin.dynamic_config.clone();
+            std::sync::Arc::new(move || {
+                overlay.lock().map_or(crate::grpc_outbound::ENABLE_GRPC_OUTBOUND_DEFAULT, |o| {
+                    cadence_persistence::dynamic_config::boolean(
+                        o.property_values(crate::grpc_outbound::ENABLE_GRPC_OUTBOUND_KEY),
+                        None,
+                        crate::grpc_outbound::ENABLE_GRPC_OUTBOUND_DEFAULT,
+                    )
+                })
+            })
+        },
+        grpc_port("history", 7834),
+        grpc_port("matching", 7835),
+    );
     let lookup: std::sync::Arc<dyn crate::handler_workflow::WorkflowDomainLookup> =
         std::sync::Arc::new(
             crate::handler_workflow::PersistenceWorkflowDomainLookup::new(
@@ -1248,6 +1289,7 @@ pub fn build_workflow_api(
         rules
     };
     let mut backend = ProductionBackend::new(history, matching)
+        .with_grpc_outbound(grpc_outbound)
         .with_header_rules(header_rules)
         .with_domains(lookup.clone())
         .with_history_page_size_policy(std::sync::Arc::new(DynamicHistoryPageSize(
