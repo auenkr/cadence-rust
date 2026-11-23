@@ -10,7 +10,7 @@
 #![allow(clippy::result_large_err)]
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use cadence_api::errors::CadenceError;
@@ -745,6 +745,91 @@ impl ScheduleRedirect {
     }
 }
 
+/// Go's generated schedule wrapper runs the local handler inside the policy
+/// callback; the typed local reply (or application error) is kept aside so a
+/// non-DomainNotActive local failure is returned unchanged.
+impl ScheduleRedirect {
+    pub async fn route_with_local(
+        &self,
+        operation: &str,
+        request: &Value,
+        headers: &HashMap<String, String>,
+        local: cadence_service_core::workflow_api::LocalCall,
+    ) -> Result<cadence_service_core::workflow_api::RedirectedReply, CadenceError> {
+        use cadence_service_core::workflow_api::RedirectedReply;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let current = self.redirector.current_cluster.as_str();
+        let captured = Mutex::new(None);
+        let last_local = AtomicBool::new(false);
+        let result = self
+            .redirector
+            .route(
+                operation,
+                request,
+                Some(super::clusterredirection::consistency_from_headers(headers)),
+                |cluster: Option<String>| {
+                    let request = request.clone();
+                    let captured = &captured;
+                    let last_local = &last_local;
+                    let local = &local;
+                    async move {
+                        match cluster {
+                            Some(cluster) if cluster != current => {
+                                last_local.store(false, Ordering::SeqCst);
+                                let client = self.remotes.get(&cluster)?;
+                                client
+                                    .call(operation, request, self.timeout)
+                                    .await
+                                    .map(RedirectedReply::Forwarded)
+                            }
+                            _ => {
+                                last_local.store(true, Ordering::SeqCst);
+                                local_reply_to_result((**local)().await, captured)
+                            }
+                        }
+                    }
+                },
+            )
+            .await;
+        if result.is_err() && last_local.load(Ordering::SeqCst) {
+            let kept = captured.lock().ok().and_then(|mut c| c.take());
+            if let Some(reply) = kept {
+                return Ok(RedirectedReply::Local(reply));
+            }
+        }
+        result
+    }
+}
+
+/// Maps a local Thrift reply to the policy's result: `DomainNotActiveError`
+/// becomes a typed error (so the policy can retry); any other application or
+/// transport error is kept aside and surfaced as a generic failure.
+fn local_reply_to_result(
+    reply: Result<cadence_service_core::workflow_api::ThriftReply, String>,
+    captured: &Mutex<Option<Result<cadence_service_core::workflow_api::ThriftReply, String>>>,
+) -> Result<cadence_service_core::workflow_api::RedirectedReply, CadenceError> {
+    use cadence_service_core::workflow_api::RedirectedReply;
+    let failure = match &reply {
+        Ok((_, None)) => None,
+        Ok((body, Some((name, message)))) => Some(match body.fields.first() {
+            Some((_, cadence_thrift::value::Value::Struct(exception))) => {
+                cadence_service_core::workflow_api::exception_from_thrift(name, exception)
+            }
+            _ => CadenceError::Unknown(message.clone()),
+        }),
+        Err(message) => Some(CadenceError::Unknown(message.clone())),
+    };
+    match failure {
+        None => Ok(RedirectedReply::Local(reply)),
+        Some(error) => {
+            if let Ok(mut slot) = captured.lock() {
+                *slot = Some(reply);
+            }
+            Err(error)
+        }
+    }
+}
+
 /// Calls the local backend for the current cluster (or no cluster) and the
 /// remote Frontend for any other target, like Go's `targetDC ==
 /// currentClusterName` switch in the generated wrapper.
@@ -810,7 +895,6 @@ impl<B: WorkflowBackend> WorkflowBackend for ForwardingBackend<B> {
 mod tests {
     use super::*;
     use crate::wrappers::clusterredirection::{ForwardingPolicy, WorkflowRedirector};
-    use std::sync::Mutex;
 
     struct TestManager;
 
@@ -1169,6 +1253,135 @@ mod tests {
         assert_eq!(remotes.get("b").unwrap().forwarding_cluster, "a");
         assert!(remotes.get("a").is_err());
         assert!(remotes.get("c").is_err());
+    }
+
+    fn app_error_reply(
+        name: &'static str,
+        exception: cadence_thrift::value::Struct,
+        message: &str,
+    ) -> Result<cadence_service_core::workflow_api::ThriftReply, String> {
+        use cadence_thrift::value::{Struct, Value as TValue};
+        Ok((
+            Struct {
+                fields: vec![(1, TValue::Struct(exception))],
+            },
+            Some((name, message.to_owned())),
+        ))
+    }
+
+    #[test]
+    fn local_domain_not_active_is_typed_for_the_policy() {
+        use cadence_thrift::value::ToThrift;
+        let exception = cadence_api::errors::DomainNotActiveError {
+            message: "inactive".into(),
+            domain_name: "global".into(),
+            current_cluster: "a".into(),
+            active_cluster: "b".into(),
+            active_clusters: Vec::new(),
+        }
+        .to_thrift();
+        let captured = Mutex::new(None);
+        let err = local_reply_to_result(
+            app_error_reply("DomainNotActiveError", exception, "inactive"),
+            &captured,
+        )
+        .err()
+        .expect("must fail");
+        match err {
+            CadenceError::DomainNotActive(e) => assert_eq!(e.active_cluster, "b"),
+            other => panic!("unexpected {other:?}"),
+        }
+        assert!(captured.lock().unwrap().is_some());
+    }
+
+    #[test]
+    fn local_success_and_other_errors() {
+        use cadence_thrift::value::Struct;
+        let captured = Mutex::new(None);
+        let ok = local_reply_to_result(Ok((Struct { fields: vec![] }, None)), &captured);
+        assert!(matches!(
+            ok,
+            Ok(cadence_service_core::workflow_api::RedirectedReply::Local(
+                _
+            ))
+        ));
+        assert!(captured.lock().unwrap().is_none());
+        let err = local_reply_to_result(Err("boom".into()), &captured);
+        assert!(matches!(err, Err(CadenceError::Unknown(m)) if m == "boom"));
+        assert!(matches!(*captured.lock().unwrap(), Some(Err(_))));
+    }
+
+    /// Local DomainNotActive inside the policy is retried on the active cluster
+    /// (Go runs the local handler from the policy callback).
+    #[tokio::test]
+    async fn local_domain_not_active_is_forwarded_by_policy() {
+        use super::super::clusterredirection::redirect_async;
+        use cadence_thrift::value::ToThrift;
+        struct NoMetrics;
+        impl RedirectMetrics for NoMetrics {
+            fn record_forward(&self, _: &ForwardRecord) {}
+        }
+        struct Cfg;
+        impl RuntimeConfig for Cfg {
+            fn domain_auto_forwarding_enabled(&self, _: &str) -> bool {
+                true
+            }
+        }
+        let domain = DomainState {
+            id: "id".into(),
+            name: "global".into(),
+            global: true,
+            active_cluster: "a".into(),
+            ..Default::default()
+        };
+        let captured = Mutex::new(None);
+        let calls = Mutex::new(Vec::new());
+        let result = redirect_async(
+            ForwardingPolicy::SelectedV3,
+            "a",
+            "",
+            &domain,
+            None,
+            None,
+            "CreateSchedule",
+            Consistency::Strong,
+            &Cfg,
+            &TestManager,
+            &NoMetrics,
+            |cluster: String| {
+                let captured = &captured;
+                let calls = &calls;
+                async move {
+                    calls.lock().unwrap().push(cluster.clone());
+                    if cluster == "a" {
+                        let exception = cadence_api::errors::DomainNotActiveError {
+                            message: "inactive".into(),
+                            domain_name: "global".into(),
+                            current_cluster: "a".into(),
+                            active_cluster: "b".into(),
+                            active_clusters: Vec::new(),
+                        }
+                        .to_thrift();
+                        local_reply_to_result(
+                            app_error_reply("DomainNotActiveError", exception, "inactive"),
+                            captured,
+                        )
+                    } else {
+                        Ok(
+                            cadence_service_core::workflow_api::RedirectedReply::Forwarded(
+                                Value::Null,
+                            ),
+                        )
+                    }
+                }
+            },
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Ok(cadence_service_core::workflow_api::RedirectedReply::Forwarded(_))
+        ));
+        assert_eq!(*calls.lock().unwrap(), ["a".to_owned(), "b".to_owned()]);
     }
 
     struct Recording(Arc<Mutex<Vec<Option<String>>>>);

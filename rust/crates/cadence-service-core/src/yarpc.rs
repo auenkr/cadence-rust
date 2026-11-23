@@ -2661,10 +2661,45 @@ pub async fn dispatch_with_transport(
             headers: caller_headers.clone(),
             transport,
         };
+        // Schedule APIs run the local handler inside the redirection policy
+        // (Go calls it from the policy callback); owned captures keep the
+        // closure 'static.
+        let local: crate::workflow_api::LocalCall = {
+            let state = state.clone();
+            let method = method.to_owned();
+            let body = body.clone();
+            let headers = caller_headers.clone();
+            Arc::new(move || {
+                let state = state.clone();
+                let method = method.clone();
+                let body = body.clone();
+                let headers = headers.clone();
+                Box::pin(async move {
+                    dispatch_local(&state, &method, &body, deadline, headers, transport).await
+                })
+            })
+        };
+        if let Some(reply) =
+            crate::workflow_api::dispatch_redirected_with_local(api, method, body, ctx.clone(), local)
+                .await?
+        {
+            return Ok(reply);
+        }
         if let Some(reply) = crate::workflow_api::dispatch_thrift(api, method, body, ctx).await? {
             return Ok(reply);
         }
     }
+    dispatch_local(state, method, body, deadline, caller_headers, transport).await
+}
+
+async fn dispatch_local(
+    state: &AppState,
+    method: &str,
+    body: &Struct,
+    deadline: Instant,
+    caller_headers: std::collections::HashMap<String, String>,
+    transport: &'static str,
+) -> Result<(Struct, Option<(&'static str, String)>), String> {
     // Admin handlers share the axum `State<Arc<AppState>>` extractor shape.
     let shared = || Arc::new(state.clone());
     let admin = method.starts_with("AdminService::");

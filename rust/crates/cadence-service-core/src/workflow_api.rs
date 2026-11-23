@@ -260,7 +260,37 @@ pub trait WorkflowApi: Send + Sync + std::fmt::Debug {
         let _ = (operation, request, ctx);
         Box::pin(async { Ok(None) })
     }
+    /// Like `redirect`, but runs the local handler inside the policy.
+    fn redirect_with_local<'a>(
+        &'a self,
+        operation: &'a str,
+        request: &'a serde_json::Value,
+        ctx: &'a CallerContext,
+        local: LocalCall,
+    ) -> RedirectLocalFuture<'a> {
+        let _ = (operation, request, ctx);
+        Box::pin(async move { Ok(RedirectedReply::Local((*local)().await)) })
+    }
 }
+
+/// Local schedule handler run inside the redirection policy (Go calls the
+/// local handler from the policy callback so DomainNotActive can be retried
+/// on the active cluster).
+pub type LocalFuture =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<ThriftReply, String>> + Send>>;
+pub type LocalCall = Arc<dyn Fn() -> LocalFuture + Send + Sync>;
+
+/// Result of a schedule call run through the redirection policy.
+pub enum RedirectedReply {
+    /// Forwarded to a remote cluster.
+    Forwarded(serde_json::Value),
+    /// Served by the local handler (its typed application error is kept).
+    Local(Result<ThriftReply, String>),
+}
+
+pub type RedirectLocalFuture<'a> = std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<RedirectedReply, CadenceError>> + Send + 'a>,
+>;
 
 pub type RedirectFuture<'a> = std::pin::Pin<
     Box<
@@ -684,6 +714,62 @@ pub fn error_to_thrift(error: &CadenceError) -> (&'static str, Struct, String) {
 /// Thrift reply: `(result struct, application error (name, details))`.
 pub type ThriftReply = (Struct, Option<(&'static str, String)>);
 
+fn encode_call_error(
+    def: &cadence_thrift::service::MethodDef,
+    method: &str,
+    error: CadenceError,
+) -> Result<ThriftReply, String> {
+    let (mut name, mut value, message) = error_to_thrift(&error);
+    let mut field = cadence_thrift::service::exception_field(def, name);
+    if field.is_none() {
+        // Undeclared exceptions are reported as InternalServiceError
+        // when declared, matching Go's ordinary-error fallthrough.
+        if let Some(id) = cadence_thrift::service::exception_field(def, "InternalServiceError") {
+            name = "InternalServiceError";
+            value = Struct {
+                fields: vec![(1, Value::Bytes(message.as_bytes().to_vec()))],
+            };
+            field = Some(id);
+        }
+    }
+    let field =
+        field.ok_or_else(|| format!("error {name} ({message}) not declared for {method}"))?;
+    Ok((
+        Struct {
+            fields: vec![(field, Value::Struct(value))],
+        },
+        Some((name, message)),
+    ))
+}
+
+/// Schedule APIs: run the redirection policy with `local` as the local call.
+/// `Ok(None)` when the method is not a redirected schedule operation.
+pub async fn dispatch_redirected_with_local(
+    api: &SharedWorkflowApi,
+    method: &str,
+    args: &Struct,
+    ctx: CallerContext,
+    local: LocalCall,
+) -> Result<Option<ThriftReply>, String> {
+    let name = method.rsplit("::").next().unwrap_or(method);
+    if method.starts_with("AdminService::")
+        || !REDIRECTED_SCHEDULE_OPERATIONS.contains(&name)
+        || api.serves(method)
+    {
+        return Ok(None);
+    }
+    let Some(codec) = codec(method) else {
+        return Ok(None);
+    };
+    let def = find_method(method).ok_or_else(|| format!("unknown method {method}"))?;
+    let request = (codec.decode)(args)?;
+    match api.redirect_with_local(name, &request, &ctx, local).await {
+        Ok(RedirectedReply::Forwarded(response)) => Ok(Some(((codec.encode)(response)?, None))),
+        Ok(RedirectedReply::Local(reply)) => reply.map(Some),
+        Err(error) => encode_call_error(def, method, error).map(Some),
+    }
+}
+
 /// Serve one WorkflowService Thrift call through the installed hook. Returns
 /// `Ok(None)` when the hook does not serve the method.
 pub async fn dispatch_thrift(
@@ -715,30 +801,6 @@ pub async fn dispatch_thrift(
     };
     match result {
         Ok(response) => Ok(Some(((codec.encode)(response)?, None))),
-        Err(error) => {
-            let (mut name, mut value, message) = error_to_thrift(&error);
-            let mut field = cadence_thrift::service::exception_field(def, name);
-            if field.is_none() {
-                // Undeclared exceptions are reported as InternalServiceError
-                // when declared, matching Go's ordinary-error fallthrough.
-                if let Some(id) =
-                    cadence_thrift::service::exception_field(def, "InternalServiceError")
-                {
-                    name = "InternalServiceError";
-                    value = Struct {
-                        fields: vec![(1, Value::Bytes(message.as_bytes().to_vec()))],
-                    };
-                    field = Some(id);
-                }
-            }
-            let field = field
-                .ok_or_else(|| format!("error {name} ({message}) not declared for {method}"))?;
-            Ok(Some((
-                Struct {
-                    fields: vec![(field, Value::Struct(value))],
-                },
-                Some((name, message)),
-            )))
-        }
+        Err(error) => encode_call_error(def, method, error).map(Some),
     }
 }
