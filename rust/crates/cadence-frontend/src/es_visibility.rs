@@ -432,6 +432,7 @@ mod tests {
         let (f, v) = fake(vec![
             Err("node [x] not available".into()),
             Ok(json!({"_scroll_id": "new", "hits": {"hits": [hit("a", 0)]}})),
+            Ok(json!({})),
         ]);
         let (infos, _) = v.scan("d", "", 5, &tok).unwrap();
         assert_eq!(infos.len(), 1);

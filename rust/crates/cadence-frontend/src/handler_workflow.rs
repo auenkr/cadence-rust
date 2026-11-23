@@ -3661,7 +3661,7 @@ mod tests {
                 "GetWorkflowExecutionHistory",
                 serde_json::json!({
                     "domain": "history-domain",
-                    "execution": {"workflowId": "workflow-1", "runId": "r"},
+                    "execution": {"workflowId": "workflow-1", "runId": "00000000-0000-0000-0000-000000000001"},
                     "nextPageToken": "AQID"
                 }),
             )
