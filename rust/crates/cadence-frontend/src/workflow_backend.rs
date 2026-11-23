@@ -2242,7 +2242,7 @@ where
     C: FnMut(String) -> Fut,
     Fut: std::future::Future<Output = Result<Struct, CadenceError>>,
 {
-    let started = std::time::Instant::now();
+    let started = tokio::time::Instant::now();
     let mut attempts = 0u32;
     let mut prev_err: Option<CadenceError> = None;
     loop {
