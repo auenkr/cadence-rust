@@ -1,0 +1,11 @@
+# Frontend finding 11 — ListDomains page size
+
+Go defaults zero to 100 in `go/common/domain/handler.go` and passes every other signed size to persistence. Rust preserves the signed value through the persistence traits, rate limiter, and stores. Matching's independent cache-source interface keeps its unsigned page size and checks the conversion at its persistence calls.
+
+- MySQL and PostgreSQL require a strictly positive page size in `SelectFromDomain` in their respective `sqlplugin/*/domain.go` files. SQLite embeds the MySQL adapter in `sqlplugin/sqlite/db.go`. A negative size takes the missing-arguments branch before executing SQL. `sql_domain_store.go` and `sql/common.go` turn that error into an internal service error. Rust returns the same class and message from the SQL persistence path.
+- Cassandra passes the signed size to `SelectAllDomains` in `nosqlplugin/cassandra/domain.go`. The pinned gocql revision `b225f9b53fa1` writes the native page-size flag only for strictly positive sizes. Cassandra's non-aggregate SELECT executes unpaged in that case and does not apply its paging state. The Rust adapter uses the driver's unpaged query for negative sizes and returns no continuation token. The standalone in-memory store follows the same unpaged behavior for negatives.
+- In the reserved `matching_domain_cassandra.rs` file, the only change is the authorized `ListDomains` page-size signature. Its existing delegation forwards the signed size directly. The Thrift handler already maps persistence errors to internal errors and needed no edit.
+
+Unit regressions cover a negative signed value with an opaque cursor through the persisted Frontend manager and an unbounded result with no cursor in memory. Existing positive-page tests cover continuation.
+
+CI is dispatched on `fe-gap-11-pagesize` for `cadence-persistence`, `cadence-matching`, the clean workspace, and the Frontend mixed gate. See the [branch runs](https://github.com/auenkr/cadence-rust/actions?query=branch%3Afe-gap-11-pagesize).

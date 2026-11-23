@@ -319,7 +319,7 @@ impl MySqlDomainMetadataStore {
     /// whenever a page is full, even if the token leads to an empty next page.
     pub fn list_domains(
         &self,
-        page_size: usize,
+        page_size: i32,
         next_page_token: Option<&[u8]>,
     ) -> Result<MatchingDomainPage, MatchingDomainMetadataError> {
         self.list_domains_with_timeout(page_size, next_page_token, GO_DOMAIN_PERSISTENCE_TIMEOUT)
@@ -328,15 +328,17 @@ impl MySqlDomainMetadataStore {
     /// Read one cache page using the caller's remaining refresh-context budget.
     pub fn list_domains_with_timeout(
         &self,
-        page_size: usize,
+        page_size: i32,
         next_page_token: Option<&[u8]>,
         timeout: Duration,
     ) -> Result<MatchingDomainPage, MatchingDomainMetadataError> {
+        if page_size < 0 {
+            return Err(MatchingDomainMetadataError::ListDomainsMissingArgs);
+        }
         if page_size == 0 {
             return Err(MatchingDomainMetadataError::InvalidPageSize);
         }
-        let limit =
-            i64::try_from(page_size).map_err(|_| MatchingDomainMetadataError::InvalidPageSize)?;
+        let limit = i64::from(page_size);
         let deadline = Instant::now() + timeout;
         let token = next_page_token.map(|token| token.to_vec());
         let rows: Vec<DomainMetadataRow> = self
@@ -352,7 +354,7 @@ impl MySqlDomainMetadataStore {
                 ).await,
             }}))
             .map_err(query_error)?;
-        let next_page_token = if rows.len() >= page_size {
+        let next_page_token = if rows.len() >= page_size as usize {
             rows.last().map(|row| row.0.clone())
         } else {
             None
@@ -859,7 +861,7 @@ impl crate::matching_domain_metadata::GoSqlDomainPersistence for MySqlDomainMeta
 
     fn list_domains(
         &self,
-        page_size: usize,
+        page_size: i32,
         page_token: Option<&[u8]>,
     ) -> Result<MatchingDomainPage, MatchingDomainMetadataError> {
         MySqlDomainMetadataStore::list_domains(self, page_size, page_token)
@@ -885,7 +887,7 @@ impl crate::matching_domain_metadata::DomainMetadataPersistence for MySqlDomainM
 
     fn list_domains(
         &self,
-        page_size: usize,
+        page_size: i32,
         page_token: Option<&[u8]>,
     ) -> Result<crate::matching_domain_metadata::MatchingDomainPage, String> {
         MySqlDomainMetadataStore::list_domains(self, page_size, page_token)

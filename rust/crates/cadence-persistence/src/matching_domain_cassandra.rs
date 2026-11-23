@@ -729,7 +729,7 @@ impl DomainMetadataPersistence for CassandraDomainMetadataPersistence {
 
     fn list_domains(
         &self,
-        page_size: usize,
+        page_size: i32,
         page_token: Option<&[u8]>,
     ) -> Result<crate::matching_domain_metadata::MatchingDomainPage, String> {
         self.metadata_reader

@@ -1587,7 +1587,8 @@ impl InMemoryDomainStore {
             name: String,
         }
         if request.page_size < 0 {
-            return Err(BadRequestError::new("Page size must be positive."));
+            // Mirror Go's unpaged Cassandra read for this standalone store.
+            return Ok(self.list());
         }
         let size = if request.page_size == 0 {
             100
@@ -2442,12 +2443,7 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
     ) -> Result<ListDomainsResponse, FrontendDomainError> {
         let size = match request.page_size {
             0 => 100,
-            size if size > 0 => size as usize,
-            _ => {
-                return Err(FrontendDomainError::Invalid(
-                    "Page size must be positive.".into(),
-                ))
-            }
+            size => size,
         };
         let token =
             (!request.next_page_token.is_empty()).then_some(request.next_page_token.as_slice());
@@ -3274,6 +3270,23 @@ mod snapshot_tests {
 mod page_tests {
     use super::*;
     #[test]
+    fn negative_page_size_returns_all_in_memory_domains_without_a_cursor() {
+        let store = InMemoryDomainStore::new();
+        for name in ["bravo", "delta"] {
+            let (info, config, replication) = super::tests::sample(name, name);
+            store.create(info, config, replication, false).unwrap();
+        }
+        let page = store
+            .list_page(&cadence_api::service_types::ListDomainsRequest {
+                page_size: i32::MIN,
+                next_page_token: b"ignored cursor".to_vec(),
+            })
+            .unwrap();
+        assert_eq!(page.domains, store.list().domains);
+        assert!(page.next_page_token.is_empty());
+    }
+
+    #[test]
     fn name_cursor_is_stable_when_an_earlier_domain_is_inserted() {
         let store = InMemoryDomainStore::new();
         for name in ["bravo", "delta"] {
@@ -3436,7 +3449,7 @@ mod failover_notification_version_tests {
         }
         fn list_domains(
             &self,
-            page_size: usize,
+            page_size: i32,
             page_token: Option<&[u8]>,
         ) -> Result<crate::matching_domain_metadata::MatchingDomainPage, String> {
             DomainMetadataPersistence::list_domains(&*self.store, page_size, page_token)
@@ -3609,6 +3622,24 @@ mod failover_notification_version_tests {
         queue.queue_error.store(false, Relaxed);
         manager.deprecate(&request, &cluster_metadata()).unwrap();
         assert_eq!(queue.audit_writes.as_ref().unwrap().load(Relaxed), 1);
+    }
+
+    #[test]
+    fn list_domains_negative_page_size_surfaces_the_sql_persistence_error() {
+        let (manager, _) = manager_with_global_domain();
+        let error = manager
+            .list_page(&cadence_api::service_types::ListDomainsRequest {
+                page_size: -1,
+                next_page_token: b"opaque cursor".to_vec(),
+            })
+            .unwrap_err();
+        let FrontendDomainError::Persistence(message) = error else {
+            panic!("expected a persistence error, got {error}");
+        };
+        assert_eq!(
+            message,
+            "ListDomains operation failed. Failed to get domain rows. Error: missing one or more args for API"
+        );
     }
 
     #[test]

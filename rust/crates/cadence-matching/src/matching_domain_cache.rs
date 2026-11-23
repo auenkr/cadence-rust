@@ -204,6 +204,8 @@ impl DomainMetadataSource for MatchingDomainMetadataStore {
         next_page_token: Option<&[u8]>,
         _timeout: Duration,
     ) -> Result<DomainMetadataPage, DomainMetadataSourceError> {
+        let page_size = i32::try_from(page_size)
+            .map_err(|_| DomainMetadataSourceError::permanent("domain page size exceeds i32"))?;
         let page = MatchingDomainMetadataStore::list_domains_with_timeout(
             self,
             page_size,
@@ -247,6 +249,8 @@ impl DomainMetadataSource
         next_page_token: Option<&[u8]>,
         _timeout: Duration,
     ) -> Result<DomainMetadataPage, DomainMetadataSourceError> {
+        let page_size = i32::try_from(page_size)
+            .map_err(|_| DomainMetadataSourceError::permanent("domain page size exceeds i32"))?;
         let page = cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore::list_domains(
             self, page_size, next_page_token,
         ).map_err(|error| match error {
@@ -346,6 +350,8 @@ impl DomainMetadataSource for cadence_persistence::matching_domain_mysql::MySqlD
         next_page_token: Option<&[u8]>,
         timeout: Duration,
     ) -> Result<DomainMetadataPage, DomainMetadataSourceError> {
+        let page_size = i32::try_from(page_size)
+            .map_err(|_| DomainMetadataSourceError::permanent("domain page size exceeds i32"))?;
         let page = self
             .list_domains_with_timeout(page_size, next_page_token, timeout)
             .map_err(mysql_metadata_source_error)?;
@@ -386,6 +392,8 @@ impl DomainMetadataSource
         next_page_token: Option<&[u8]>,
         timeout: Duration,
     ) -> Result<DomainMetadataPage, DomainMetadataSourceError> {
+        let page_size = i32::try_from(page_size)
+            .map_err(|_| DomainMetadataSourceError::permanent("domain page size exceeds i32"))?;
         let page = self
             .list_domains_with_timeout(page_size, next_page_token, timeout)
             .map_err(postgres_metadata_source_error)?;

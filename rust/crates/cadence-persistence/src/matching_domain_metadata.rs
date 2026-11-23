@@ -98,6 +98,8 @@ pub enum MatchingDomainMetadataError {
     InvalidPageSize,
     #[error("domain metadata persistence operation timed out")]
     OperationTimedOut,
+    #[error("ListDomains operation failed. Failed to get domain rows. Error: missing one or more args for API")]
+    ListDomainsMissingArgs,
     #[error("invalid SQLite domain metadata reader configuration: {0}")]
     InvalidSqliteConfiguration(String),
     #[error("invalid MySQL domain metadata reader configuration: {0}")]
@@ -174,7 +176,7 @@ pub trait GoSqlDomainPersistence: Send + Sync {
 
     fn list_domains(
         &self,
-        page_size: usize,
+        page_size: i32,
         page_token: Option<&[u8]>,
     ) -> Result<MatchingDomainPage, MatchingDomainMetadataError>;
 }
@@ -225,7 +227,7 @@ pub trait DomainMetadataPersistence: std::fmt::Debug + Send + Sync {
     /// List Go-compatible domain rows for paginated Frontend reads.
     fn list_domains(
         &self,
-        _page_size: usize,
+        _page_size: i32,
         _page_token: Option<&[u8]>,
     ) -> Result<MatchingDomainPage, String> {
         Err("domain listing is unavailable for this persistence backend".into())
@@ -774,7 +776,7 @@ impl GoSqlDomainPersistence for CassandraFrontendDomainPersistence {
 
     fn list_domains(
         &self,
-        page_size: usize,
+        page_size: i32,
         page_token: Option<&[u8]>,
     ) -> Result<MatchingDomainPage, MatchingDomainMetadataError> {
         self.metadata.list_domains(page_size, page_token)
@@ -895,7 +897,7 @@ impl CassandraDomainMetadataStore {
 
     pub fn list_domains(
         &self,
-        page_size: usize,
+        page_size: i32,
         next_page_token: Option<&[u8]>,
     ) -> Result<MatchingDomainPage, MatchingDomainMetadataError> {
         use crate::cassandra::{
@@ -906,18 +908,23 @@ impl CassandraDomainMetadataStore {
         if page_size == 0 {
             return Err(MatchingDomainMetadataError::InvalidPageSize);
         }
-        let page_size =
-            i32::try_from(page_size).map_err(|_| MatchingDomainMetadataError::InvalidPageSize)?;
         let session = self.driver.session();
         let mut query = Statement::new("SELECT name, domain, config, replication_config, is_global_domain, config_version, failover_version, failover_notification_version, previous_failover_version, failover_end_time, last_updated_time, notification_version FROM domains_by_name_v2 WHERE domains_partition=?");
-        query.set_page_size(page_size);
-        let paging_state = next_page_token
-            .map(|token| PagingState::new_from_raw_bytes(token.to_vec()))
-            .unwrap_or_else(PagingState::start);
-        let (result, paging_response) = self
-            .driver
-            .run(session.query_single_page(query, (0_i32,), paging_state))
-            .map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?;
+        let (result, paging_response) = if page_size < 0 {
+            // gocql omits nonpositive page sizes. Cassandra executes the
+            // query unpaged and does not resume from the supplied cursor.
+            self.driver
+                .run(session.query_unpaged(query, (0_i32,)))
+                .map(|result| (result, scylla::response::PagingStateResponse::NoMorePages))
+        } else {
+            query.set_page_size(page_size);
+            let paging_state = next_page_token
+                .map(|token| PagingState::new_from_raw_bytes(token.to_vec()))
+                .unwrap_or_else(PagingState::start);
+            self.driver
+                .run(session.query_single_page(query, (0_i32,), paging_state))
+        }
+        .map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?;
         let rows = result
             .into_rows_result()
             .map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?;
@@ -1251,7 +1258,7 @@ impl MatchingDomainMetadataStore {
     /// page returns a token even when it happens to be the final page.
     pub fn list_domains(
         &self,
-        page_size: usize,
+        page_size: i32,
         next_page_token: Option<&[u8]>,
     ) -> Result<MatchingDomainPage, MatchingDomainMetadataError> {
         self.list_domains_with_timeout(page_size, next_page_token, Duration::from_secs(3))
@@ -1260,10 +1267,13 @@ impl MatchingDomainMetadataStore {
     /// Scan one cache page with the remaining Go refresh-context budget.
     pub fn list_domains_with_timeout(
         &self,
-        page_size: usize,
+        page_size: i32,
         next_page_token: Option<&[u8]>,
         timeout: Duration,
     ) -> Result<MatchingDomainPage, MatchingDomainMetadataError> {
+        if page_size < 0 {
+            return Err(MatchingDomainMetadataError::ListDomainsMissingArgs);
+        }
         if page_size == 0 {
             return Err(MatchingDomainMetadataError::InvalidPageSize);
         }
@@ -1278,11 +1288,11 @@ impl MatchingDomainMetadataStore {
                 .map_err(|error| sqlite_operation_error(error, deadline))?;
             let mapped = statement
                 .query_map(
-                    params![GO_DEFAULT_SHARD_ID, token, page_size as i64],
+                    params![GO_DEFAULT_SHARD_ID, token, i64::from(page_size)],
                     row_from_sqlite,
                 )
                 .map_err(|error| sqlite_operation_error(error, deadline))?;
-            let mut collected = Vec::with_capacity(page_size);
+            let mut collected = Vec::new();
             for row in mapped {
                 collected.push(row.map_err(|error| sqlite_operation_error(error, deadline))?);
             }
@@ -1296,17 +1306,17 @@ impl MatchingDomainMetadataStore {
                 .map_err(|error| sqlite_operation_error(error, deadline))?;
             let mapped = statement
                 .query_map(
-                    params![GO_DEFAULT_SHARD_ID, page_size as i64],
+                    params![GO_DEFAULT_SHARD_ID, i64::from(page_size)],
                     row_from_sqlite,
                 )
                 .map_err(|error| sqlite_operation_error(error, deadline))?;
-            let mut collected = Vec::with_capacity(page_size);
+            let mut collected = Vec::new();
             for row in mapped {
                 collected.push(row.map_err(|error| sqlite_operation_error(error, deadline))?);
             }
             collected
         };
-        let has_next_token = rows.len() >= page_size;
+        let has_next_token = rows.len() >= page_size as usize;
         let next_page_token = if has_next_token {
             rows.last().map(|row| row.id.clone())
         } else {
@@ -1481,7 +1491,7 @@ impl GoSqlDomainPersistence for MatchingDomainMetadataStore {
 
     fn list_domains(
         &self,
-        page_size: usize,
+        page_size: i32,
         page_token: Option<&[u8]>,
     ) -> Result<MatchingDomainPage, MatchingDomainMetadataError> {
         MatchingDomainMetadataStore::list_domains(self, page_size, page_token)
@@ -1684,7 +1694,7 @@ impl crate::matching_domain_metadata::DomainMetadataPersistence for MatchingDoma
 
     fn list_domains(
         &self,
-        page_size: usize,
+        page_size: i32,
         page_token: Option<&[u8]>,
     ) -> Result<crate::matching_domain_metadata::MatchingDomainPage, String> {
         MatchingDomainMetadataStore::list_domains(self, page_size, page_token)
