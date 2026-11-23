@@ -116,6 +116,9 @@ def assert_embedded_start_succeeds():
     test_command = command.copy()
     config_index = test_command.index('--config')
     del test_command[config_index:config_index + 2]
+    # cadence-server now hosts every service by default; the previous
+    # matching-only binary implied this restriction.
+    test_command += ['--services', 'matching']
     embedded_data = artifacts / 'embedded-data'
     test_command[test_command.index('--data-dir') + 1] = str(embedded_data)
     log_path = artifacts / 'embedded-startup.log'
