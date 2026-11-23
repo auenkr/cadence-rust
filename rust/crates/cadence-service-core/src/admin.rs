@@ -1054,6 +1054,10 @@ pub async fn refresh_workflow_tasks(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::RefreshWorkflowTasksRequest>,
 ) -> Response {
+    // Go validates the optional execution before any domain lookup.
+    if let Err(e) = validation::check_execution(req.workflow_execution.as_ref()) {
+        return bad_request(e);
+    }
     // Go resolves the domain by name, falling back to the UUID.
     let domain = if req.domain.is_empty() {
         match state
@@ -1075,9 +1079,6 @@ pub async fn refresh_workflow_tasks(
         return e;
     }
     let execution = req.workflow_execution.clone().unwrap_or_default();
-    if let Err(e) = validation::check_execution(Some(&execution)) {
-        return bad_request(e);
-    }
     // Production Frontend delegates to History like Go (HistoryClient.RefreshWorkflowTasks
     // with the domain UUID); the in-memory store is only for embedded service-core use.
     if state.history_admin_channel.is_some() || state.admin.membership.get().is_some() {
@@ -3027,6 +3028,21 @@ mod tests {
         let text = String::from_utf8_lossy(&body);
         assert!(text.contains("getting domain"), "{text}");
         assert!(!text.contains("Workflow execution is not set"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn refresh_workflow_tasks_validates_execution_before_domain() {
+        use axum::extract::State;
+        let state = std::sync::Arc::new(crate::handlers::AppState::default());
+        let req = cadence_api::admin::RefreshWorkflowTasksRequest {
+            domain: "no-such-domain".into(),
+            workflow_execution: None,
+            ..Default::default()
+        };
+        let resp = super::refresh_workflow_tasks(State(state), axum::Json(req)).await;
+        let body = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+        let text = String::from_utf8_lossy(&body);
+        assert!(text.contains("Execution is not set on request."), "{text}");
     }
 
     #[test]
