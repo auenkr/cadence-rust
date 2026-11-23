@@ -99,7 +99,7 @@ jobs:
   fmt:
     # Fast fail: the enforced rustfmt checks finish in ~30s on their own runner; on failure the whole
     # run is cancelled so `gh run watch` returns before clippy/test (previously ~4-7 min).
-    if: inputs.heap_profile_run_id == ''
+    if: inputs.heap_profile_run_id == '' && inputs.format_all != true
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
