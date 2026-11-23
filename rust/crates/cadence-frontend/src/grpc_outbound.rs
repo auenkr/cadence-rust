@@ -301,7 +301,7 @@ impl GrpcOutbound {
             "RequestCancelWorkflowExecution" => {
                 let req: st::RequestCancelWorkflowExecutionRequest = inner(env, 20)?;
                 let msg = h::RequestCancelWorkflowExecutionRequest {
-                    request: Some(cv::cancel_request_out(req)),
+                    cancel_request: Some(cv::cancel_request_out(req)),
                     domain_id,
                     ..Default::default()
                 };
@@ -365,8 +365,10 @@ impl GrpcOutbound {
             }
             "RefreshWorkflowTasks" => {
                 let req: ty::RefreshWorkflowTasksRequest = inner(env, 20)?;
+                let base = cv::refresh_request_out(req);
                 let msg = h::RefreshWorkflowTasksRequest {
-                    request: Some(cv::refresh_request_out(req)),
+                    domain: base.domain,
+                    workflow_execution: base.workflow_execution,
                     domain_id,
                 };
                 client
@@ -485,10 +487,7 @@ impl GrpcOutbound {
                 let task_list: ty::TaskList = inner(env, 20)?;
                 let completed: tk::RespondQueryTaskCompletedRequest = inner(env, 40)?;
                 let msg = m::RespondQueryTaskCompletedRequest {
-                    request: Some(
-                        convert::query_completed_out(completed)
-                            .map_err(|s| internal(s.to_string()))?,
-                    ),
+                    request: Some(convert::query_completed_out(completed)),
                     domain_id: domain_of(env)?,
                     task_list: Some(convert::task_list_out(task_list)),
                     task_id: env
