@@ -715,7 +715,7 @@ def run_sql_stack():
     try:
         matching_proc = launch('rust-matching', [server_bin, 'start', '--config', work / 'rust.yaml', '--root', work, '--services', 'matching',
             '--port', '0', '--history-grpc-port', h_g, '--matching-grpc-port', m_g, '--matching-tchannel-port', m_t, '--data-dir', work / 'matching-data'],
-            env={**os.environ, 'RUST_LOG': os.environ.get('RUST_LOG', 'info,cadence_matching=debug')})
+            env={**os.environ, 'RUST_LOG': os.environ.get('RUST_LOG', 'info,cadence_matching=trace,hyper=trace,axum=trace,tower_http=trace')})
         frontend_proc = launch('rust-frontend', [server_bin, 'start', '--config', work / 'rust.yaml', '--root', work, '--services', 'frontend',
             '--history-grpc-port', h_g, '--grpc-port', fe_g, '--tchannel-port', fe_t, '--data-dir', work / 'frontend-data'],
             env={**os.environ, 'CADENCE_HISTORY_TCHANNEL_ADDR': f'127.0.0.1:{h_t}', 'CADENCE_MATCHING_TCHANNEL_ADDR': f'127.0.0.1:{m_t}'})
@@ -743,8 +743,8 @@ def run_sql_stack():
             for log_name in ('rust-matching.log',):
                 lines = (work / log_name).read_text(errors='replace').splitlines()
                 print(f'--- {log_name}: {len(lines)} lines, last 40 and query lines ---', flush=True)
-                print('\n'.join(l[:300] for l in lines[-40:]), flush=True)
-                print('\n'.join(l[:300] for l in [x for x in lines if 'uer' in x][-40:]), flush=True)
+                quiet = [x for x in lines if 'Ringpop' not in x and 'ping' not in x.lower()]
+                print('\n'.join(l[:240] for l in quiet[-150:]), flush=True)
             raise RuntimeError(f'real-stack Go tests failed: {failures}')
         for proc in procs:
             if proc.poll() is not None:
