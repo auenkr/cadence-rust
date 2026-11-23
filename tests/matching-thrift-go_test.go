@@ -68,13 +68,20 @@ func TestRustMatchingNativeThrift(t *testing.T) {
 				}
 			}
 			dispatcher := yarpc.NewDispatcher(yarpc.Config{Name: "matching-thrift-compat", Outbounds: yarpc.Outbounds{
-				"cadence-matching": {Unary: outbound}, "cadence-frontend": {Unary: tr.NewSingleOutbound(os.Getenv("CADENCE_FRONTEND_TCHANNEL"))},
+				"cadence-matching": {Unary: outbound}, "cadence-matching-tc": {Unary: tr.NewSingleOutbound(os.Getenv("CADENCE_MATCHING_TCHANNEL"))}, "cadence-frontend": {Unary: tr.NewSingleOutbound(os.Getenv("CADENCE_FRONTEND_TCHANNEL"))},
 			}})
 			if err := dispatcher.Start(); err != nil {
 				t.Fatal(err)
 			}
 			defer dispatcher.Stop()
 			matching := matchingserviceclient.New(dispatcher.ClientConfig("cadence-matching"))
+			pollClient, queryClient := matching, matching
+			if os.Getenv("CADENCE_DIAG_POLL_TCHANNEL") != "" {
+				pollClient = matchingserviceclient.New(dispatcher.ClientConfig("cadence-matching-tc"))
+			}
+			if os.Getenv("CADENCE_DIAG_QUERY_TCHANNEL") != "" {
+				queryClient = matchingserviceclient.New(dispatcher.ClientConfig("cadence-matching-tc"))
+			}
 			frontend := workflowserviceclient.New(dispatcher.ClientConfig("cadence-frontend"))
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
@@ -223,7 +230,7 @@ func TestRustMatchingNativeThrift(t *testing.T) {
 			pollDone := make(chan *m.PollForDecisionTaskResponse, 1)
 			pollErrors := make(chan error, 1)
 			go func() {
-				v, e := matching.PollForDecisionTask(ctx, &m.PollForDecisionTaskRequest{DomainUUID: common.StringPtr(domainID), PollerID: common.StringPtr(pollID), PollRequest: &s.PollForDecisionTaskRequest{TaskList: queryList, Identity: common.StringPtr("query-worker")}})
+				v, e := pollClient.PollForDecisionTask(ctx, &m.PollForDecisionTaskRequest{DomainUUID: common.StringPtr(domainID), PollerID: common.StringPtr(pollID), PollRequest: &s.PollForDecisionTaskRequest{TaskList: queryList, Identity: common.StringPtr("query-worker")}})
 				if e != nil {
 					pollErrors <- e
 				} else {
@@ -234,7 +241,7 @@ func TestRustMatchingNativeThrift(t *testing.T) {
 			result := make(chan *s.QueryWorkflowResponse, 1)
 			queryErrors := make(chan error, 1)
 			go func() {
-				v, e := matching.QueryWorkflow(ctx, &m.QueryWorkflowRequest{DomainUUID: common.StringPtr(domainID), TaskList: queryList, QueryRequest: &s.QueryWorkflowRequest{Domain: common.StringPtr(domain), Execution: execution, Query: &s.WorkflowQuery{QueryType: common.StringPtr("ping")}}})
+				v, e := queryClient.QueryWorkflow(ctx, &m.QueryWorkflowRequest{DomainUUID: common.StringPtr(domainID), TaskList: queryList, QueryRequest: &s.QueryWorkflowRequest{Domain: common.StringPtr(domain), Execution: execution, Query: &s.WorkflowQuery{QueryType: common.StringPtr("ping")}}})
 				if e != nil {
 					queryErrors <- e
 				} else {

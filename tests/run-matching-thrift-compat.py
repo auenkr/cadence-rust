@@ -732,6 +732,10 @@ def run_sql_stack():
                             'CADENCE_FRONTEND_TCHANNEL': f'127.0.0.1:{fe_t}',
                             'CADENCE_MATCHING_TLS_CERT': str(artifacts / 'tls-cert.pem')}
         failures = []
+        for diag_env in ({'CADENCE_DIAG_POLL_TCHANNEL': '1'}, {'CADENCE_DIAG_QUERY_TCHANNEL': '1'}):
+            result = subprocess.run(['go', 'test', '-overlay', str(overlay.resolve()), './service/matching/wrappers/thrift',
+                                     '-run', '^TestRustMatchingNativeThrift$/^http$', '-count=1', '-v'], cwd=root / 'go', timeout=300, env={**stack_env, **diag_env})
+            print(f'DIAG real-stack http {diag_env} exit={result.returncode}', flush=True)
         for pattern in ('^TestRustMatchingNativeThrift$/^http$', '^TestRustMatchingNativeThrift$/^tchannel$',
                         '^TestRustMatchingNativeThrift$/^http-trailing-slash$', '^TestRustMatchingNativeThrift$/^http-tls$', '^TestRustMatchingTLS$'):
             result = subprocess.run(['go', 'test', '-overlay', str(overlay.resolve()), './service/matching/wrappers/thrift',
