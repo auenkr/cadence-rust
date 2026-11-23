@@ -60,3 +60,11 @@ query-matched poll's outbound History call, including content-length/content-typ
 Go yarpc `CallFromContext(ctx).HeaderNames()` returns only application headers (Rpc-Header-*, prefix
 stripped); tchannel path already passes only app headers (tchannel.rs:578-590).
 Proposed parity fix: in thrift_matching.rs http_handler keep only `rpc-header-*` headers, stripped.
+
+## Resolution (2026-11-23)
+Root cause confirmed: Matching `http_handler` captured ALL inbound HTTP headers into INBOUND_HEADERS, which
+the default forwarding rule re-sent on outbound History calls. yarpc HTTP inbound exposes only
+`Rpc-Header-*` application headers (prefix stripped) via `CallFromContext(ctx).HeaderNames()`.
+Fix 2b5818c93: `http_application_headers` keeps only `rpc-header-*`, stripped, with a unit test.
+Runs on head 2b5818c93: matching-http-tls-interop 45178721745 success; matching-mixed-gate 45178755457 success;
+rust-ci cadence-matching 45178729807 (see final entry below).

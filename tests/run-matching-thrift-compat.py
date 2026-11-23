@@ -715,7 +715,7 @@ def run_sql_stack():
     try:
         matching_proc = launch('rust-matching', [server_bin, 'start', '--config', work / 'rust.yaml', '--root', work, '--services', 'matching',
             '--port', '0', '--history-grpc-port', h_g, '--matching-grpc-port', m_g, '--matching-tchannel-port', m_t, '--data-dir', work / 'matching-data'],
-            env={**os.environ, 'RUST_LOG': os.environ.get('RUST_LOG', 'info,cadence_matching=trace,hyper=trace,axum=trace,tower_http=trace')})
+            env={**os.environ, 'RUST_LOG': os.environ.get('RUST_LOG', 'info')})
         frontend_proc = launch('rust-frontend', [server_bin, 'start', '--config', work / 'rust.yaml', '--root', work, '--services', 'frontend',
             '--history-grpc-port', h_g, '--grpc-port', fe_g, '--tchannel-port', fe_t, '--data-dir', work / 'frontend-data'],
             env={**os.environ, 'CADENCE_HISTORY_TCHANNEL_ADDR': f'127.0.0.1:{h_t}', 'CADENCE_MATCHING_TCHANNEL_ADDR': f'127.0.0.1:{m_t}'})
@@ -732,10 +732,6 @@ def run_sql_stack():
                             'CADENCE_FRONTEND_TCHANNEL': f'127.0.0.1:{fe_t}',
                             'CADENCE_MATCHING_TLS_CERT': str(artifacts / 'tls-cert.pem')}
         failures = []
-        for diag_env in ({'CADENCE_DIAG_POLL_TCHANNEL': '1'}, {'CADENCE_DIAG_QUERY_TCHANNEL': '1'}):
-            result = subprocess.run(['go', 'test', '-overlay', str(overlay.resolve()), './service/matching/wrappers/thrift',
-                                     '-run', '^TestRustMatchingNativeThrift$/^http$', '-count=1', '-v'], cwd=root / 'go', timeout=300, env={**stack_env, **diag_env})
-            print(f'DIAG real-stack http {diag_env} exit={result.returncode}', flush=True)
         for pattern in ('^TestRustMatchingNativeThrift$/^http$', '^TestRustMatchingNativeThrift$/^tchannel$',
                         '^TestRustMatchingNativeThrift$/^http-trailing-slash$', '^TestRustMatchingNativeThrift$/^http-tls$', '^TestRustMatchingTLS$'):
             result = subprocess.run(['go', 'test', '-overlay', str(overlay.resolve()), './service/matching/wrappers/thrift',
@@ -744,11 +740,6 @@ def run_sql_stack():
             if result.returncode != 0:
                 failures.append(pattern)
         if failures:
-            for log_name in ('rust-matching.log',):
-                lines = (work / log_name).read_text(errors='replace').splitlines()
-                print(f'--- {log_name}: {len(lines)} lines, last 40 and query lines ---', flush=True)
-                quiet = [x for x in lines if 'Ringpop' not in x and 'ping' not in x.lower()]
-                print('\n'.join(l[:240] for l in quiet[-150:]), flush=True)
             raise RuntimeError(f'real-stack Go tests failed: {failures}')
         for proc in procs:
             if proc.poll() is not None:
