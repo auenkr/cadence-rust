@@ -653,6 +653,11 @@ pub struct AdminState {
     /// Elasticsearch/OpenSearch mapping client; None when advanced visibility is not configured.
     pub es: Option<crate::es_mapping::EsVisibility>,
     pub workflow_deletion: Option<WorkflowDeletionStores>,
+    /// Last known domain replication DLQ size (Go dlqMessageHandlerImpl.lastCount;
+    /// `None` is Go's -1 "not yet loaded").
+    pub domain_dlq_last_count: Arc<Mutex<Option<i64>>>,
+    /// Set once the periodic (5 minute) refresh loop has been started.
+    pub domain_dlq_refresh_started: Arc<std::sync::atomic::AtomicBool>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1054,6 +1059,10 @@ pub async fn refresh_workflow_tasks(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::RefreshWorkflowTasksRequest>,
 ) -> Response {
+    // Go validates the optional execution before any domain lookup.
+    if let Err(e) = validation::check_execution(req.workflow_execution.as_ref()) {
+        return bad_request(e);
+    }
     // Go resolves the domain by name, falling back to the UUID.
     let domain = if req.domain.is_empty() {
         match state
@@ -1075,9 +1084,6 @@ pub async fn refresh_workflow_tasks(
         return e;
     }
     let execution = req.workflow_execution.clone().unwrap_or_default();
-    if let Err(e) = validation::check_execution(Some(&execution)) {
-        return bad_request(e);
-    }
     // Production Frontend delegates to History like Go (HistoryClient.RefreshWorkflowTasks
     // with the domain UUID); the in-memory store is only for embedded service-core use.
     if state.history_admin_channel.is_some() || state.admin.membership.get().is_some() {
@@ -1669,21 +1675,15 @@ pub async fn read_dlq_messages(
         }
     };
     let ack_level = ack_levels.get("domainReplication").copied().unwrap_or(-1);
-    let first_message_id = match decode_domain_dlq_page_token(&req.next_page_token) {
-        Ok(Some(id)) => id,
-        Ok(None) => ack_level,
-        Err(error) => {
-            return crate::handlers::error_response(
-                "InternalServiceError",
-                StatusCode::INTERNAL_SERVER_ERROR,
-                error,
-            )
-        }
-    };
     let end_message_id = req.inclusive_end_message_id.unwrap_or(i64::MAX - 1);
     let page_size = read_dlq_page_size(req.maximum_page_size);
-    match persistence.read_domain_replication_dlq(first_message_id, end_message_id, page_size) {
-        Ok(rows) => {
+    match persistence.read_domain_replication_dlq_page(
+        ack_level,
+        end_message_id,
+        page_size,
+        &req.next_page_token,
+    ) {
+        Ok((rows, next_page_token)) => {
             let mut tasks = Vec::with_capacity(rows.len());
             for row in &rows {
                 let task = (|| {
@@ -1705,11 +1705,6 @@ pub async fn read_dlq_messages(
                     }
                 }
             }
-            let next_page_token = if rows.len() >= page_size {
-                encode_domain_dlq_page_token(rows.last().map_or(first_message_id, |row| row.id))
-            } else {
-                vec![]
-            };
             ok_json(serde_json::json!({
                 "replicationTasks": tasks,
                 "nextPageToken": next_page_token,
@@ -1784,6 +1779,7 @@ pub async fn purge_dlq_messages(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn decode_domain_dlq_page_token(token: &[u8]) -> Result<Option<i64>, String> {
     if token.is_empty() {
         return Ok(None);
@@ -1803,6 +1799,7 @@ pub(crate) fn decode_domain_dlq_page_token(token: &[u8]) -> Result<Option<i64>, 
     )))
 }
 
+#[cfg(test)]
 pub(crate) fn encode_domain_dlq_page_token(message_id: i64) -> Vec<u8> {
     message_id.to_le_bytes().to_vec()
 }
@@ -1861,13 +1858,16 @@ pub fn merge_domain_dlq_messages(
     })?;
     let ack_levels = persistence.get_domain_replication_dlq_ack_levels()?;
     let ack_level = ack_levels.get("domainReplication").copied().unwrap_or(-1);
-    let first_message_id = decode_domain_dlq_page_token(&req.next_page_token)?.unwrap_or(ack_level);
     let end_message_id = req.inclusive_end_message_id.unwrap_or(i64::MAX - 1);
     // Go passes MergeDLQMessages.MaximumPageSize through unchanged. Unlike
     // ReadDLQMessages, it does not apply the 1000-message read default.
     let page_size = req.maximum_page_size.max(0) as usize;
-    let rows =
-        persistence.read_domain_replication_dlq(first_message_id, end_message_id, page_size)?;
+    let (rows, next_page_token) = persistence.read_domain_replication_dlq_page(
+        ack_level,
+        end_message_id,
+        page_size,
+        &req.next_page_token,
+    )?;
     // Go starts ackedMessageID at 0 and always range-deletes and updates the
     // ack level, even when no message was merged (persistence ignores stale levels).
     let mut last_processed = 0_i64;
@@ -1906,11 +1906,6 @@ pub fn merge_domain_dlq_messages(
     // Go treats acknowledgement metadata as best-effort after delete.
     let _ = persistence
         .update_domain_replication_dlq_ack_level("domainReplication".into(), last_processed);
-    let next_page_token = if rows.len() >= page_size {
-        encode_domain_dlq_page_token(rows.last().map_or(first_message_id, |row| row.id))
-    } else {
-        Vec::new()
-    };
     Ok(cadence_api::admin::MergeDLQMessagesResponse { next_page_token })
 }
 
@@ -1920,6 +1915,14 @@ pub async fn resend_replication_tasks(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::ResendReplicationTasksRequest>,
 ) -> Response {
+    // Go performs no field validation here: the resender resolves the domain
+    // first and leaves execution/cluster validation to downstream calls.
+    if state.history_admin_channel.is_some() {
+        return match crate::admin_replication::resend_replication_tasks(&state, req).await {
+            Ok(()) => ok_json(cadence_api::admin::ResendReplicationTasksResponse {}),
+            Err(error) => proxy_error_response(error),
+        };
+    }
     if req.domain_id.is_empty() || req.workflow_id.is_empty() || req.run_id.is_empty() {
         return bad_request(BadRequestError::new(
             "Workflow execution is not set on request.",
@@ -1929,12 +1932,6 @@ pub async fn resend_replication_tasks(
         return bad_request(BadRequestError::new(
             "Remote cluster is not set on request.",
         ));
-    }
-    if state.history_admin_channel.is_some() {
-        return match crate::admin_replication::resend_replication_tasks(&state, req).await {
-            Ok(()) => ok_json(cadence_api::admin::ResendReplicationTasksResponse {}),
-            Err(error) => proxy_error_response(error),
-        };
     }
     if req.remote_cluster != state.current_cluster_name {
         return bad_request(BadRequestError::new(format!(
@@ -2272,14 +2269,14 @@ pub async fn reset_queue(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::ResetQueueRequest>,
 ) -> Response {
-    if let Err(e) = check_shard_id(&state, req.shard_id) {
-        return bad_request(e);
-    }
     if req.task_type.is_none() {
-        return bad_request(BadRequestError::new("TaskType is not set on request."));
+        return bad_request(BadRequestError::new("Request is nil."));
     }
     if req.cluster_name.is_empty() {
         return bad_request(BadRequestError::new("Cluster name is not set."));
+    }
+    if let Err(e) = check_shard_id(&state, req.shard_id) {
+        return bad_request(e);
     }
     let channel = match history_channel_for(&state, req.shard_id, None) {
         Ok(channel) => channel,
@@ -2333,14 +2330,14 @@ pub async fn describe_queue(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::DescribeQueueRequest>,
 ) -> Response {
-    if let Err(e) = check_shard_id(&state, req.shard_id) {
-        return bad_request(e);
-    }
     if req.task_type.is_none() {
-        return bad_request(BadRequestError::new("TaskType is not set on request."));
+        return bad_request(BadRequestError::new("Request is nil."));
     }
     if req.cluster_name.is_empty() {
         return bad_request(BadRequestError::new("Cluster name is not set."));
+    }
+    if let Err(e) = check_shard_id(&state, req.shard_id) {
+        return bad_request(e);
     }
     let channel = match history_channel_for(&state, req.shard_id, None) {
         Ok(channel) => channel,
@@ -2451,7 +2448,7 @@ pub async fn get_workflow_execution_raw_history(
             Err(response) => return response,
         }
     } else {
-        match RawHistoryToken::from_bytes(&req.next_page_token) {
+        match RawHistoryToken::from_bytes_go(&req.next_page_token) {
             Ok(token) => {
                 persistence_token = token.persistence_token.clone().unwrap_or_default();
                 let validation = if configured {
@@ -2466,7 +2463,13 @@ pub async fn get_workflow_execution_raw_history(
                 continuation = Some(token);
                 histories
             }
-            Err(e) => return bad_request(e),
+            Err(message) => {
+                return error_response(
+                    "InternalServiceError",
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    message,
+                )
+            }
         }
     };
     if histories.histories.is_empty() {
@@ -2672,10 +2675,6 @@ async fn describe_workflow_execution_admin_core(
 
     let shard_id = (cadence_common::membership::fingerprint32(execution.workflow_id.as_bytes())
         % shard_count(state).max(1) as u32) as i32;
-    let domain_id = match state.domain_manager.domain_id(&req.domain) {
-        Ok(id) => id,
-        Err(error) => return Err(entity_not_exists(error)),
-    };
     let owner = match state
         .admin
         .membership
@@ -2691,6 +2690,11 @@ async fn describe_workflow_execution_admin_core(
                 error,
             ));
         }
+    };
+    // Go resolves the History host before looking up the domain.
+    let domain_id = match state.domain_manager.domain_id(&req.domain) {
+        Ok(id) => id,
+        Err(error) => return Err(entity_not_exists(error)),
     };
     let (history_addr, channel) = match history_channel_for(state, shard_id, None) {
         Ok(Some(channel)) => (
@@ -2978,6 +2982,169 @@ mod tests {
             .unwrap();
         let text = String::from_utf8_lossy(&body);
         assert!(text.contains("Request is nil."), "{text}");
+    }
+
+    #[tokio::test]
+    async fn queue_requests_validate_required_fields_before_shard() {
+        use axum::extract::State;
+        async fn text(resp: axum::response::Response) -> String {
+            let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
+                .await
+                .unwrap();
+            String::from_utf8_lossy(&body).to_string()
+        }
+        let state = std::sync::Arc::new(crate::handlers::AppState::default());
+        let r = cadence_api::admin::ResetQueueRequest {
+            shard_id: -5,
+            task_type: None,
+            ..Default::default()
+        };
+        let t = text(super::reset_queue(State(state.clone()), axum::Json(r)).await).await;
+        assert!(t.contains("Request is nil."), "{t}");
+        let d = cadence_api::admin::DescribeQueueRequest {
+            shard_id: -5,
+            task_type: None,
+            ..Default::default()
+        };
+        let t = text(super::describe_queue(State(state), axum::Json(d)).await).await;
+        assert!(t.contains("Request is nil."), "{t}");
+    }
+
+    #[tokio::test]
+    async fn resend_resolves_domain_before_field_validation() {
+        use axum::extract::State;
+        let state = crate::handlers::AppState {
+            history_admin_channel: Some(
+                tonic::transport::Channel::from_static("http://127.0.0.1:1").connect_lazy(),
+            ),
+            ..Default::default()
+        };
+        let req = cadence_api::admin::ResendReplicationTasksRequest {
+            domain_id: "no-such-domain".into(),
+            workflow_id: "wf".into(),
+            run_id: String::new(),
+            remote_cluster: String::new(),
+            ..Default::default()
+        };
+        let resp =
+            super::resend_replication_tasks(State(std::sync::Arc::new(state)), axum::Json(req))
+                .await;
+        let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        let text = String::from_utf8_lossy(&body);
+        assert!(text.contains("getting domain"), "{text}");
+        assert!(!text.contains("Workflow execution is not set"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn refresh_workflow_tasks_validates_execution_before_domain() {
+        use axum::extract::State;
+        let state = std::sync::Arc::new(crate::handlers::AppState::default());
+        let req = cadence_api::admin::RefreshWorkflowTasksRequest {
+            domain: "no-such-domain".into(),
+            workflow_execution: None,
+            ..Default::default()
+        };
+        let resp = super::refresh_workflow_tasks(State(state), axum::Json(req)).await;
+        let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        let text = String::from_utf8_lossy(&body);
+        assert!(text.contains("Execution is not set on request."), "{text}");
+    }
+
+    #[tokio::test]
+    async fn admin_describe_execution_resolves_shard_owner_before_domain() {
+        struct FailingRing;
+        impl super::ClusterMembership for FailingRing {
+            fn who_am_i(&self) -> Result<String, String> {
+                Ok("fe".into())
+            }
+            fn members(&self, _role: &str) -> Result<Vec<String>, String> {
+                Err("ring unavailable".into())
+            }
+        }
+        let state = crate::handlers::AppState::default();
+        state
+            .admin
+            .membership
+            .set(Some(std::sync::Arc::new(FailingRing)));
+        let req = cadence_api::admin::AdminDescribeWorkflowExecutionRequest {
+            domain: "no-such-domain".into(),
+            execution: Some(cadence_api::types::WorkflowExecution::new("w", "")),
+        };
+        let err = super::describe_workflow_execution_admin_core(&state, req)
+            .await
+            .unwrap_err();
+        let body = axum::body::to_bytes(err.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        let text = String::from_utf8_lossy(&body);
+        assert!(text.contains("ring unavailable"), "{text}");
+    }
+
+    #[test]
+    fn domain_dlq_read_passes_opaque_backend_token_through() {
+        #[derive(Debug)]
+        struct P;
+        impl cadence_persistence::matching_domain_metadata::DomainMetadataPersistence for P {
+            fn metadata_version(&self) -> Result<i64, String> {
+                Ok(0)
+            }
+            fn create_domain(
+                &self,
+                _: &cadence_persistence::matching_domain_metadata::MatchingDomainMetadata,
+                _: i64,
+            ) -> Result<(), String> {
+                unimplemented!()
+            }
+            fn update_domain(
+                &self,
+                _: &cadence_persistence::matching_domain_metadata::MatchingDomainMetadata,
+                _: i64,
+            ) -> Result<(), String> {
+                unimplemented!()
+            }
+            fn delete_domain(&self, _: &str) -> Result<(), String> {
+                unimplemented!()
+            }
+            fn get_domain_replication_dlq_ack_levels(
+                &self,
+            ) -> Result<std::collections::HashMap<String, i64>, String> {
+                Ok(Default::default())
+            }
+            fn read_domain_replication_dlq_page(
+                &self,
+                first: i64,
+                _last: i64,
+                _page: usize,
+                token: &[u8],
+            ) -> Result<
+                (
+                    Vec<cadence_persistence::matching_domain_metadata::DomainReplicationDlqMessage>,
+                    Vec<u8>,
+                ),
+                String,
+            > {
+                assert_eq!(first, -1);
+                assert_eq!(token, b"cassandra-page-state");
+                Ok((Vec::new(), b"next-opaque-state".to_vec()))
+            }
+        }
+        let state = crate::handlers::AppState {
+            domain_metadata_persistence: Some(std::sync::Arc::new(P)),
+            ..Default::default()
+        };
+        let response = super::read_domain_dlq_messages(
+            &state,
+            cadence_api::admin::ReadDLQMessagesRequest {
+                next_page_token: b"cassandra-page-state".to_vec(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(response.next_page_token, b"next-opaque-state");
     }
 
     #[test]
@@ -3871,12 +4038,14 @@ pub fn read_domain_dlq_messages(
     })?;
     let ack_levels = persistence.get_domain_replication_dlq_ack_levels()?;
     let ack_level = ack_levels.get("domainReplication").copied().unwrap_or(-1);
-    let first_message_id =
-        decode_domain_dlq_page_token(&request.next_page_token)?.unwrap_or(ack_level);
     let end_message_id = request.inclusive_end_message_id.unwrap_or(i64::MAX - 1);
     let page_size = read_dlq_page_size(request.maximum_page_size);
-    let rows =
-        persistence.read_domain_replication_dlq(first_message_id, end_message_id, page_size)?;
+    let (rows, next_page_token) = persistence.read_domain_replication_dlq_page(
+        ack_level,
+        end_message_id,
+        page_size,
+        &request.next_page_token,
+    )?;
     let mut tasks = Vec::with_capacity(rows.len());
     for row in &rows {
         let thrift = decode_thriftrw_payload(&row.payload)?;
@@ -3888,11 +4057,6 @@ pub fn read_domain_dlq_messages(
         task.source_task_id = Some(row.id);
         tasks.push(task);
     }
-    let next_page_token = if rows.len() >= page_size {
-        encode_domain_dlq_page_token(rows.last().map_or(first_message_id, |row| row.id))
-    } else {
-        Vec::new()
-    };
     Ok(cadence_api::admin::ReadDLQMessagesResponse {
         dlq_type: None,
         replication_tasks: tasks,

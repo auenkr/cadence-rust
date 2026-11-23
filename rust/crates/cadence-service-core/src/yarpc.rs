@@ -912,16 +912,16 @@ async fn handle_respond_cross_cluster_tasks_completed(
 async fn handle_reset_queue(state: &AppState, body: &Struct) -> HandlerResult {
     let req: cadence_api::admin::ResetQueueRequest =
         decode_args(body).map_err(AppError::bad_request)?;
-    crate::admin::check_shard_id(state, req.shard_id)
-        .map_err(|error| AppError::bad_request(error.message))?;
     let task_type = req
         .task_type
-        .ok_or_else(|| AppError::bad_request("TaskType is not set on request.".to_string()))?;
+        .ok_or_else(|| AppError::bad_request("Request is nil.".to_string()))?;
     if req.cluster_name.is_empty() {
         return Err(AppError::bad_request(
             "Cluster name is not set.".to_string(),
         ));
     }
+    crate::admin::check_shard_id(state, req.shard_id)
+        .map_err(|error| AppError::bad_request(error.message))?;
     let channel = crate::admin::history_channel_for(state, req.shard_id, None)
         .map_err(AppError::internal)?
         .ok_or_else(|| AppError::internal("History client is not configured.".to_string()))?;
@@ -949,25 +949,27 @@ async fn handle_reset_queue(state: &AppState, body: &Struct) -> HandlerResult {
 async fn handle_resend_replication_tasks(state: &AppState, body: &Struct) -> HandlerResult {
     let req: cadence_api::admin::ResendReplicationTasksRequest =
         decode_args(body).map_err(AppError::bad_request)?;
-    if req.domain_id.is_empty() || req.workflow_id.is_empty() || req.run_id.is_empty() {
-        return Err(AppError::bad_request(
-            "Workflow execution is not set on request.".to_string(),
-        ));
-    }
-    if req.remote_cluster.is_empty() {
-        return Err(AppError::bad_request(
-            "Remote cluster is not set on request.".to_string(),
-        ));
-    }
     if state.history_admin_channel.is_some() {
         crate::admin_replication::resend_replication_tasks(state, req)
             .await
             .map_err(proxy_app_error)?;
-    } else if req.remote_cluster != state.current_cluster_name {
-        return Err(AppError::bad_request(format!(
-            "Unknown remote cluster {:?}.",
-            req.remote_cluster
-        )));
+    } else {
+        if req.domain_id.is_empty() || req.workflow_id.is_empty() || req.run_id.is_empty() {
+            return Err(AppError::bad_request(
+                "Workflow execution is not set on request.".to_string(),
+            ));
+        }
+        if req.remote_cluster.is_empty() {
+            return Err(AppError::bad_request(
+                "Remote cluster is not set on request.".to_string(),
+            ));
+        }
+        if req.remote_cluster != state.current_cluster_name {
+            return Err(AppError::bad_request(format!(
+                "Unknown remote cluster {:?}.",
+                req.remote_cluster
+            )));
+        }
     }
     Ok(wrap_success(
         &cadence_api::admin::ResendReplicationTasksResponse {},
@@ -977,16 +979,16 @@ async fn handle_resend_replication_tasks(state: &AppState, body: &Struct) -> Han
 async fn handle_describe_queue(state: &AppState, body: &Struct) -> HandlerResult {
     let req: cadence_api::admin::DescribeQueueRequest =
         decode_args(body).map_err(AppError::bad_request)?;
-    crate::admin::check_shard_id(state, req.shard_id)
-        .map_err(|error| AppError::bad_request(error.message))?;
     let task_type = req
         .task_type
-        .ok_or_else(|| AppError::bad_request("TaskType is not set on request.".to_string()))?;
+        .ok_or_else(|| AppError::bad_request("Request is nil.".to_string()))?;
     if req.cluster_name.is_empty() {
         return Err(AppError::bad_request(
             "Cluster name is not set.".to_string(),
         ));
     }
+    crate::admin::check_shard_id(state, req.shard_id)
+        .map_err(|error| AppError::bad_request(error.message))?;
     let channel = crate::admin::history_channel_for(state, req.shard_id, None)
         .map_err(AppError::internal)?
         .ok_or_else(|| AppError::internal("History client is not configured.".to_string()))?;
@@ -1102,8 +1104,8 @@ fn handle_raw_history_v2(state: &AppState, body: &Struct) -> HandlerResult {
         view.version_histories
             .ok_or_else(|| AppError::bad_request("Invalid version histories.".to_string()))?
     } else {
-        let token = RawHistoryToken::from_bytes(&req.next_page_token)
-            .map_err(|error| AppError::bad_request(error.message))?;
+        let token = RawHistoryToken::from_bytes_go(&req.next_page_token)
+            .map_err(AppError::internal)?;
         persistence_token = token.persistence_token.clone().unwrap_or_default();
         raw_history::validate_persistence_token(&persistence_token)
             .map_err(|error| AppError::bad_request(error.message))?;

@@ -43,6 +43,7 @@ const DOMAIN_QUEUE_INSERT: &str = "INSERT INTO queue (queue_type, message_id, me
 const DOMAIN_QUEUE_READ: &str =
     "SELECT message_id, message_payload FROM queue WHERE queue_type=? AND message_id>? LIMIT ?";
 const DOMAIN_DLQ_READ: &str = "SELECT message_id, message_payload FROM queue WHERE queue_type=? AND message_id>? AND message_id<=? LIMIT ?";
+const DOMAIN_DLQ_READ_PAGED: &str = "SELECT message_id, message_payload FROM queue WHERE queue_type=? AND message_id>? AND message_id<=?";
 const CREATE_DOMAIN: &str =
     "INSERT INTO domains (id, domain, created_time) VALUES (?, {name: ?}, ?) IF NOT EXISTS";
 const CREATE_DOMAIN_V2: &str = "INSERT INTO domains_by_name_v2 (domains_partition, name, domain, config, replication_config, is_global_domain, config_version, failover_version, failover_notification_version, previous_failover_version, failover_end_time, last_updated_time, notification_version, created_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) IF NOT EXISTS";
@@ -231,6 +232,57 @@ impl CassandraDomainMetadataPersistence {
                 Ok(crate::matching_domain_metadata::DomainReplicationDlqMessage { id, payload })
             })
             .collect()
+    }
+
+    /// Go `SelectMessagesBetween`: native Cassandra paging (page size plus the
+    /// driver page state as the opaque token), no `LIMIT`.
+    pub fn read_domain_replication_dlq_page(
+        &self,
+        first_message_id: i64,
+        last_message_id: i64,
+        page_size: usize,
+        page_token: &[u8],
+    ) -> Result<(Vec<crate::matching_domain_metadata::DomainReplicationDlqMessage>, Vec<u8>), String>
+    {
+        let page_size = i32::try_from(page_size).map_err(|error| error.to_string())?;
+        let mut statement = Statement::new(DOMAIN_DLQ_READ_PAGED);
+        statement.set_page_size(page_size);
+        let paging_state = if page_token.is_empty() {
+            PagingState::start()
+        } else {
+            PagingState::new_from_raw_bytes(page_token.to_vec())
+        };
+        let session = self.driver.session();
+        let (result, paging_response) = self
+            .driver
+            .run(session.query_single_page(
+                statement,
+                (
+                    DOMAIN_REPLICATION_DLQ_TYPE,
+                    first_message_id,
+                    last_message_id,
+                ),
+                paging_state,
+            ))
+            .map_err(|error| error.to_string())?;
+        let next = match paging_response.into_paging_control_flow() {
+            std::ops::ControlFlow::Continue(state) => {
+                state.as_bytes_slice().map(|b| b.to_vec()).unwrap_or_default()
+            }
+            std::ops::ControlFlow::Break(()) => Vec::new(),
+        };
+        let rows = result
+            .into_rows_result()
+            .map_err(|error| error.to_string())?;
+        let messages = rows
+            .rows::<(i64, Vec<u8>)>()
+            .map_err(|error| error.to_string())?
+            .map(|row| {
+                let (id, payload) = row.map_err(|error| error.to_string())?;
+                Ok(crate::matching_domain_metadata::DomainReplicationDlqMessage { id, payload })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        Ok((messages, next))
     }
 
     pub fn delete_domain_replication_dlq_range(
@@ -854,6 +906,23 @@ impl DomainMetadataPersistence for CassandraDomainMetadataPersistence {
             first_message_id,
             last_message_id,
             max_count,
+        )
+    }
+
+    fn read_domain_replication_dlq_page(
+        &self,
+        first_message_id: i64,
+        last_message_id: i64,
+        page_size: usize,
+        page_token: &[u8],
+    ) -> Result<(Vec<crate::matching_domain_metadata::DomainReplicationDlqMessage>, Vec<u8>), String>
+    {
+        CassandraDomainMetadataPersistence::read_domain_replication_dlq_page(
+            self,
+            first_message_id,
+            last_message_id,
+            page_size,
+            page_token,
         )
     }
 

@@ -281,6 +281,40 @@ pub trait DomainMetadataPersistence: std::fmt::Debug + Send + Sync {
         Err("domain replication DLQ is unavailable for this persistence backend".into())
     }
 
+    /// Go `ReadMessagesFromDLQ`: one page plus the backend's next-page token.
+    /// SQL backends use an 8-byte little-endian last message ID cursor and
+    /// return a token only for a full page; Cassandra overrides this to pass
+    /// its opaque native page state through.
+    fn read_domain_replication_dlq_page(
+        &self,
+        first_message_id: i64,
+        last_message_id: i64,
+        page_size: usize,
+        page_token: &[u8],
+    ) -> Result<(Vec<DomainReplicationDlqMessage>, Vec<u8>), String> {
+        let mut first = first_message_id;
+        if !page_token.is_empty() {
+            let bytes: [u8; 8] = page_token.try_into().map_err(|_| {
+                format!(
+                    "invalid next page token [{}]",
+                    page_token
+                        .iter()
+                        .map(|b| b.to_string())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                )
+            })?;
+            first = i64::from_le_bytes(bytes);
+        }
+        let rows = self.read_domain_replication_dlq(first, last_message_id, page_size)?;
+        let next = if !rows.is_empty() && rows.len() >= page_size {
+            rows.last().map_or(Vec::new(), |row| row.id.to_le_bytes().to_vec())
+        } else {
+            Vec::new()
+        };
+        Ok((rows, next))
+    }
+
     fn delete_domain_replication_dlq_range(
         &self,
         _first_message_id: i64,
