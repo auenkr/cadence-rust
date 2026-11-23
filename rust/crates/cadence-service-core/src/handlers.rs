@@ -359,7 +359,7 @@ pub fn domain_replication(
     Ok(replication)
 }
 
-fn prepare_domain_replication(
+pub fn prepare_domain_replication(
     state: &AppState,
     req: &RegisterDomainRequest,
 ) -> Result<cadence_api::types::DomainReplicationConfiguration, BadRequestError> {
@@ -387,7 +387,7 @@ fn prepare_domain_replication(
     })
 }
 
-fn validate_domain_registration_replication(
+pub fn validate_domain_registration_replication(
     state: &AppState,
     is_global: bool,
     replication: &cadence_api::types::DomainReplicationConfiguration,
