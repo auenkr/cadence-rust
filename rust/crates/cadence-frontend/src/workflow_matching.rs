@@ -915,16 +915,26 @@ impl ProductionBackend {
         } else {
             Duration::from_secs(30)
         };
-        let reply = self
-            .call_with_timeout(
-                &self.history_addr_for_workflow(&execution.workflow_id)?,
-                "cadence-history",
-                "HistoryService",
-                "PollMutableState",
-                Struct { fields },
-                timeout,
-            )
-            .await?;
+        let envelope = Struct { fields };
+        let reply = crate::workflow_backend::retry_history_call(
+            || self.history_addr_for_workflow(&execution.workflow_id),
+            |address| {
+                let envelope = envelope.clone();
+                async move {
+                    self.call_with_timeout(
+                        &address,
+                        "cadence-history",
+                        "HistoryService",
+                        "PollMutableState",
+                        envelope,
+                        timeout,
+                    )
+                    .await
+                }
+            },
+            timeout,
+        )
+        .await?;
         let e = |x| thrift_err("PollMutableState response", x);
         let run_id = reply
             .opt_struct::<ty::WorkflowExecution>(10)

@@ -2207,11 +2207,13 @@ pub async fn remove_task(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::RemoveTaskRequest>,
 ) -> Response {
+    // Go `request == nil || request.Type == nil` -> `validate.ErrRequestNotSet`,
+    // checked before delegating (and before any shard validation).
+    if req.task_type.is_none() {
+        return bad_request(BadRequestError::new("Request is nil."));
+    }
     if let Err(e) = check_shard_id(&state, req.shard_id) {
         return bad_request(e);
-    }
-    if req.task_type.is_none() {
-        return bad_request(BadRequestError::new("TaskType is not set on request."));
     }
     let channel = match history_channel_for(&state, req.shard_id, None) {
         Ok(channel) => channel,
@@ -2960,6 +2962,24 @@ pub async fn update_domain_async_workflow_configuration(
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn remove_task_without_type_returns_request_not_set_before_shard_check() {
+        use axum::extract::State;
+        let state = std::sync::Arc::new(crate::handlers::AppState::default());
+        // Invalid shard id AND missing type: Go checks the type first.
+        let req = cadence_api::admin::RemoveTaskRequest {
+            shard_id: -5,
+            task_type: None,
+            ..Default::default()
+        };
+        let resp = super::remove_task(State(state), axum::Json(req)).await;
+        let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        let text = String::from_utf8_lossy(&body);
+        assert!(text.contains("Request is nil."), "{text}");
+    }
+
     #[test]
     fn domain_dlq_page_token_error_matches_go_format() {
         assert_eq!(

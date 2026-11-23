@@ -33,9 +33,12 @@ const HISTORY_SERVICE: &str = "cadence-history";
 const CALLER: &str = "cadence-frontend";
 /// Go's frontend client default timeout for History calls.
 const HISTORY_TIMEOUT: Duration = Duration::from_secs(30);
-const HISTORY_RETRY_BUDGET: Duration = Duration::from_secs(25);
-const HISTORY_RETRY_BACKOFF_UNIT: Duration = Duration::from_millis(250);
-const HISTORY_RETRY_MAX_ATTEMPTS: u32 = 20;
+/// Go `common.CreateHistoryServiceRetryPolicy`: 50ms initial, x2, 10s cap, 30s expiration.
+const HISTORY_RETRY_INITIAL: Duration = Duration::from_millis(50);
+const HISTORY_RETRY_MAX_INTERVAL: Duration = Duration::from_secs(10);
+const HISTORY_RETRY_EXPIRATION: Duration = Duration::from_secs(30);
+/// Go `constants.WorkflowIDRateLimitReason`.
+const WORKFLOW_ID_RATE_LIMIT_REASON: &str = "external-workflow-id-rate-limit";
 
 #[derive(Clone)]
 pub struct ProductionBackend {
@@ -344,8 +347,7 @@ impl ProductionBackend {
                     .await
                 }
             },
-            HISTORY_RETRY_BACKOFF_UNIT,
-            HISTORY_RETRY_BUDGET,
+            HISTORY_TIMEOUT,
         )
         .await
     }
@@ -786,6 +788,60 @@ impl std::fmt::Debug for HandlerApi {
     }
 }
 
+impl HandlerApi {
+    fn call_with<'a>(
+        &'a self,
+        operation: &'a str,
+        request: serde_json::Value,
+        ctx: cadence_service_core::workflow_api::CallerContext,
+        inner: bool,
+    ) -> cadence_service_core::workflow_api::ApiFuture<'a> {
+        Box::pin(async move {
+            let header = |name: &str| ctx.headers.get(name).cloned().unwrap_or_default();
+            let (isolation_group, partition_config) =
+                crate::production_hooks::context_from_headers(&ctx.headers)?;
+            let caller = crate::handler_workflow::CallerMetadata {
+                isolation_group,
+                partition_config,
+                client_impl: header("cadence-client-implementation"),
+                feature_version: header("cadence-client-feature-version"),
+                deadline: ctx.deadline,
+                original_headers: ctx.headers.clone(),
+                transport_caller: ctx
+                    .headers
+                    .get("rpc-caller")
+                    .or_else(|| ctx.headers.get("cn"))
+                    .cloned()
+                    .unwrap_or_default(),
+                transport: ctx.transport.to_owned(),
+                ..Default::default()
+            };
+            let inbound = ctx.headers.clone();
+            cadence_persistence::caller_type::scope_from_headers(
+                &ctx.headers,
+                cadence_service_core::header_forwarding::INBOUND_DEADLINE.scope(
+                    ctx.deadline,
+                    cadence_service_core::header_forwarding::INBOUND_HEADERS.scope(
+                        inbound,
+                        async move {
+                            if inner {
+                                self.handler
+                                    .dispatch_inner_with_metadata(operation, request, &caller)
+                                    .await
+                            } else {
+                                self.handler
+                                    .dispatch_with_metadata(operation, request, &caller)
+                                    .await
+                            }
+                        },
+                    ),
+                ),
+            )
+            .await
+        })
+    }
+}
+
 impl cadence_service_core::workflow_api::WorkflowApi for HandlerApi {
     fn admin_delete_visibility<'a>(
         &'a self,
@@ -854,40 +910,16 @@ impl cadence_service_core::workflow_api::WorkflowApi for HandlerApi {
         request: serde_json::Value,
         ctx: cadence_service_core::workflow_api::CallerContext,
     ) -> cadence_service_core::workflow_api::ApiFuture<'a> {
-        Box::pin(async move {
-            let header = |name: &str| ctx.headers.get(name).cloned().unwrap_or_default();
-            let (isolation_group, partition_config) =
-                crate::production_hooks::context_from_headers(&ctx.headers)?;
-            let caller = crate::handler_workflow::CallerMetadata {
-                isolation_group,
-                partition_config,
-                client_impl: header("cadence-client-implementation"),
-                feature_version: header("cadence-client-feature-version"),
-                deadline: ctx.deadline,
-                original_headers: ctx.headers.clone(),
-                transport_caller: ctx
-                    .headers
-                    .get("rpc-caller")
-                    .or_else(|| ctx.headers.get("cn"))
-                    .cloned()
-                    .unwrap_or_default(),
-                transport: ctx.transport.to_owned(),
-                ..Default::default()
-            };
-            let inbound = ctx.headers.clone();
-            cadence_persistence::caller_type::scope_from_headers(
-                &ctx.headers,
-                cadence_service_core::header_forwarding::INBOUND_DEADLINE.scope(
-                    ctx.deadline,
-                    cadence_service_core::header_forwarding::INBOUND_HEADERS.scope(
-                        inbound,
-                        self.handler
-                            .dispatch_with_metadata(operation, request, &caller),
-                    ),
-                ),
-            )
-            .await
-        })
+        self.call_with(operation, request, ctx, false)
+    }
+
+    fn call_inner<'a>(
+        &'a self,
+        operation: &'a str,
+        request: serde_json::Value,
+        ctx: cadence_service_core::workflow_api::CallerContext,
+    ) -> cadence_service_core::workflow_api::ApiFuture<'a> {
+        self.call_with(operation, request, ctx, true)
     }
 
     fn redirect<'a>(
@@ -2149,35 +2181,113 @@ mod history_routing_tests {
     }
 }
 
-/// Go client/history: the owner is re-resolved from Ringpop on every attempt;
-/// ShardOwnershipLost (request not applied) and ServiceBusy (host down /
-/// overloaded) are retried with linear backoff (capped at 8 units) while shard
-/// ownership moves. Any other result is returned immediately.
+/// Go `common.FrontendRetry`: a ServiceBusy caused by workflow-ID rate
+/// limiting is proxied to the caller; otherwise `IsServiceTransientError`.
+/// (ShardOwnershipLost never reaches here: the history client follows it.)
+pub(crate) fn frontend_retry(err: &CadenceError) -> bool {
+    match err {
+        CadenceError::ServiceBusy(e) => e.reason.as_deref() != Some(WORKFLOW_ID_RATE_LIMIT_REASON),
+        CadenceError::Internal(_) | CadenceError::ShardOwnershipLost(_) => true,
+        _ => false,
+    }
+}
+
+/// Go `ExponentialRetryPolicy.ComputeNextDelay` (coefficient 2, no max
+/// attempts). `jitter_sample` is a uniform value used for `rand.Intn`.
+pub(crate) fn compute_next_delay(
+    initial: Duration,
+    max_interval: Duration,
+    expiration: Duration,
+    elapsed: Duration,
+    attempts: u32,
+    jitter_sample: u64,
+) -> Option<Duration> {
+    if elapsed > expiration {
+        return None;
+    }
+    let mut next = initial.as_nanos() as f64 * 2f64.powi(attempts.min(1000) as i32);
+    if next <= 0.0 || !next.is_finite() {
+        return None;
+    }
+    next = next.min(max_interval.as_nanos() as f64);
+    let remaining = expiration.saturating_sub(elapsed).as_nanos() as f64;
+    next = next.min(remaining);
+    if (next as u128) < initial.as_nanos() {
+        return None;
+    }
+    let jitter_portion = ((0.2 * next) as u64).max(1);
+    let out = next * 0.8 + (jitter_sample % jitter_portion) as f64;
+    Some(Duration::from_nanos(out as u64))
+}
+
+fn jitter_sample() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| u64::from(d.subsec_nanos()).wrapping_mul(2_654_435_761))
+        .unwrap_or(0)
+}
+
+/// Go retryable History client (`common.FrontendRetry` + 50ms/10s/30s
+/// exponential policy) around the history client's `executeWithRedirect`:
+/// ShardOwnershipLost is followed immediately to the owner named in the error
+/// (no backoff); other retryable errors back off and re-resolve the owner.
+/// `caller_timeout` bounds the whole call like the incoming context deadline.
 pub(crate) async fn retry_history_call<R, C, Fut>(
     mut resolve: R,
     mut call: C,
-    backoff_unit: Duration,
-    budget: Duration,
+    caller_timeout: Duration,
 ) -> Result<Struct, CadenceError>
 where
     R: FnMut() -> Result<String, CadenceError>,
     C: FnMut(String) -> Fut,
     Fut: std::future::Future<Output = Result<Struct, CadenceError>>,
 {
-    let started = std::time::Instant::now();
-    let mut attempt = 0u32;
+    let started = tokio::time::Instant::now();
+    let mut attempts = 0u32;
+    let mut prev_err: Option<CadenceError> = None;
     loop {
-        let address = resolve()?;
-        let result = call(address).await;
-        match &result {
-            Err(CadenceError::ShardOwnershipLost(_)) | Err(CadenceError::ServiceBusy(_))
-                if attempt < HISTORY_RETRY_MAX_ATTEMPTS && started.elapsed() < budget =>
-            {
-                attempt += 1;
-                tokio::time::sleep(backoff_unit * attempt.min(8)).await;
+        let mut address = resolve()?;
+        let result = loop {
+            let result = call(address.clone()).await;
+            match &result {
+                Err(CadenceError::ShardOwnershipLost(lost))
+                    if started.elapsed() < caller_timeout =>
+                {
+                    if lost.owner.is_empty() {
+                        break Err(internal(
+                            "shard owner is not set in ShardOwnershipLostError",
+                        ));
+                    }
+                    address = lost.owner.clone();
+                }
+                _ => break result,
             }
-            _ => return result,
+        };
+        let err = match result {
+            Ok(v) => return Ok(v),
+            Err(e) => e,
+        };
+        let prev = prev_err.take();
+        if !frontend_retry(&err) {
+            return Err(prev.unwrap_or(err));
         }
+        let elapsed = started.elapsed();
+        let Some(delay) = compute_next_delay(
+            HISTORY_RETRY_INITIAL,
+            HISTORY_RETRY_MAX_INTERVAL,
+            HISTORY_RETRY_EXPIRATION,
+            elapsed,
+            attempts,
+            jitter_sample(),
+        ) else {
+            return Err(prev.unwrap_or(err));
+        };
+        attempts += 1;
+        if elapsed + delay >= caller_timeout {
+            return Err(prev.unwrap_or(err));
+        }
+        prev_err = Some(err);
+        tokio::time::sleep(delay).await;
     }
 }
 
@@ -2187,39 +2297,84 @@ mod history_retry_tests {
     use cadence_api::errors::{ServiceBusyError, ShardOwnershipLostError};
     use std::sync::{Arc, Mutex};
 
-    fn lost() -> CadenceError {
-        CadenceError::ShardOwnershipLost(ShardOwnershipLostError::new("moved"))
+    fn lost(owner: &str) -> CadenceError {
+        CadenceError::ShardOwnershipLost(ShardOwnershipLostError {
+            message: "moved".into(),
+            owner: owner.into(),
+        })
     }
 
-    #[tokio::test]
-    async fn retries_ownership_lost_and_re_resolves_owner_each_attempt() {
-        let owners = Arc::new(Mutex::new(vec!["h3:1", "h2:1", "h1:1"]));
+    fn busy(reason: Option<&str>) -> CadenceError {
+        CadenceError::ServiceBusy(ServiceBusyError {
+            message: "busy".into(),
+            reason: reason.map(str::to_string),
+        })
+    }
+
+    #[test]
+    fn frontend_retry_matches_go_predicate() {
+        assert!(frontend_retry(&busy(None)));
+        assert!(frontend_retry(&busy(Some("other"))));
+        assert!(!frontend_retry(&busy(Some(WORKFLOW_ID_RATE_LIMIT_REASON))));
+        assert!(frontend_retry(&internal("x")));
+        assert!(!frontend_retry(&CadenceError::BadRequest(
+            cadence_api::errors::BadRequestError::new("x")
+        )));
+    }
+
+    #[test]
+    fn backoff_timings_match_go_exponential_policy() {
+        let d = |attempt, elapsed_ms, j| {
+            compute_next_delay(
+                HISTORY_RETRY_INITIAL,
+                HISTORY_RETRY_MAX_INTERVAL,
+                HISTORY_RETRY_EXPIRATION,
+                Duration::from_millis(elapsed_ms),
+                attempt,
+                j,
+            )
+        };
+        // 50ms*0.8 + [0, 10ms) jitter.
+        assert_eq!(d(0, 0, 0), Some(Duration::from_millis(40)));
+        assert_eq!(d(1, 0, 0), Some(Duration::from_millis(80)));
+        assert_eq!(d(3, 0, 0), Some(Duration::from_millis(320)));
+        // capped at 10s -> 8s base.
+        assert_eq!(d(20, 0, 0), Some(Duration::from_secs(8)));
+        // expiration clamps to the remaining time; below initial => stop.
+        assert_eq!(d(20, 25_000, 0), Some(Duration::from_secs(4)));
+        assert_eq!(d(20, 29_980, 0), None);
+        assert_eq!(d(0, 30_001, 0), None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn follows_owner_from_error_immediately_without_backoff() {
         let called = Arc::new(Mutex::new(Vec::new()));
-        let (o, c) = (owners.clone(), called.clone());
+        let c = called.clone();
+        let t0 = tokio::time::Instant::now();
         let result = retry_history_call(
-            move || Ok(o.lock().unwrap().pop().unwrap().to_string()),
+            || Ok("h1:1".to_string()),
             move |addr| {
                 let c = c.clone();
                 async move {
                     let mut c = c.lock().unwrap();
                     c.push(addr);
-                    if c.len() < 3 {
-                        Err(lost())
-                    } else {
-                        Ok(Struct::default())
+                    match c.len() {
+                        1 => Err(lost("h2:1")),
+                        2 => Err(lost("h3:1")),
+                        _ => Ok(Struct::default()),
                     }
                 }
             },
-            Duration::from_millis(1),
-            Duration::from_secs(5),
+            HISTORY_TIMEOUT,
         )
         .await;
         assert!(result.is_ok());
         assert_eq!(called.lock().unwrap().as_slice(), ["h1:1", "h2:1", "h3:1"]);
+        assert_eq!(t0.elapsed(), Duration::ZERO);
     }
 
-    #[tokio::test]
-    async fn retries_service_busy_then_succeeds() {
+    #[tokio::test(start_paused = true)]
+    async fn retries_service_busy_and_internal_then_succeeds() {
         let n = Arc::new(Mutex::new(0));
         let n2 = n.clone();
         let result = retry_history_call(
@@ -2229,23 +2384,22 @@ mod history_retry_tests {
                 async move {
                     let mut n = n.lock().unwrap();
                     *n += 1;
-                    if *n == 1 {
-                        Err(CadenceError::ServiceBusy(ServiceBusyError::new("busy")))
-                    } else {
-                        Ok(Struct::default())
+                    match *n {
+                        1 => Err(busy(None)),
+                        2 => Err(internal("transient")),
+                        _ => Ok(Struct::default()),
                     }
                 }
             },
-            Duration::from_millis(1),
-            Duration::from_secs(5),
+            HISTORY_TIMEOUT,
         )
         .await;
         assert!(result.is_ok());
-        assert_eq!(*n.lock().unwrap(), 2);
+        assert_eq!(*n.lock().unwrap(), 3);
     }
 
-    #[tokio::test]
-    async fn other_errors_are_not_retried() {
+    #[tokio::test(start_paused = true)]
+    async fn workflow_id_rate_limit_busy_is_not_retried() {
         let n = Arc::new(Mutex::new(0));
         let n2 = n.clone();
         let result = retry_history_call(
@@ -2254,66 +2408,64 @@ mod history_retry_tests {
                 let n = n2.clone();
                 async move {
                     *n.lock().unwrap() += 1;
-                    Err(internal("boom"))
+                    Err(busy(Some(WORKFLOW_ID_RATE_LIMIT_REASON)))
                 }
             },
-            Duration::from_millis(1),
-            Duration::from_secs(5),
+            HISTORY_TIMEOUT,
+        )
+        .await;
+        assert!(matches!(result, Err(CadenceError::ServiceBusy(_))));
+        assert_eq!(*n.lock().unwrap(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stops_at_expiration_and_propagates_resolver_errors() {
+        let n = Arc::new(Mutex::new(0u32));
+        let n2 = n.clone();
+        let result = retry_history_call(
+            || Ok("h:1".into()),
+            move |_| {
+                let n = n2.clone();
+                async move {
+                    *n.lock().unwrap() += 1;
+                    Err(internal("down"))
+                }
+            },
+            Duration::from_secs(300),
         )
         .await;
         assert!(matches!(result, Err(CadenceError::Internal(_))));
-        assert_eq!(*n.lock().unwrap(), 1);
-    }
-
-    #[tokio::test]
-    async fn gives_up_after_max_attempts_with_last_error() {
-        let n = Arc::new(Mutex::new(0u32));
-        let n2 = n.clone();
-        let result = retry_history_call(
-            || Ok("h:1".into()),
-            move |_| {
-                let n = n2.clone();
-                async move {
-                    *n.lock().unwrap() += 1;
-                    Err(lost())
-                }
-            },
-            Duration::from_micros(1),
-            Duration::from_secs(60),
-        )
-        .await;
-        assert!(matches!(result, Err(CadenceError::ShardOwnershipLost(_))));
-        assert_eq!(*n.lock().unwrap(), HISTORY_RETRY_MAX_ATTEMPTS + 1);
-    }
-
-    #[tokio::test]
-    async fn stops_when_budget_is_spent_and_propagates_resolver_errors() {
-        let n = Arc::new(Mutex::new(0u32));
-        let n2 = n.clone();
-        let result = retry_history_call(
-            || Ok("h:1".into()),
-            move |_| {
-                let n = n2.clone();
-                async move {
-                    *n.lock().unwrap() += 1;
-                    Err(lost())
-                }
-            },
-            Duration::from_millis(1),
-            Duration::ZERO,
-        )
-        .await;
-        assert!(result.is_err());
-        assert_eq!(*n.lock().unwrap(), 1);
+        let attempts = *n.lock().unwrap();
+        assert!((6..=12).contains(&attempts), "attempts={attempts}");
 
         let result = retry_history_call(
             || Err(internal("no owner")),
             |_| async { Ok(Struct::default()) },
-            Duration::from_millis(1),
             Duration::from_secs(1),
         )
         .await;
         assert!(matches!(result, Err(CadenceError::Internal(_))));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn caller_deadline_bounds_retries() {
+        let n = Arc::new(Mutex::new(0u32));
+        let n2 = n.clone();
+        let t0 = tokio::time::Instant::now();
+        let result = retry_history_call(
+            || Ok("h:1".into()),
+            move |_| {
+                let n = n2.clone();
+                async move {
+                    *n.lock().unwrap() += 1;
+                    Err(internal("down"))
+                }
+            },
+            Duration::from_millis(200),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(t0.elapsed() < Duration::from_millis(200));
     }
 }
 

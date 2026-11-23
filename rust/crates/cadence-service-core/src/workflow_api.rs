@@ -225,6 +225,18 @@ pub trait WorkflowApi: Send + Sync + std::fmt::Debug {
         request: serde_json::Value,
         ctx: CallerContext,
     ) -> ApiFuture<'a>;
+    /// Go's inner `WorkflowHandler` call used for nested operations (schedule
+    /// scheduler-workflow start/signal/query/visibility reads, DeleteDomain
+    /// execution check): skips the outer authorization, redirection, rate
+    /// limiting, version check and metering wrappers. Defaults to `call`.
+    fn call_inner<'a>(
+        &'a self,
+        operation: &'a str,
+        request: serde_json::Value,
+        ctx: CallerContext,
+    ) -> ApiFuture<'a> {
+        self.call(operation, request, ctx)
+    }
     /// Go metered wrapper for operations served outside `call` (schedule APIs
     /// on the in-process router): `error` is the gRPC status code on failure.
     fn observe_local(
