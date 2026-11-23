@@ -75,6 +75,11 @@ methods = ['Meta::health', 'MatchingService::AddActivityTask', 'MatchingService:
            'MatchingService::QueryWorkflow', 'MatchingService::RespondQueryTaskCompleted']
 http_config = f'      http:\n        port: {matching_http}\n        procedures:\n' + ''.join(f'          - {method}\n' for method in methods)
 config = config[:matching_section.end()] + http_config + config[matching_section.end():]
+# Matching-only stage has no Frontend admin API: set the drain window through the
+# file-based dynamic config that Matching reads at startup.
+stage_dynamic = artifacts / 'matching-dynamic-config.yaml'
+stage_dynamic.write_text('matching.shutdownDrainDuration:\n  - value: "30s"\n')
+config = config.replace('filepath: "config/dynamicconfig/development.yaml"', 'filepath: ' + json.dumps(str(stage_dynamic)), 1)
 config_path = artifacts / 'server.yaml'
 config_path.write_text(config)
 tls_config_path = artifacts / 'server-tls.yaml'
@@ -415,21 +420,6 @@ with (artifacts / 'server.log').open('w') as log:
         # Keep a wide margin for process scheduling and the Go dispatcher
         # startup between signal delivery and the health RPC. The second
         # signal below ends the process after the drain behavior is proved.
-        drain_value = base64.b64encode(b'"30s"').decode('ascii')
-        update = urllib.request.Request(
-            f'http://127.0.0.1:{http}/api/v1/admin/dynamic-config/update',
-            data=json.dumps({
-                'configName': 'matching.shutdownDrainDuration',
-                'configValues': [{
-                    'filters': [],
-                    'value': {'encodingType': 'JSON', 'data': drain_value},
-                }],
-            }).encode(),
-            headers={'Content-Type': 'application/json'},
-        )
-        with urllib.request.urlopen(update, timeout=3) as response:
-            if response.status != 200:
-                raise AssertionError(f'dynamic drain config update returned {response.status}')
         server.send_signal(signal.SIGTERM)
         env = {**os.environ, 'CADENCE_MATCHING_TCHANNEL': f'127.0.0.1:{matching_tchannel}'}
         subprocess.run(
