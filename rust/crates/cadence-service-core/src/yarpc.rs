@@ -3013,11 +3013,18 @@ async fn dispatch_local(
         "DescribeQueue" => handle_describe_queue(state, body).await,
         "MergeDLQMessages" => handle_merge_dlq_messages(state, body).await,
         "GetWorkflowExecutionRawHistoryV2" if admin && crate::admin::configured_raw_history(state) => {
+            let token_present = raw_history_token_present(body);
             bridge_value::<_, cadence_api::admin::GetWorkflowExecutionRawHistoryV2Response, _, _>(
                 method,
                 body,
-                |req: cadence_api::admin::GetWorkflowExecutionRawHistoryV2Request| {
-                    crate::admin::get_workflow_execution_raw_history(State(shared()), Json(req))
+                move |req: cadence_api::admin::GetWorkflowExecutionRawHistoryV2Request| {
+                    crate::admin::get_workflow_execution_raw_history(
+                        State(shared()),
+                        Json(crate::admin::RawHistoryJsonRequest {
+                            request: req,
+                            token_present,
+                        }),
+                    )
                 },
             )
             .await
