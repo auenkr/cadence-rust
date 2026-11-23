@@ -912,16 +912,16 @@ async fn handle_respond_cross_cluster_tasks_completed(
 async fn handle_reset_queue(state: &AppState, body: &Struct) -> HandlerResult {
     let req: cadence_api::admin::ResetQueueRequest =
         decode_args(body).map_err(AppError::bad_request)?;
-    crate::admin::check_shard_id(state, req.shard_id)
-        .map_err(|error| AppError::bad_request(error.message))?;
     let task_type = req
         .task_type
-        .ok_or_else(|| AppError::bad_request("TaskType is not set on request.".to_string()))?;
+        .ok_or_else(|| AppError::bad_request("Request is nil.".to_string()))?;
     if req.cluster_name.is_empty() {
         return Err(AppError::bad_request(
             "Cluster name is not set.".to_string(),
         ));
     }
+    crate::admin::check_shard_id(state, req.shard_id)
+        .map_err(|error| AppError::bad_request(error.message))?;
     let channel = crate::admin::history_channel_for(state, req.shard_id, None)
         .map_err(AppError::internal)?
         .ok_or_else(|| AppError::internal("History client is not configured.".to_string()))?;
@@ -977,16 +977,16 @@ async fn handle_resend_replication_tasks(state: &AppState, body: &Struct) -> Han
 async fn handle_describe_queue(state: &AppState, body: &Struct) -> HandlerResult {
     let req: cadence_api::admin::DescribeQueueRequest =
         decode_args(body).map_err(AppError::bad_request)?;
-    crate::admin::check_shard_id(state, req.shard_id)
-        .map_err(|error| AppError::bad_request(error.message))?;
     let task_type = req
         .task_type
-        .ok_or_else(|| AppError::bad_request("TaskType is not set on request.".to_string()))?;
+        .ok_or_else(|| AppError::bad_request("Request is nil.".to_string()))?;
     if req.cluster_name.is_empty() {
         return Err(AppError::bad_request(
             "Cluster name is not set.".to_string(),
         ));
     }
+    crate::admin::check_shard_id(state, req.shard_id)
+        .map_err(|error| AppError::bad_request(error.message))?;
     let channel = crate::admin::history_channel_for(state, req.shard_id, None)
         .map_err(AppError::internal)?
         .ok_or_else(|| AppError::internal("History client is not configured.".to_string()))?;

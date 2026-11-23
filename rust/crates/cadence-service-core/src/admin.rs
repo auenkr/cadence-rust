@@ -2272,14 +2272,14 @@ pub async fn reset_queue(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::ResetQueueRequest>,
 ) -> Response {
-    if let Err(e) = check_shard_id(&state, req.shard_id) {
-        return bad_request(e);
-    }
     if req.task_type.is_none() {
-        return bad_request(BadRequestError::new("TaskType is not set on request."));
+        return bad_request(BadRequestError::new("Request is nil."));
     }
     if req.cluster_name.is_empty() {
         return bad_request(BadRequestError::new("Cluster name is not set."));
+    }
+    if let Err(e) = check_shard_id(&state, req.shard_id) {
+        return bad_request(e);
     }
     let channel = match history_channel_for(&state, req.shard_id, None) {
         Ok(channel) => channel,
@@ -2333,14 +2333,14 @@ pub async fn describe_queue(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::DescribeQueueRequest>,
 ) -> Response {
-    if let Err(e) = check_shard_id(&state, req.shard_id) {
-        return bad_request(e);
-    }
     if req.task_type.is_none() {
-        return bad_request(BadRequestError::new("TaskType is not set on request."));
+        return bad_request(BadRequestError::new("Request is nil."));
     }
     if req.cluster_name.is_empty() {
         return bad_request(BadRequestError::new("Cluster name is not set."));
+    }
+    if let Err(e) = check_shard_id(&state, req.shard_id) {
+        return bad_request(e);
     }
     let channel = match history_channel_for(&state, req.shard_id, None) {
         Ok(channel) => channel,
@@ -2978,6 +2978,32 @@ mod tests {
             .unwrap();
         let text = String::from_utf8_lossy(&body);
         assert!(text.contains("Request is nil."), "{text}");
+    }
+
+    #[tokio::test]
+    async fn queue_requests_validate_required_fields_before_shard() {
+        use axum::extract::State;
+        async fn text(resp: axum::response::Response) -> String {
+            let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
+                .await
+                .unwrap();
+            String::from_utf8_lossy(&body).to_string()
+        }
+        let state = std::sync::Arc::new(crate::handlers::AppState::default());
+        let r = cadence_api::admin::ResetQueueRequest {
+            shard_id: -5,
+            task_type: None,
+            ..Default::default()
+        };
+        let t = text(super::reset_queue(State(state.clone()), axum::Json(r)).await).await;
+        assert!(t.contains("Request is nil."), "{t}");
+        let d = cadence_api::admin::DescribeQueueRequest {
+            shard_id: -5,
+            task_type: None,
+            ..Default::default()
+        };
+        let t = text(super::describe_queue(State(state), axum::Json(d)).await).await;
+        assert!(t.contains("Request is nil."), "{t}");
     }
 
     #[test]
