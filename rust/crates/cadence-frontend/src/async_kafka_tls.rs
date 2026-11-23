@@ -216,10 +216,7 @@ mod tests {
         let dialed = ServerName::try_from("10.0.0.5").unwrap();
         v.verify_server_cert(&cert, &[], &dialed, &[], UnixTime::now())
             .unwrap();
-        assert_eq!(
-            capture.0.lock().unwrap().as_deref(),
-            Some("kafka.internal")
-        );
+        assert_eq!(capture.0.lock().unwrap().as_deref(), Some("kafka.internal"));
         // Empty name leaves the dialed host untouched.
         let v = with_server_name(capture.clone(), "").unwrap();
         v.verify_server_cert(&cert, &[], &dialed, &[], UnixTime::now())

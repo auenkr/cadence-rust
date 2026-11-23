@@ -2250,9 +2250,13 @@ where
         let result = loop {
             let result = call(address.clone()).await;
             match &result {
-                Err(CadenceError::ShardOwnershipLost(lost)) if started.elapsed() < caller_timeout => {
+                Err(CadenceError::ShardOwnershipLost(lost))
+                    if started.elapsed() < caller_timeout =>
+                {
                     if lost.owner.is_empty() {
-                        break Err(internal("shard owner is not set in ShardOwnershipLostError"));
+                        break Err(internal(
+                            "shard owner is not set in ShardOwnershipLostError",
+                        ));
                     }
                     address = lost.owner.clone();
                 }

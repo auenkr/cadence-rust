@@ -136,7 +136,9 @@ impl TokenBucketPolicy {
             } else if rps <= 0.0 {
                 Err(Duration::from_secs_f64(0.001))
             } else {
-                Err(Duration::from_secs_f64(((1.0 - bucket.tokens) / rps).max(0.001)))
+                Err(Duration::from_secs_f64(
+                    ((1.0 - bucket.tokens) / rps).max(0.001),
+                ))
             }
         };
         match stage {
@@ -397,9 +399,7 @@ mod tests {
         let policy = TokenBucketPolicy::new(Arc::new(|| 1.0), Arc::new(|_| 2.0));
         // Drain the single global token through another domain.
         assert!(policy.allow(&info("other")));
-        let result = policy
-            .wait(&info("a"), Duration::from_millis(10))
-            .await;
+        let result = policy.wait(&info("a"), Duration::from_millis(10)).await;
         assert!(matches!(result, Err(WaitFailure::Deadline)));
         // The domain stage consumed one of its two tokens before the global
         // stage timed out (Go's documented limitation).

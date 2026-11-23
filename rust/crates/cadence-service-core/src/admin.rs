@@ -2973,7 +2973,9 @@ mod tests {
             ..Default::default()
         };
         let resp = super::remove_task(State(state), axum::Json(req)).await;
-        let body = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
+            .await
+            .unwrap();
         let text = String::from_utf8_lossy(&body);
         assert!(text.contains("Request is nil."), "{text}");
     }
