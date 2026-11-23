@@ -390,9 +390,18 @@ impl ProductionBackend {
         timeout: Duration,
     ) -> Result<Struct, CadenceError> {
         if let Some(grpc) = &self.grpc {
+            let member_grpc = self.membership.get().and_then(|resolver| {
+                let host = if service == HISTORY_SERVICE {
+                    resolver.history_host(addr)
+                } else {
+                    resolver.matching_host(addr)
+                };
+                host.ok().flatten().map(|h| h.grpc_address)
+            });
             if let Some(result) = grpc
                 .try_call(
                     addr,
+                    member_grpc.as_deref(),
                     service,
                     method,
                     &envelope,
@@ -1296,6 +1305,10 @@ pub fn build_workflow_api(
         grpc_port("history", "CADENCE_HISTORY_GRPC_PORT", 7834),
         grpc_port("matching", "CADENCE_MATCHING_GRPC_PORT", 7835),
     );
+    println!(
+        "Cadence frontend outbound transport to History/Matching: {:?} (system.enableGRPCOutbound)",
+        grpc_outbound.transport()
+    );
     let lookup: std::sync::Arc<dyn crate::handler_workflow::WorkflowDomainLookup> =
         std::sync::Arc::new(
             crate::handler_workflow::PersistenceWorkflowDomainLookup::new(
@@ -1810,6 +1823,18 @@ pub fn build_workflow_api(
     .with_history_page_size_policy(std::sync::Arc::new(DynamicHistoryPageSize(
         dynamic_overlay.clone(),
     )))
+    .with_throttled_log(Box::new({
+        let overlay = dynamic_overlay.clone();
+        move || {
+            overlay.lock().map_or(20, |config| {
+                cadence_persistence::dynamic_config::integer(
+                    config.property_values("frontend.throttledLogRPS"),
+                    None,
+                    20,
+                )
+            }) as f64
+        }
+    }))
     .with_raw_history_policy(std::sync::Arc::new(DynamicRawHistory(
         dynamic_overlay.clone(),
     )))

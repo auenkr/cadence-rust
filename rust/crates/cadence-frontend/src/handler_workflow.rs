@@ -9,6 +9,7 @@
 
 use cadence_api::errors::{BadRequestError, CadenceError};
 use cadence_api::{service_types, tasks};
+use cadence_common::dynamic_rate_limiter::{DynamicRateLimiter, RpsFn};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::future::Future;
@@ -322,6 +323,7 @@ pub struct Handler<B> {
     backend: B,
     validator: crate::request_validator::RequestValidator,
     history_max_page_size: i32,
+    throttled_log: Option<DynamicRateLimiter>,
     history_page_size_policy: Option<Arc<dyn HistoryPageSizePolicy>>,
     raw_history_policy: Option<Arc<dyn RawHistoryPolicy>>,
     metrics: Arc<dyn crate::wrappers::metered::Metrics + Send + Sync>,
@@ -603,6 +605,7 @@ impl<B: WorkflowBackend> Handler<B> {
             validator: crate::request_validator::RequestValidator::default(),
             history_max_page_size: 1000,
             history_page_size_policy: None,
+            throttled_log: None,
             raw_history_policy: None,
             metrics: Arc::new(NoopWorkflowMetrics),
             access_control: None,
@@ -638,6 +641,7 @@ impl<B: WorkflowBackend> Handler<B> {
             validator,
             history_max_page_size: 1000,
             history_page_size_policy: None,
+            throttled_log: None,
             raw_history_policy: None,
             metrics: Arc::new(NoopWorkflowMetrics),
             access_control: None,
@@ -678,6 +682,7 @@ impl<B: WorkflowBackend> Handler<B> {
             validator,
             history_max_page_size: 1000,
             history_page_size_policy: None,
+            throttled_log: None,
             raw_history_policy: None,
             metrics,
             access_control: None,
@@ -766,6 +771,15 @@ impl<B: WorkflowBackend> Handler<B> {
     pub fn with_raw_history_policy(mut self, policy: Arc<dyn RawHistoryPolicy>) -> Self {
         self.raw_history_policy = Some(policy);
         self
+    }
+
+    pub(crate) fn with_throttled_log(mut self, rate: RpsFn) -> Self {
+        self.throttled_log = Some(DynamicRateLimiter::new(rate));
+        self
+    }
+
+    fn allow_throttled_log(&self) -> bool {
+        self.throttled_log.as_ref().is_some_and(|log| log.allow())
     }
 
     pub fn with_history_page_size_policy(mut self, policy: Arc<dyn HistoryPageSizePolicy>) -> Self {
@@ -1159,7 +1173,7 @@ impl<B: WorkflowBackend> Handler<B> {
             operation,
             WorkflowOperation::PollForActivityTask | WorkflowOperation::PollForDecisionTask
         ) {
-            validate_long_poll_deadline(caller.deadline)?;
+            self.validate_long_poll_deadline(operation, &request, caller.deadline)?;
         }
         let request = self.validate_request(operation, request)?;
         if operation == WorkflowOperation::GetWorkflowExecutionHistory
@@ -1392,7 +1406,11 @@ impl<B: WorkflowBackend> Handler<B> {
                 return Ok(serde_json::json!({}));
             }
         }
-        if poll_domain.is_some() && validate_long_poll_deadline(caller.deadline).is_err() {
+        if poll_domain.is_some()
+            && self
+                .validate_long_poll_deadline(operation, &request, caller.deadline)
+                .is_err()
+        {
             // Go returns an empty poll result if its isolation wait exhausted
             // the long-poll budget.
             return Ok(serde_json::json!({}));
@@ -1980,6 +1998,57 @@ impl<B: WorkflowBackend> Handler<B> {
         Ok(prepared)
     }
 
+    fn validate_long_poll_deadline(
+        &self,
+        operation: WorkflowOperation,
+        request: &Value,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<(), CadenceError> {
+        let result = validate_long_poll_deadline(deadline);
+        if let Some(domain) = request
+            .get("domain")
+            .and_then(Value::as_str)
+            .filter(|domain| !domain.is_empty())
+        {
+            let task_list = request
+                .pointer("/taskList/name")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let handler = operation.name();
+            if let Some(deadline) = deadline {
+                let timeout = deadline.saturating_duration_since(std::time::Instant::now());
+                if result.is_err() && self.allow_throttled_log() {
+                    tracing::error!(
+                        domain,
+                        task_list,
+                        handler,
+                        ?timeout,
+                        "Context timeout is too short for long poll API."
+                    );
+                } else if result.is_ok()
+                    && timeout < std::time::Duration::from_secs(20)
+                    && self.allow_throttled_log()
+                {
+                    tracing::debug!(
+                        domain,
+                        task_list,
+                        handler,
+                        ?timeout,
+                        "Context timeout is lower than critical value for long poll API."
+                    );
+                }
+            } else if self.allow_throttled_log() {
+                tracing::error!(
+                    domain,
+                    task_list,
+                    handler,
+                    "Context timeout not set for long poll API."
+                );
+            }
+        }
+        result
+    }
+
     fn validate_request(
         &self,
         operation: WorkflowOperation,
@@ -2093,6 +2162,21 @@ impl<B: WorkflowBackend> Handler<B> {
                     .map_or(self.history_max_page_size, |policy| {
                         policy.maximum_page_size(&domain)
                     });
+            }
+            if request.maximum_page_size > 1000 && self.allow_throttled_log() {
+                let domain_id = self
+                    .domain_lookup
+                    .as_ref()
+                    .and_then(|lookup| lookup.domain_id(&request.domain).ok())
+                    .unwrap_or_default();
+                let execution = request.execution.as_ref();
+                tracing::warn!(
+                    domain_id,
+                    workflow_id = execution.map_or("", |execution| execution.workflow_id.as_str()),
+                    run_id = execution.map_or("", |execution| execution.run_id.as_str()),
+                    page_size = request.maximum_page_size,
+                    "GetHistory page size is larger than threshold"
+                );
             }
             request.maximum_page_size = request.maximum_page_size.min(1000);
             set_i32_field(&mut value, "maximumPageSize", request.maximum_page_size);

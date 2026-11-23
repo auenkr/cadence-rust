@@ -710,6 +710,16 @@ pub trait ClusterMembership: Send + Sync {
             }))
     }
 
+    /// Resolve a Matching ring member by its address (Go `membership.Resolver`
+    /// host lookup, used to read the member's `grpc` label).
+    fn matching_host(
+        &self,
+        address: &str,
+    ) -> Result<Option<cadence_common::membership::Host>, String> {
+        let _ = address;
+        Ok(None)
+    }
+
     /// Resolve the owner of a task list name on the live Matching ring (Go client
     /// routes Matching RPCs by task list on the `cadence-matching` hashring).
     fn matching_owner(
@@ -2408,10 +2418,41 @@ pub(crate) fn configured_raw_history(state: &AppState) -> bool {
         || state.admin.membership.get().is_some()
 }
 
+/// Raw-history request plus whether JSON `nextPageToken` was present and
+/// non-null. Go's `[]byte` decode gives nil for absent/null and a non-nil
+/// empty slice for `""`, and the handler branches on `NextPageToken == nil`.
+pub struct RawHistoryJsonRequest {
+    pub request: cadence_api::admin::GetWorkflowExecutionRawHistoryV2Request,
+    pub token_present: bool,
+}
+
+impl<'de> serde::Deserialize<'de> for RawHistoryJsonRequest {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let mut value = serde_json::Value::deserialize(d)?;
+        // Go decodes JSON null into a nil slice, same as an absent field.
+        if let Some(object) = value.as_object_mut() {
+            if object.get("nextPageToken").is_some_and(|t| t.is_null()) {
+                object.remove("nextPageToken");
+            }
+        }
+        let token_present = value
+            .get("nextPageToken")
+            .is_some_and(|token| !token.is_null());
+        let request = serde_json::from_value(value).map_err(serde::de::Error::custom)?;
+        Ok(Self {
+            request,
+            token_present,
+        })
+    }
+}
+
 /// Read the selected history branch from the configured store.
 pub async fn get_workflow_execution_raw_history(
     State(state): State<StdArc<AppState>>,
-    Json(req): Json<cadence_api::admin::GetWorkflowExecutionRawHistoryV2Request>,
+    Json(RawHistoryJsonRequest {
+        request: req,
+        token_present,
+    }): Json<RawHistoryJsonRequest>,
 ) -> Response {
     use cadence_persistence::history_reader::{self, HistoryReadError, ReadHistoryBranchRequest};
     use cadence_persistence::raw_history::{self, RawHistoryToken};
@@ -2432,7 +2473,8 @@ pub async fn get_workflow_execution_raw_history(
     let mut req = req;
     let mut persistence_token = Vec::new();
     let mut continuation = None;
-    let histories: cadence_api::types::VersionHistories = if req.next_page_token.is_empty() {
+    let token_absent = req.next_page_token.is_empty() && !token_present;
+    let histories: cadence_api::types::VersionHistories = if token_absent {
         let result = if configured {
             raw_history_version_histories(&state, &req.domain, &execution, shard_id).await
         } else {
@@ -4080,4 +4122,33 @@ pub fn purge_domain_dlq_messages(
     let _ = persistence
         .update_domain_replication_dlq_ack_level("domainReplication".to_string(), end_message_id);
     Ok(cadence_api::admin::PurgeDLQMessagesResponse {})
+}
+
+#[cfg(test)]
+mod raw_history_json_presence_tests {
+    use super::RawHistoryJsonRequest;
+
+    fn parse(body: &str) -> RawHistoryJsonRequest {
+        serde_json::from_str(body).expect("valid request")
+    }
+
+    #[test]
+    fn absent_and_null_token_are_not_present() {
+        assert!(!parse(r#"{"domain":"d"}"#).token_present);
+        assert!(!parse(r#"{"domain":"d","nextPageToken":null}"#).token_present);
+    }
+
+    #[test]
+    fn empty_string_token_is_present_but_empty() {
+        let r = parse(r#"{"domain":"d","nextPageToken":""}"#);
+        assert!(r.token_present);
+        assert!(r.request.next_page_token.is_empty());
+    }
+
+    #[test]
+    fn non_empty_token_is_present() {
+        let r = parse(r#"{"domain":"d","nextPageToken":"AQ=="}"#);
+        assert!(r.token_present);
+        assert_eq!(r.request.next_page_token, vec![1]);
+    }
 }
