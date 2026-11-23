@@ -904,8 +904,51 @@ impl PageToken {
         if data.is_empty() {
             return Ok(PageToken::default());
         }
-        serde_json::from_slice(data)
-            .map_err(|e| bad(format!("unable to deserialize page token. err: {e}")))
+        let derr = |e: String| bad(format!("unable to deserialize page token. err: {e}"));
+        // Go json.Decoder.Decode: first JSON value only, `null` is a no-op,
+        // object keys match field names case-insensitively (last one wins).
+        let first = serde_json::Deserializer::from_slice(data)
+            .into_iter::<Value>()
+            .next()
+            .ok_or_else(|| derr("EOF".into()))?
+            .map_err(|e| derr(e.to_string()))?;
+        let mut token = PageToken::default();
+        let obj = match first {
+            Value::Null => return Ok(token),
+            Value::Object(o) => o,
+            other => {
+                return Err(derr(format!(
+                    "json: cannot unmarshal {other} into Go value of type elasticsearch.ElasticVisibilityPageToken"
+                )))
+            }
+        };
+        for (k, v) in obj {
+            let bad_field = |name: &str| {
+                derr(format!("json: cannot unmarshal {v} into Go struct field ElasticVisibilityPageToken.{name}"))
+            };
+            if k.eq_ignore_ascii_case("From") {
+                match &v {
+                    Value::Null => {}
+                    Value::Number(n) if n.is_i64() => token.from = n.as_i64().unwrap_or(0),
+                    _ => return Err(bad_field("From")),
+                }
+            } else if k.eq_ignore_ascii_case("SortValue") {
+                token.sort_value = v;
+            } else if k.eq_ignore_ascii_case("TieBreaker") {
+                match &v {
+                    Value::Null => {}
+                    Value::String(x) => token.tie_breaker = x.clone(),
+                    _ => return Err(bad_field("TieBreaker")),
+                }
+            } else if k.eq_ignore_ascii_case("ScrollID") {
+                match &v {
+                    Value::Null => {}
+                    Value::String(x) => token.scroll_id = x.clone(),
+                    _ => return Err(bad_field("ScrollID")),
+                }
+            }
+        }
+        Ok(token)
     }
     pub fn encode(&self) -> Vec<u8> {
         serde_json::to_vec(self).unwrap_or_default()
@@ -1116,6 +1159,15 @@ pub fn open_closed_body(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn page_token_decode_matches_go_json_rules() {
+        assert_eq!(PageToken::decode(b"null").unwrap(), PageToken::default());
+        let t = PageToken::decode(br#"{"scrollid":"abc","FROM":3} {"x":1}"#).unwrap();
+        assert_eq!((t.scroll_id.as_str(), t.from), ("abc", 3));
+        assert!(PageToken::decode(b"[1]").is_err());
+        assert!(PageToken::decode(br#"{"From":"x"}"#).is_err());
+    }
+
     use super::*;
 
     fn attrs() -> HashMap<String, i32> {
