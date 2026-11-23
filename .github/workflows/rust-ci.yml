@@ -48,6 +48,10 @@ on:
         description: "Run cargo fmt --all and upload the patch"
         type: boolean
         default: false
+      sync_lock_only:
+        description: "Temporarily sync workspace lock entries and upload Cargo.lock"
+        type: boolean
+        default: false
       go_sdk_compile:
         description: "Compile the existing Go SDK mixed Matching diagnostic fixture"
         type: boolean
@@ -66,8 +70,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  sync-lock:
+    if: inputs.sync_lock_only == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Sync workspace lock entries
+        working-directory: rust
+        run: |
+          cargo update --workspace
+          git diff --stat Cargo.lock
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-cargo-lock
+          path: rust/Cargo.lock
+          retention-days: 3
   heap-analysis:
-    if: inputs.heap_profile_run_id != '' && github.event_name == 'workflow_dispatch'
+    if: inputs.sync_lock_only != true && inputs.heap_profile_run_id != '' && github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -99,7 +122,7 @@ jobs:
   fmt:
     # Fast fail: the enforced rustfmt checks finish in ~30s on their own runner; on failure the whole
     # run is cancelled so `gh run watch` returns before clippy/test (previously ~4-7 min).
-    if: inputs.heap_profile_run_id == ''
+    if: inputs.sync_lock_only != true && inputs.heap_profile_run_id == ''
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -116,7 +139,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh run cancel ${{ github.run_id }} -R ${{ github.repository }}
   clippy-test:
-    if: inputs.heap_profile_run_id == ''
+    if: inputs.sync_lock_only != true && inputs.heap_profile_run_id == ''
     runs-on: ubuntu-latest
     timeout-minutes: 90
     services:
