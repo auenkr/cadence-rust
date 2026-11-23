@@ -41,7 +41,7 @@ config = (root / 'rust/config/development.yaml').read_text()
 # are needed for the focused persistence and native Thrift assertions.
 config = re.sub(
     r'(?m)^  bootstrapHosts:.*$',
-    f'  broadcastAddress: 127.0.0.1\n  bootstrapHosts: ["127.0.0.1:{tchannel}", "127.0.0.1:{history_tchannel}", "127.0.0.1:{matching_tchannel}"]',
+    f'  broadcastAddress: 127.0.0.1\n  bootstrapHosts: ["127.0.0.1:{matching_tchannel}"]',
     config,
     count=1,
 )
