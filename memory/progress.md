@@ -2045,3 +2045,12 @@ During handoff merged documentation-only tips `origin/frontend-core2`
 - Parity merged 2026-11-20/21: matching-cfg, maintain-corrupt, dynconfig-audit, persistence-qps (+qps-2), shard-acquire, tasklist-selects, plus eff-* efficiency merges (gains within noise).
 - Open gaps: persistence limiter caller-type bypass, visibility limiters and sampling, throttled logger. (History soak stall and mutable-state JSON shape resolved; see memory/evidence/stale-gaps-20261121.md.)
 - Docker Hub publish workflow `.github/workflows/docker-hub-publish.yml`, run 44773608414.
+
+## 2026-11-23 status
+
+- Full gate sweep on `96feb1b18`: 25/25 green. Evidence: `memory/evidence/gate-sweep-96feb1b-20261123.md`.
+- Frontend final review (Sol 6.2 + Opus 5.5 cross-review) agreed on eight findings. Seven are fixed (items 1, 2, 3, 4, 5, 7 and 8); item 6, outbound gRPC transport, is in progress. See `memory/evidence/fe-final-review-sol-20261123.md`, `fe-final-review-opus-20261123.md`, and the fix reports.
+- The `matching-http-tls-interop` workflow now runs on the real MySQL stack; Matching HTTP inbound keeps only `rpc-header-*` headers. See `memory/evidence/fix-http-tls-interop-20261123.md`.
+- Go source is now a `go/` submodule plus `go-overlay`. See `memory/evidence/go-submodule-defork-20261123.md`.
+- Benchmark rerun: Rust is better or equal in all lanes. See `memory/evidence/bench-rerun-20261123.md`.
+- Remaining: Frontend review item 6, then a final gate sweep.
