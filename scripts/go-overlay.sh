@@ -13,3 +13,5 @@ if git apply --check -R ../go-overlay/go-mod.patch 2>/dev/null; then
 else
   git apply ../go-overlay/go-mod.patch
 fi
+# go/ is a nested git repo; files outside it (tests/*.go) cannot be VCS-stamped.
+if [ -n "${GITHUB_ENV:-}" ]; then echo "GOFLAGS=-buildvcs=false" >> "$GITHUB_ENV"; fi
