@@ -148,7 +148,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Init IDL submodule
-        run: git submodule update --init go/idls
+        run: git submodule update --init --recursive go && scripts/go-overlay.sh
       - uses: actions/setup-go@v6
         with:
           go-version: "1.25.14"
@@ -203,11 +203,11 @@ jobs:
           set -euo pipefail
           evidence="$RUNNER_TEMP/matching-raw-string-oracle"
           mkdir -p "$evidence"
-          git rev-parse HEAD > "$evidence/source-sha.txt"
+          git -C "$GITHUB_WORKSPACE" rev-parse HEAD > "$evidence/source-sha.txt"
           go version > "$evidence/go-version.txt"
           go list -m github.com/gogo/protobuf github.com/uber/cadence-idl go.uber.org/yarpc github.com/google/uuid github.com/gocql/gocql > "$evidence/modules.txt"
           gofmt -w ../tests/matching-raw-string-oracle.go
-          git diff --binary -- ../tests/matching-raw-string-oracle.go > "$evidence/go-format.patch"
+          git -C "$GITHUB_WORKSPACE" diff --binary -- tests/matching-raw-string-oracle.go > "$evidence/go-format.patch"
           set +e
           go run ../tests/matching-raw-string-oracle.go > "$evidence/go-oracle.json" 2> "$evidence/go-oracle.log"
           result=$?
@@ -228,7 +228,7 @@ jobs:
           set -euo pipefail
           evidence="$RUNNER_TEMP/sqlblobs-golden"
           mkdir -p "$evidence"
-          git rev-parse HEAD > "$evidence/source-sha.txt"
+          git -C "$GITHUB_WORKSPACE" rev-parse HEAD > "$evidence/source-sha.txt"
           go version > "$evidence/go-version.txt"
           printf '%s\n' 'go test ./common/persistence/serialization -run ^TestPrintSQLBlobsGoldenHex$ -count=1 -v' > "$evidence/command.txt"
           set +e
@@ -250,7 +250,7 @@ jobs:
           set -euo pipefail
           evidence="$RUNNER_TEMP/matching-describe-tasklist-go-oracle"
           mkdir -p "$evidence"
-          git rev-parse HEAD > "$evidence/source-sha.txt"
+          git -C "$GITHUB_WORKSPACE" rev-parse HEAD > "$evidence/source-sha.txt"
           cat > "$RUNNER_TEMP/describe-tasklist-overlay.json" <<EOF
           {"Replace":{"$GITHUB_WORKSPACE/go/service/matching/handler/describe_tasklist_oracle_test.go":"$GITHUB_WORKSPACE/tests/go-matching-describe-tasklist-oracle_test.go","$GITHUB_WORKSPACE/go/service/matching/handler/optional_payload_oracle_test.go":"$GITHUB_WORKSPACE/tests/go-matching-optional-payload-oracle_test.go"}}
           EOF
@@ -278,7 +278,7 @@ jobs:
           set -euo pipefail
           evidence="$RUNNER_TEMP/domain-cache-uuid-oracle"
           mkdir -p "$evidence"
-          git rev-parse HEAD > "$evidence/source-sha.txt"
+          git -C "$GITHUB_WORKSPACE" rev-parse HEAD > "$evidence/source-sha.txt"
           cat > "$RUNNER_TEMP/domain-cache-uuid-overlay.json" <<EOF
           {"Replace":{"$GITHUB_WORKSPACE/go/common/cache/domain_cache_uuid_oracle_test.go":"$GITHUB_WORKSPACE/tests/go-domain-cache-uuid-oracle_test.go"}}
           EOF
@@ -306,7 +306,7 @@ jobs:
           set -euo pipefail
           evidence="$RUNNER_TEMP/source-domain-boundary-oracle"
           mkdir -p "$evidence"
-          git rev-parse HEAD > "$evidence/source-sha.txt"
+          git -C "$GITHUB_WORKSPACE" rev-parse HEAD > "$evidence/source-sha.txt"
           cat > "$RUNNER_TEMP/source-domain-boundary-overlay.json" <<EOF
           {"Replace":{"$GITHUB_WORKSPACE/go/service/matching/tasklist/source_domain_boundary_oracle_test.go":"$GITHUB_WORKSPACE/tests/go-source-domain-boundary-manager-oracle_test.go","$GITHUB_WORKSPACE/go/common/persistence/sql/source_domain_boundary_oracle_test.go":"$GITHUB_WORKSPACE/tests/go-source-domain-boundary-sql-oracle_test.go"}}
           EOF
@@ -730,9 +730,9 @@ jobs:
         run: |
           evidence="$RUNNER_TEMP/frontend-async-wire"
           mkdir -p "$evidence"
-          git rev-parse HEAD > "$evidence/source-sha.txt"
+          git -C "$GITHUB_WORKSPACE" rev-parse HEAD > "$evidence/source-sha.txt"
           gofmt -w ../tests/frontend-async-wire-oracle.go
-          git diff --binary -- ../tests/frontend-async-wire-oracle.go > "$evidence/go-format.patch"
+          git -C "$GITHUB_WORKSPACE" diff --binary -- tests/frontend-async-wire-oracle.go > "$evidence/go-format.patch"
           set +e
           go run ../tests/frontend-async-wire-oracle.go "$evidence" > "$evidence/go-decode.json" 2> "$evidence/go-decode.log"
           result=$?
@@ -818,7 +818,7 @@ jobs:
             (cd rust && cargo run -p cadence-server --example matching_metrics_emission_oracle -- "$mode") > "$evidence/rust-$mode.json"
             python3 tests/compare-matching-metrics-emission.py "$evidence/go-$mode.json" "$evidence/rust-$mode.json" > "$evidence/compare-$mode.json"
           done
-          git rev-parse HEAD > "$evidence/head-sha.txt"
+          git -C "$GITHUB_WORKSPACE" rev-parse HEAD > "$evidence/head-sha.txt"
           sha256sum "${CARGO_TARGET_DIR:-rust/target}/debug/examples/matching_metrics_emission_oracle" > "$evidence/rust-binary.sha256"
       - name: Upload Matching metrics comparison evidence
         if: always() && (inputs.package == '' || inputs.package == 'cadence-server')
@@ -830,7 +830,7 @@ jobs:
       - name: Record validation identity
         if: always()
         run: |
-          git rev-parse HEAD > rust/commit.txt
+          git -C "$GITHUB_WORKSPACE" rev-parse HEAD > rust/commit.txt
           printf '%s\n' "${CARGO_TARGET_DIR:-$PWD/rust/target}" > rust/target-dir.txt
       - name: Upload logs
         if: always()

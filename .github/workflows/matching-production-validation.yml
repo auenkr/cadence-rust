@@ -39,7 +39,7 @@ jobs:
       CADENCE_MATCHING_SHUTDOWN_TRACE: "1"
     steps:
       - uses: actions/checkout@v4
-      - run: git submodule update --init go/idls
+      - run: git submodule update --init --recursive go && scripts/go-overlay.sh
       - uses: actions/setup-go@v5
         with:
           go-version-file: go/go.mod

@@ -20,6 +20,9 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: scripts/go-overlay.sh
       - uses: actions/setup-go@v5
         with:
           go-version-file: go/go.mod
@@ -28,7 +31,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/matching-oracle-evidence"
-          git rev-parse HEAD > "$RUNNER_TEMP/matching-oracle-evidence/commit.txt"
+          git -C "$GITHUB_WORKSPACE" rev-parse HEAD > "$RUNNER_TEMP/matching-oracle-evidence/commit.txt"
       - name: Format or check overlay Go files
         working-directory: go
         continue-on-error: true

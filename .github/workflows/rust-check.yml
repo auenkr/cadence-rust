@@ -32,7 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Init IDL submodule
-        run: git submodule update --init go/idls
+        run: git submodule update --init --recursive go && scripts/go-overlay.sh
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy

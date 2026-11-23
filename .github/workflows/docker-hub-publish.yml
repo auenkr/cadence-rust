@@ -32,7 +32,7 @@ jobs:
       DOCKER_BUILDKIT: "1"
     steps:
       - uses: actions/checkout@v4
-      - run: git submodule update --init go/idls
+      - run: git submodule update --init --recursive go && scripts/go-overlay.sh
       - name: Docker Hub login
         env:
           DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
