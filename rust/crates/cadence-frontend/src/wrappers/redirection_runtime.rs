@@ -209,8 +209,10 @@ impl RedirectRequestResolver for DomainCacheResolver {
             active_active: is_active_active(replication.active_clusters.as_ref()),
         };
         let execution = if EXECUTION_OPERATIONS.contains(&operation) {
+            // Go passes `GetWorkflowExecution()`; the history request names
+            // that field `execution`.
             fields
-                .get("workflowExecution")
+                .get(execution_field_name(operation))
                 .map(|execution| WorkflowRef {
                     workflow_id: str_field(execution, "workflowId").to_owned(),
                     run_id: str_field(execution, "runId").to_owned(),
@@ -241,6 +243,15 @@ impl RedirectRequestResolver for DomainCacheResolver {
                 Consistency::Eventual
             },
         }))
+    }
+}
+
+/// JSON field holding the workflow execution of a redirected operation.
+fn execution_field_name(operation: &str) -> &'static str {
+    if operation == "GetWorkflowExecutionHistory" {
+        "execution"
+    } else {
+        "workflowExecution"
     }
 }
 
@@ -288,11 +299,14 @@ pub fn is_active_active(active_clusters: Option<&cadence_api::types::ActiveClust
         clusters
             .active_clusters_by_cluster_attribute
             .as_ref()
-            .is_some_and(|scopes| !scopes.is_empty())
-            || clusters
-                .active_clusters_by_region
-                .as_ref()
-                .is_some_and(|regions| !regions.is_empty())
+            .is_some_and(|scopes| {
+                scopes.values().any(|scope| {
+                    scope
+                        .cluster_attributes
+                        .as_ref()
+                        .is_some_and(|attributes| !attributes.is_empty())
+                })
+            })
     })
 }
 
@@ -662,11 +676,21 @@ impl RemoteFrontends {
         }
     }
 
+    /// Go `%v` of `map[string]frontend.Client`: `map[a:<ptr> b:<ptr>]`.
+    fn client_map_display(&self) -> String {
+        let mut names: Vec<&String> = self.clients.keys().collect();
+        names.sort();
+        let items: Vec<String> = names.iter().map(|n| format!("{n}:0x0")).collect();
+        format!("map[{}]", items.join(" "))
+    }
+
     pub fn get(&self, cluster: &str) -> Result<&RemoteFrontendClient, CadenceError> {
         self.clients.get(cluster).ok_or_else(|| {
-            CadenceError::Internal(InternalServiceError::new(format!(
-                "Cannot find remote Frontend client for cluster {cluster}"
-            )))
+            // Go clientBean.go: plain `fmt.Errorf`, not a typed service error.
+            CadenceError::Unknown(format!(
+                "unknown cluster name: {cluster} with given cluster client map: {}",
+                self.client_map_display()
+            ))
         })
     }
 }
@@ -954,6 +978,58 @@ mod tests {
     }
 
     #[test]
+    fn active_active_matches_go_nonempty_attribute_predicate() {
+        use cadence_api::types::{ActiveClusterInfo, ActiveClusters, ClusterAttributeScope};
+        // Scope present but with no attributes: not active-active.
+        let empty_scope = ActiveClusters {
+            active_clusters_by_region: None,
+            active_clusters_by_cluster_attribute: Some(HashMap::from([(
+                "region".to_owned(),
+                ClusterAttributeScope {
+                    cluster_attributes: Some(HashMap::new()),
+                },
+            )])),
+        };
+        assert!(!is_active_active(Some(&empty_scope)));
+        // Legacy region map alone: not active-active.
+        let regions_only = ActiveClusters {
+            active_clusters_by_region: Some(HashMap::from([(
+                "us".to_owned(),
+                ActiveClusterInfo::default(),
+            )])),
+            active_clusters_by_cluster_attribute: None,
+        };
+        assert!(!is_active_active(Some(&regions_only)));
+    }
+
+    #[test]
+    fn unknown_cluster_error_matches_go_text() {
+        let err = RemoteFrontends::default().get("zz").err().unwrap();
+        assert!(matches!(err, CadenceError::Unknown(_)));
+        assert!(err
+            .to_string()
+            .ends_with("unknown cluster name: zz with given cluster client map: map[]"));
+    }
+
+    #[test]
+    fn history_execution_is_read_from_execution_field() {
+        let req = serde_json::to_value(
+            cadence_api::service_types::GetWorkflowExecutionHistoryRequest {
+                domain: "d".into(),
+                execution: Some(cadence_api::types::WorkflowExecution {
+                    workflow_id: "w".into(),
+                    run_id: "r".into(),
+                }),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let field = execution_field_name("GetWorkflowExecutionHistory");
+        assert_eq!(req[field]["workflowId"], "w");
+        assert_eq!(execution_field_name("SignalWorkflowExecution"), "workflowExecution");
+    }
+
+    #[test]
     fn cluster_attribute_lookup_matches_domain_cache_entry() {
         let clusters = active_clusters();
         // Nil attribute: the domain's ActiveClusterName.
@@ -1137,7 +1213,7 @@ mod tests {
             .unwrap_err();
         assert!(err
             .to_string()
-            .contains("Cannot find remote Frontend client"));
+            .contains("unknown cluster name: b with given cluster client map: map[]"));
         assert_eq!(calls.lock().unwrap().len(), 1);
     }
 
@@ -1225,7 +1301,7 @@ mod tests {
             .unwrap_err();
         assert!(err
             .to_string()
-            .contains("remote Frontend client for cluster b"));
+            .contains("unknown cluster name: b"));
         assert!(calls.lock().unwrap().is_empty());
     }
 }
