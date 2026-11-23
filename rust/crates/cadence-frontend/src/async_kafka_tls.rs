@@ -56,6 +56,63 @@ impl ServerCertVerifier for SkipVerify {
     }
 }
 
+/// Go `tls.Config.ServerName`: certificate names are verified against the
+/// configured name instead of the dialed broker host.
+#[derive(Debug)]
+struct ServerNameOverride {
+    inner: Arc<dyn ServerCertVerifier>,
+    name: ServerName<'static>,
+}
+
+impl ServerCertVerifier for ServerNameOverride {
+    fn verify_server_cert(
+        &self,
+        end_entity: &CertificateDer<'_>,
+        intermediates: &[CertificateDer<'_>],
+        _: &ServerName<'_>,
+        ocsp: &[u8],
+        now: UnixTime,
+    ) -> Result<ServerCertVerified, Error> {
+        self.inner
+            .verify_server_cert(end_entity, intermediates, &self.name, ocsp, now)
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, Error> {
+        self.inner.verify_tls12_signature(message, cert, dss)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, Error> {
+        self.inner.verify_tls13_signature(message, cert, dss)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.inner.supported_verify_schemes()
+    }
+}
+
+/// Wraps `inner` so verification uses `server_name` when it is non-empty.
+fn with_server_name(
+    inner: Arc<dyn ServerCertVerifier>,
+    server_name: &str,
+) -> anyhow::Result<Arc<dyn ServerCertVerifier>> {
+    if server_name.is_empty() {
+        return Ok(inner);
+    }
+    let name = ServerName::try_from(server_name.to_string())
+        .map_err(|e| anyhow::anyhow!("invalid tls serverName {server_name}: {e}"))?;
+    Ok(Arc::new(ServerNameOverride { inner, name }))
+}
+
 /// `None` when TLS is disabled (Go returns a nil tls.Config).
 pub fn client_config(tls: &TlsConfig) -> anyhow::Result<Option<Arc<ClientConfig>>> {
     if !tls.enabled {
@@ -83,7 +140,18 @@ pub fn client_config(tls: &TlsConfig) -> anyhow::Result<Option<Arc<ClientConfig>
     let builder = ClientConfig::builder_with_provider(provider.clone())
         .with_safe_default_protocol_versions()?;
     let builder = if tls.enable_host_verification {
-        builder.with_root_certificates(roots)
+        if tls.server_name.is_empty() {
+            builder.with_root_certificates(roots)
+        } else {
+            let webpki = rustls::client::WebPkiServerVerifier::builder_with_provider(
+                Arc::new(roots),
+                provider,
+            )
+            .build()?;
+            builder
+                .dangerous()
+                .with_custom_certificate_verifier(with_server_name(webpki, &tls.server_name)?)
+        }
     } else {
         builder
             .dangerous()
@@ -105,6 +173,66 @@ pub fn client_config(tls: &TlsConfig) -> anyhow::Result<Option<Arc<ClientConfig>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn server_name_override_is_applied_to_verification() {
+        #[derive(Debug)]
+        struct Capture(std::sync::Mutex<Option<String>>);
+        impl ServerCertVerifier for Capture {
+            fn verify_server_cert(
+                &self,
+                _: &CertificateDer<'_>,
+                _: &[CertificateDer<'_>],
+                n: &ServerName<'_>,
+                _: &[u8],
+                _: UnixTime,
+            ) -> Result<ServerCertVerified, Error> {
+                *self.0.lock().unwrap() = Some(n.to_str().to_string());
+                Ok(ServerCertVerified::assertion())
+            }
+            fn verify_tls12_signature(
+                &self,
+                _: &[u8],
+                _: &CertificateDer<'_>,
+                _: &DigitallySignedStruct,
+            ) -> Result<HandshakeSignatureValid, Error> {
+                Ok(HandshakeSignatureValid::assertion())
+            }
+            fn verify_tls13_signature(
+                &self,
+                _: &[u8],
+                _: &CertificateDer<'_>,
+                _: &DigitallySignedStruct,
+            ) -> Result<HandshakeSignatureValid, Error> {
+                Ok(HandshakeSignatureValid::assertion())
+            }
+            fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+                vec![]
+            }
+        }
+        let capture = Arc::new(Capture(Default::default()));
+        let v = with_server_name(capture.clone(), "kafka.internal").unwrap();
+        let cert = CertificateDer::from(vec![0u8]);
+        let dialed = ServerName::try_from("10.0.0.5").unwrap();
+        v.verify_server_cert(&cert, &[], &dialed, &[], UnixTime::now())
+            .unwrap();
+        assert_eq!(
+            capture.0.lock().unwrap().as_deref(),
+            Some("kafka.internal")
+        );
+        // Empty name leaves the dialed host untouched.
+        let v = with_server_name(capture.clone(), "").unwrap();
+        v.verify_server_cert(&cert, &[], &dialed, &[], UnixTime::now())
+            .unwrap();
+        assert_eq!(capture.0.lock().unwrap().as_deref(), Some("10.0.0.5"));
+        let with_name = TlsConfig {
+            enabled: true,
+            enable_host_verification: true,
+            server_name: "kafka.internal".into(),
+            ..Default::default()
+        };
+        assert!(client_config(&with_name).unwrap().is_some());
+    }
 
     #[test]
     fn disabled_tls_yields_none_and_enabled_builds_config() {
