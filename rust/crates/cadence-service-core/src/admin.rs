@@ -2675,10 +2675,6 @@ async fn describe_workflow_execution_admin_core(
 
     let shard_id = (cadence_common::membership::fingerprint32(execution.workflow_id.as_bytes())
         % shard_count(state).max(1) as u32) as i32;
-    let domain_id = match state.domain_manager.domain_id(&req.domain) {
-        Ok(id) => id,
-        Err(error) => return Err(entity_not_exists(error)),
-    };
     let owner = match state
         .admin
         .membership
@@ -2694,6 +2690,11 @@ async fn describe_workflow_execution_admin_core(
                 error,
             ));
         }
+    };
+    // Go resolves the History host before looking up the domain.
+    let domain_id = match state.domain_manager.domain_id(&req.domain) {
+        Ok(id) => id,
+        Err(error) => return Err(entity_not_exists(error)),
     };
     let (history_addr, channel) = match history_channel_for(state, shard_id, None) {
         Ok(Some(channel)) => (
@@ -3043,6 +3044,32 @@ mod tests {
         let body = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
         let text = String::from_utf8_lossy(&body);
         assert!(text.contains("Execution is not set on request."), "{text}");
+    }
+
+    #[tokio::test]
+    async fn admin_describe_execution_resolves_shard_owner_before_domain() {
+        struct FailingRing;
+        impl super::ClusterMembership for FailingRing {
+            fn who_am_i(&self) -> Result<String, String> {
+                Ok("fe".into())
+            }
+            fn members(&self, _role: &str) -> Result<Vec<String>, String> {
+                Err("ring unavailable".into())
+            }
+        }
+        let state = crate::handlers::AppState::default();
+        state.admin.membership.set(Some(std::sync::Arc::new(FailingRing)));
+        let req = cadence_api::admin::AdminDescribeWorkflowExecutionRequest {
+            domain: "no-such-domain".into(),
+            execution: Some(cadence_api::types::WorkflowExecution::new("w", "")),
+            ..Default::default()
+        };
+        let err = super::describe_workflow_execution_admin_core(&state, req)
+            .await
+            .unwrap_err();
+        let body = axum::body::to_bytes(err.into_body(), 1 << 20).await.unwrap();
+        let text = String::from_utf8_lossy(&body);
+        assert!(text.contains("ring unavailable"), "{text}");
     }
 
     #[test]
