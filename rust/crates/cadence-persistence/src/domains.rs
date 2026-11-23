@@ -102,6 +102,16 @@ impl DomainRecord {
         }
     }
 
+    fn to_update_response(&self) -> cadence_api::service_types::UpdateDomainResponse {
+        cadence_api::service_types::UpdateDomainResponse {
+            domain_info: Some(self.info.clone()),
+            configuration: Some(self.configuration.clone()),
+            replication_configuration: Some(self.replication.clone()),
+            failover_version: self.failover_version,
+            is_global_domain: self.is_global_domain,
+        }
+    }
+
     fn to_describe_response(&self) -> DescribeDomainResponse {
         DescribeDomainResponse {
             domain_info: Some(self.info.clone()),
@@ -926,22 +936,27 @@ impl InMemoryDomainStore {
         let current = inner.by_name.get_mut(&req.name).ok_or_else(|| {
             EntityNotExistsError::new(format!("Domain {} does not exist.", req.name))
         })?;
-        let (response, failed_over) = Self::update_record(current, req, metadata, policy)?;
-        if failed_over {
-            self.notify_failover(current);
+        let prepared = Self::prepare_update(current, req, metadata, policy, now_nanos())?;
+        let response = prepared.record.to_update_response();
+        if prepared.write {
+            *current = prepared.record;
+            if prepared.failover {
+                self.notify_failover(current);
+            }
         }
         Ok(response)
     }
 
-    fn update_record(
-        current: &mut DomainRecord,
+    fn prepare_update(
+        current: &DomainRecord,
         req: &UpdateDomainRequest,
         metadata: &cadence_common::cluster::Metadata,
         policy: &crate::domain_update::DomainPolicy,
-    ) -> Result<(cadence_api::service_types::UpdateDomainResponse, bool), FailoverError> {
-        let prepared = crate::domain_update::prepare(current, req, metadata, now_nanos(), policy)
+        now: i64,
+    ) -> Result<crate::domain_update::PreparedUpdate, FailoverError> {
+        let mut prepared = crate::domain_update::prepare(current, req, metadata, now, policy)
             .map_err(FailoverError::from)?;
-        let mut candidate = prepared.record;
+        let candidate = &mut prepared.record;
         if prepared.failover && prepared.write {
             candidate.failover_audit.push(FailoverAuditEntry {
                 id: uuid::Uuid::new_v4().to_string(),
@@ -957,17 +972,7 @@ impl InMemoryDomainStore {
                 after_version: candidate.failover_version,
             });
         }
-        let response = cadence_api::service_types::UpdateDomainResponse {
-            domain_info: Some(candidate.info.clone()),
-            configuration: Some(candidate.configuration.clone()),
-            replication_configuration: Some(candidate.replication.clone()),
-            failover_version: candidate.failover_version,
-            is_global_domain: candidate.is_global_domain,
-        };
-        if prepared.write {
-            *current = candidate;
-        }
-        Ok((response, prepared.failover && prepared.write))
+        Ok(prepared)
     }
 
     /// Errors for domain failover, mirroring Go's domain-handler mapping:
@@ -2214,18 +2219,20 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
         let version = self.current_metadata_version()?;
         let old = self.read_record_by_name(&request.name)?;
         let before = old.to_describe_response();
-        let mut updated = old.clone();
-        let (response, _) =
-            InMemoryDomainStore::update_record(&mut updated, request, metadata, policy)?;
+        let now = now_nanos();
+        let prepared = InMemoryDomainStore::prepare_update(&old, request, metadata, policy, now)?;
+        let mut updated = prepared.record;
         if updated.failover_version != old.failover_version {
             updated.failover_notification_version = version;
         }
-        self.persist_record(&updated, version, false)?;
-        self.cache.restore_record(updated.clone());
+        if prepared.write {
+            self.persist_record(&updated, version, false)?;
+            self.cache.restore_record(updated.clone());
+        }
         if updated.failover_version != old.failover_version {
             self.record_failover_audit(&before, old.failover_end_time, &updated)?;
             self.cache.notify_failover(&updated);
-        } else {
+        } else if prepared.write || updated.is_global_domain {
             let before_state = crate::domain_audit::DomainAuditState {
                 describe: before.clone(),
                 failover_expire_nanos: old.failover_end_time,
@@ -2234,13 +2241,13 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
                 &updated.info.uuid,
                 crate::domain_audit::DOMAIN_AUDIT_OPERATION_TYPE_UPDATE,
                 "domain updated",
-                updated.last_updated_time_nanos,
+                now,
                 Some(&before_state),
                 Some(&Self::audit_state(&updated)),
             );
         }
         self.publish_replication_task(&updated, cadence_api::enums::DomainOperation::Update)?;
-        Ok(response)
+        Ok(updated.to_update_response())
     }
 
     fn failover(
@@ -3567,6 +3574,40 @@ mod failover_notification_version_tests {
             })
             .unwrap();
         assert!(next.domains.is_empty());
+    }
+
+    #[test]
+    fn bad_binary_merge_returns_candidate_without_writing_domain_row() {
+        let (manager, persistence) = manager_with_global_domain();
+        let version = persistence.get_metadata_version().unwrap();
+        let response = manager
+            .update(
+                &UpdateDomainRequest {
+                    name: "global".into(),
+                    configuration: Some(cadence_api::service_types::DomainConfigurationUpdate {
+                        bad_binaries: Some(cadence_api::types::BadBinaries {
+                            binaries: Some(std::collections::HashMap::from([(
+                                "checksum".into(),
+                                Some(Default::default()),
+                            )])),
+                        }),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                &cluster_metadata(),
+                &no_cooldown(),
+            )
+            .unwrap();
+        assert!(response
+            .configuration
+            .unwrap()
+            .bad_binaries
+            .unwrap()
+            .binaries
+            .unwrap()
+            .contains_key("checksum"));
+        assert_eq!(persistence.get_metadata_version().unwrap(), version);
     }
 
     #[test]
