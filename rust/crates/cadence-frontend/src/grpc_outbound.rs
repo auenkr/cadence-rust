@@ -857,20 +857,27 @@ fn push_transient(
         decision.ostruct(
             10,
             v.scheduled_event
-                .map(convert::history_in::event)
+                .map(transient_event_in)
                 .transpose()?
                 .as_ref(),
         );
         decision.ostruct(
             20,
             v.started_event
-                .map(convert::history_in::event)
+                .map(transient_event_in)
                 .transpose()?
                 .as_ref(),
         );
         fields.fields.push((id, Value::Struct(decision.finish())));
     }
     Ok(())
+}
+
+fn transient_event_in(mut event: api::HistoryEvent) -> Result<st::HistoryEvent, tonic::Status> {
+    let timestamp = convert::nanos(event.event_time.take());
+    let mut event = convert::history_in::event(event)?;
+    event.timestamp = timestamp;
+    Ok(event)
 }
 
 fn describe_workflow_request(
@@ -989,7 +996,7 @@ fn poll_decision_response(v: m::PollForDecisionTaskResponse) -> Result<Struct, t
 }
 
 fn poll_activity_response(v: m::PollForActivityTaskResponse) -> Result<Struct, tonic::Status> {
-    let mut reply = cv::poll_activity_response_in(api::PollForActivityTaskResponse {
+    let mut activity = cv::poll_activity_response_in(api::PollForActivityTaskResponse {
         task_token: v.task_token,
         workflow_execution: v.workflow_execution,
         activity_id: v.activity_id,
@@ -1007,8 +1014,20 @@ fn poll_activity_response(v: m::PollForActivityTaskResponse) -> Result<Struct, t
         workflow_domain: v.workflow_domain,
         header: v.header,
         auto_config_hint: v.auto_config_hint,
-    })?
-    .to_thrift();
+    })?;
+    // The public Thrift converter multiplies millisecond timestamps by a
+    // million. Matching's protobuf timestamps already map to wire nanoseconds.
+    let timestamps = [
+        (70, activity.scheduled_timestamp.take()),
+        (90, activity.started_timestamp.take()),
+        (130, activity.scheduled_timestamp_of_this_attempt.take()),
+    ];
+    let mut reply = activity.to_thrift();
+    reply.fields.extend(
+        timestamps
+            .into_iter()
+            .filter_map(|(id, timestamp)| timestamp.map(|value| (id, Value::I64(value)))),
+    );
     push_poll_feedback(&mut reply, v.partition_config, v.load_balancer_hints);
     Ok(reply)
 }
@@ -1260,6 +1279,19 @@ mod tests {
                 scheduled_event_id: 7,
                 attempt: 2,
                 scheduled_time: Some(convert::timestamp_from_nanos(123456789)),
+                decision_info: Some(shared::TransientDecisionInfo {
+                    scheduled_event: Some(api::HistoryEvent {
+                        event_id: 7,
+                        event_time: Some(convert::timestamp_from_nanos(123456789)),
+                        attributes: Some(
+                            api::history_event::Attributes::DecisionTaskScheduledEventAttributes(
+                                api::DecisionTaskScheduledEventAttributes::default(),
+                            ),
+                        ),
+                        ..Default::default()
+                    }),
+                    started_event: None,
+                }),
                 ..Default::default()
             }),
             activities_to_dispatch_locally: HashMap::from([(
@@ -1277,6 +1309,11 @@ mod tests {
         assert_eq!(started.opt_i64(30).unwrap(), Some(7));
         assert_eq!(started.opt_i64(60).unwrap(), Some(2));
         assert_eq!(started.opt_i64(120).unwrap(), Some(123456789));
+        let Value::Struct(decision) = started.get(80).unwrap() else {
+            panic!("transient decision missing");
+        };
+        let event = decision.opt_struct::<st::HistoryEvent>(10).unwrap().unwrap();
+        assert_eq!(event.timestamp, Some(123456789));
         let dispatch = reply
             .opt_map_str::<tk::ActivityLocalDispatchInfo>(20)
             .unwrap()
@@ -1424,7 +1461,7 @@ mod tests {
             task_token: vec![1],
             activity_id: "activity".into(),
             input: vec![2],
-            scheduled_timestamp: Some(123456789),
+            scheduled_timestamp: Some(1_700_000_000_123),
             heartbeat_timeout_seconds: Some(42),
             ..Default::default()
         };
@@ -1433,9 +1470,7 @@ mod tests {
             task_token: proto.task_token,
             activity_id: proto.activity_id,
             input: proto.input,
-            scheduled_time: activity
-                .scheduled_timestamp
-                .map(convert::timestamp_from_nanos),
+            scheduled_time: Some(convert::timestamp_from_nanos(1_700_000_000_123_456_789)),
             heartbeat_timeout: proto.heartbeat_timeout,
             load_balancer_hints: Some(m::LoadBalancerHints {
                 backlog_count: 3,
@@ -1444,6 +1479,7 @@ mod tests {
             ..Default::default()
         })
         .unwrap();
+        assert_eq!(reply.opt_i64(70).unwrap(), Some(1_700_000_000_123_456_789));
         let decoded = tk::PollForActivityTaskResponse::from_thrift(&reply).unwrap();
         assert_eq!(decoded, activity);
         let (_, hints) = poll_feedback(&reply);
