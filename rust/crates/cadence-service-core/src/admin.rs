@@ -4,6 +4,7 @@
 //! Admin service state and the shared ordered snapshot used by runtime
 //! dynamic-config property readers.
 
+use cadence_persistence::domains::decode_thriftrw_payload;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -1579,11 +1580,10 @@ pub fn domain_replication_messages_response(
     let rows = persistence.read_domain_replication_messages(cursor, 100)?;
     let mut tasks = Vec::with_capacity(rows.len());
     for row in rows {
-        let decoded = cadence_persistence::domains::decode_thriftrw_payload(&row.payload)
-            .and_then(|value| {
-                cadence_api::types::ReplicationTask::from_thrift(&value)
-                    .map_err(|error| error.to_string())
-            });
+        let decoded = decode_thriftrw_payload(&row.payload).and_then(|value| {
+            cadence_api::types::ReplicationTask::from_thrift(&value)
+                .map_err(|error| error.to_string())
+        });
         match decoded {
             Ok(task) => {
                 cursor = row.id;
@@ -1690,7 +1690,7 @@ pub async fn read_dlq_messages(
             let mut tasks = Vec::with_capacity(rows.len());
             for row in &rows {
                 let task = (|| {
-                    let thrift = cadence_persistence::domains::decode_thriftrw_payload(&row.payload)?;
+                    let thrift = decode_thriftrw_payload(&row.payload)?;
                     <cadence_api::types::ReplicationTask as cadence_thrift::FromThrift>::from_thrift(&thrift)
                         .map_err(|error| error.to_string())
                 })();
@@ -1878,8 +1878,7 @@ pub fn merge_domain_dlq_messages(
     // ack level, even when no message was merged (persistence ignores stale levels).
     let mut last_processed = 0_i64;
     for row in &rows {
-        let thrift =
-            cadence_persistence::domains::decode_thriftrw_payload(&row.payload)?;
+        let thrift = decode_thriftrw_payload(&row.payload)?;
         let task = cadence_api::types::ReplicationTask::from_thrift(&thrift)
             .map_err(|error| error.to_string())?;
         // Go only checks GetDomainTaskAttributes() == nil.
@@ -3866,7 +3865,7 @@ pub fn read_domain_dlq_messages(
         persistence.read_domain_replication_dlq(first_message_id, end_message_id, page_size)?;
     let mut tasks = Vec::with_capacity(rows.len());
     for row in &rows {
-        let thrift = cadence_persistence::domains::decode_thriftrw_payload(&row.payload)?;
+        let thrift = decode_thriftrw_payload(&row.payload)?;
         let mut task =
             <cadence_api::types::ReplicationTask as cadence_thrift::FromThrift>::from_thrift(
                 &thrift,
