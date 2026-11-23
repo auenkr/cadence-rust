@@ -243,7 +243,7 @@ impl GrpcOutbound {
             };
         }
         let st_err =
-            |s: tonic::Status| cadence_service_core::frontend_remote_grpc::error_from_status(&s);
+            |s: tonic::Status| cadence_service_core::frontend_remote_grpc::error_from_status_typed(&s);
         match method {
             "StartWorkflowExecution" => {
                 let start: ty::StartWorkflowExecutionRequest = inner(env, 20)?;
@@ -472,7 +472,7 @@ impl GrpcOutbound {
             };
         }
         let st_err =
-            |s: tonic::Status| cadence_service_core::frontend_remote_grpc::error_from_status(&s);
+            |s: tonic::Status| cadence_service_core::frontend_remote_grpc::error_from_status_typed(&s);
         match method {
             "CancelOutstandingPoll" => {
                 let task_list: Option<ty::TaskList> =

@@ -63,6 +63,119 @@ pub fn error_from_status(status: &tonic::Status) -> CadenceError {
     }
 }
 
+#[derive(Clone, PartialEq, Message)]
+struct StartedDetail {
+    #[prost(string, tag = "1")]
+    start_request_id: String,
+    #[prost(string, tag = "2")]
+    run_id: String,
+}
+
+#[derive(Clone, PartialEq, Message)]
+struct ClientVersionDetail {
+    #[prost(string, tag = "1")]
+    feature_version: String,
+    #[prost(string, tag = "2")]
+    client_impl: String,
+    #[prost(string, tag = "3")]
+    supported_versions: String,
+}
+
+#[derive(Clone, PartialEq, Message)]
+struct ReasonDetail {
+    #[prost(string, tag = "1")]
+    reason: String,
+}
+
+#[derive(Clone, PartialEq, Message)]
+struct OwnerDetail {
+    #[prost(string, tag = "1")]
+    owner: String,
+}
+
+/// Go `proto.ToError` for History/Matching peers: typed detail first (matched
+/// by the `Any` type name), then the status code. Falls back to
+/// [`error_from_status`] for anything not typed.
+pub fn error_from_status_typed(status: &tonic::Status) -> CadenceError {
+    use cadence_api::errors as e;
+    let message = status.message().to_owned();
+    if let Ok(rpc) = RpcStatus::decode(status.details()) {
+        for any in rpc.details {
+            let name = any.type_url.rsplit(['/', '.']).next().unwrap_or("");
+            let v = any.value.as_slice();
+            match name {
+                "WorkflowExecutionAlreadyStartedError" => {
+                    if let Ok(d) = StartedDetail::decode(v) {
+                        return CadenceError::WorkflowAlreadyStarted(
+                            e::WorkflowExecutionAlreadyStartedError {
+                                message,
+                                start_request_id: d.start_request_id,
+                                run_id: d.run_id,
+                            },
+                        );
+                    }
+                }
+                "ShardOwnershipLostError" => {
+                    let owner = OwnerDetail::decode(v).map(|d| d.owner).unwrap_or_default();
+                    return CadenceError::ShardOwnershipLost(e::ShardOwnershipLostError {
+                        message,
+                        owner,
+                    });
+                }
+                "ServiceBusyError" => {
+                    let reason = ReasonDetail::decode(v).map(|d| d.reason).unwrap_or_default();
+                    return CadenceError::ServiceBusy(e::ServiceBusyError {
+                        message,
+                        reason: Some(reason),
+                    });
+                }
+                "LimitExceededError" => {
+                    return CadenceError::LimitExceeded(e::LimitExceededError::new(message))
+                }
+                "WorkflowExecutionAlreadyCompletedError" => {
+                    return CadenceError::WorkflowAlreadyCompleted(
+                        e::WorkflowExecutionAlreadyCompletedError::new(message),
+                    )
+                }
+                "QueryFailedError" => {
+                    return CadenceError::QueryFailed(e::QueryFailedError::new(message))
+                }
+                "CancellationAlreadyRequestedError" => {
+                    return CadenceError::CancellationAlreadyRequested(
+                        e::CancellationAlreadyRequestedError::new(message),
+                    )
+                }
+                "DomainAlreadyExistsError" => {
+                    return CadenceError::DomainAlreadyExists(e::DomainAlreadyExistsError::new(
+                        message,
+                    ))
+                }
+                "ClientVersionNotSupportedError" => {
+                    let d = ClientVersionDetail::decode(v).unwrap_or_default();
+                    return CadenceError::ClientVersionNotSupported(
+                        e::ClientVersionNotSupportedError {
+                            feature_version: d.feature_version,
+                            client_impl: d.client_impl,
+                            supported_versions: d.supported_versions,
+                        },
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+    match status.code() {
+        tonic::Code::PermissionDenied => {
+            CadenceError::AccessDenied(e::AccessDeniedError::new(message))
+        }
+        tonic::Code::ResourceExhausted => CadenceError::ServiceBusy(e::ServiceBusyError {
+            message,
+            reason: None,
+        }),
+        _ => error_from_status(status),
+    }
+}
+
 fn bad(error: serde_json::Error) -> CadenceError {
     CadenceError::BadRequest(BadRequestError::new(error.to_string()))
 }
@@ -365,6 +478,61 @@ pub async fn call(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn typed_status(code: tonic::Code, name: &str, value: Vec<u8>) -> tonic::Status {
+        let rpc = RpcStatus {
+            code: code as i32,
+            message: "m".into(),
+            details: vec![prost_types::Any {
+                type_url: format!("type.googleapis.com/uber.cadence.api.v1.{name}"),
+                value,
+            }],
+        };
+        tonic::Status::with_details(code, "m", rpc.encode_to_vec().into())
+    }
+
+    #[test]
+    fn typed_decoder_maps_details_like_go_to_error() {
+        let st = typed_status(
+            tonic::Code::AlreadyExists,
+            "WorkflowExecutionAlreadyStartedError",
+            StartedDetail { start_request_id: "s".into(), run_id: "r".into() }.encode_to_vec(),
+        );
+        match error_from_status_typed(&st) {
+            CadenceError::WorkflowAlreadyStarted(e) => {
+                assert_eq!((e.start_request_id.as_str(), e.run_id.as_str()), ("s", "r"));
+            }
+            other => panic!("{other:?}"),
+        }
+        let st = typed_status(
+            tonic::Code::Aborted,
+            "ShardOwnershipLostError",
+            OwnerDetail { owner: "o".into() }.encode_to_vec(),
+        );
+        assert!(matches!(
+            error_from_status_typed(&st),
+            CadenceError::ShardOwnershipLost(e) if e.owner == "o"
+        ));
+        let st = typed_status(
+            tonic::Code::ResourceExhausted,
+            "ServiceBusyError",
+            ReasonDetail { reason: "r".into() }.encode_to_vec(),
+        );
+        assert!(matches!(error_from_status_typed(&st), CadenceError::ServiceBusy(_)));
+        let st = typed_status(tonic::Code::NotFound, "WorkflowExecutionAlreadyCompletedError", vec![]);
+        assert!(matches!(
+            error_from_status_typed(&st),
+            CadenceError::WorkflowAlreadyCompleted(_)
+        ));
+        assert!(matches!(
+            error_from_status_typed(&tonic::Status::new(tonic::Code::PermissionDenied, "x")),
+            CadenceError::AccessDenied(_)
+        ));
+        assert!(matches!(
+            error_from_status_typed(&tonic::Status::new(tonic::Code::NotFound, "x")),
+            CadenceError::EntityNotExists(_)
+        ));
+    }
 
     #[test]
     fn signal_request_maps_to_proto() {
