@@ -545,6 +545,10 @@ impl ProductionBackend {
             (20, Value::Struct(poll)),
         ];
         let _ = poll_key;
+        let forwarded_from = str_field(request, "forwardedFrom");
+        if !forwarded_from.is_empty() {
+            fields.push((30, Value::Bytes(forwarded_from.into_bytes())));
+        }
         let isolation = str_field(request, "isolationGroup");
         if !isolation.is_empty() {
             fields.push((40, Value::Bytes(isolation.into_bytes())));
@@ -681,15 +685,14 @@ impl ProductionBackend {
             .await;
         drop(guard);
         let reply = reply?;
-        // Matching's Thrift poll responses carry no partitionConfig /
-        // loadBalancerHints (same as Go over TChannel), so both are nil here.
+        let (config, hints) = crate::grpc_outbound::poll_feedback(&reply);
         self.poll_feedback(
             request,
             root.as_ref(),
             polled,
             cadence_common::matching_lb::TASK_LIST_TYPE_DECISION,
-            None,
-            None,
+            config,
+            hints,
         );
         let Some(task) = DecisionTask::from_matching(&reply)? else {
             // Go returns the AutoConfigHint even for an empty poll.
@@ -731,15 +734,14 @@ impl ProductionBackend {
             .await;
         drop(guard);
         let reply = reply?;
-        // Matching's Thrift poll responses carry no partitionConfig /
-        // loadBalancerHints (same as Go over TChannel), so both are nil here.
+        let (config, hints) = crate::grpc_outbound::poll_feedback(&reply);
         self.poll_feedback(
             request,
             root.as_ref(),
             polled,
             cadence_common::matching_lb::TASK_LIST_TYPE_ACTIVITY,
-            None,
-            None,
+            config,
+            hints,
         );
         let response = tk::PollForActivityTaskResponse::from_thrift(&reply)
             .map_err(|e| thrift_err("Matching PollForActivityTask response", e))?;
