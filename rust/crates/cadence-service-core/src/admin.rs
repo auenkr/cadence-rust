@@ -653,6 +653,11 @@ pub struct AdminState {
     /// Elasticsearch/OpenSearch mapping client; None when advanced visibility is not configured.
     pub es: Option<crate::es_mapping::EsVisibility>,
     pub workflow_deletion: Option<WorkflowDeletionStores>,
+    /// Last known domain replication DLQ size (Go dlqMessageHandlerImpl.lastCount;
+    /// `None` is Go's -1 "not yet loaded").
+    pub domain_dlq_last_count: Arc<Mutex<Option<i64>>>,
+    /// Set once the periodic (5 minute) refresh loop has been started.
+    pub domain_dlq_refresh_started: Arc<std::sync::atomic::AtomicBool>,
 }
 
 // ---------------------------------------------------------------------------

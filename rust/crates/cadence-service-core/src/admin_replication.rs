@@ -308,6 +308,49 @@ pub async fn get_dlq_replication_messages(
     })
 }
 
+/// Go `dlqMessageHandlerImpl.Count`: fetch when forced or never loaded, else
+/// return the cached `lastCount`; a 5 minute loop refreshes the cache.
+fn domain_dlq_count(
+    state: &AppState,
+    persistence: &std::sync::Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence>,
+    force_fetch: bool,
+) -> Result<i64, ProxyError> {
+    let cache = state.admin.domain_dlq_last_count.clone();
+    let cached = *cache.lock().unwrap();
+    if !force_fetch {
+        if let Some(count) = cached {
+            return Ok(count);
+        }
+    }
+    let size = persistence
+        .domain_replication_dlq_size()
+        .map_err(ProxyError::Internal)?;
+    *cache.lock().unwrap() = Some(size);
+    if !state
+        .admin
+        .domain_dlq_refresh_started
+        .swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let persistence = persistence.clone();
+            handle.spawn(async move {
+                let mut tick = tokio::time::interval(std::time::Duration::from_secs(300));
+                tick.tick().await;
+                loop {
+                    tick.tick().await;
+                    let p = persistence.clone();
+                    if let Ok(Ok(size)) =
+                        tokio::task::spawn_blocking(move || p.domain_replication_dlq_size()).await
+                    {
+                        *cache.lock().unwrap() = Some(size);
+                    }
+                }
+            });
+        }
+    }
+    Ok(size)
+}
+
 pub async fn count_dlq_messages(
     state: &AppState,
     request: api_admin::CountDLQMessagesRequest,
@@ -317,9 +360,7 @@ pub async fn count_dlq_messages(
             "domain replication DLQ is unavailable for this persistence backend".to_string(),
         )
     })?;
-    let domain = persistence
-        .domain_replication_dlq_size()
-        .map_err(ProxyError::Internal)?;
+    let domain = domain_dlq_count(state, persistence, request.force_fetch)?;
     let mut history = client(state)?;
     let response = history
         .count_dlq_messages(history_admin_request(ph::CountDlqMessagesRequest {
@@ -542,6 +583,52 @@ pub async fn respond_cross_cluster_tasks_completed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn domain_dlq_count_is_cached_unless_forced() {
+        use std::sync::atomic::{AtomicI64, Ordering};
+        #[derive(Debug)]
+        struct P(AtomicI64, std::sync::atomic::AtomicBool);
+        impl cadence_persistence::matching_domain_metadata::DomainMetadataPersistence for P {
+            fn metadata_version(&self) -> Result<i64, String> {
+                Ok(0)
+            }
+            fn domain_replication_dlq_size(&self) -> Result<i64, String> {
+                if self.1.load(Ordering::SeqCst) {
+                    return Err("down".into());
+                }
+                Ok(self.0.fetch_add(1, Ordering::SeqCst) + 1)
+            }
+            fn create_domain(
+                &self,
+                _: &cadence_persistence::matching_domain_metadata::MatchingDomainMetadata,
+                _: i64,
+            ) -> Result<(), String> {
+                unimplemented!()
+            }
+            fn update_domain(
+                &self,
+                _: &cadence_persistence::matching_domain_metadata::MatchingDomainMetadata,
+                _: i64,
+            ) -> Result<(), String> {
+                unimplemented!()
+            }
+            fn delete_domain(&self, _: &str) -> Result<(), String> {
+                unimplemented!()
+            }
+        }
+        let p = std::sync::Arc::new(P(AtomicI64::new(0), Default::default()));
+        let dynp: std::sync::Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence> = p.clone();
+        let state = AppState::default();
+        assert_eq!(domain_dlq_count(&state, &dynp, false).unwrap(), 1);
+        p.1.store(true, Ordering::SeqCst);
+        // Cached value survives a persistence outage when not forced.
+        assert_eq!(domain_dlq_count(&state, &dynp, false).unwrap(), 1);
+        assert!(domain_dlq_count(&state, &dynp, true).is_err());
+        p.1.store(false, Ordering::SeqCst);
+        assert_eq!(domain_dlq_count(&state, &dynp, true).unwrap(), 2);
+        assert_eq!(domain_dlq_count(&state, &dynp, false).unwrap(), 2);
+    }
 
     #[tokio::test]
     async fn cross_cluster_requests_validate_then_need_history() {
