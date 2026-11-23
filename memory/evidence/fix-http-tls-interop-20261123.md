@@ -37,3 +37,9 @@ but the Go test then needs a real History).
 - 45152507800 (29a6ace, own addr appended): fail, own addr excluded.
 - 45153528092 (02242e7, self-only bootstrap): startup OK; fail `cadence-history unavailable`.
 - 45154664436 (f6631c0): embedded step PASS; explicit-config step fail (item 3).
+
+## Attempt 2 (worker; NOT green) — real-Rust-History redesign is blocked
+- 45155939660 (cd6a24488): Go History ring stub removed, `services.history.rpc.port` set to a random port in the written config, bootstrap = Frontend+History+Matching. Fail: Matching starts first and its Ringpop JOIN to Frontend/History (not yet serving JOIN) fails for 30s; server never opens all listeners.
+- 45157883598 (67ac2d8ca): bootstrap = Matching only (others join through it). Ring forms (Matching+Frontend members). Fail at `TestRustMatchingNativeThrift`: `cadence-history unavailable: TChannel error 6: Unknown Cadence procedure`.
+- Finding: `cadence-server` (cadence-matching launcher.rs ~1300-1345) does NOT link the real `cadence-history` crate. Its "history" TChannel/gRPC listeners are the old Matching-side shim (serve_history_listener), which lacks StartWorkflowExecution etc. The real History is the separate `cadence-history` binary and has no sqlite store (only Cassandra/MySQL/Postgres), while this harness backs Matching with sqlite. So a real Frontend+History+Matching run needs a SQL service container (see history-mixed-gate.yml) plus Matching on the same SQL store: a much larger redesign than a harness tweak.
+- Options for orchestrator: (a) run the Go native-thrift test against MySQL/Postgres with cadence-server + cadence-history (reuse history-mixed-gate setup); (b) rewrite TestRustMatchingNativeThrift to skip Frontend (seed domain via sqlite, synthetic workflow/run IDs) but Matching Poll* still needs History RecordDecision/ActivityTaskStarted, so a Go History gRPC stub would be needed; (c) revert to a Rust shim Frontend/History for tests only (contradicts parity).
