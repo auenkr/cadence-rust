@@ -266,19 +266,19 @@ pub trait WorkflowApi: Send + Sync + std::fmt::Debug {
         operation: &'a str,
         request: &'a serde_json::Value,
         ctx: &'a CallerContext,
-        local: LocalCall<'a>,
+        local: LocalCall,
     ) -> RedirectLocalFuture<'a> {
         let _ = (operation, request, ctx);
-        Box::pin(async move { Ok(RedirectedReply::Local(local().await)) })
+        Box::pin(async move { Ok(RedirectedReply::Local((*local)().await)) })
     }
 }
 
 /// Local schedule handler run inside the redirection policy (Go calls the
 /// local handler from the policy callback so DomainNotActive can be retried
 /// on the active cluster).
-pub type LocalFuture<'a> =
-    std::pin::Pin<Box<dyn std::future::Future<Output = Result<ThriftReply, String>> + Send + 'a>>;
-pub type LocalCall<'a> = &'a (dyn Fn() -> LocalFuture<'a> + Send + Sync);
+pub type LocalFuture =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<ThriftReply, String>> + Send>>;
+pub type LocalCall = Arc<dyn Fn() -> LocalFuture + Send + Sync>;
 
 /// Result of a schedule call run through the redirection policy.
 pub enum RedirectedReply {
@@ -749,7 +749,7 @@ pub async fn dispatch_redirected_with_local(
     method: &str,
     args: &Struct,
     ctx: CallerContext,
-    local: LocalCall<'_>,
+    local: LocalCall,
 ) -> Result<Option<ThriftReply>, String> {
     let name = method.rsplit("::").next().unwrap_or(method);
     if method.starts_with("AdminService::")

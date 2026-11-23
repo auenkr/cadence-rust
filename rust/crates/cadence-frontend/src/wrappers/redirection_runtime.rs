@@ -754,7 +754,7 @@ impl ScheduleRedirect {
         operation: &str,
         request: &Value,
         headers: &HashMap<String, String>,
-        local: cadence_service_core::workflow_api::LocalCall<'_>,
+        local: cadence_service_core::workflow_api::LocalCall,
     ) -> Result<cadence_service_core::workflow_api::RedirectedReply, CadenceError> {
         use cadence_service_core::workflow_api::RedirectedReply;
         use std::sync::atomic::{AtomicBool, Ordering};
@@ -771,6 +771,7 @@ impl ScheduleRedirect {
                     let request = request.clone();
                     let captured = &captured;
                     let last_local = &last_local;
+                    let local = &local;
                     async move {
                         match cluster {
                             Some(cluster) if cluster != current => {
@@ -783,7 +784,7 @@ impl ScheduleRedirect {
                             }
                             _ => {
                                 last_local.store(true, Ordering::SeqCst);
-                                local_reply_to_result(local().await, captured)
+                                local_reply_to_result((**local)().await, captured)
                             }
                         }
                     }

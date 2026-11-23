@@ -965,7 +965,7 @@ impl cadence_service_core::workflow_api::WorkflowApi for HandlerApi {
         operation: &'a str,
         request: &'a serde_json::Value,
         ctx: &'a cadence_service_core::workflow_api::CallerContext,
-        local: cadence_service_core::workflow_api::LocalCall<'a>,
+        local: cadence_service_core::workflow_api::LocalCall,
     ) -> cadence_service_core::workflow_api::RedirectLocalFuture<'a> {
         Box::pin(async move {
             match &self.schedule_redirect {
@@ -975,7 +975,7 @@ impl cadence_service_core::workflow_api::WorkflowApi for HandlerApi {
                         .await
                 }
                 None => Ok(cadence_service_core::workflow_api::RedirectedReply::Local(
-                    local().await,
+                    (*local)().await,
                 )),
             }
         })
