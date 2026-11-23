@@ -41,6 +41,9 @@ on:
       dynamic_config_extra:
         description: YAML appended to dynamic config (literal \n for newlines; both arms)
         default: ''
+      rust_services:
+        description: Services run from the Rust image in the paired rust arm (all-Rust cluster = frontend,matching,history)
+        default: 'frontend,matching'
       sdk_repetitions:
         description: Fresh database pairs for SDK mode
         default: '1'
@@ -198,12 +201,13 @@ jobs:
           python3 tests/frontend-gate/benchmark/paired-run.py \
             --requests "$REQUESTS" --warmup "$WARMUP" \
             --repetitions "$REPETITIONS" --concurrency "$CONCURRENCY" \
-            --payload-bytes "$PAYLOAD_BYTES" > out/paired-runner.log 2>&1
+            --payload-bytes "$PAYLOAD_BYTES" --rust-services "${{ inputs.rust_services || 'frontend,matching' }}" > out/paired-runner.log 2>&1
           status=$?
           echo "$status" > out/paired-runner.exit
           cat out/paired-runner.log
           exit "$status"
       - name: Verify complete paired benchmark evidence
+        if: ${{ (inputs.rust_services || 'frontend,matching') == 'frontend,matching' }}
         run: |
           set +e
           python3 tests/benchmark/verify_artifacts.py --out out --expected-head "$GITHUB_SHA" > out/artifact-verification.json
