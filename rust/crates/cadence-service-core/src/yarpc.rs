@@ -2655,16 +2655,73 @@ pub async fn dispatch_with_transport(
     caller_headers: std::collections::HashMap<String, String>,
     transport: &'static str,
 ) -> Result<(Struct, Option<(&'static str, String)>), String> {
-    if let Some(api) = &state.workflow_api {
-        let ctx = crate::workflow_api::CallerContext {
-            deadline: Some(deadline),
-            headers: caller_headers.clone(),
-            transport,
-        };
-        if let Some(reply) = crate::workflow_api::dispatch_thrift(api, method, body, ctx).await? {
-            return Ok(reply);
+    dispatch_with_transport_inner(state, method, body, deadline, caller_headers, transport, false)
+        .await
+}
+
+/// Boxed so the schedule redirection can call the local handler (this same
+/// function with `local_only`) from inside the policy callback.
+fn dispatch_with_transport_inner<'a>(
+    state: &'a AppState,
+    method: &'a str,
+    body: &'a Struct,
+    deadline: Instant,
+    caller_headers: std::collections::HashMap<String, String>,
+    transport: &'static str,
+    local_only: bool,
+) -> std::pin::Pin<
+    Box<
+        dyn std::future::Future<Output = Result<(Struct, Option<(&'static str, String)>), String>>
+            + Send
+            + 'a,
+    >,
+> {
+    Box::pin(async move {
+        if !local_only {
+            if let Some(api) = &state.workflow_api {
+                let ctx = crate::workflow_api::CallerContext {
+                    deadline: Some(deadline),
+                    headers: caller_headers.clone(),
+                    transport,
+                };
+                let local_headers = caller_headers.clone();
+                let local = move || -> crate::workflow_api::LocalFuture<'a> {
+                    dispatch_with_transport_inner(
+                        state,
+                        method,
+                        body,
+                        deadline,
+                        local_headers.clone(),
+                        transport,
+                        true,
+                    )
+                };
+                if let Some(reply) = crate::workflow_api::dispatch_redirected_with_local(
+                    api, method, body, ctx.clone(), &local,
+                )
+                .await?
+                {
+                    return Ok(reply);
+                }
+                if let Some(reply) =
+                    crate::workflow_api::dispatch_thrift(api, method, body, ctx).await?
+                {
+                    return Ok(reply);
+                }
+            }
         }
-    }
+        dispatch_local(state, method, body, deadline, caller_headers, transport).await
+    })
+}
+
+async fn dispatch_local(
+    state: &AppState,
+    method: &str,
+    body: &Struct,
+    deadline: Instant,
+    caller_headers: std::collections::HashMap<String, String>,
+    transport: &'static str,
+) -> Result<(Struct, Option<(&'static str, String)>), String> {
     // Admin handlers share the axum `State<Arc<AppState>>` extractor shape.
     let shared = || Arc::new(state.clone());
     let admin = method.starts_with("AdminService::");

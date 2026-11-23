@@ -959,6 +959,27 @@ impl cadence_service_core::workflow_api::WorkflowApi for HandlerApi {
             }
         })
     }
+
+    fn redirect_with_local<'a>(
+        &'a self,
+        operation: &'a str,
+        request: &'a serde_json::Value,
+        ctx: &'a cadence_service_core::workflow_api::CallerContext,
+        local: cadence_service_core::workflow_api::LocalCall<'a>,
+    ) -> cadence_service_core::workflow_api::RedirectLocalFuture<'a> {
+        Box::pin(async move {
+            match &self.schedule_redirect {
+                Some(redirect) => {
+                    redirect
+                        .route_with_local(operation, request, &ctx.headers, local)
+                        .await
+                }
+                None => Ok(cadence_service_core::workflow_api::RedirectedReply::Local(
+                    local().await,
+                )),
+            }
+        })
+    }
 }
 
 fn service_addr(
