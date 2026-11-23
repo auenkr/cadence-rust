@@ -527,7 +527,7 @@ impl GrpcOutbound {
                 let req = tk::ListTaskListPartitionsRequest::from_thrift(env)
                     .map_err(|e| thrift_err("ListTaskListPartitions request", e))?;
                 let resp = client
-                    .list_task_list_partitions(r(convert::list_task_list_partitions_request_out(
+                    .list_task_list_partitions(r!(convert::list_task_list_partitions_request_out(
                         req,
                     )))
                     .await
@@ -539,7 +539,7 @@ impl GrpcOutbound {
                 let req = tk::GetTaskListsByDomainRequest::from_thrift(env)
                     .map_err(|e| thrift_err("GetTaskListsByDomain request", e))?;
                 let resp = client
-                    .get_task_lists_by_domain(r(convert::get_task_lists_by_domain_request_out(req)))
+                    .get_task_lists_by_domain(r!(convert::get_task_lists_by_domain_request_out(req)))
                     .await
                     .map_err(st_err)?
                     .into_inner();
