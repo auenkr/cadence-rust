@@ -221,6 +221,22 @@ jobs:
           uname -a > out/runner-uname.txt
           lscpu > out/runner-cpu.txt
           free -h > out/runner-memory.txt
+          {
+            echo "## Machine spec"
+            echo "- CPU model: $(lscpu | sed -n 's/^Model name:[[:space:]]*//p')"
+            echo "- Cores/threads: $(lscpu | sed -n 's/^Core(s) per socket:[[:space:]]*//p') cores x $(lscpu | sed -n 's/^Thread(s) per core:[[:space:]]*//p') threads/core; sockets $(lscpu | sed -n 's/^Socket(s):[[:space:]]*//p')"
+            echo "- nproc: $(nproc)"
+            echo "- RAM: $(free -h | awk '/^Mem:/{print $2}')"
+            echo "- Disk (work dir): $(df -h . | tail -1)"
+            echo "- Kernel: $(uname -r)"
+            echo "- OS: $(. /etc/os-release; echo "$PRETTY_NAME")"
+            echo "- Runner image: ${ImageOS:-?} ${ImageVersion:-?}; runner name: ${RUNNER_NAME:-?}"
+            echo "- Database: $(docker image inspect mysql:8.0 --format '{{index .RepoTags 0}} {{.Id}}' 2>/dev/null)"
+            echo "- Container limits (mem/cpu per service):"
+            for f in out/paired-benchmark/compose-*-rust.yaml; do [ -f "$f" ] && grep -E 'mem_limit|cpus:' "$f" | sort | uniq -c | sed 's/^/    /' && break; done
+            echo "- rust_services: ${{ inputs.rust_services || 'frontend,matching' }}"
+          } > out/machine-spec.md 2>&1 || true
+          cat out/machine-spec.md
           git rev-parse HEAD > out/head-sha.txt
           git status --short > out/worktree-status.txt
       - uses: actions/upload-artifact@v4
