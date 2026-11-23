@@ -1182,6 +1182,11 @@ impl<B: WorkflowBackend> Handler<B> {
                 if let Some(response) = reader.get_if_archived(domain_id, request.clone()).await? {
                     return Ok(response);
                 }
+                let typed: cadence_api::service_types::GetWorkflowExecutionHistoryRequest =
+                    serde_json::from_value(request.clone()).map_err(|error| {
+                        CadenceError::BadRequest(BadRequestError::new(error.to_string()))
+                    })?;
+                check_live_history_token(&typed)?;
             }
         }
         if operation == WorkflowOperation::ListArchivedWorkflowExecutions {
@@ -2075,20 +2080,10 @@ impl<B: WorkflowBackend> Handler<B> {
                 )));
             }
             cadence_api::validation::check_execution(request.execution.as_ref())?;
-            if !request.next_page_token.is_empty() {
-                let token = crate::handler_workflow_history::deserialize_history_token(
-                    &request.next_page_token,
-                )
-                .map_err(|_| {
-                    CadenceError::BadRequest(BadRequestError::new("Invalid NextPageToken."))
-                })?;
-                crate::handler_workflow_history::validate_history_run_id(
-                    request
-                        .execution
-                        .as_ref()
-                        .map_or("", |execution| execution.run_id.as_str()),
-                    &token,
-                )?;
+            // Go selects archived history before decoding the live token; the
+            // live-token check is deferred until the archive reader declines.
+            if !(self.archived_history_reader.is_some() && !request.skip_archival) {
+                check_live_history_token(&request)?;
             }
             if request.maximum_page_size <= 0 {
                 let domain = request.domain.clone();
@@ -2842,6 +2837,24 @@ fn isolation_group_wait_deadline(
     let tailroom_nanos = remaining.as_nanos().saturating_add(19) / 20;
     let tailroom = std::time::Duration::from_nanos(tailroom_nanos.min(u64::MAX as u128) as u64);
     deadline.checked_sub(tailroom).or(Some(now))
+}
+
+fn check_live_history_token(
+    request: &cadence_api::service_types::GetWorkflowExecutionHistoryRequest,
+) -> Result<(), CadenceError> {
+    if request.next_page_token.is_empty() {
+        return Ok(());
+    }
+    let token = crate::handler_workflow_history::deserialize_history_token(&request.next_page_token)
+        .map_err(|_| CadenceError::BadRequest(BadRequestError::new("Invalid NextPageToken.")))?;
+    crate::handler_workflow_history::validate_history_run_id(
+        request
+            .execution
+            .as_ref()
+            .map_or("", |execution| execution.run_id.as_str()),
+        &token,
+    )?;
+    Ok(())
 }
 
 fn normalize_archived_execution_times(response: &mut Value) {
@@ -3632,6 +3645,27 @@ mod tests {
             .unwrap();
         assert_eq!(response, Value::Null);
         assert_eq!(reader.0.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn archived_history_continuation_token_is_not_validated_as_live_token() {
+        let reader = Arc::new(RecordingArchivedHistoryReader::default());
+        let handler = Handler::new(CapturingBackend::default())
+            .with_domain_lookup(Arc::new(StaticDomainLookup))
+            .with_archived_history_reader(reader.clone());
+        let response = handler
+            .dispatch(
+                "GetWorkflowExecutionHistory",
+                serde_json::json!({
+                    "domain": "history-domain",
+                    "execution": {"workflowId": "workflow-1", "runId": "r"},
+                    "nextPageToken": "AQID"
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response["archived"], true);
+        assert_eq!(reader.0.lock().unwrap()[0].1["nextPageToken"], "AQID");
     }
 
     #[test]
