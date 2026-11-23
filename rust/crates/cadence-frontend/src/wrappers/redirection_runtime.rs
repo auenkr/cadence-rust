@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use cadence_api::errors::{CadenceError, InternalServiceError};
+use cadence_api::errors::CadenceError;
 use cadence_api::service_types::DescribeDomainRequest;
 use cadence_common::cluster::GroupMetadata;
 use cadence_persistence::history_reader::{
