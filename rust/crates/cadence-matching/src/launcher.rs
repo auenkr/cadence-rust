@@ -1449,9 +1449,20 @@ async fn run_with_lifecycle(
                 None
             };
             let frontend_ringpop_provider = if let Some(listener) = &frontend_tchannel_listener {
+                let mut frontend_ringpop = cfg.ringpop.clone();
+                if embedded_development {
+                    // The development config bootstraps at the default 7933-7935
+                    // ports (where Go's development.yaml services listen). When
+                    // CLI flags move the Frontend TChannel port, add its actual
+                    // address so the one-node dev ring can still join itself.
+                    let own = listener.local_addr()?.to_string();
+                    if !frontend_ringpop.bootstrap_hosts.contains(&own) {
+                        frontend_ringpop.bootstrap_hosts.push(own);
+                    }
+                }
                 Some(std::sync::Arc::new(
                     crate::matching_ringpop_provider::MatchingRingpopProvider::new(
-                        cfg.ringpop.clone(),
+                        frontend_ringpop,
                         "cadence-frontend",
                         listener.local_addr()?,
                         grpc_addr.port(),
