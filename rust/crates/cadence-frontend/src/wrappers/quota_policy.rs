@@ -63,6 +63,13 @@ fn burst(rps: f64) -> f64 {
     rps.ceil().max(1.0)
 }
 
+#[derive(Clone, Copy)]
+enum Stage {
+    TaskList,
+    Domain,
+    Global,
+}
+
 pub struct TokenBucketPolicy {
     global_rps: RpsSource,
     domain_rps: DomainRpsSource,
@@ -104,6 +111,75 @@ impl TokenBucketPolicy {
     pub fn with_task_list_rps(mut self, source: TaskListRpsSource) -> Self {
         self.task_list_rps = Some(source);
         self
+    }
+
+    /// Consume one token from a single stage (Go `Limiter.Wait` per stage);
+    /// on failure return how long until that stage has a token.
+    fn take_stage(&self, stage: Stage, info: &QuotaInfo) -> Result<(), Duration> {
+        let now = Instant::now();
+        let from_collection = |coll: &Collection, key: &str| -> Option<Result<(), Duration>> {
+            coll.reserve(key).map(|r| {
+                let (ok, retry) = (r.ok, r.retry_after);
+                r.used(ok);
+                if ok {
+                    Ok(())
+                } else {
+                    Err(retry)
+                }
+            })
+        };
+        let take = |bucket: &mut Bucket, rps: f64| -> Result<(), Duration> {
+            bucket.refill(rps, now);
+            if bucket.tokens >= 1.0 {
+                bucket.tokens -= 1.0;
+                Ok(())
+            } else if rps <= 0.0 {
+                Err(Duration::from_secs_f64(0.001))
+            } else {
+                Err(Duration::from_secs_f64(((1.0 - bucket.tokens) / rps).max(0.001)))
+            }
+        };
+        match stage {
+            Stage::TaskList => {
+                if info.task_list.is_empty() {
+                    return Ok(());
+                }
+                if let Some((_, Some(tl_coll))) = &self.collections {
+                    if let Some(r) =
+                        from_collection(tl_coll, &format!("{}/{}", info.domain, info.task_list))
+                    {
+                        return r;
+                    }
+                }
+                let Some(source) = &self.task_list_rps else {
+                    return Ok(());
+                };
+                let rps = source(&info.domain, &info.task_list);
+                let mut task_lists = self.task_lists.lock().unwrap_or_else(|e| e.into_inner());
+                let bucket = task_lists
+                    .entry((info.domain.clone(), info.task_list.clone()))
+                    .or_insert_with(|| Bucket::new(rps));
+                take(bucket, rps)
+            }
+            Stage::Domain => {
+                if let Some((domain_coll, _)) = &self.collections {
+                    if let Some(r) = from_collection(domain_coll, &info.domain) {
+                        return r;
+                    }
+                }
+                let rps = (self.domain_rps)(&info.domain);
+                let mut domains = self.domains.lock().unwrap_or_else(|e| e.into_inner());
+                let bucket = domains
+                    .entry(info.domain.clone())
+                    .or_insert_with(|| Bucket::new(rps));
+                take(bucket, rps)
+            }
+            Stage::Global => {
+                let rps = (self.global_rps)();
+                let mut global = self.global.lock().unwrap_or_else(|e| e.into_inner());
+                take(&mut global, rps)
+            }
+        }
     }
 
     /// Try to take one token from both stages; on failure return how long
@@ -217,19 +293,25 @@ impl Policy for TokenBucketPolicy {
         info: &'a QuotaInfo,
         timeout: Duration,
     ) -> super::ratelimited::WaitFuture<'a> {
+        // Go `MultiStageRateLimiter.Wait`: wait on and consume the task-list,
+        // domain and global stages in order; a token consumed by an earlier
+        // stage stays consumed if a later stage times out.
         Box::pin(async move {
             let deadline = tokio::time::Instant::now() + timeout;
-            loop {
-                match self.reserve(info) {
-                    Ok(()) => return Ok(()),
-                    Err(delay) => {
-                        if tokio::time::Instant::now() + delay > deadline {
-                            return Err(WaitFailure::Deadline);
+            for stage in [Stage::TaskList, Stage::Domain, Stage::Global] {
+                loop {
+                    match self.take_stage(stage, info) {
+                        Ok(()) => break,
+                        Err(delay) => {
+                            if tokio::time::Instant::now() + delay > deadline {
+                                return Err(WaitFailure::Deadline);
+                            }
+                            tokio::time::sleep(delay).await;
                         }
-                        tokio::time::sleep(delay).await;
                     }
                 }
             }
+            Ok(())
         })
     }
 }
@@ -308,6 +390,21 @@ mod tests {
             task_list: String::new(),
             caller_type: String::new(),
         }
+    }
+
+    #[tokio::test]
+    async fn wait_consumes_stages_in_order_and_keeps_earlier_tokens_on_timeout() {
+        let policy = TokenBucketPolicy::new(Arc::new(|| 1.0), Arc::new(|_| 2.0));
+        // Drain the single global token through another domain.
+        assert!(policy.allow(&info("other")));
+        let result = policy
+            .wait(&info("a"), Duration::from_millis(10))
+            .await;
+        assert!(matches!(result, Err(WaitFailure::Deadline)));
+        // The domain stage consumed one of its two tokens before the global
+        // stage timed out (Go's documented limitation).
+        assert!(policy.take_stage(Stage::Domain, &info("a")).is_ok());
+        assert!(policy.take_stage(Stage::Domain, &info("a")).is_err());
     }
 
     #[test]
