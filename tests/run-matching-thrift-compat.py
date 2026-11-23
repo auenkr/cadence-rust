@@ -116,10 +116,10 @@ def assert_embedded_start_succeeds():
     test_command = command.copy()
     config_index = test_command.index('--config')
     del test_command[config_index:config_index + 2]
-    # cadence-server now hosts every service by default (History blocks on Ringpop joins
-    # without a History ring peer); the previous
-    # matching-only binary implied this restriction.
-    test_command += ['--services', 'frontend,matching']
+    # cadence-server hosts every service by default and runs the production
+    # Frontend (0c90d7c7e), which needs a real History peer; the old in-memory
+    # Frontend/History shim is gone. Restrict the no-config probe to Matching.
+    test_command += ['--services', 'matching']
     embedded_data = artifacts / 'embedded-data'
     test_command[test_command.index('--data-dir') + 1] = str(embedded_data)
     log_path = artifacts / 'embedded-startup.log'
@@ -131,7 +131,7 @@ def assert_embedded_start_succeeds():
                 if process.poll() is not None:
                     raise RuntimeError(f'no-config embedded Matching exited; see {log_path}')
                 try:
-                    for port in (tchannel, matching_tchannel):
+                    for port in (matching_tchannel,):
                         with socket.create_connection(('127.0.0.1', port), timeout=0.2):
                             pass
                     break
@@ -139,19 +139,8 @@ def assert_embedded_start_succeeds():
                     time.sleep(0.1)
             else:
                 raise RuntimeError(f'no-config embedded Matching did not start; see {log_path}')
-            embedded_env = {
-                **os.environ,
-                'CADENCE_MATCHING_TCHANNEL': f'127.0.0.1:{matching_tchannel}',
-                'CADENCE_FRONTEND_TCHANNEL': f'127.0.0.1:{tchannel}',
-                'CADENCE_MATCHING_SQLITE_DB': str(embedded_data / 'matching.db'),
-                'CADENCE_MATCHING_TCHANNEL_ONLY': '1',
-                'CADENCE_MATCHING_TLS_HTTP': '',
-            }
-            subprocess.run([
-                'go', 'test', '-overlay', str(overlay.resolve()),
-                './service/matching/wrappers/thrift',
-                '-run', '^TestRustMatchingNativeThrift$', '-count=1', '-v',
-            ], cwd=root / 'go', env=embedded_env, check=True, timeout=240)
+            # The Go thrift workflow test needs a Frontend+History; it runs
+            # against the explicit-config cluster below.
         finally:
             process.terminate()
             try:
