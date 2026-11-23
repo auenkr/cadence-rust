@@ -788,6 +788,60 @@ impl std::fmt::Debug for HandlerApi {
     }
 }
 
+impl HandlerApi {
+    fn call_with<'a>(
+        &'a self,
+        operation: &'a str,
+        request: serde_json::Value,
+        ctx: cadence_service_core::workflow_api::CallerContext,
+        inner: bool,
+    ) -> cadence_service_core::workflow_api::ApiFuture<'a> {
+        Box::pin(async move {
+            let header = |name: &str| ctx.headers.get(name).cloned().unwrap_or_default();
+            let (isolation_group, partition_config) =
+                crate::production_hooks::context_from_headers(&ctx.headers)?;
+            let caller = crate::handler_workflow::CallerMetadata {
+                isolation_group,
+                partition_config,
+                client_impl: header("cadence-client-implementation"),
+                feature_version: header("cadence-client-feature-version"),
+                deadline: ctx.deadline,
+                original_headers: ctx.headers.clone(),
+                transport_caller: ctx
+                    .headers
+                    .get("rpc-caller")
+                    .or_else(|| ctx.headers.get("cn"))
+                    .cloned()
+                    .unwrap_or_default(),
+                transport: ctx.transport.to_owned(),
+                ..Default::default()
+            };
+            let inbound = ctx.headers.clone();
+            cadence_persistence::caller_type::scope_from_headers(
+                &ctx.headers,
+                cadence_service_core::header_forwarding::INBOUND_DEADLINE.scope(
+                    ctx.deadline,
+                    cadence_service_core::header_forwarding::INBOUND_HEADERS.scope(
+                        inbound,
+                        async move {
+                            if inner {
+                                self.handler
+                                    .dispatch_inner_with_metadata(operation, request, &caller)
+                                    .await
+                            } else {
+                                self.handler
+                                    .dispatch_with_metadata(operation, request, &caller)
+                                    .await
+                            }
+                        },
+                    ),
+                ),
+            )
+            .await
+        })
+    }
+}
+
 impl cadence_service_core::workflow_api::WorkflowApi for HandlerApi {
     fn admin_delete_visibility<'a>(
         &'a self,
@@ -856,40 +910,16 @@ impl cadence_service_core::workflow_api::WorkflowApi for HandlerApi {
         request: serde_json::Value,
         ctx: cadence_service_core::workflow_api::CallerContext,
     ) -> cadence_service_core::workflow_api::ApiFuture<'a> {
-        Box::pin(async move {
-            let header = |name: &str| ctx.headers.get(name).cloned().unwrap_or_default();
-            let (isolation_group, partition_config) =
-                crate::production_hooks::context_from_headers(&ctx.headers)?;
-            let caller = crate::handler_workflow::CallerMetadata {
-                isolation_group,
-                partition_config,
-                client_impl: header("cadence-client-implementation"),
-                feature_version: header("cadence-client-feature-version"),
-                deadline: ctx.deadline,
-                original_headers: ctx.headers.clone(),
-                transport_caller: ctx
-                    .headers
-                    .get("rpc-caller")
-                    .or_else(|| ctx.headers.get("cn"))
-                    .cloned()
-                    .unwrap_or_default(),
-                transport: ctx.transport.to_owned(),
-                ..Default::default()
-            };
-            let inbound = ctx.headers.clone();
-            cadence_persistence::caller_type::scope_from_headers(
-                &ctx.headers,
-                cadence_service_core::header_forwarding::INBOUND_DEADLINE.scope(
-                    ctx.deadline,
-                    cadence_service_core::header_forwarding::INBOUND_HEADERS.scope(
-                        inbound,
-                        self.handler
-                            .dispatch_with_metadata(operation, request, &caller),
-                    ),
-                ),
-            )
-            .await
-        })
+        self.call_with(operation, request, ctx, false)
+    }
+
+    fn call_inner<'a>(
+        &'a self,
+        operation: &'a str,
+        request: serde_json::Value,
+        ctx: cadence_service_core::workflow_api::CallerContext,
+    ) -> cadence_service_core::workflow_api::ApiFuture<'a> {
+        self.call_with(operation, request, ctx, true)
     }
 
     fn redirect<'a>(

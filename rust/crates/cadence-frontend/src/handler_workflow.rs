@@ -902,6 +902,23 @@ impl<B: WorkflowBackend> Handler<B> {
         self.health_status.store(status as u8, Ordering::Release);
     }
 
+    /// Go's inner `WorkflowHandler` entry for nested calls: no access control,
+    /// cluster redirection, rate limiting, version check or metering.
+    pub async fn dispatch_inner_with_metadata<'a>(
+        &'a self,
+        operation: &str,
+        request: Value,
+        caller: &'a CallerMetadata,
+    ) -> Result<Value, CadenceError> {
+        let operation = WorkflowOperation::from_name(operation).ok_or_else(|| {
+            CadenceError::BadRequest(BadRequestError::new(format!(
+                "unknown workflow operation: {operation}"
+            )))
+        })?;
+        self.dispatch_operation_with(operation, request, caller, None, true)
+            .await
+    }
+
     pub async fn dispatch(&self, operation: &str, request: Value) -> Result<Value, CadenceError> {
         self.dispatch_with_metadata(operation, request, &CallerMetadata::default())
             .await
@@ -1069,8 +1086,22 @@ impl<B: WorkflowBackend> Handler<B> {
         caller: &CallerMetadata,
         target_cluster: Option<String>,
     ) -> Result<Value, CadenceError> {
-        validate_ratelimit_wrapper_request(operation, &request)?;
-        if let Some(rate_limit) = &self.rate_limit {
+        self.dispatch_operation_with(operation, request, caller, target_cluster, false)
+            .await
+    }
+
+    async fn dispatch_operation_with(
+        &self,
+        operation: WorkflowOperation,
+        request: Value,
+        caller: &CallerMetadata,
+        target_cluster: Option<String>,
+        inner: bool,
+    ) -> Result<Value, CadenceError> {
+        if !inner {
+            validate_ratelimit_wrapper_request(operation, &request)?;
+        }
+        if let Some(rate_limit) = self.rate_limit.as_ref().filter(|_| !inner) {
             rate_limit
                 .allow_with_headers(
                     operation.name(),
@@ -1080,7 +1111,7 @@ impl<B: WorkflowBackend> Handler<B> {
                 )
                 .await?;
         }
-        if let Some(version_check) = &self.version_check {
+        if let Some(version_check) = self.version_check.as_ref().filter(|_| !inner) {
             crate::wrappers::versioncheck::check(
                 operation.name(),
                 (version_check.enabled)(),

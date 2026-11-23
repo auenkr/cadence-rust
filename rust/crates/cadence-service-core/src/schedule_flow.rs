@@ -376,7 +376,7 @@ async fn api_call<Req: serde::Serialize, Resp: serde::de::DeserializeOwned>(
 ) -> Result<Resp, CadenceError> {
     let value = serde_json::to_value(request)
         .map_err(|e| CadenceError::Internal(InternalServiceError::new(e.to_string())))?;
-    let out = api.call(operation, value, ctx.clone()).await?;
+    let out = api.call_inner(operation, value, ctx.clone()).await?;
     serde_json::from_value(out)
         .map_err(|e| CadenceError::Internal(InternalServiceError::new(e.to_string())))
 }
@@ -618,7 +618,21 @@ mod caller_context_tests {
             true
         }
 
+        // Nested calls must never re-enter the public (outer) wrappers.
         fn call<'a>(
+            &'a self,
+            operation: &'a str,
+            _request: serde_json::Value,
+            ctx: CallerContext,
+        ) -> ApiFuture<'a> {
+            self.0
+                .lock()
+                .unwrap()
+                .push((format!("OUTER:{operation}"), ctx));
+            Box::pin(async { Ok(serde_json::json!({})) })
+        }
+
+        fn call_inner<'a>(
             &'a self,
             operation: &'a str,
             request: serde_json::Value,

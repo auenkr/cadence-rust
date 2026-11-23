@@ -269,7 +269,7 @@ async fn handle_delete_domain(
         let value =
             serde_json::to_value(&list_request).map_err(|e| AppError::internal(e.to_string()))?;
         let out = api
-            .call("ListWorkflowExecutions", value, ctx.clone())
+            .call_inner("ListWorkflowExecutions", value, ctx.clone())
             .await
             .map_err(schedule_api_error)?;
         let response: cadence_api::service_types::ListWorkflowExecutionsResponse =
