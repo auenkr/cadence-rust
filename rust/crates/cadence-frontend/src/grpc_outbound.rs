@@ -54,6 +54,19 @@ pub fn grpc_address(tchannel_addr: &str, grpc_port: u16) -> String {
     }
 }
 
+/// gRPC target for a peer: the member's own `grpc` label address when the ring
+/// resolved one, else the configured port applied to the TChannel host.
+pub fn resolve_grpc_target(
+    tchannel_addr: &str,
+    member_grpc: Option<&str>,
+    fallback_port: u16,
+) -> String {
+    match member_grpc {
+        Some(a) if !a.is_empty() => a.to_owned(),
+        _ => grpc_address(tchannel_addr, fallback_port),
+    }
+}
+
 /// True for the methods this module maps to gRPC.
 pub fn supported(service: &str, method: &str) -> bool {
     match service {
@@ -208,9 +221,11 @@ impl GrpcOutbound {
 
     /// Returns `None` when `method` has no gRPC mapping (caller uses TChannel).
     /// `addr` is the TChannel `host:port` of the owner.
+    #[allow(clippy::too_many_arguments)]
     pub async fn try_call(
         &self,
         addr: &str,
+        member_grpc: Option<&str>,
         service: &str,
         method: &str,
         envelope: &Struct,
@@ -226,14 +241,14 @@ impl GrpcOutbound {
         let started = std::time::Instant::now();
         let (target, result) = match service {
             "cadence-history" => {
-                let target = grpc_address(addr, self.history_port);
+                let target = resolve_grpc_target(addr, member_grpc, self.history_port);
                 let r = self
                     .history(&target, method, envelope, timeout, &forwarded)
                     .await;
                 (target, r)
             }
             _ => {
-                let target = grpc_address(addr, self.matching_port);
+                let target = resolve_grpc_target(addr, member_grpc, self.matching_port);
                 let r = self
                     .matching(&target, method, envelope, timeout, &forwarded)
                     .await;
@@ -1181,6 +1196,28 @@ mod tests {
     }
 
     #[test]
+    fn per_member_grpc_ports_and_redirect() {
+        // two members on one host with different gRPC labels
+        assert_eq!(
+            resolve_grpc_target("127.0.0.1:7934", Some("127.0.0.1:7834"), 1),
+            "127.0.0.1:7834"
+        );
+        assert_eq!(
+            resolve_grpc_target("127.0.0.1:8934", Some("127.0.0.1:8834"), 1),
+            "127.0.0.1:8834"
+        );
+        // redirect owner has no label: fallback port
+        assert_eq!(
+            resolve_grpc_target("127.0.0.1:8934", None, 7834),
+            "127.0.0.1:7834"
+        );
+        assert_eq!(
+            resolve_grpc_target("127.0.0.1:8934", Some(""), 7834),
+            "127.0.0.1:7834"
+        );
+    }
+
+    #[test]
     fn grpc_address_swaps_port() {
         assert_eq!(grpc_address("10.0.0.1:7934", 7834), "10.0.0.1:7834");
         assert_eq!(grpc_address("host", 7834), "host:7834");
@@ -1611,6 +1648,7 @@ mod tests {
         let r = g
             .try_call(
                 "127.0.0.1:1",
+                None,
                 "cadence-history",
                 "SignalWorkflowExecution",
                 &Struct::default(),
