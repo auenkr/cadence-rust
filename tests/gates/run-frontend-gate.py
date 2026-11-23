@@ -575,6 +575,10 @@ try:
     record(f'outbound-transport-{args.rust_outbound}-configured',
            all(f'system.enableGRPCOutbound:\n  - value: {_want}' in t or (_want == 'true' and 'enableGRPCOutbound:\n  - value: false' not in t) for t in _cfgs.values())
            and (args.rust_outbound != 'tchannel' or all('system.enableGRPCOutbound:\n  - value: false' in t for t in _cfgs.values())))
+    _fe_log = (work / 'rust-frontend.log').read_text(errors='replace')
+    _label = 'Tchannel' if args.rust_outbound == 'tchannel' else 'Grpc'
+    record(f'rust-frontend-outbound-runtime-{args.rust_outbound}',
+           f'outbound transport to History/Matching: {_label} ' in _fe_log)
     record_services_alive('before-sdk')
     marks = work / 'marks'; marks.mkdir(exist_ok=True)
     env = {**os.environ, **({'FE_CHURN': '1'} if args.two_history else {}), 'FE_TCHANNEL': f'127.0.0.1:{ports["FRONTEND_PORT"]}', 'FE_DOMAIN': dom_t, 'FE_MARK_DIR': str(marks), 'FE_CLI': str(args.go_cli), 'FE_GRPC': f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}'}
