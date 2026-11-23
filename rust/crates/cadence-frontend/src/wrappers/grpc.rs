@@ -27,7 +27,26 @@ pub const API_GROUPS: &[ApiGroup] = &[
 /// gRPC transport errors are converted from the same internal Cadence error
 /// values used by the Thrift adapter; never turn a typed API error into text.
 pub fn error_message(error: &cadence_api::errors::CadenceError) -> String {
-    error.to_string()
+    // Go's proto mapper sends a plain `error` as `status.New(Unknown, err.Error())`:
+    // the bare message, without the Rust `unknown: ` Display prefix.
+    match error {
+        cadence_api::errors::CadenceError::Unknown(message) => message.clone(),
+        other => other.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod unknown_message_tests {
+    use super::*;
+    use cadence_api::errors::CadenceError;
+
+    #[test]
+    fn unknown_error_message_has_no_display_prefix() {
+        let msg = "unknown cluster name: b with given cluster client map: map[a:0x0]";
+        let status = to_status(&CadenceError::Unknown(msg.to_owned()));
+        assert_eq!(status.code(), tonic::Code::Unknown);
+        assert_eq!(status.message(), msg);
+    }
 }
 
 /// Status code selected by Go's `common/types/mapper/proto.FromError` for the
