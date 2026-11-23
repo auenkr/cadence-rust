@@ -1,6 +1,6 @@
 # history-auditp1 (2026-11-11)
 
-Branch `history-auditp1` (from master e50090050). Source: memory/history-parity-audit-20261111.md. Nothing was compiled locally; all validation is on GitHub Actions.
+Branch `history-auditp1` (from master e50090050). Source: memory/archive/history-parity-audit-20261111.md. Nothing was compiled locally; all validation is on GitHub Actions.
 
 ## Items
 | # | Change | Notes |

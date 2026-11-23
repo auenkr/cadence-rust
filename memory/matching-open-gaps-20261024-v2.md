@@ -1,6 +1,6 @@
 # Matching open parity gaps v2 (2026-10-24)
 
-Supersedes `memory/matching-open-gaps-20261024.md` (base `e9b8e9a0e`).
+Supersedes `memory/archive/matching-open-gaps-20261024.md` (base `e9b8e9a0e`).
 
 **Base:** `origin/master` @ `e7285da4f` ("Record merge11 CI runs"), plus the 15 unmerged `origin/matching-*-20261024` branches listed in section 2.
 **Method:** read-only. No cargo, no docker, no gate run. Every status below comes from `git grep`/`git show` on the refs named, and from the evidence files on those refs. Test names were grepped, not executed. "FIXED" means the code and a named test exist on that ref, not that the test passes in CI or in a gate.

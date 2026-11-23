@@ -136,8 +136,8 @@ Add one Markdown file per branch at `memory/evidence/<branch>-<yyyymmdd>.md`. Re
 | [history-archgaps-20261112.md](history-archgaps-20261112.md) | Branch `history-archgaps` closes the gaps listed in `history-s3gs-20261112.md`. |
 | [history-archstream-20261112.md](history-archstream-20261112.md) | Closes the remaining gaps of `history-archgaps-20261112.md` (s3store / gcloud history archivers). |
 | [history-auditgaps-20261114.md](history-auditgaps-20261114.md) | Static re-check of every open gap in `history-parity-audit-20261114.md` against master 803fcab58 (no local cargo/go/docker). |
-| [history-auditp0-20261111.md](history-auditp0-20261111.md) | Source: memory/history-parity-audit-20261111.md (P0 list). |
-| [history-auditp1-20261111.md](history-auditp1-20261111.md) | Branch `history-auditp1` (from master e50090050). Source: memory/history-parity-audit-20261111.md. Nothing was compiled locally; all vali… |
+| [history-auditp0-20261111.md](history-auditp0-20261111.md) | Source: memory/archive/history-parity-audit-20261111.md (P0 list). |
+| [history-auditp1-20261111.md](history-auditp1-20261111.md) | Branch `history-auditp1` (from master e50090050). Source: memory/archive/history-parity-audit-20261111.md. Nothing was compiled locally; all vali… |
 | [history-batch-gap-20261115.md](history-batch-gap-20261115.md) | Branch: `history-batch-gap` |
 | [history-casflake-20261113.md](history-casflake-20261113.md) | - Evidence limits: attempt 2 overwrote the artifact `history-mixed-gate-cassandra-tchannel`; only the 100-line gate.log tail of attempt 1… |
 | [history-cassandra-20261111.md](history-cassandra-20261111.md) | - `rust/crates/cadence-persistence/src/history_shard_cassandra.rs`: `CassandraShardStore` (impl of `history_sql::ShardStore`), |
@@ -587,7 +587,7 @@ Add one Markdown file per branch at `memory/evidence/<branch>-<yyyymmdd>.md`. Re
 | [matching-native-writer-20261028.md](matching-native-writer-20261028.md) | New `rust/crates/cadence-matching/src/matching_writer_native.rs`: `NativeTaskWriter`, a port of `matching_writer.rs` |
 | [matching-nil-query-domain-source-review.md](matching-nil-query-domain-source-review.md) | Source-derived only; no code/CI run. Paths under go/. Supersedes the first version of this note. |
 | [matching-nil-tasklist-result.md](matching-nil-tasklist-result.md) | Go: handler.go QueryWorkflow uses nil-safe getters; engine.go QueryWorkflow -> tasklist.NewIdentifier(domain, "", Decision). newTaskListN… |
-| [matching-open-gaps-20261024-v2.md](matching-open-gaps-20261024-v2.md) | Supersedes `memory/matching-open-gaps-20261024.md` (base `e9b8e9a0e`). |
+| [matching-open-gaps-20261024-v2.md](matching-open-gaps-20261024-v2.md) | Supersedes `memory/archive/matching-open-gaps-20261024.md` (base `e9b8e9a0e`). |
 | [matching-openfeature-runtime-next-20261024.md](matching-openfeature-runtime-next-20261024.md) | This remains required even after provider polling and Unleash evaluation are complete. Current launcher registers the provider but Matchi… |
 | [matching-orchestration-checkpoint-20261029-2203.md](matching-orchestration-checkpoint-20261029-2203.md) | Matching remains incomplete. No candidate source accepted onto master. No |
 | [matching-orchestrator-checkpoint-20261030.md](matching-orchestrator-checkpoint-20261030.md) | Matching remains incomplete. Use one Codex gpt-6-luna worker, normal service tier; high effort for hard tasks, medium/low for simple task… |

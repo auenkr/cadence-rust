@@ -1,6 +1,6 @@
 # P1 UNCLEAR items: resolution (2026-10-24)
 
-Base: `origin/master` @ `e9b8e9a0e`. Source of items: `memory/matching-open-gaps-20261024.md` (on `origin/matching-open-gaps-20261024`).
+Base: `origin/master` @ `e9b8e9a0e`. Source of items: `memory/archive/matching-open-gaps-20261024.md` (on `origin/matching-open-gaps-20261024`).
 Method: read the Go and Rust sources named by each item at `e9b8e9a0e`. Cargo was not run locally. The one code change is verified only by GitHub Actions (run URL below).
 
 | item | verdict | evidence | change | run URL |

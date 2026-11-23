@@ -5,7 +5,7 @@ Branch `frontend-soakfix` (from master 7d0e189c4). Not merged.
 ## Cause of the "query returns init" failures (fixed)
 - Go `WorkflowHandler.QueryWorkflow` (go/service/frontend/api/handler.go:2643) only validates and forwards to History. The Rust Frontend validation (handler_workflow.rs) matches; no Frontend divergence found.
 - Rust History `engine/query_workflow.rs` was read against Go `QueryWorkflow`; no divergence found. It is not a line-by-line audit of every helper.
-- The failures came from the History bug in memory/history-soak-20261113.md: a timer task scheduled a decision while one was pending, the task retried forever, the `wake` signal was never processed, and the query was answered from state before the signal ("init"). Fix: commit 1f59dcd34 (from branch history-soakfix, guard `schedule_decision` with `has_pending_decision`, Go ScheduleDecision), cherry-picked here as a143c88bc. I did not write that fix; it needs its own review/merge from history-soakfix.
+- The failures came from the History bug in memory/archive/history-soak-20261113.md: a timer task scheduled a decision while one was pending, the task retried forever, the `wake` signal was never processed, and the query was answered from state before the signal ("init"). Fix: commit 1f59dcd34 (from branch history-soakfix, guard `schedule_decision` with `has_pending_decision`, Go ScheduleDecision), cherry-picked here as a143c88bc. I did not write that fix; it needs its own review/merge from history-soakfix.
 - Evidence: soak 3000 started / 3000 completed / 0 failed, no panics. Before the fix, the 2026-11-04 pilot had 17/300 failed (memory/evidence/fe-soak-20261104.md).
 
 ## Runs (head SHAs on branch frontend-soakfix)

@@ -2,7 +2,7 @@
 
 Branch: `master-validation-20261118`. Validated head: `d1dba9370688f19bccd137d7cfbffe8e9c72d63d` (`origin/master`; includes glibc arena cap/malloc_trim, jemalloc Alpine image, Matching/FE trace removal, History queue limiter burst parity 242ceff31, shared `cadence_common::dynamic_rate_limiter` for replication/archiver/history handler/FE global ratelimit).
 
-Same 28 gate configurations as `master-validation-20261115b.md`, plus one extra History S3+GCS archival gate (archiver limiter changed) and the default FE/MT soak. All 30 runs were dispatched in parallel, CI only. No local Cargo, Go or Docker was run. Pass rule: the run concludes `success` and its log has `GATE SUMMARY failed: []` (soak: `RUST OVERALL: PASS`). Rust binary SHA256 values were not pulled from the logs in this batch; each run's log and artifacts have them.
+Same 28 gate configurations as `archive/master-validation-20261115b.md`, plus one extra History S3+GCS archival gate (archiver limiter changed) and the default FE/MT soak. All 30 runs were dispatched in parallel, CI only. No local Cargo, Go or Docker was run. Pass rule: the run concludes `success` and its log has `GATE SUMMARY failed: []` (soak: `RUST OVERALL: PASS`). Rust binary SHA256 values were not pulled from the logs in this batch; each run's log and artifacts have them.
 
 | Gate | Run URL | Head SHA | Conclusion / notes |
 |---|---|---|---|

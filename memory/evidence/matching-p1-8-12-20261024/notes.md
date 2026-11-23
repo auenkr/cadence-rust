@@ -1,6 +1,6 @@
 # P1-8 and P1-12 notes (2026-10-24)
 
-Base: `origin/master` @ `e9b8e9a0e`. Branch `matching-p1-8-12-20261024`. Source of items: `memory/matching-open-gaps-20261024.md` (on `origin/matching-open-gaps-20261024`). P1-4 and P1-6 are owned by another worker and were not touched.
+Base: `origin/master` @ `e9b8e9a0e`. Branch `matching-p1-8-12-20261024`. Source of items: `memory/archive/matching-open-gaps-20261024.md` (on `origin/matching-open-gaps-20261024`). P1-4 and P1-6 are owned by another worker and were not touched.
 
 Verification: no local cargo. The only check is GitHub Actions `rust-ci.yml` on this branch (run URL recorded in the final report, not here).
 
