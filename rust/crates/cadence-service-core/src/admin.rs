@@ -1563,10 +1563,7 @@ pub fn domain_replication_messages_response(
     state: &AppState,
     req: cadence_api::admin::GetDomainReplicationMessagesRequest,
 ) -> Result<cadence_api::admin::GetDomainReplicationMessagesResponse, String> {
-    use cadence_thrift::{
-        protocol::Reader,
-        value::{read_struct, FromThrift},
-    };
+    use cadence_thrift::value::FromThrift;
 
     let Some(persistence) = state.domain_metadata_persistence.as_ref() else {
         return Err("domain replication queue not enabled for cluster".into());
@@ -1857,10 +1854,7 @@ pub fn merge_domain_dlq_messages(
     state: &AppState,
     req: cadence_api::admin::MergeDLQMessagesRequest,
 ) -> Result<cadence_api::admin::MergeDLQMessagesResponse, String> {
-    use cadence_thrift::{
-        protocol::Reader,
-        value::{read_struct, FromThrift},
-    };
+    use cadence_thrift::value::FromThrift;
 
     let persistence = state.domain_metadata_persistence.as_ref().ok_or_else(|| {
         "domain replication DLQ is unavailable for this persistence backend".to_string()
