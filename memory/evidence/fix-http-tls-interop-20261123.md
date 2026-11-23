@@ -68,3 +68,8 @@ the default forwarding rule re-sent on outbound History calls. yarpc HTTP inboun
 Fix 2b5818c93: `http_application_headers` keeps only `rpc-header-*`, stripped, with a unit test.
 Runs on head 2b5818c93: matching-http-tls-interop 45178721745 success; matching-mixed-gate 45178755457 success;
 rust-ci cadence-matching 45178729807 (see final entry below).
+
+## Final (head df7de6518, diagnostics removed from harness) — all green
+- matching-http-tls-interop: https://github.com/auenkr/cadence-rust/actions/runs/45180027971 success
+- matching-mixed-gate: https://github.com/auenkr/cadence-rust/actions/runs/45180034589 success
+- rust-ci package=cadence-matching: https://github.com/auenkr/cadence-rust/actions/runs/45180040194 success
