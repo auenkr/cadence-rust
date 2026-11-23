@@ -1312,7 +1312,10 @@ mod tests {
         let Value::Struct(decision) = started.get(80).unwrap() else {
             panic!("transient decision missing");
         };
-        let event = decision.opt_struct::<st::HistoryEvent>(10).unwrap().unwrap();
+        let event = decision
+            .opt_struct::<st::HistoryEvent>(10)
+            .unwrap()
+            .unwrap();
         assert_eq!(event.timestamp, Some(123456789));
         let dispatch = reply
             .opt_map_str::<tk::ActivityLocalDispatchInfo>(20)
