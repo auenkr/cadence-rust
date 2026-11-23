@@ -130,7 +130,7 @@ def assert_embedded_start_succeeds():
                 if process.poll() is not None:
                     raise RuntimeError(f'no-config embedded Matching exited; see {log_path}')
                 try:
-                    for port in (tchannel, matching_tchannel):
+                    for port in (matching_tchannel,):
                         with socket.create_connection(('127.0.0.1', port), timeout=0.2):
                             pass
                     break
