@@ -172,6 +172,23 @@ impl GrpcOutbound {
             tonic::metadata::MetadataValue::from_static("proto"),
         );
         for (k, v) in forwarded {
+            // Transport routing headers belong to this hop, never the inbound one
+            // (the inbound `rpc-service` is cadence-frontend).
+            let lk = k.to_ascii_lowercase();
+            if matches!(
+                lk.as_str(),
+                "rpc-service"
+                    | "rpc-caller"
+                    | "rpc-encoding"
+                    | "rpc-procedure"
+                    | "rpc-ttl"
+                    | "rpc-shard-key"
+                    | "rpc-routing-key"
+                    | "rpc-routing-delegate"
+                    | "rpc-caller-procedure"
+            ) {
+                continue;
+            }
             if let (Ok(key), Ok(val)) = (
                 tonic::metadata::MetadataKey::from_bytes(k.to_ascii_lowercase().as_bytes()),
                 tonic::metadata::MetadataValue::try_from(v.as_str()),
