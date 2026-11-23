@@ -354,6 +354,15 @@ pub fn domain_replication(
     state: &AppState,
     req: &RegisterDomainRequest,
 ) -> Result<cadence_api::types::DomainReplicationConfiguration, BadRequestError> {
+    let replication = prepare_domain_replication(state, req)?;
+    validate_domain_registration_replication(state, req.is_global_domain, &replication)?;
+    Ok(replication)
+}
+
+fn prepare_domain_replication(
+    state: &AppState,
+    req: &RegisterDomainRequest,
+) -> Result<cadence_api::types::DomainReplicationConfiguration, BadRequestError> {
     let active_cluster_name = if req.active_cluster_name.is_empty() {
         state.current_cluster_name.clone()
     } else {
@@ -371,15 +380,22 @@ pub fn domain_replication(
         req.is_global_domain,
         req.active_clusters.as_ref(),
     )?;
-    let replication = cadence_api::types::DomainReplicationConfiguration {
+    Ok(cadence_api::types::DomainReplicationConfiguration {
         active_cluster_name,
         clusters,
         active_clusters,
-    };
-    if req.is_global_domain {
+    })
+}
+
+fn validate_domain_registration_replication(
+    state: &AppState,
+    is_global: bool,
+    replication: &cadence_api::types::DomainReplicationConfiguration,
+) -> Result<(), BadRequestError> {
+    if is_global {
         cadence_persistence::domain_replication::validate_global(
             &state.cluster_metadata,
-            &replication,
+            replication,
         )?;
     } else {
         if replication.active_cluster_name != state.current_cluster_name {
@@ -391,7 +407,7 @@ pub fn domain_replication(
             return Err(BadRequestError::new("Invalid local domain clusters"));
         }
     }
-    Ok(replication)
+    Ok(())
 }
 
 fn now_millis() -> i64 {
@@ -685,13 +701,6 @@ async fn register_domain(
     if req.name.len() > state.limits.ids.domain_max {
         return bad_request(BadRequestError::new("Domain length exceeds limit."));
     }
-    if req.workflow_execution_retention_period_in_days
-        < state.domain_policy(&req.name).min_retention_days
-    {
-        return bad_request(BadRequestError::new(
-            "A valid retention period is not set on request.",
-        ));
-    }
     let info = cadence_api::types::DomainInfo {
         name: req.name.clone(),
         status: Some(DomainStatus::Registered),
@@ -719,10 +728,22 @@ async fn register_domain(
         visibility_archival_uri: req.visibility_archival_uri.clone(),
         ..Default::default()
     };
-    let replication = match domain_replication(&state, &req) {
+    let replication = match prepare_domain_replication(&state, &req) {
         Ok(v) => v,
         Err(e) => return bad_request(e),
     };
+    if req.workflow_execution_retention_period_in_days
+        < state.domain_policy(&req.name).min_retention_days
+    {
+        return bad_request(BadRequestError::new(
+            "A valid retention period is not set on request.",
+        ));
+    }
+    if let Err(error) =
+        validate_domain_registration_replication(&state, req.is_global_domain, &replication)
+    {
+        return bad_request(error);
+    }
     let failover_version = if req.is_global_domain {
         match state.cluster_metadata.next_failover_version(
             &replication.active_cluster_name,
@@ -766,6 +787,35 @@ async fn register_domain(
             StatusCode::INTERNAL_SERVER_ERROR,
             error.to_string(),
         ),
+    }
+}
+
+#[cfg(test)]
+mod domain_registration_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn register_domain_prepares_active_clusters_before_validating_retention() {
+        let state = Arc::new(AppState::default());
+        let request: RegisterDomainRequest = serde_json::from_value(serde_json::json!({
+            "name": "domain",
+            "isGlobalDomain": true,
+            "workflowExecutionRetentionPeriodInDays": -1,
+            "activeClusters": {
+                "activeClustersByClusterAttribute": {
+                    "region": {
+                        "clusterAttributes": {"west": {"activeClusterName": "unknown"}}
+                    }
+                }
+            }
+        }))
+        .unwrap();
+        let response = register_domain(State(state), Json(request)).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        assert!(String::from_utf8_lossy(&body).contains("Cluster unknown not found."));
     }
 }
 
