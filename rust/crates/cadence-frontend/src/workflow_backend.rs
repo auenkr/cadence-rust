@@ -1810,6 +1810,18 @@ pub fn build_workflow_api(
     .with_history_page_size_policy(std::sync::Arc::new(DynamicHistoryPageSize(
         dynamic_overlay.clone(),
     )))
+    .with_throttled_log(Box::new({
+        let overlay = dynamic_overlay.clone();
+        move || {
+            overlay.lock().map_or(20, |config| {
+                cadence_persistence::dynamic_config::integer(
+                    config.property_values("frontend.throttledLogRPS"),
+                    None,
+                    20,
+                )
+            }) as f64
+        }
+    }))
     .with_raw_history_policy(std::sync::Arc::new(DynamicRawHistory(
         dynamic_overlay.clone(),
     )))
