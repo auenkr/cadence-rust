@@ -43,3 +43,20 @@ but the Go test then needs a real History).
 - 45157883598 (67ac2d8ca): bootstrap = Matching only (others join through it). Ring forms (Matching+Frontend members). Fail at `TestRustMatchingNativeThrift`: `cadence-history unavailable: TChannel error 6: Unknown Cadence procedure`.
 - Finding: `cadence-server` (cadence-matching launcher.rs ~1300-1345) does NOT link the real `cadence-history` crate. Its "history" TChannel/gRPC listeners are the old Matching-side shim (serve_history_listener), which lacks StartWorkflowExecution etc. The real History is the separate `cadence-history` binary and has no sqlite store (only Cassandra/MySQL/Postgres), while this harness backs Matching with sqlite. So a real Frontend+History+Matching run needs a SQL service container (see history-mixed-gate.yml) plus Matching on the same SQL store: a much larger redesign than a harness tweak.
 - Options for orchestrator: (a) run the Go native-thrift test against MySQL/Postgres with cadence-server + cadence-history (reuse history-mixed-gate setup); (b) rewrite TestRustMatchingNativeThrift to skip Frontend (seed domain via sqlite, synthetic workflow/run IDs) but Matching Poll* still needs History RecordDecision/ActivityTaskStarted, so a Go History gRPC stub would be needed; (c) revert to a Rust shim Frontend/History for tests only (contradicts parity).
+
+## Real-stack HTTP poll blocker (2026-11-23)
+
+Runs 45168029903, 45169609880, 45171016613, 45172774255, 45174264742, 45176054877 (head ed85a32b0):
+on the SQL real stack tchannel NativeThrift and TestRustMatchingTLS pass; the three HTTP-mode
+NativeThrift subtests fail (query poll returns empty at ~29s, query never delivered).
+Diagnostic matrix: an HTTP poll never receives a query even when the query is sent over tchannel;
+a tchannel poll with an HTTP query passes the poll side (harness error "Unknown TChannel service" only).
+
+Suspected root cause (inferred from source, not yet confirmed by a run): Rust HTTP handler captures
+ALL inbound HTTP headers into INBOUND_HEADERS (rust/crates/cadence-matching/src/thrift_matching.rs:1049,
+grpc_matching.rs:4258 `inbound_headers`). The default forwarding rule (cadence-service-core
+header_forwarding.rs:214 `default_dynamic_rules`: add "" , remove ^grpc-.*) forwards them on the
+query-matched poll's outbound History call, including content-length/content-type/host/rpc-*.
+Go yarpc `CallFromContext(ctx).HeaderNames()` returns only application headers (Rpc-Header-*, prefix
+stripped); tchannel path already passes only app headers (tchannel.rs:578-590).
+Proposed parity fix: in thrift_matching.rs http_handler keep only `rpc-header-*` headers, stripped.
