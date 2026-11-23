@@ -176,7 +176,8 @@ jobs:
           docker build --pull=false -f rust/Dockerfile --build-arg GO_IMAGE=cadence-go:ci -t cadence-rust:ci . > out/rust-image-build.log 2>&1 || { tail -80 out/rust-image-build.log; exit 1; }
           docker image inspect cadence-rust:ci --format '{{.Id}} {{.Size}}' > out/rust-image.txt
           docker run --entrypoint cat cadence-rust:ci /etc/cadence/cadence-server.sha256 > out/rust-binary.sha256
-          docker run --entrypoint sha256sum cadence-rust:ci /usr/local/bin/cadence-server >> out/rust-binary.sha256
+          docker run --entrypoint sha256sum cadence-rust:ci /usr/local/bin/cadence-history >> out/rust-binary.sha256
+          docker run --entrypoint sha256sum cadence-rust:ci /usr/local/bin/cadence-server-real >> out/rust-binary.sha256
       - name: Build CLI and SDK benchmark driver
         working-directory: tests/frontend-gate
         run: |
@@ -207,7 +208,6 @@ jobs:
           cat out/paired-runner.log
           exit "$status"
       - name: Verify complete paired benchmark evidence
-        if: ${{ (inputs.rust_services || 'frontend,matching') == 'frontend,matching' }}
         run: |
           set +e
           python3 tests/benchmark/verify_artifacts.py --out out --expected-head "$GITHUB_SHA" > out/artifact-verification.json
