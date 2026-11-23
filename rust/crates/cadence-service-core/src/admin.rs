@@ -3014,9 +3014,8 @@ mod tests {
     async fn resend_resolves_domain_before_field_validation() {
         use axum::extract::State;
         let mut state = crate::handlers::AppState::default();
-        state.history_admin_channel = Some(
-            tonic::transport::Channel::from_static("http://127.0.0.1:1").connect_lazy(),
-        );
+        state.history_admin_channel =
+            Some(tonic::transport::Channel::from_static("http://127.0.0.1:1").connect_lazy());
         let req = cadence_api::admin::ResendReplicationTasksRequest {
             domain_id: "no-such-domain".into(),
             workflow_id: "wf".into(),
@@ -3024,8 +3023,12 @@ mod tests {
             remote_cluster: String::new(),
             ..Default::default()
         };
-        let resp = super::resend_replication_tasks(State(std::sync::Arc::new(state)), axum::Json(req)).await;
-        let body = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+        let resp =
+            super::resend_replication_tasks(State(std::sync::Arc::new(state)), axum::Json(req))
+                .await;
+        let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
+            .await
+            .unwrap();
         let text = String::from_utf8_lossy(&body);
         assert!(text.contains("getting domain"), "{text}");
         assert!(!text.contains("Workflow execution is not set"), "{text}");
@@ -3041,7 +3044,9 @@ mod tests {
             ..Default::default()
         };
         let resp = super::refresh_workflow_tasks(State(state), axum::Json(req)).await;
-        let body = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
+            .await
+            .unwrap();
         let text = String::from_utf8_lossy(&body);
         assert!(text.contains("Execution is not set on request."), "{text}");
     }
@@ -3058,7 +3063,10 @@ mod tests {
             }
         }
         let state = crate::handlers::AppState::default();
-        state.admin.membership.set(Some(std::sync::Arc::new(FailingRing)));
+        state
+            .admin
+            .membership
+            .set(Some(std::sync::Arc::new(FailingRing)));
         let req = cadence_api::admin::AdminDescribeWorkflowExecutionRequest {
             domain: "no-such-domain".into(),
             execution: Some(cadence_api::types::WorkflowExecution::new("w", "")),
@@ -3067,7 +3075,9 @@ mod tests {
         let err = super::describe_workflow_execution_admin_core(&state, req)
             .await
             .unwrap_err();
-        let body = axum::body::to_bytes(err.into_body(), 1 << 20).await.unwrap();
+        let body = axum::body::to_bytes(err.into_body(), 1 << 20)
+            .await
+            .unwrap();
         let text = String::from_utf8_lossy(&body);
         assert!(text.contains("ring unavailable"), "{text}");
     }
