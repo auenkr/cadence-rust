@@ -725,14 +725,22 @@ def run_sql_stack():
             if not wait_port(port, 240, proc):
                 raise RuntimeError(f'real-stack {label} port {port} did not open; see {work}')
         time.sleep(20)  # ring convergence
-        subprocess.run(['go', 'test', '-overlay', str(overlay.resolve()), './service/matching/wrappers/thrift',
-                        '-run', '^(TestRustMatchingNativeThrift|TestRustMatchingTLS)$', '-count=1', '-v'], cwd=root / 'go', check=True, timeout=300,
-                       env={**os.environ, 'CADENCE_MATCHING_TLS_HTTP': f'https://localhost:{matching_http}/matching',
+        stack_env = {**os.environ, 'CADENCE_MATCHING_TLS_HTTP': f'https://localhost:{matching_http}/matching',
                             'CADENCE_MATCHING_PLAINTEXT_HTTP': f'http://127.0.0.1:{matching_http}/matching',
                             'CADENCE_MATCHING_HTTP': f'http://127.0.0.1:{matching_http}/matching',
                             'CADENCE_MATCHING_TCHANNEL': f'127.0.0.1:{m_t}',
                             'CADENCE_FRONTEND_TCHANNEL': f'127.0.0.1:{fe_t}',
-                            'CADENCE_MATCHING_TLS_CERT': str(artifacts / 'tls-cert.pem')})
+                            'CADENCE_MATCHING_TLS_CERT': str(artifacts / 'tls-cert.pem')}
+        failures = []
+        for pattern in ('^TestRustMatchingNativeThrift$/^tchannel$', '^TestRustMatchingNativeThrift$/^http$',
+                        '^TestRustMatchingNativeThrift$/^http-trailing-slash$', '^TestRustMatchingNativeThrift$/^http-tls$', '^TestRustMatchingTLS$'):
+            result = subprocess.run(['go', 'test', '-overlay', str(overlay.resolve()), './service/matching/wrappers/thrift',
+                                     '-run', pattern, '-count=1', '-v'], cwd=root / 'go', timeout=300, env=stack_env)
+            print(f'real-stack go test {pattern} exit={result.returncode}', flush=True)
+            if result.returncode != 0:
+                failures.append(pattern)
+        if failures:
+            raise RuntimeError(f'real-stack Go tests failed: {failures}')
         for proc in procs:
             if proc.poll() is not None:
                 raise RuntimeError(f'real-stack process exited early with {proc.returncode}; see {work}')
