@@ -242,13 +242,12 @@ impl EsVisibility {
             ) {
                 Ok(r) => r,
                 // Go isNodeUnavailableError: retry once with a fresh scroll.
-                Err(e) if e.contains("node") && e.contains("not available") => {
-                    fresh_scroll().map_err(|_| {
+                Err(e) if e.contains("node") && e.contains("not available") => fresh_scroll()
+                    .map_err(|_| {
                         QueryError::Internal(format!(
                             "ScanByQuery failed after fresh scroll. Error: {e}"
                         ))
-                    })?
-                }
+                    })?,
                 Err(e) => return Err(internal("ScanWorkflowExecutions failed, ", e)),
             }
         };
@@ -425,7 +424,11 @@ mod tests {
 
     #[test]
     fn scan_retries_fresh_scroll_on_node_unavailable() {
-        let tok = PageToken { scroll_id: "old".into(), ..Default::default() }.encode();
+        let tok = PageToken {
+            scroll_id: "old".into(),
+            ..Default::default()
+        }
+        .encode();
         let (f, v) = fake(vec![
             Err("node [x] not available".into()),
             Ok(json!({"_scroll_id": "new", "hits": {"hits": [hit("a", 0)]}})),
@@ -435,7 +438,8 @@ mod tests {
         assert_eq!(f.calls.lock().unwrap()[1].1, "/idx/_search?scroll=5m");
         let (_, v) = fake(vec![Err("node 1 not available".into()), Err("boom".into())]);
         let err = v.scan("d", "", 5, &tok).unwrap_err();
-        assert!(format!("{err:?}").contains("ScanByQuery failed after fresh scroll. Error: node 1 not available"));
+        assert!(format!("{err:?}")
+            .contains("ScanByQuery failed after fresh scroll. Error: node 1 not available"));
     }
 
     #[test]

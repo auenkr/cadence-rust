@@ -2082,7 +2082,7 @@ impl<B: WorkflowBackend> Handler<B> {
             cadence_api::validation::check_execution(request.execution.as_ref())?;
             // Go selects archived history before decoding the live token; the
             // live-token check is deferred until the archive reader declines.
-            if !(self.archived_history_reader.is_some() && !request.skip_archival) {
+            if self.archived_history_reader.is_none() || request.skip_archival {
                 check_live_history_token(&request)?;
             }
             if request.maximum_page_size <= 0 {
@@ -2845,8 +2845,11 @@ fn check_live_history_token(
     if request.next_page_token.is_empty() {
         return Ok(());
     }
-    let token = crate::handler_workflow_history::deserialize_history_token(&request.next_page_token)
-        .map_err(|_| CadenceError::BadRequest(BadRequestError::new("Invalid NextPageToken.")))?;
+    let token =
+        crate::handler_workflow_history::deserialize_history_token(&request.next_page_token)
+            .map_err(|_| {
+                CadenceError::BadRequest(BadRequestError::new("Invalid NextPageToken."))
+            })?;
     crate::handler_workflow_history::validate_history_run_id(
         request
             .execution
