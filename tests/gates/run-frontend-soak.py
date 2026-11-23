@@ -271,6 +271,8 @@ frontend_env = {
     **os.environ,
     'CADENCE_HISTORY_TCHANNEL_ADDR': f'127.0.0.1:{ports["HISTORY_PORT"]}',
     'CADENCE_MATCHING_TCHANNEL_ADDR': f'127.0.0.1:{ports["RUST_MATCHING_PORT" if RUST_MT else "MATCHING_PORT"]}',
+    'CADENCE_HISTORY_GRPC_PORT': ports['HISTORY_PORT_GRPC'],
+    'CADENCE_MATCHING_GRPC_PORT': ports['RUST_MATCHING_PORT_GRPC' if RUST_MT else 'MATCHING_PORT_GRPC'],
 }
 go_matching = lambda: [args.go_server, '--config', work / 'config', '--zone', plugin, 'start', '--services', 'matching']
 go_frontend = lambda: [args.go_server, '--config', work / 'config', '--zone', plugin, 'start', '--services', 'frontend']

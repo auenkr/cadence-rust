@@ -1246,7 +1246,10 @@ pub fn build_workflow_api(
         "CADENCE_MATCHING_TCHANNEL_ADDR",
         7935,
     );
-    let grpc_port = |service: &str, default: u16| {
+    let grpc_port = |service: &str, env: &str, default: u16| {
+        if let Some(p) = std::env::var(env).ok().and_then(|v| v.parse::<u16>().ok()) {
+            return p;
+        }
         ctx.config
             .services
             .get(service)
@@ -1269,8 +1272,8 @@ pub fn build_workflow_api(
                     })
             })
         },
-        grpc_port("history", 7834),
-        grpc_port("matching", 7835),
+        grpc_port("history", "CADENCE_HISTORY_GRPC_PORT", 7834),
+        grpc_port("matching", "CADENCE_MATCHING_GRPC_PORT", 7835),
     );
     let lookup: std::sync::Arc<dyn crate::handler_workflow::WorkflowDomainLookup> =
         std::sync::Arc::new(
