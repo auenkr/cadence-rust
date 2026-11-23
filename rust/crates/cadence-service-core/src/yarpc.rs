@@ -376,13 +376,6 @@ async fn handle_register(state: &AppState, body: &Struct) -> HandlerResult {
             "Domain length exceeds limit.".to_string(),
         ));
     }
-    if req.workflow_execution_retention_period_in_days
-        < state.domain_policy(&req.name).min_retention_days
-    {
-        return Err(AppError::bad_request(
-            "A valid retention period is not set on request.".to_string(),
-        ));
-    }
     let mut req = req;
     if let Some(policy) = cadence_common::archival_state::domain_archival_policy() {
         use cadence_common::archival_state::ArchivalKind;
@@ -441,8 +434,23 @@ async fn handle_register(state: &AppState, body: &Struct) -> HandlerResult {
         visibility_archival_uri: req.visibility_archival_uri.clone(),
         ..Default::default()
     };
-    let replication = crate::handlers::domain_replication(state, &req)
+    // Go order: prepare active-active attributes, then retention, then
+    // replication-config validation.
+    let replication = crate::handlers::prepare_domain_replication(state, &req)
         .map_err(|e| AppError::bad_request(e.message))?;
+    if req.workflow_execution_retention_period_in_days
+        < state.domain_policy(&req.name).min_retention_days
+    {
+        return Err(AppError::bad_request(
+            "A valid retention period is not set on request.".to_string(),
+        ));
+    }
+    crate::handlers::validate_domain_registration_replication(
+        state,
+        req.is_global_domain,
+        &replication,
+    )
+    .map_err(|e| AppError::bad_request(e.message))?;
     let failover_version = if req.is_global_domain {
         state
             .cluster_metadata
@@ -3145,6 +3153,30 @@ pub async fn yarpc_handler(
     match dispatch_with_transport(&state, &method, &args, deadline, caller_headers, "http").await {
         Ok((result, app_error)) => ok_reply(service_echo, result, app_error),
         Err(e) => transport_error(StatusCode::INTERNAL_SERVER_ERROR, e),
+    }
+}
+
+#[cfg(test)]
+mod register_ordering_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn register_prepares_active_clusters_before_retention() {
+        let state = AppState::default();
+        let req: cadence_api::types::RegisterDomainRequest =
+            serde_json::from_value(serde_json::json!({
+                "name": "domain",
+                "isGlobalDomain": true,
+                "workflowExecutionRetentionPeriodInDays": -1,
+                "activeClusters": {"activeClustersByClusterAttribute": {"region": {
+                    "clusterAttributes": {"west": {"activeClusterName": "unknown"}}}}}
+            }))
+            .unwrap();
+        let body = Struct {
+            fields: vec![(1, Value::Struct(req.to_thrift()))],
+        };
+        let err = handle_register(&state, &body).await.unwrap_err();
+        assert!(err.message.contains("Cluster unknown not found."), "{}", err.message);
     }
 }
 
