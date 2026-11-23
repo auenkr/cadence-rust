@@ -1090,6 +1090,14 @@ fn handle_refresh_workflow_tasks(state: &AppState, body: &Struct) -> HandlerResu
     }
 }
 
+/// Thrift field 80 (`nextPageToken`) of the raw-history request is present.
+fn raw_history_token_present(body: &Struct) -> bool {
+    matches!(
+        body.get(1),
+        Some(Value::Struct(s)) if matches!(s.get(80), Some(Value::Bytes(_)))
+    )
+}
+
 fn handle_raw_history_v2(state: &AppState, body: &Struct) -> HandlerResult {
     use cadence_api::admin::{
         GetWorkflowExecutionRawHistoryV2Request as Request,
@@ -1105,7 +1113,10 @@ fn handle_raw_history_v2(state: &AppState, body: &Struct) -> HandlerResult {
     let executions = require_domain_thrift(state, &req.domain)?;
     let mut persistence_token = Vec::new();
     let mut continuation = None;
-    let histories = if req.next_page_token.is_empty() {
+    // Go selects the continuation path on `NextPageToken != nil`, so a
+    // present-but-empty Thrift field 80 reaches token JSON decoding.
+    let token_absent = req.next_page_token.is_empty() && !raw_history_token_present(body);
+    let histories = if token_absent {
         let view = executions
             .mutable_state_view(&req.domain, &execution)
             .map_err(|error| AppError::entity_not_exists(error.message))?;
@@ -3183,6 +3194,21 @@ mod register_ordering_tests {
 #[cfg(test)]
 mod history_token_presence_tests {
     use super::*;
+
+    #[test]
+    fn raw_history_token_presence_is_distinguished() {
+        let mk = |t: Option<Vec<u8>>| Struct {
+            fields: vec![(
+                1,
+                Value::Struct(Struct {
+                    fields: t.map(|b| vec![(80, Value::Bytes(b))]).unwrap_or_default(),
+                }),
+            )],
+        };
+        assert!(raw_history_token_present(&mk(Some(vec![]))));
+        assert!(raw_history_token_present(&mk(Some(vec![1]))));
+        assert!(!raw_history_token_present(&mk(None)));
+    }
 
     fn args(token: Option<Vec<u8>>) -> Struct {
         let fields = token.map(|b| vec![(40, Value::Bytes(b))]).unwrap_or_default();
