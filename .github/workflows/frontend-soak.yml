@@ -41,7 +41,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: recursive
+      - run: scripts/go-overlay.sh
       - uses: actions/setup-go@v5
         with:
           go-version-file: go/go.mod
@@ -89,7 +90,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: recursive
+      - run: scripts/go-overlay.sh
       - uses: actions/download-artifact@v4
         with:
           name: soak-binaries

@@ -81,7 +81,7 @@ jobs:
           path: rustsrc
           submodules: true
       - name: IDL submodule
-        run: git submodule update --init go/idls
+        run: git submodule update --init --recursive go && scripts/go-overlay.sh
       - uses: actions/setup-go@v5
         with:
           go-version-file: go/go.mod

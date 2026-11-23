@@ -20,6 +20,9 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: scripts/go-overlay.sh
       - uses: actions/setup-go@v5
         with:
           go-version-file: go/go.mod

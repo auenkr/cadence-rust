@@ -76,12 +76,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: recursive
+      - run: scripts/go-overlay.sh
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.source_ref || github.sha }}
           path: benchmark-source
-          submodules: true
+          submodules: recursive
       - uses: actions/setup-go@v5
         with:
           go-version-file: Benchmark/go.mod
@@ -92,7 +93,7 @@ jobs:
         id: binkey
         run: |
           src=benchmark-source
-          key="bench-bin-v1-${{ inputs.service || 'matching' }}-p${{ inputs.profile || '0' }}-$(git -C $src rev-parse HEAD:rust)-$(git -C $src rev-parse HEAD:go/idls)-$(git -C $src rev-parse HEAD:go/proto)-$(sha256sum Benchmark/Dockerfile | cut -c1-16)"
+          key="bench-bin-v1-${{ inputs.service || 'matching' }}-p${{ inputs.profile || '0' }}-$(git -C $src rev-parse HEAD:rust)-$(git -C $src rev-parse HEAD:go)-$(git -C $src rev-parse HEAD:go-overlay)-$(sha256sum Benchmark/Dockerfile | cut -c1-16)"
           echo "key=$key" >> "$GITHUB_OUTPUT"; echo "$key"
       - uses: actions/cache/restore@v4
         id: bincache
@@ -143,7 +144,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: recursive
+      - run: scripts/go-overlay.sh
       - uses: actions/setup-go@v5
         with:
           go-version-file: tests/frontend-gate/go.mod

@@ -1,7 +1,6 @@
-[submodule "idls"]
-	path = go/idls
-	url = https://github.com/cadence-workflow/cadence-idl.git
-	branch = master
 [submodule "cadence-web"]
 	path = cadence-web
 	url = https://github.com/cadence-workflow/cadence-web.git
+[submodule "go"]
+	path = go
+	url = https://github.com/cadence-workflow/cadence.git
