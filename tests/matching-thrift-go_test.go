@@ -91,6 +91,11 @@ func TestRustMatchingNativeThrift(t *testing.T) {
 				t.Fatal(err)
 			}
 			domainID := described.DomainInfo.GetUUID()
+			// Go's DefaultDomainCache throttles on-demand refreshes to once per
+			// domainCacheMinRefreshInterval (1s, go/common/cache/domainCache.go);
+			// a Matching call within that window of a fresh Frontend registration
+			// returns "domain exists but cannot be loaded" in Go as well.
+			time.Sleep(1500 * time.Millisecond)
 			list := &s.TaskList{Name: common.StringPtr("tasks-" + uuid.NewString()), Kind: s.TaskListKindNormal.Ptr()}
 			// The Go handler/engine oracle records both absent and empty task-list
 			// shapes as successful DescribeTaskList calls with no pollers.
@@ -182,7 +187,14 @@ func TestRustMatchingNativeThrift(t *testing.T) {
 				}
 			}
 			activity, err := matching.PollForActivityTask(ctx, &m.PollForActivityTaskRequest{DomainUUID: common.StringPtr(domainID), PollerID: common.StringPtr(uuid.NewString()), PollRequest: &s.PollForActivityTaskRequest{TaskList: list, Identity: common.StringPtr("activity-worker"), TaskListMetadata: &s.TaskListMetadata{MaxTasksPerSecond: common.Float64Ptr(50)}}})
-			if err != nil || string(activity.Input) != "input" || activity.GetActivityId() != "activity" {
+			if os.Getenv("CADENCE_MATCHING_SQLITE_DB") == "" {
+				// Real History also dispatches both scheduled activities through
+				// Matching, so either one may be delivered first.
+				inputs := map[string]string{"activity": "input", "go-queued-activity": "go-input"}
+				if err != nil || inputs[activity.GetActivityId()] == "" || string(activity.Input) != inputs[activity.GetActivityId()] {
+					t.Fatalf("activity delivery: %v %v", activity, err)
+				}
+			} else if err != nil || string(activity.Input) != "input" || activity.GetActivityId() != "activity" {
 				t.Fatalf("Rust-enqueued activity delivery: %v %v", activity, err)
 			}
 			if path := os.Getenv("CADENCE_MATCHING_SQLITE_DB"); path != "" {
