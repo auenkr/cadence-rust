@@ -132,7 +132,10 @@ impl GrpcOutbound {
     }
 
     fn channel(&self, addr: &str) -> Result<Channel, CadenceError> {
-        let mut channels = self.channels.lock().map_err(|_| internal("channel cache"))?;
+        let mut channels = self
+            .channels
+            .lock()
+            .map_err(|_| internal("channel cache"))?;
         if let Some(channel) = channels.get(addr) {
             return Ok(channel.clone());
         }
@@ -142,7 +145,8 @@ impl GrpcOutbound {
         let port: u16 = port
             .parse()
             .map_err(|_| internal(format!("invalid gRPC port in {addr}")))?;
-        let channel = crate::history_client::connect(host, port).map_err(|e| internal(e.to_string()))?;
+        let channel =
+            crate::history_client::connect(host, port).map_err(|e| internal(e.to_string()))?;
         channels.insert(addr.to_owned(), channel.clone());
         Ok(channel)
     }
@@ -155,12 +159,18 @@ impl GrpcOutbound {
     ) -> Request<T> {
         let mut request = Request::new(payload);
         let md = request.metadata_mut();
-        md.insert("rpc-service", tonic::metadata::MetadataValue::from_static(service));
+        md.insert(
+            "rpc-service",
+            tonic::metadata::MetadataValue::from_static(service),
+        );
         md.insert(
             "rpc-caller",
             tonic::metadata::MetadataValue::from_static("cadence-frontend"),
         );
-        md.insert("rpc-encoding", tonic::metadata::MetadataValue::from_static("proto"));
+        md.insert(
+            "rpc-encoding",
+            tonic::metadata::MetadataValue::from_static("proto"),
+        );
         for (k, v) in forwarded {
             if let (Ok(key), Ok(val)) = (
                 tonic::metadata::MetadataKey::from_bytes(k.to_ascii_lowercase().as_bytes()),
@@ -194,11 +204,13 @@ impl GrpcOutbound {
         Some(match service {
             "cadence-history" => {
                 let target = grpc_address(addr, self.history_port);
-                self.history(&target, method, envelope, timeout, &forwarded).await
+                self.history(&target, method, envelope, timeout, &forwarded)
+                    .await
             }
             _ => {
                 let target = grpc_address(addr, self.matching_port);
-                self.matching(&target, method, envelope, timeout, &forwarded).await
+                self.matching(&target, method, envelope, timeout, &forwarded)
+                    .await
             }
         })
     }
@@ -214,7 +226,8 @@ impl GrpcOutbound {
         let mut client = crate::history_client::generated(self.channel(target)?, 64 << 20);
         let domain_id = domain_of(env)?;
         let r = |p| Self::request("cadence-history", p, timeout, fwd);
-        let st_err = |s: tonic::Status| cadence_service_core::frontend_remote_grpc::error_from_status(&s);
+        let st_err =
+            |s: tonic::Status| cadence_service_core::frontend_remote_grpc::error_from_status(&s);
         match method {
             "StartWorkflowExecution" => {
                 let start: ty::StartWorkflowExecutionRequest = inner(env, 20)?;
@@ -228,8 +241,15 @@ impl GrpcOutbound {
                     partition_config: str_map(env, 62)?,
                     ..Default::default()
                 };
-                let resp = client.start_workflow_execution(r(msg)).await.map_err(st_err)?.into_inner();
-                Ok(ty::StartWorkflowExecutionResponse { run_id: resp.run_id }.to_thrift())
+                let resp = client
+                    .start_workflow_execution(r(msg))
+                    .await
+                    .map_err(st_err)?
+                    .into_inner();
+                Ok(ty::StartWorkflowExecutionResponse {
+                    run_id: resp.run_id,
+                }
+                .to_thrift())
             }
             "SignalWithStartWorkflowExecution" => {
                 let req: st::SignalWithStartWorkflowExecutionRequest = inner(env, 20)?;
@@ -243,7 +263,10 @@ impl GrpcOutbound {
                     .await
                     .map_err(st_err)?
                     .into_inner();
-                Ok(ty::StartWorkflowExecutionResponse { run_id: resp.run_id }.to_thrift())
+                Ok(ty::StartWorkflowExecutionResponse {
+                    run_id: resp.run_id,
+                }
+                .to_thrift())
             }
             "SignalWorkflowExecution" => {
                 let req: ty::SignalWorkflowExecutionRequest = inner(env, 20)?;
@@ -252,7 +275,10 @@ impl GrpcOutbound {
                     domain_id,
                     ..Default::default()
                 };
-                client.signal_workflow_execution(r(msg)).await.map_err(st_err)?;
+                client
+                    .signal_workflow_execution(r(msg))
+                    .await
+                    .map_err(st_err)?;
                 Ok(Struct::default())
             }
             "TerminateWorkflowExecution" => {
@@ -262,7 +288,10 @@ impl GrpcOutbound {
                     domain_id,
                     ..Default::default()
                 };
-                client.terminate_workflow_execution(r(msg)).await.map_err(st_err)?;
+                client
+                    .terminate_workflow_execution(r(msg))
+                    .await
+                    .map_err(st_err)?;
                 Ok(Struct::default())
             }
             "RequestCancelWorkflowExecution" => {
@@ -272,7 +301,10 @@ impl GrpcOutbound {
                     domain_id,
                     ..Default::default()
                 };
-                client.request_cancel_workflow_execution(r(msg)).await.map_err(st_err)?;
+                client
+                    .request_cancel_workflow_execution(r(msg))
+                    .await
+                    .map_err(st_err)?;
                 Ok(Struct::default())
             }
             "ResetWorkflowExecution" => {
@@ -281,8 +313,15 @@ impl GrpcOutbound {
                     request: Some(cv::reset_request_out(req)),
                     domain_id,
                 };
-                let resp = client.reset_workflow_execution(r(msg)).await.map_err(st_err)?.into_inner();
-                Ok(ty::ResetWorkflowExecutionResponse { run_id: resp.run_id }.to_thrift())
+                let resp = client
+                    .reset_workflow_execution(r(msg))
+                    .await
+                    .map_err(st_err)?
+                    .into_inner();
+                Ok(ty::ResetWorkflowExecutionResponse {
+                    run_id: resp.run_id,
+                }
+                .to_thrift())
             }
             "QueryWorkflow" => {
                 let req: tk::QueryWorkflowRequest = inner(env, 20)?;
@@ -290,7 +329,11 @@ impl GrpcOutbound {
                     request: Some(cv::query_request_out(req)),
                     domain_id,
                 };
-                let resp = client.query_workflow(r(msg)).await.map_err(st_err)?.into_inner();
+                let resp = client
+                    .query_workflow(r(msg))
+                    .await
+                    .map_err(st_err)?
+                    .into_inner();
                 let public = cv::query_response_in(cadence_proto::api::QueryWorkflowResponse {
                     query_result: resp.query_result,
                     query_rejected: resp.query_rejected,
@@ -310,7 +353,10 @@ impl GrpcOutbound {
                     }),
                     domain_id,
                 };
-                client.reset_sticky_task_list(r(msg)).await.map_err(st_err)?;
+                client
+                    .reset_sticky_task_list(r(msg))
+                    .await
+                    .map_err(st_err)?;
                 Ok(Struct::default())
             }
             "RefreshWorkflowTasks" => {
@@ -319,7 +365,10 @@ impl GrpcOutbound {
                     request: Some(cv::refresh_request_out(req)),
                     domain_id,
                 };
-                client.refresh_workflow_tasks(r(msg)).await.map_err(st_err)?;
+                client
+                    .refresh_workflow_tasks(r(msg))
+                    .await
+                    .map_err(st_err)?;
                 Ok(Struct::default())
             }
             "RecordActivityTaskHeartbeat" => {
@@ -344,7 +393,10 @@ impl GrpcOutbound {
                     request: Some(cv::respond_activity_completed_request_out(req)),
                     domain_id,
                 };
-                client.respond_activity_task_completed(r(msg)).await.map_err(st_err)?;
+                client
+                    .respond_activity_task_completed(r(msg))
+                    .await
+                    .map_err(st_err)?;
                 Ok(Struct::default())
             }
             "RespondActivityTaskFailed" => {
@@ -353,7 +405,10 @@ impl GrpcOutbound {
                     request: Some(cv::respond_activity_failed_request_out(req)),
                     domain_id,
                 };
-                client.respond_activity_task_failed(r(msg)).await.map_err(st_err)?;
+                client
+                    .respond_activity_task_failed(r(msg))
+                    .await
+                    .map_err(st_err)?;
                 Ok(Struct::default())
             }
             "RespondActivityTaskCanceled" => {
@@ -362,7 +417,10 @@ impl GrpcOutbound {
                     request: Some(cv::respond_activity_canceled_request_out(req)),
                     domain_id,
                 };
-                client.respond_activity_task_canceled(r(msg)).await.map_err(st_err)?;
+                client
+                    .respond_activity_task_canceled(r(msg))
+                    .await
+                    .map_err(st_err)?;
                 Ok(Struct::default())
             }
             "RespondDecisionTaskFailed" => {
@@ -371,7 +429,10 @@ impl GrpcOutbound {
                     request: Some(cv::respond_decision_failed_request_out(req)),
                     domain_id,
                 };
-                client.respond_decision_task_failed(r(msg)).await.map_err(st_err)?;
+                client
+                    .respond_decision_task_failed(r(msg))
+                    .await
+                    .map_err(st_err)?;
                 Ok(Struct::default())
             }
             other => Err(internal(format!("no gRPC mapping for History {other}"))),
@@ -388,7 +449,8 @@ impl GrpcOutbound {
     ) -> Result<Struct, CadenceError> {
         let mut client = crate::matching_client::generated(self.channel(target)?, 64 << 20);
         let r = |p| Self::request("cadence-matching", p, timeout, fwd);
-        let st_err = |s: tonic::Status| cadence_service_core::frontend_remote_grpc::error_from_status(&s);
+        let st_err =
+            |s: tonic::Status| cadence_service_core::frontend_remote_grpc::error_from_status(&s);
         match method {
             "CancelOutstandingPoll" => {
                 let task_list: Option<ty::TaskList> =
@@ -405,14 +467,20 @@ impl GrpcOutbound {
                         .map_or(0, |t| t + 1),
                     task_list: task_list.map(convert::task_list_out),
                 };
-                client.cancel_outstanding_poll(r(msg)).await.map_err(st_err)?;
+                client
+                    .cancel_outstanding_poll(r(msg))
+                    .await
+                    .map_err(st_err)?;
                 Ok(Struct::default())
             }
             "RespondQueryTaskCompleted" => {
                 let task_list: ty::TaskList = inner(env, 20)?;
                 let completed: tk::RespondQueryTaskCompletedRequest = inner(env, 40)?;
                 let msg = m::RespondQueryTaskCompletedRequest {
-                    request: Some(convert::query_completed_out(completed).map_err(|s| internal(s.to_string()))?),
+                    request: Some(
+                        convert::query_completed_out(completed)
+                            .map_err(|s| internal(s.to_string()))?,
+                    ),
                     domain_id: domain_of(env)?,
                     task_list: Some(convert::task_list_out(task_list)),
                     task_id: env
@@ -420,7 +488,10 @@ impl GrpcOutbound {
                         .map_err(|e| thrift_err("task id", e))?
                         .unwrap_or_default(),
                 };
-                client.respond_query_task_completed(r(msg)).await.map_err(st_err)?;
+                client
+                    .respond_query_task_completed(r(msg))
+                    .await
+                    .map_err(st_err)?;
                 Ok(Struct::default())
             }
             "DescribeTaskList" => {
@@ -429,21 +500,28 @@ impl GrpcOutbound {
                     request: Some(convert::describe_task_list_request_out(desc)),
                     domain_id: domain_of(env)?,
                 };
-                let resp = client.describe_task_list(r(msg)).await.map_err(st_err)?.into_inner();
-                let public = convert::describe_task_list_in(cadence_proto::api::DescribeTaskListResponse {
-                    pollers: resp.pollers,
-                    task_list_status: resp.task_list_status,
-                    partition_config: resp.partition_config,
-                    task_list: resp.task_list,
-                })
-                .map_err(|s| internal(s.to_string()))?;
+                let resp = client
+                    .describe_task_list(r(msg))
+                    .await
+                    .map_err(st_err)?
+                    .into_inner();
+                let public =
+                    convert::describe_task_list_in(cadence_proto::api::DescribeTaskListResponse {
+                        pollers: resp.pollers,
+                        task_list_status: resp.task_list_status,
+                        partition_config: resp.partition_config,
+                        task_list: resp.task_list,
+                    })
+                    .map_err(|s| internal(s.to_string()))?;
                 Ok(public.to_thrift())
             }
             "ListTaskListPartitions" => {
                 let req = tk::ListTaskListPartitionsRequest::from_thrift(env)
                     .map_err(|e| thrift_err("ListTaskListPartitions request", e))?;
                 let resp = client
-                    .list_task_list_partitions(r(convert::list_task_list_partitions_request_out(req)))
+                    .list_task_list_partitions(r(convert::list_task_list_partitions_request_out(
+                        req,
+                    )))
                     .await
                     .map_err(st_err)?
                     .into_inner();
@@ -541,9 +619,15 @@ mod tests {
         let env = Struct {
             fields: vec![(
                 62,
-                Value::Map(vec![(Value::Bytes(b"k".to_vec()), Value::Bytes(b"v".to_vec()))]),
+                Value::Map(vec![(
+                    Value::Bytes(b"k".to_vec()),
+                    Value::Bytes(b"v".to_vec()),
+                )]),
             )],
         };
-        assert_eq!(str_map(&env, 62).unwrap().get("k").map(String::as_str), Some("v"));
+        assert_eq!(
+            str_map(&env, 62).unwrap().get("k").map(String::as_str),
+            Some("v")
+        );
     }
 }

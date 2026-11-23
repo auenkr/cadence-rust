@@ -391,7 +391,14 @@ impl ProductionBackend {
     ) -> Result<Struct, CadenceError> {
         if let Some(grpc) = &self.grpc {
             if let Some(result) = grpc
-                .try_call(addr, service, method, &envelope, timeout, &self.header_rules)
+                .try_call(
+                    addr,
+                    service,
+                    method,
+                    &envelope,
+                    timeout,
+                    &self.header_rules,
+                )
                 .await
             {
                 return result;
@@ -1251,13 +1258,15 @@ pub fn build_workflow_api(
         {
             let overlay = ctx.state.admin.dynamic_config.clone();
             std::sync::Arc::new(move || {
-                overlay.lock().map_or(crate::grpc_outbound::ENABLE_GRPC_OUTBOUND_DEFAULT, |o| {
-                    cadence_persistence::dynamic_config::boolean(
-                        o.property_values(crate::grpc_outbound::ENABLE_GRPC_OUTBOUND_KEY),
-                        None,
-                        crate::grpc_outbound::ENABLE_GRPC_OUTBOUND_DEFAULT,
-                    )
-                })
+                overlay
+                    .lock()
+                    .map_or(crate::grpc_outbound::ENABLE_GRPC_OUTBOUND_DEFAULT, |o| {
+                        cadence_persistence::dynamic_config::boolean(
+                            o.property_values(crate::grpc_outbound::ENABLE_GRPC_OUTBOUND_KEY),
+                            None,
+                            crate::grpc_outbound::ENABLE_GRPC_OUTBOUND_DEFAULT,
+                        )
+                    })
             })
         },
         grpc_port("history", 7834),
