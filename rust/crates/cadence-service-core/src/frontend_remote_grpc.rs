@@ -39,6 +39,16 @@ pub use cv::client::{
 pub fn error_from_status(status: &tonic::Status) -> CadenceError {
     if let Ok(rpc) = RpcStatus::decode(status.details()) {
         for any in rpc.details {
+            if any.type_url.ends_with(".EntityNotExistsError") {
+                if let Ok(d) = p::EntityNotExistsError::decode(any.value.as_slice()) {
+                    return CadenceError::EntityNotExists(EntityNotExistsError {
+                        message: status.message().to_owned(),
+                        current_cluster: d.current_cluster,
+                        active_cluster: d.active_cluster,
+                        active_clusters: d.active_clusters,
+                    });
+                }
+            }
             if any.type_url.ends_with(".DomainNotActiveError") {
                 if let Ok(d) = p::DomainNotActiveError::decode(any.value.as_slice()) {
                     return CadenceError::DomainNotActive(DomainNotActiveError {
@@ -783,6 +793,35 @@ mod tests {
             }
             other => panic!("unexpected {other:?}"),
         }
+    }
+
+    #[test]
+    fn entity_not_exists_preserves_cluster_context() {
+        let detail = p::EntityNotExistsError {
+            current_cluster: "local".into(),
+            active_cluster: "remote".into(),
+            active_clusters: vec!["remote".into()],
+        };
+        let rpc = RpcStatus {
+            code: tonic::Code::NotFound as i32,
+            message: "workflow missing".into(),
+            details: vec![prost_types::Any {
+                type_url: "type.googleapis.com/uber.cadence.api.v1.EntityNotExistsError".into(),
+                value: detail.encode_to_vec(),
+            }],
+        };
+        let status = tonic::Status::with_details(
+            tonic::Code::NotFound,
+            "workflow missing",
+            rpc.encode_to_vec().into(),
+        );
+        let CadenceError::EntityNotExists(error) = error_from_status_typed(&status) else {
+            panic!("expected entity not found");
+        };
+        assert_eq!(error.message, "workflow missing");
+        assert_eq!(error.current_cluster, "local");
+        assert_eq!(error.active_cluster, "remote");
+        assert_eq!(error.active_clusters, ["remote"]);
     }
 
     #[test]

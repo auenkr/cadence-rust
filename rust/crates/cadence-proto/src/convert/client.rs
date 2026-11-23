@@ -17,7 +17,7 @@ fn wf_type(v: t::WorkflowType) -> p::WorkflowType {
     p::WorkflowType { name: v.name }
 }
 
-fn wf_type_in(v: p::WorkflowType) -> t::WorkflowType {
+pub fn wf_type_in(v: p::WorkflowType) -> t::WorkflowType {
     t::WorkflowType { name: v.name }
 }
 
@@ -562,7 +562,7 @@ pub fn partitions_response_in(
 
 // ---- Worker API (client direction) ----
 
-fn query_in(v: p::WorkflowQuery) -> tk::WorkflowQuery {
+pub fn query_in(v: p::WorkflowQuery) -> tk::WorkflowQuery {
     tk::WorkflowQuery {
         query_type: v.query_type,
         query_args: data(v.query_args),
@@ -679,20 +679,21 @@ pub fn respond_decision_completed_response_in(
         activities_to_dispatch_locally: v
             .activities_to_dispatch_locally
             .into_iter()
-            .map(|(k, a)| {
-                (
-                    k,
-                    tk::ActivityLocalDispatchInfo {
-                        activity_id: a.activity_id,
-                        scheduled_timestamp: nanos(a.scheduled_time),
-                        started_timestamp: nanos(a.started_time),
-                        scheduled_timestamp_of_this_attempt: nanos(a.scheduled_time_of_this_attempt),
-                        task_token: a.task_token,
-                    },
-                )
-            })
+            .map(|(id, activity)| (id, activity_local_dispatch_in(activity)))
             .collect(),
     })
+}
+
+pub fn activity_local_dispatch_in(
+    a: p::ActivityLocalDispatchInfo,
+) -> tk::ActivityLocalDispatchInfo {
+    tk::ActivityLocalDispatchInfo {
+        activity_id: a.activity_id,
+        scheduled_timestamp: nanos(a.scheduled_time),
+        started_timestamp: nanos(a.started_time),
+        scheduled_timestamp_of_this_attempt: nanos(a.scheduled_time_of_this_attempt),
+        task_token: a.task_token,
+    }
 }
 
 pub fn respond_decision_failed_request_out(
