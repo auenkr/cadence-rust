@@ -2457,7 +2457,8 @@ pub async fn get_workflow_execution_raw_history(
     let mut req = req;
     let mut persistence_token = Vec::new();
     let mut continuation = None;
-    let histories: cadence_api::types::VersionHistories = if req.next_page_token.is_empty() && !token_present {
+    let token_absent = req.next_page_token.is_empty() && !token_present;
+    let histories: cadence_api::types::VersionHistories = if token_absent {
         let result = if configured {
             raw_history_version_histories(&state, &req.domain, &execution, shard_id).await
         } else {
