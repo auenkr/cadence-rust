@@ -201,18 +201,30 @@ impl GrpcOutbound {
         let forwarded =
             cadence_service_core::header_forwarding::forward_for_current_call(header_rules, &[]);
         let timeout = cadence_service_core::header_forwarding::clamp_to_inbound_deadline(timeout);
-        Some(match service {
+        let started = std::time::Instant::now();
+        let (target, result) = match service {
             "cadence-history" => {
                 let target = grpc_address(addr, self.history_port);
-                self.history(&target, method, envelope, timeout, &forwarded)
-                    .await
+                let r = self
+                    .history(&target, method, envelope, timeout, &forwarded)
+                    .await;
+                (target, r)
             }
             _ => {
                 let target = grpc_address(addr, self.matching_port);
-                self.matching(&target, method, envelope, timeout, &forwarded)
-                    .await
+                let r = self
+                    .matching(&target, method, envelope, timeout, &forwarded)
+                    .await;
+                (target, r)
             }
-        })
+        };
+        if let Err(e) = &result {
+            eprintln!(
+                "WARN gRPC outbound {service}/{method} to {target} failed after {:?} (timeout {timeout:?}): {e:?}",
+                started.elapsed()
+            );
+        }
+        Some(result)
     }
 
     async fn history(
