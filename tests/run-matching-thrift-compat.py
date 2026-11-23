@@ -28,10 +28,10 @@ subprocess.run(['go', 'test', 'go.uber.org/yarpc/transport/internal/tls/muxliste
                 '-run', '^TestIsTLSClientHelloRecord$', '-count=1', '-v'],
                cwd=root / 'go', check=True, timeout=60)
 
-reservations = [socket.socket() for _ in range(7)]
+reservations = [socket.socket() for _ in range(8)]
 for listener in reservations:
     listener.bind(('127.0.0.1', 0))
-http, frontend, history, matching, tchannel, matching_tchannel, matching_http = [s.getsockname()[1] for s in reservations]
+http, frontend, history, matching, tchannel, matching_tchannel, matching_http, history_tchannel = [s.getsockname()[1] for s in reservations]
 for listener in reservations:
     listener.close()
 config = (root / 'rust/config/development.yaml').read_text()
@@ -41,10 +41,12 @@ config = (root / 'rust/config/development.yaml').read_text()
 # are needed for the focused persistence and native Thrift assertions.
 config = re.sub(
     r'(?m)^  bootstrapHosts:.*$',
-    f'  broadcastAddress: 127.0.0.1\n  bootstrapHosts: ["127.0.0.1:{matching_tchannel}"]',
+    f'  broadcastAddress: 127.0.0.1\n  bootstrapHosts: ["127.0.0.1:{tchannel}", "127.0.0.1:{history_tchannel}", "127.0.0.1:{matching_tchannel}"]',
     config,
     count=1,
 )
+# Real Rust History joins the ring on its configured TChannel port (Go config shape: services.history.rpc.port).
+config = config.replace('${HISTORY_PORT:7934}', str(history_tchannel), 1)
 domain_database = (artifacts / 'go-cadence.sqlite').resolve()
 oracle_database = (artifacts / 'go-oracle.sqlite').resolve()
 for path in (domain_database, oracle_database):
@@ -279,7 +281,7 @@ with (artifacts / 'server.log').open('w') as log:
                 if time.monotonic() >= deadline:
                     raise RuntimeError(f'Rust service listeners did not all start: {ready_ports}')
                 time.sleep(0.1)
-        main_ring.enter_context(history_ring_member('main'))
+        pass  # real Rust History is a ring member
         verify_task_list = artifacts / 'rust-configured-task-list.txt'
         verify_task_list.unlink(missing_ok=True)
         subprocess.run(['go', 'test', '-overlay', str(overlay.resolve()), './service/matching/wrappers/thrift',
@@ -523,7 +525,7 @@ with (artifacts / 'server-permissive.log').open('w') as log:
                 if time.monotonic() >= deadline:
                     raise RuntimeError('Rust permissive Matching listener did not start')
                 time.sleep(0.1)
-        permissive_ring.enter_context(history_ring_member('permissive'))
+        pass  # real Rust History is a ring member
         # A silent connection must not hold up the listener while a different
         # client completes a request.
         silent = socket.create_connection(('127.0.0.1', matching_http), timeout=3)
