@@ -221,6 +221,7 @@ impl GrpcOutbound {
 
     /// Returns `None` when `method` has no gRPC mapping (caller uses TChannel).
     /// `addr` is the TChannel `host:port` of the owner.
+    #[allow(clippy::too_many_arguments)]
     pub async fn try_call(
         &self,
         addr: &str,
