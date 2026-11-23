@@ -1292,6 +1292,15 @@ async fn handle_describe_workflow(state: &AppState, body: &Struct) -> HandlerRes
     }
 }
 
+/// Go selects the continued-page path on `NextPageToken != nil`; a Thrift
+/// binary field that is present but empty fails JSON decoding there.
+fn history_token_present_but_empty(body: &Struct) -> bool {
+    matches!(
+        body.get(1),
+        Some(Value::Struct(s)) if matches!(s.get(40), Some(Value::Bytes(b)) if b.is_empty())
+    )
+}
+
 async fn handle_get_history(state: &AppState, body: &Struct, deadline: Instant) -> HandlerResult {
     use cadence_api::service_types::GetWorkflowExecutionHistoryRequest;
     use cadence_api::validation;
@@ -1300,6 +1309,9 @@ async fn handle_get_history(state: &AppState, body: &Struct, deadline: Instant) 
     let executions = require_domain_thrift(state, &req.domain)?;
     let execution = req.execution.clone().unwrap_or_default();
     validation::check_execution(Some(&execution)).map_err(|e| AppError::bad_request(e.message))?;
+    if history_token_present_but_empty(body) {
+        return Err(AppError::bad_request("Invalid NextPageToken.".to_string()));
+    }
     if req.wait_for_new_event {
         loop {
             match executions.history_page(
@@ -3131,6 +3143,25 @@ pub async fn yarpc_handler(
     match dispatch_with_transport(&state, &method, &args, deadline, caller_headers, "http").await {
         Ok((result, app_error)) => ok_reply(service_echo, result, app_error),
         Err(e) => transport_error(StatusCode::INTERNAL_SERVER_ERROR, e),
+    }
+}
+
+#[cfg(test)]
+mod history_token_presence_tests {
+    use super::*;
+
+    fn args(token: Option<Vec<u8>>) -> Struct {
+        let fields = token.map(|b| vec![(40, Value::Bytes(b))]).unwrap_or_default();
+        Struct {
+            fields: vec![(1, Value::Struct(Struct { fields }))],
+        }
+    }
+
+    #[test]
+    fn present_empty_history_token_is_distinguished_from_absent() {
+        assert!(history_token_present_but_empty(&args(Some(vec![]))));
+        assert!(!history_token_present_but_empty(&args(None)));
+        assert!(!history_token_present_but_empty(&args(Some(vec![1]))));
     }
 }
 
