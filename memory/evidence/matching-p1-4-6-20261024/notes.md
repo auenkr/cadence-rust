@@ -1,6 +1,6 @@
 # P1-4 and P1-6 notes (2026-10-24)
 
-Base: `origin/master` @ `e9b8e9a0e`. Branch: `matching-p1-4-6-20261024`. Source of the items: `memory/matching-open-gaps-20261024.md` (on `origin/matching-open-gaps-20261024`).
+Base: `origin/master` @ `e9b8e9a0e`. Branch: `matching-p1-4-6-20261024`. Source of the items: `memory/archive/matching-open-gaps-20261024.md` (on `origin/matching-open-gaps-20261024`).
 
 No cargo was run locally. Verification is the `rust-ci.yml` run recorded at the bottom of this file.
 

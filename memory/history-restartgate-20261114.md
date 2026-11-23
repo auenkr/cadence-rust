@@ -26,7 +26,7 @@ Branch `history-restartgate` (from origin/master a5b151f44). Harness only, no Ru
 Fault injection steps (kill/restart/pause/matching kill, restarted-listening) all ran; the failing steps are completion ones.
 
 ## Diagnosis
-Identical signature to the known soak stall (memory/history-soak-20261113.md): only ~150 workflows ever complete, the rest sit at query state "init"
+Identical signature to the known soak stall (memory/archive/history-soak-20261113.md): only ~150 workflows ever complete, the rest sit at query state "init"
 (`query_init_workflows` in driver STATS grows from the first fault), on all three databases, before any fault is attributable. Per the task rules this is
 owned by worker `history-soakstall` (origin/history-soakstall) and was NOT fixed here. The postgres SIGTERM hang is likely a consequence (shutdown blocked on
 retrying stuck tasks) but is not proven; recheck after the soak stall fix.

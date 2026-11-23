@@ -1,6 +1,6 @@
 # History audit P0 fixes (branch history-auditp0, 2026-11-11)
 
-Source: memory/history-parity-audit-20261111.md (P0 list).
+Source: memory/archive/history-parity-audit-20261111.md (P0 list).
 
 ## Done
 1. Handler RPCs ported from Go: GetReplicationMessages (shard fan-out, sort by earliest creation time, MaxResponseSize cap), RemoveTask (CompleteHistoryTask by transfer/timer/replication category), RatelimitUpdate (new `ratelimit_aggregator.rs`, port of Go `RequestWeighted`; unit tests). Gap errors removed. Aggregator metrics emission is NOT ported.

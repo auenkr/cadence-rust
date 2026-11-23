@@ -1,7 +1,7 @@
 # P1-15 and P1-5 notes (2026-10-24)
 
 Branch: `matching-p1-15-5-20261024`, based on `origin/master` @ `e9b8e9a0e`.
-Source of the items: `memory/matching-open-gaps-20261024.md` (on `origin/matching-open-gaps-20261024`).
+Source of the items: `memory/archive/matching-open-gaps-20261024.md` (on `origin/matching-open-gaps-20261024`).
 No cargo was run locally. Verification is CI (`rust-ci.yml`, package `cadence-matching`).
 
 ## P1-5: semaphore deadline and unknown-outcome gaps

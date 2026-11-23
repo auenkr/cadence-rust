@@ -1,7 +1,7 @@
 # History final parity audit (2026-11-13), branch history-finalaudit, base 26e4e3e73
 
 Method and limits: package-level mapping of `go/service/history/**` to `rust/crates/cadence-history/src/**`, carried forward from
-`history-parity-audit-20261112-v2.md` (per-function scan, 234 renamed/private-helper misses, all manually classified) and
+`archive/history-parity-audit-20261112-v2.md` (per-function scan, 234 renamed/private-helper misses, all manually classified) and
 `history-p2rest-20261112.md`. No new line-by-line re-read of every Go file was done in this pass; no new P0/P1 gap was found, so no
 Rust logic was changed. No cargo/go/docker ran locally. DONE = Go behaviour present and validated by CI/mixed gate.
 
