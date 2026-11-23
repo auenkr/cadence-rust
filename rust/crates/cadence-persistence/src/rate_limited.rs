@@ -613,7 +613,7 @@ impl DomainMetadataPersistence for RateLimitedDomainMetadata {
         self.check().map_err(DomainReadError::Other)?;
         self.inner.get_domain_typed(name, id)
     }
-    fn list_domains(&self, page_size: usize, page_token: Option<&[u8]>) -> Result<MatchingDomainPage, String> {
+    fn list_domains(&self, page_size: i32, page_token: Option<&[u8]>) -> Result<MatchingDomainPage, String> {
         self.check()?;
         self.inner.list_domains(page_size, page_token)
     }

@@ -749,6 +749,25 @@ impl Session {
         self.do_query_unpaged(&statement.into(), values).await
     }
 
+    /// Queries without a page size while forwarding an opaque paging state.
+    ///
+    /// Cassandra still decodes the state, even for a SELECT that runs unpaged.
+    pub async fn query_unpaged_with_paging_state(
+        &self,
+        statement: impl Into<Statement>,
+        values: impl SerializeRow,
+        paging_state: PagingState,
+    ) -> Result<(QueryResult, PagingStateResponse), ExecutionError> {
+        self.query(
+            &statement.into(),
+            values,
+            None,
+            paging_state,
+            RequestPaging::Unpaged,
+        )
+        .await
+    }
+
     /// Queries a single page from the database, optionally continuing from a saved point.
     ///
     /// It is discouraged to use this method with non-empty values argument ([`SerializeRow::is_empty()`]

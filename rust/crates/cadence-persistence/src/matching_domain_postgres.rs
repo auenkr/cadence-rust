@@ -632,7 +632,7 @@ impl PostgresDomainMetadataStore {
 
     pub fn list_domains(
         &self,
-        page_size: usize,
+        page_size: i32,
         next_page_token: Option<&[u8]>,
     ) -> Result<MatchingDomainPage, MatchingDomainMetadataError> {
         self.list_domains_with_timeout(page_size, next_page_token, DEFAULT_TIMEOUT)
@@ -640,16 +640,18 @@ impl PostgresDomainMetadataStore {
 
     pub fn list_domains_with_timeout(
         &self,
-        page_size: usize,
+        page_size: i32,
         next_page_token: Option<&[u8]>,
         timeout: Duration,
     ) -> Result<MatchingDomainPage, MatchingDomainMetadataError> {
         crate::matching_postgres::outside_runtime(|| {
+            if page_size < 0 {
+                return Err(MatchingDomainMetadataError::ListDomainsMissingArgs);
+            }
             if page_size == 0 {
                 return Err(MatchingDomainMetadataError::InvalidPageSize);
             }
-            let limit = i64::try_from(page_size)
-                .map_err(|_| MatchingDomainMetadataError::InvalidPageSize)?;
+            let limit = i64::from(page_size);
             let started = Instant::now();
             let mut client = self
                 .pool
@@ -669,7 +671,7 @@ impl PostgresDomainMetadataStore {
             }
             .map_err(domain_error)?;
             transaction.commit().map_err(domain_error)?;
-            let next_page_token = if rows.len() >= page_size {
+            let next_page_token = if rows.len() >= page_size as usize {
                 rows.last().map(|row| row.get::<_, Vec<u8>>(0))
             } else {
                 None
@@ -735,7 +737,7 @@ impl crate::matching_domain_metadata::GoSqlDomainPersistence for PostgresDomainM
 
     fn list_domains(
         &self,
-        page_size: usize,
+        page_size: i32,
         page_token: Option<&[u8]>,
     ) -> Result<MatchingDomainPage, MatchingDomainMetadataError> {
         PostgresDomainMetadataStore::list_domains(self, page_size, page_token)
@@ -940,7 +942,7 @@ impl crate::matching_domain_metadata::DomainMetadataPersistence for PostgresDoma
 
     fn list_domains(
         &self,
-        page_size: usize,
+        page_size: i32,
         page_token: Option<&[u8]>,
     ) -> Result<crate::matching_domain_metadata::MatchingDomainPage, String> {
         PostgresDomainMetadataStore::list_domains(self, page_size, page_token)
