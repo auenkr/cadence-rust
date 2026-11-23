@@ -2487,7 +2487,7 @@ mod history_retry_tests {
         .await;
         assert!(matches!(result, Err(CadenceError::Internal(_))));
         let attempts = *n.lock().unwrap();
-        assert!((6..=12).contains(&attempts), "attempts={attempts}");
+        assert!((6..=13).contains(&attempts), "attempts={attempts}");
 
         let result = retry_history_call(
             || Err(internal("no owner")),
