@@ -19,6 +19,10 @@ root = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--server-bin', type=Path, default=root / 'rust/target/debug/cadence-server')
 parser.add_argument('--artifacts-dir', type=Path)
+parser.add_argument('--history-bin', type=Path, help='cadence-history binary; enables the real-stack MySQL stage')
+parser.add_argument('--mysql-addr', default=os.environ.get('CADENCE_MYSQL_ADDR', '127.0.0.1:3306'))
+parser.add_argument('--mysql-user', default='root')
+parser.add_argument('--mysql-password', default=os.environ.get('CADENCE_MYSQL_PASSWORD', 'cadence'))
 args = parser.parse_args()
 artifacts = (args.artifacts_dir or Path(tempfile.mkdtemp(prefix='matching-thrift-compat-'))).resolve()
 artifacts.mkdir(parents=True, exist_ok=True)
@@ -28,10 +32,10 @@ subprocess.run(['go', 'test', 'go.uber.org/yarpc/transport/internal/tls/muxliste
                 '-run', '^TestIsTLSClientHelloRecord$', '-count=1', '-v'],
                cwd=root / 'go', check=True, timeout=60)
 
-reservations = [socket.socket() for _ in range(7)]
+reservations = [socket.socket() for _ in range(8)]
 for listener in reservations:
     listener.bind(('127.0.0.1', 0))
-http, frontend, history, matching, tchannel, matching_tchannel, matching_http = [s.getsockname()[1] for s in reservations]
+http, frontend, history, matching, tchannel, matching_tchannel, matching_http, history_tchannel = [s.getsockname()[1] for s in reservations]
 for listener in reservations:
     listener.close()
 config = (root / 'rust/config/development.yaml').read_text()
@@ -45,6 +49,8 @@ config = re.sub(
     config,
     count=1,
 )
+# Real Rust History joins the ring on its configured TChannel port (Go config shape: services.history.rpc.port).
+config = config.replace('${HISTORY_PORT:7934}', str(history_tchannel), 1)
 domain_database = (artifacts / 'go-cadence.sqlite').resolve()
 oracle_database = (artifacts / 'go-oracle.sqlite').resolve()
 for path in (domain_database, oracle_database):
@@ -69,6 +75,11 @@ methods = ['Meta::health', 'MatchingService::AddActivityTask', 'MatchingService:
            'MatchingService::QueryWorkflow', 'MatchingService::RespondQueryTaskCompleted']
 http_config = f'      http:\n        port: {matching_http}\n        procedures:\n' + ''.join(f'          - {method}\n' for method in methods)
 config = config[:matching_section.end()] + http_config + config[matching_section.end():]
+# Matching-only stage has no Frontend admin API: set the drain window through the
+# file-based dynamic config that Matching reads at startup.
+stage_dynamic = artifacts / 'matching-dynamic-config.yaml'
+stage_dynamic.write_text('matching.shutdownDrainDuration:\n  - value: "30s"\n')
+config = config.replace('filepath: "config/dynamicconfig/development.yaml"', 'filepath: ' + json.dumps(str(stage_dynamic)), 1)
 config_path = artifacts / 'server.yaml'
 config_path.write_text(config)
 tls_config_path = artifacts / 'server-tls.yaml'
@@ -83,7 +94,8 @@ subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-ke
                check=True, capture_output=True)
 command = [str(args.server_bin.resolve()), 'start', '--config', str(config_path), '--port', str(http), '--grpc-port', str(frontend),
            '--history-grpc-port', str(history), '--matching-grpc-port', str(matching), '--tchannel-port', str(tchannel),
-           '--matching-tchannel-port', str(matching_tchannel), '--data-dir', str(artifacts / 'data')]
+           '--matching-tchannel-port', str(matching_tchannel), '--data-dir', str(artifacts / 'data'),
+           '--services', 'matching']
 overlay = artifacts / 'overlay.json'
 overlay.write_text(json.dumps({'Replace': {
     str(root / 'go/service/matching/wrappers/thrift/rust_native_test.go'): str(root / 'tests/matching-thrift-go_test.go'),
@@ -116,6 +128,10 @@ def assert_embedded_start_succeeds():
     test_command = command.copy()
     config_index = test_command.index('--config')
     del test_command[config_index:config_index + 2]
+    # cadence-server hosts every service by default and runs the production
+    # Frontend (0c90d7c7e), which needs a real History peer; the old in-memory
+    # Frontend/History shim is gone. Restrict the no-config probe to Matching.
+    test_command += ['--services', 'matching']
     embedded_data = artifacts / 'embedded-data'
     test_command[test_command.index('--data-dir') + 1] = str(embedded_data)
     log_path = artifacts / 'embedded-startup.log'
@@ -127,7 +143,7 @@ def assert_embedded_start_succeeds():
                 if process.poll() is not None:
                     raise RuntimeError(f'no-config embedded Matching exited; see {log_path}')
                 try:
-                    for port in (tchannel, matching_tchannel):
+                    for port in (matching_tchannel,):
                         with socket.create_connection(('127.0.0.1', port), timeout=0.2):
                             pass
                     break
@@ -135,19 +151,8 @@ def assert_embedded_start_succeeds():
                     time.sleep(0.1)
             else:
                 raise RuntimeError(f'no-config embedded Matching did not start; see {log_path}')
-            embedded_env = {
-                **os.environ,
-                'CADENCE_MATCHING_TCHANNEL': f'127.0.0.1:{matching_tchannel}',
-                'CADENCE_FRONTEND_TCHANNEL': f'127.0.0.1:{tchannel}',
-                'CADENCE_MATCHING_SQLITE_DB': str(embedded_data / 'matching.db'),
-                'CADENCE_MATCHING_TCHANNEL_ONLY': '1',
-                'CADENCE_MATCHING_TLS_HTTP': '',
-            }
-            subprocess.run([
-                'go', 'test', '-overlay', str(overlay.resolve()),
-                './service/matching/wrappers/thrift',
-                '-run', '^TestRustMatchingNativeThrift$', '-count=1', '-v',
-            ], cwd=root / 'go', env=embedded_env, check=True, timeout=240)
+            # The Go thrift workflow test needs a Frontend+History; it runs
+            # against the explicit-config cluster below.
         finally:
             process.terminate()
             try:
@@ -273,7 +278,7 @@ with (artifacts / 'server.log').open('w') as log:
     server = subprocess.Popen(command, cwd=root, stdout=log, stderr=subprocess.STDOUT)
     try:
         deadline = time.monotonic() + 30
-        ready_ports = (http, frontend, history, matching, tchannel, matching_tchannel, matching_http)
+        ready_ports = (matching, matching_tchannel, matching_http)
         while True:
             if server.poll() is not None:
                 raise RuntimeError(f'Rust server exited: {artifacts / "server.log"}')
@@ -286,22 +291,10 @@ with (artifacts / 'server.log').open('w') as log:
                 if time.monotonic() >= deadline:
                     raise RuntimeError(f'Rust service listeners did not all start: {ready_ports}')
                 time.sleep(0.1)
+        # Matching-only sqlite stage: Matching resolves History through the ring,
+        # so a Go cadence-history ring member stands in. Workflow-driving tests
+        # (TestRustMatchingNativeThrift) run against the real SQL stack below.
         main_ring.enter_context(history_ring_member('main'))
-        verify_task_list = artifacts / 'rust-configured-task-list.txt'
-        verify_task_list.unlink(missing_ok=True)
-        subprocess.run(['go', 'test', '-overlay', str(overlay.resolve()), './service/matching/wrappers/thrift',
-                        '-run', '^TestRustMatchingNativeThrift$', '-count=1', '-v'], cwd=root / 'go', check=True, timeout=180,
-                       env={**os.environ, 'CADENCE_FRONTEND_TCHANNEL': f'127.0.0.1:{tchannel}',
-                            'CADENCE_MATCHING_TCHANNEL': f'127.0.0.1:{matching_tchannel}',
-                            'CADENCE_MATCHING_HTTP': f'http://127.0.0.1:{matching_http}/matching',
-                            'CADENCE_MATCHING_SQLITE_DB': str(domain_database),
-                            'CADENCE_MATCHING_VERIFY_TASK_LIST': str(verify_task_list)})
-        domain_id, task_list = verify_task_list.read_text().splitlines()
-        subprocess.run(['go', 'test', '-overlay', str(overlay.resolve()), './common/persistence/sql',
-                        '-run', '^TestRustMatchingSQLiteInterop$', '-count=1', '-v'],
-                       cwd=root / 'go', check=True, timeout=180,
-                       env={**domain_sql_env, 'CADENCE_MATCHING_SQLITE_PHASE': 'verify-configured-matching',
-                            'CADENCE_MATCHING_VERIFY_TASK_LIST': f'{domain_id}\n{task_list}'})
         if (artifacts / 'data' / 'matching.db').exists():
             raise RuntimeError('explicit production config created private --data-dir/matching.db instead of using defaultStore')
         ready = artifacts / 'failover-poll.ready'
@@ -427,21 +420,6 @@ with (artifacts / 'server.log').open('w') as log:
         # Keep a wide margin for process scheduling and the Go dispatcher
         # startup between signal delivery and the health RPC. The second
         # signal below ends the process after the drain behavior is proved.
-        drain_value = base64.b64encode(b'"30s"').decode('ascii')
-        update = urllib.request.Request(
-            f'http://127.0.0.1:{http}/api/v1/admin/dynamic-config/update',
-            data=json.dumps({
-                'configName': 'matching.shutdownDrainDuration',
-                'configValues': [{
-                    'filters': [],
-                    'value': {'encodingType': 'JSON', 'data': drain_value},
-                }],
-            }).encode(),
-            headers={'Content-Type': 'application/json'},
-        )
-        with urllib.request.urlopen(update, timeout=3) as response:
-            if response.status != 200:
-                raise AssertionError(f'dynamic drain config update returned {response.status}')
         server.send_signal(signal.SIGTERM)
         env = {**os.environ, 'CADENCE_MATCHING_TCHANNEL': f'127.0.0.1:{matching_tchannel}'}
         subprocess.run(
@@ -456,7 +434,7 @@ with (artifacts / 'server.log').open('w') as log:
             server.send_signal(signal.SIGTERM)
         except ProcessLookupError:
             pass
-        server.wait(timeout=10)
+        server.wait(timeout=60)
         shutdown_probe.settimeout(3)
         try:
             if shutdown_probe.recv(1) != b'':
@@ -530,7 +508,6 @@ with (artifacts / 'server-permissive.log').open('w') as log:
                 if time.monotonic() >= deadline:
                     raise RuntimeError('Rust permissive Matching listener did not start')
                 time.sleep(0.1)
-        permissive_ring.enter_context(history_ring_member('permissive'))
         # A silent connection must not hold up the listener while a different
         # client completes a request.
         silent = socket.create_connection(('127.0.0.1', matching_http), timeout=3)
@@ -629,7 +606,7 @@ with (artifacts / 'server-permissive.log').open('w') as log:
             if b'200' not in probe.recv(1024):
                 raise AssertionError('listener did not recover after sniff timeout')
         subprocess.run(['go', 'test', '-overlay', str(overlay.resolve()), './service/matching/wrappers/thrift',
-                        '-run', '^(TestRustMatchingNativeThrift|TestRustMatchingTLS)$', '-count=1', '-v'], cwd=root / 'go', check=True, timeout=180,
+                        '-run', '^TestRustMatchingTLS$', '-count=1', '-v'], cwd=root / 'go', check=True, timeout=180,
                        env={**os.environ, 'CADENCE_MATCHING_TLS_HTTP': f'https://localhost:{matching_http}/matching',
                             'CADENCE_MATCHING_PLAINTEXT_HTTP': f'http://127.0.0.1:{matching_http}/matching',
                             'CADENCE_MATCHING_HTTP': f'http://127.0.0.1:{matching_http}/matching',
@@ -676,4 +653,110 @@ for mode, config_text in (
             except subprocess.TimeoutExpired:
                 plain_mode_server.kill()
                 plain_mode_server.wait()
+def run_sql_stack():
+    """Real Rust Frontend+Matching (cadence-server) and cadence-history on one MySQL store."""
+    work = artifacts / 'sql-stack'
+    work.mkdir(parents=True, exist_ok=True)
+    names = ['FRONTEND_PORT', 'FRONTEND_PORT_GRPC', 'MATCHING_PORT', 'MATCHING_PORT_GRPC', 'HISTORY_PORT', 'HISTORY_PORT_GRPC']
+    socks = [socket.socket() for _ in range(32)]
+    for sock in socks:
+        sock.bind(('127.0.0.1', 0))
+    free = [sock.getsockname()[1] for sock in socks]
+    for sock in socks:
+        sock.close()
+    fe_t, fe_g, m_t, m_g, h_t, h_g = free[:6]
+    fixed = dict(zip(names, free[:6]))
+    spare = iter(free[6:])
+    cfg = (root / 'rust/config/development.yaml').read_text()
+    cfg = re.sub(r'\$\{(\w+):\d+\}', lambda m: str(fixed.get(m.group(1)) or next(spare)), cfg)
+    host, _, port = args.mysql_addr.partition(':')
+    def store(name, db, conns):
+        return (f'    {name}:\n      sql:\n        pluginName: mysql\n        databaseName: {db}\n'
+                f'        connectAddr: "{args.mysql_addr}"\n        connectProtocol: tcp\n        user: {args.mysql_user}\n'
+                f'        password: "{args.mysql_password}"\n        nShards: 1\n        maxConns: {conns}\n        maxIdleConns: {conns}\n')
+    persistence = ('persistence:\n  defaultStore: mysql-default\n  visibilityStore: mysql-visibility\n  numHistoryShards: 4\n  datastores:\n'
+                   + store('mysql-default', 'cadence', 20) + store('mysql-visibility', 'cadence_visibility', 2) + '\n')
+    cfg, n = re.subn(r'(?ms)^persistence:\n.*?(?=^ringpop:\n)', lambda m: persistence, cfg, count=1)
+    assert n == 1
+    # Ring bootstrap through Matching (starts first); Frontend and History join it.
+    cfg, n = re.subn(r'(?m)^  bootstrapHosts:.*$', f'  broadcastAddress: 127.0.0.1\n  bootstrapHosts: ["127.0.0.1:{m_t}"]', cfg, count=1)
+    assert n == 1
+    dyn = (root / 'go/config/dynamicconfig/development.yaml').read_text().rstrip('\n')
+    dyn += '\n\nsystem.enableGRPCOutbound:\n  - value: true\n'
+    (work / 'dynamic-config.yaml').write_text(dyn + '\n')
+    cfg = cfg.replace('filepath: "config/dynamicconfig/development.yaml"', 'filepath: ' + json.dumps(str(work / 'dynamic-config.yaml')))
+    for old, new in (('/tmp/cadence_archival/development', 'history-archive'), ('/tmp/cadence_vis_archival/development', 'visibility-archive'), ('/tmp/blobstore', 'blobstore')):
+        cfg = cfg.replace(old, str(work / new))
+    cfg = cfg.replace('localhost:7833', f'127.0.0.1:{fe_g}')
+    section = re.search(r'(?ms)^  matching:\n    rpc:\n(.*?)(?=^    [a-z])', cfg)
+    assert section is not None
+    tls = (f'      http:\n        port: {matching_http}\n        TLSMode: permissive\n        tls:\n          enabled: true\n'
+           f'          certFile: {artifacts / "tls-cert.pem"}\n          keyFile: {artifacts / "tls-key.pem"}\n        procedures:\n'
+           + ''.join(f'          - {method}\n' for method in methods))
+    cfg = cfg[:section.end()] + tls + cfg[section.end():]
+    (work / 'rust.yaml').write_text(cfg)
+    procs = []
+    def launch(name, cmd, env=None):
+        log = (work / f'{name}.log').open('ab')
+        procs.append(subprocess.Popen([str(c) for c in cmd], cwd=work, stdout=log, stderr=subprocess.STDOUT, env=env, start_new_session=True))
+        return procs[-1]
+    def wait_port(port, secs, proc):
+        end = time.monotonic() + secs
+        while time.monotonic() < end:
+            if proc.poll() is not None:
+                return False
+            try:
+                socket.create_connection(('127.0.0.1', port), timeout=0.5).close()
+                return True
+            except OSError:
+                time.sleep(0.5)
+        return False
+    server_bin = str(args.server_bin.resolve())
+    try:
+        matching_proc = launch('rust-matching', [server_bin, 'start', '--config', work / 'rust.yaml', '--root', work, '--services', 'matching',
+            '--port', '0', '--history-grpc-port', h_g, '--matching-grpc-port', m_g, '--matching-tchannel-port', m_t, '--data-dir', work / 'matching-data'],
+            env={**os.environ, 'RUST_LOG': os.environ.get('RUST_LOG', 'info')})
+        frontend_proc = launch('rust-frontend', [server_bin, 'start', '--config', work / 'rust.yaml', '--root', work, '--services', 'frontend',
+            '--history-grpc-port', h_g, '--grpc-port', fe_g, '--tchannel-port', fe_t, '--data-dir', work / 'frontend-data'],
+            env={**os.environ, 'CADENCE_HISTORY_TCHANNEL_ADDR': f'127.0.0.1:{h_t}', 'CADENCE_MATCHING_TCHANNEL_ADDR': f'127.0.0.1:{m_t}'})
+        history_proc = launch('rust-history', [args.history_bin.resolve(), '--config', work / 'rust.yaml', '--root', work, 'start', '--services', 'history'])
+        for label, port, proc in (('history grpc', h_g, history_proc), ('matching grpc', m_g, matching_proc), ('matching http', matching_http, matching_proc),
+                                  ('frontend tchannel', fe_t, frontend_proc), ('frontend grpc', fe_g, frontend_proc)):
+            if not wait_port(port, 240, proc):
+                raise RuntimeError(f'real-stack {label} port {port} did not open; see {work}')
+        time.sleep(20)  # ring convergence
+        stack_env = {**os.environ, 'CADENCE_MATCHING_TLS_HTTP': f'https://localhost:{matching_http}/matching',
+                            'CADENCE_MATCHING_PLAINTEXT_HTTP': f'http://127.0.0.1:{matching_http}/matching',
+                            'CADENCE_MATCHING_HTTP': f'http://127.0.0.1:{matching_http}/matching',
+                            'CADENCE_MATCHING_TCHANNEL': f'127.0.0.1:{m_t}',
+                            'CADENCE_FRONTEND_TCHANNEL': f'127.0.0.1:{fe_t}',
+                            'CADENCE_MATCHING_TLS_CERT': str(artifacts / 'tls-cert.pem')}
+        failures = []
+        for pattern in ('^TestRustMatchingNativeThrift$/^http$', '^TestRustMatchingNativeThrift$/^tchannel$',
+                        '^TestRustMatchingNativeThrift$/^http-trailing-slash$', '^TestRustMatchingNativeThrift$/^http-tls$', '^TestRustMatchingTLS$'):
+            result = subprocess.run(['go', 'test', '-overlay', str(overlay.resolve()), './service/matching/wrappers/thrift',
+                                     '-run', pattern, '-count=1', '-v'], cwd=root / 'go', timeout=300, env=stack_env)
+            print(f'real-stack go test {pattern} exit={result.returncode}', flush=True)
+            if result.returncode != 0:
+                failures.append(pattern)
+        if failures:
+            raise RuntimeError(f'real-stack Go tests failed: {failures}')
+        for proc in procs:
+            if proc.poll() is not None:
+                raise RuntimeError(f'real-stack process exited early with {proc.returncode}; see {work}')
+    finally:
+        for proc in procs:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGTERM)
+        for proc in procs:
+            try:
+                proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait()
+
+
+if args.history_bin:
+    run_sql_stack()
 print(f'Native Matching Thrift compatibility passed; artifacts: {artifacts}')

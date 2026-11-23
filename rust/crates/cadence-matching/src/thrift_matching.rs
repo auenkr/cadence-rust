@@ -1004,6 +1004,39 @@ pub fn combined_router(matching: Matching) -> axum::Router {
         )
         .layer(axum::extract::DefaultBodyLimit::max(limit))
 }
+/// yarpc's HTTP inbound exposes only application headers (`Rpc-Header-<name>`,
+/// prefix stripped) through `yarpc.CallFromContext(ctx).HeaderNames()`;
+/// transport headers (Content-Length, Host, Rpc-*) are not part of the call.
+fn http_application_headers(
+    headers: &axum::http::HeaderMap,
+) -> std::collections::HashMap<String, String> {
+    headers
+        .iter()
+        .filter_map(|(name, value)| {
+            let name = name.as_str().to_ascii_lowercase();
+            let name = name.strip_prefix("rpc-header-")?.to_owned();
+            Some((name, value.to_str().ok()?.to_owned()))
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod http_application_header_tests {
+    use super::http_application_headers;
+
+    #[test]
+    fn only_rpc_header_prefixed_headers_are_kept_and_stripped() {
+        let mut h = axum::http::HeaderMap::new();
+        h.insert("Content-Length", "5".parse().unwrap());
+        h.insert("Host", "x".parse().unwrap());
+        h.insert("Rpc-Procedure", "p".parse().unwrap());
+        h.insert("Rpc-Header-X-Trace", "t1".parse().unwrap());
+        let got = http_application_headers(&h);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got.get("x-trace").map(String::as_str), Some("t1"));
+    }
+}
+
 async fn http_handler(
     axum::extract::State(matching): axum::extract::State<std::sync::Arc<Matching>>,
     headers: axum::http::HeaderMap,
@@ -1046,7 +1079,7 @@ async fn http_handler(
     let deadline = crate::yarpc::ttl_deadline(&headers, std::time::Duration::from_secs(60));
     // Go serves yarpc HTTP through the same inbound middleware: capture the
     // inbound headers for forwarding and the caller type.
-    let inbound = crate::grpc_matching::inbound_headers(&headers);
+    let inbound = http_application_headers(&headers);
     let caller_type = header(cadence_persistence::caller_type::CALLER_TYPE_HEADER);
     match tokio::time::timeout(
         deadline.saturating_duration_since(Instant::now()),
