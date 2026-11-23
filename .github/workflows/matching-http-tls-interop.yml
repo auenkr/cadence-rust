@@ -12,6 +12,16 @@ jobs:
   interop:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    services:
+      mysql:
+        image: mysql:8.0.36
+        env:
+          MYSQL_ROOT_PASSWORD: cadence
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h127.0.0.1 -uroot -pcadence"
+          --health-interval 5s --health-timeout 5s --health-retries 30
     steps:
       - uses: actions/checkout@v4
       - name: Initialize Go IDL submodule
@@ -29,22 +39,28 @@ jobs:
         run: |
           mkdir -p out/interop
           git rev-parse HEAD > out/source-sha.txt
-          printf '%s\n' 'cargo build --locked --manifest-path rust/Cargo.toml -p cadence-server' > out/build-command.txt
-          printf '%s\n' 'python3 tests/run-matching-thrift-compat.py --server-bin "$CARGO_TARGET_DIR/debug/cadence-server" --artifacts-dir out/interop' > out/interop-command.txt
+          printf '%s\n' 'cargo build --locked --manifest-path rust/Cargo.toml -p cadence-server -p cadence-history' > out/build-command.txt
+          printf '%s\n' 'python3 tests/run-matching-thrift-compat.py --server-bin "$CARGO_TARGET_DIR/debug/cadence-server" --history-bin "$CARGO_TARGET_DIR/debug/cadence-history" --artifacts-dir out/interop' > out/interop-command.txt
       - name: Build fresh Rust server
         run: |
           set +e
-          cargo build --locked --manifest-path rust/Cargo.toml -p cadence-server > out/build.log 2>&1
+          cargo build --locked --manifest-path rust/Cargo.toml -p cadence-server -p cadence-history > out/build.log 2>&1
           result=$?
           echo "$result" > out/build.exit
           if [ "$result" != 0 ]; then tail -80 out/build.log; exit "$result"; fi
           git diff --binary HEAD -- rust/Cargo.lock > out/cargo-lock.patch
-          sha256sum "$CARGO_TARGET_DIR/debug/cadence-server" > out/binary.sha256
+          sha256sum "$CARGO_TARGET_DIR/debug/cadence-server" "$CARGO_TARGET_DIR/debug/cadence-history" > out/binary.sha256
+      - name: Create MySQL schema
+        run: |
+          for db in cadence cadence_visibility; do mysql -h127.0.0.1 -uroot -pcadence -e "CREATE DATABASE IF NOT EXISTS $db"; done
+          mysql -h127.0.0.1 -uroot -pcadence cadence < go/schema/mysql/v8/cadence/schema.sql
+          mysql -h127.0.0.1 -uroot -pcadence cadence_visibility < go/schema/mysql/v8/visibility/schema.sql
       - name: Run standalone Go HTTP TLS interop
         run: |
           set +e
           python3 tests/run-matching-thrift-compat.py \
             --server-bin "$CARGO_TARGET_DIR/debug/cadence-server" \
+            --history-bin "$CARGO_TARGET_DIR/debug/cadence-history" \
             --artifacts-dir "$PWD/out/interop" > out/interop.log 2>&1
           result=$?
           echo "$result" > out/interop.exit
