@@ -1296,6 +1296,10 @@ pub fn build_workflow_api(
         grpc_port("history", "CADENCE_HISTORY_GRPC_PORT", 7834),
         grpc_port("matching", "CADENCE_MATCHING_GRPC_PORT", 7835),
     );
+    println!(
+        "Cadence frontend outbound transport to History/Matching: {:?} (system.enableGRPCOutbound)",
+        grpc_outbound.transport()
+    );
     let lookup: std::sync::Arc<dyn crate::handler_workflow::WorkflowDomainLookup> =
         std::sync::Arc::new(
             crate::handler_workflow::PersistenceWorkflowDomainLookup::new(
