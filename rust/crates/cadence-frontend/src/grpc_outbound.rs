@@ -242,8 +242,9 @@ impl GrpcOutbound {
                 Self::request("cadence-history", $p, timeout, fwd)
             };
         }
-        let st_err =
-            |s: tonic::Status| cadence_service_core::frontend_remote_grpc::error_from_status_typed(&s);
+        let st_err = |s: tonic::Status| {
+            cadence_service_core::frontend_remote_grpc::error_from_status_typed(&s)
+        };
         match method {
             "StartWorkflowExecution" => {
                 let start: ty::StartWorkflowExecutionRequest = inner(env, 20)?;
@@ -471,8 +472,9 @@ impl GrpcOutbound {
                 Self::request("cadence-matching", $p, timeout, fwd)
             };
         }
-        let st_err =
-            |s: tonic::Status| cadence_service_core::frontend_remote_grpc::error_from_status_typed(&s);
+        let st_err = |s: tonic::Status| {
+            cadence_service_core::frontend_remote_grpc::error_from_status_typed(&s)
+        };
         match method {
             "CancelOutstandingPoll" => {
                 let task_list: Option<ty::TaskList> =
