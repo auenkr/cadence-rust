@@ -684,7 +684,9 @@ pub fn respond_decision_completed_response_in(
     })
 }
 
-pub fn activity_local_dispatch_in(a: p::ActivityLocalDispatchInfo) -> tk::ActivityLocalDispatchInfo {
+pub fn activity_local_dispatch_in(
+    a: p::ActivityLocalDispatchInfo,
+) -> tk::ActivityLocalDispatchInfo {
     tk::ActivityLocalDispatchInfo {
         activity_id: a.activity_id,
         scheduled_timestamp: nanos(a.scheduled_time),

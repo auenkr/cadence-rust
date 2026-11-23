@@ -442,7 +442,9 @@ impl GrpcOutbound {
             }
             "RespondDecisionTaskCompleted" => {
                 let reply = client
-                    .respond_decision_task_completed(r!(decision_completed_request(env, domain_id)?))
+                    .respond_decision_task_completed(r!(decision_completed_request(
+                        env, domain_id
+                    )?))
                     .await
                     .map_err(st_err)?;
                 decision_completed_response(reply.into_inner()).map_err(st_err)
@@ -588,7 +590,10 @@ impl GrpcOutbound {
     }
 }
 
-fn start_workflow_request(env: &Struct, domain_id: String) -> Result<h::StartWorkflowExecutionRequest, CadenceError> {
+fn start_workflow_request(
+    env: &Struct,
+    domain_id: String,
+) -> Result<h::StartWorkflowExecutionRequest, CadenceError> {
     let start: ty::StartWorkflowExecutionRequest = inner(env, 20)?;
     let backoff = env.opt_i32(60).map_err(|e| thrift_err("backoff", e))?;
     let expiration = env.opt_i64(50).map_err(|e| thrift_err("expiration", e))?;
@@ -609,7 +614,10 @@ fn start_workflow_response(resp: h::StartWorkflowExecutionResponse) -> Struct {
     .to_thrift()
 }
 
-fn signal_with_start_request(env: &Struct, domain_id: String) -> Result<h::SignalWithStartWorkflowExecutionRequest, CadenceError> {
+fn signal_with_start_request(
+    env: &Struct,
+    domain_id: String,
+) -> Result<h::SignalWithStartWorkflowExecutionRequest, CadenceError> {
     let req: st::SignalWithStartWorkflowExecutionRequest = inner(env, 20)?;
     Ok(h::SignalWithStartWorkflowExecutionRequest {
         request: Some(cv::signal_with_start_request_out(req)),
@@ -625,7 +633,10 @@ fn signal_with_start_response(resp: h::SignalWithStartWorkflowExecutionResponse)
     .to_thrift()
 }
 
-fn reset_workflow_request(env: &Struct, domain_id: String) -> Result<h::ResetWorkflowExecutionRequest, CadenceError> {
+fn reset_workflow_request(
+    env: &Struct,
+    domain_id: String,
+) -> Result<h::ResetWorkflowExecutionRequest, CadenceError> {
     let req: ty::ResetWorkflowExecutionRequest = inner(env, 20)?;
     Ok(h::ResetWorkflowExecutionRequest {
         request: Some(cv::reset_request_out(req)),
@@ -640,7 +651,10 @@ fn reset_workflow_response(resp: h::ResetWorkflowExecutionResponse) -> Struct {
     .to_thrift()
 }
 
-fn query_workflow_request(env: &Struct, domain_id: String) -> Result<h::QueryWorkflowRequest, CadenceError> {
+fn query_workflow_request(
+    env: &Struct,
+    domain_id: String,
+) -> Result<h::QueryWorkflowRequest, CadenceError> {
     let req: tk::QueryWorkflowRequest = inner(env, 20)?;
     Ok(h::QueryWorkflowRequest {
         request: Some(cv::query_request_out(req)),
@@ -660,7 +674,10 @@ fn query_workflow_response(resp: h::QueryWorkflowResponse) -> Result<Struct, Cad
     })
 }
 
-fn heartbeat_request(env: &Struct, domain_id: String) -> Result<h::RecordActivityTaskHeartbeatRequest, CadenceError> {
+fn heartbeat_request(
+    env: &Struct,
+    domain_id: String,
+) -> Result<h::RecordActivityTaskHeartbeatRequest, CadenceError> {
     let req: tk::RecordActivityTaskHeartbeatRequest = inner(env, 20)?;
     Ok(h::RecordActivityTaskHeartbeatRequest {
         request: Some(cv::heartbeat_request_out(req)),
@@ -676,7 +693,8 @@ fn heartbeat_response(resp: h::RecordActivityTaskHeartbeatResponse) -> Struct {
 }
 
 fn envelope_string(env: &Struct, id: i16) -> Result<String, CadenceError> {
-    env.req_string(id, "").map_err(|e| thrift_err("envelope", e))
+    env.req_string(id, "")
+        .map_err(|e| thrift_err("envelope", e))
 }
 
 fn envelope_value<T: FromThrift>(env: &Struct, id: i16) -> Result<Option<T>, CadenceError> {
@@ -692,7 +710,9 @@ fn poll_mutable_state_request(
         domain_id,
         workflow_execution: envelope_value(env, 20)?.map(convert::execution_out),
         expected_next_event_id: env.i64_or_zero(30).map_err(|e| thrift_err("envelope", e))?,
-        current_branch_token: env.bytes_or_empty(40).map_err(|e| thrift_err("envelope", e))?,
+        current_branch_token: env
+            .bytes_or_empty(40)
+            .map_err(|e| thrift_err("envelope", e))?,
     })
 }
 
@@ -703,34 +723,60 @@ fn poll_mutable_state_response(v: h::PollMutableStateResponse) -> Result<Struct,
     fields.oi64(30, Some(v.next_event_id));
     fields.oi64(35, v.previous_started_event_id);
     fields.oi64(40, Some(v.last_first_event_id));
-    fields.ostruct(50, v.task_list.map(convert::task_list).transpose()?.as_ref());
-    fields.ostruct(60, v.sticky_task_list.map(convert::task_list).transpose()?.as_ref());
+    fields.ostruct(
+        50,
+        v.task_list.map(convert::task_list).transpose()?.as_ref(),
+    );
+    fields.ostruct(
+        60,
+        v.sticky_task_list
+            .map(convert::task_list)
+            .transpose()?
+            .as_ref(),
+    );
     fields.sstr(70, &v.client_library_version);
     fields.sstr(80, &v.client_feature_version);
     fields.sstr(90, &v.client_impl);
-    fields.oi32(100, convert::seconds(v.sticky_task_list_schedule_to_start_timeout)?);
+    fields.oi32(
+        100,
+        convert::seconds(v.sticky_task_list_schedule_to_start_timeout)?,
+    );
     fields.sbytes(110, &v.current_branch_token);
     if let Some(histories) = v.version_histories {
         let mut thrift = Fields::new();
         thrift.oi32(10, Some(histories.current_version_history_index));
-        let histories: Vec<_> = histories.histories.into_iter().map(|h| {
-            ty::VersionHistory {
+        let histories: Vec<_> = histories
+            .histories
+            .into_iter()
+            .map(|h| ty::VersionHistory {
                 branch_token: h.branch_token,
-                items: h.items.into_iter().map(|item| ty::VersionHistoryItem {
-                    event_id: item.event_id,
-                    version: item.version,
-                }).collect(),
-            }
-        }).collect();
+                items: h
+                    .items
+                    .into_iter()
+                    .map(|item| ty::VersionHistoryItem {
+                        event_id: item.event_id,
+                        version: item.version,
+                    })
+                    .collect(),
+            })
+            .collect();
         thrift.olist(20, &histories);
         fields.fields.push((130, Value::Struct(thrift.finish())));
     }
-    fields.oi32(140, (1..=6).contains(&v.workflow_state).then(|| v.workflow_state - 1));
-    fields.oi32(150, Some(if (1..=6).contains(&v.workflow_close_state) {
-        v.workflow_close_state
-    } else {
-        0
-    }));
+    fields.oi32(
+        140,
+        (1..=6)
+            .contains(&v.workflow_state)
+            .then(|| v.workflow_state - 1),
+    );
+    fields.oi32(
+        150,
+        Some(if (1..=6).contains(&v.workflow_close_state) {
+            v.workflow_close_state
+        } else {
+            0
+        }),
+    );
     Ok(fields.finish())
 }
 
@@ -747,19 +793,27 @@ fn decision_completed_request(
     })
 }
 
-fn decision_completed_response(v: h::RespondDecisionTaskCompletedResponse) -> Result<Struct, tonic::Status> {
+fn decision_completed_response(
+    v: h::RespondDecisionTaskCompletedResponse,
+) -> Result<Struct, tonic::Status> {
     let mut fields = Fields::new();
     if let Some(started) = v.started_response {
-        fields.fields.push((10, Value::Struct(decision_started_response(started)?)));
+        fields
+            .fields
+            .push((10, Value::Struct(decision_started_response(started)?)));
     }
-    let activities = v.activities_to_dispatch_locally.into_iter()
+    let activities = v
+        .activities_to_dispatch_locally
+        .into_iter()
         .map(|(id, activity)| (id, cv::activity_local_dispatch_in(activity)))
         .collect();
     fields.omap_str_struct(20, &Some(activities));
     Ok(fields.finish())
 }
 
-fn decision_started_response(v: h::RecordDecisionTaskStartedResponse) -> Result<Struct, tonic::Status> {
+fn decision_started_response(
+    v: h::RecordDecisionTaskStartedResponse,
+) -> Result<Struct, tonic::Status> {
     let mut fields = Fields::new();
     fields.ostruct(10, v.workflow_type.map(cv::wf_type_in).as_ref());
     fields.oi64(20, v.previous_started_event_id);
@@ -769,21 +823,51 @@ fn decision_started_response(v: h::RecordDecisionTaskStartedResponse) -> Result<
     fields.oi64(60, Some(i64::from(v.attempt)));
     fields.obool(70, v.sticky_execution_enabled);
     push_transient(&mut fields, 80, v.decision_info)?;
-    fields.ostruct(90, v.workflow_execution_task_list.map(convert::task_list).transpose()?.as_ref());
+    fields.ostruct(
+        90,
+        v.workflow_execution_task_list
+            .map(convert::task_list)
+            .transpose()?
+            .as_ref(),
+    );
     fields.oi32(100, Some(v.event_store_version));
     fields.sbytes(110, &v.branch_token);
     fields.oi64(120, convert::nanos(v.scheduled_time));
     fields.oi64(130, convert::nanos(v.started_time));
-    fields.omap_str_struct(140, &Some(v.queries.into_iter().map(|(id, query)| (id, cv::query_in(query))).collect()));
+    fields.omap_str_struct(
+        140,
+        &Some(
+            v.queries
+                .into_iter()
+                .map(|(id, query)| (id, cv::query_in(query)))
+                .collect(),
+        ),
+    );
     fields.oi64(150, Some(v.history_size));
     Ok(fields.finish())
 }
 
-fn push_transient(fields: &mut Fields, id: i16, v: Option<shared::TransientDecisionInfo>) -> Result<(), tonic::Status> {
+fn push_transient(
+    fields: &mut Fields,
+    id: i16,
+    v: Option<shared::TransientDecisionInfo>,
+) -> Result<(), tonic::Status> {
     if let Some(v) = v {
         let mut decision = Fields::new();
-        decision.ostruct(10, v.scheduled_event.map(convert::history_in::event).transpose()?.as_ref());
-        decision.ostruct(20, v.started_event.map(convert::history_in::event).transpose()?.as_ref());
+        decision.ostruct(
+            10,
+            v.scheduled_event
+                .map(convert::history_in::event)
+                .transpose()?
+                .as_ref(),
+        );
+        decision.ostruct(
+            20,
+            v.started_event
+                .map(convert::history_in::event)
+                .transpose()?
+                .as_ref(),
+        );
         fields.fields.push((id, Value::Struct(decision.finish())));
     }
     Ok(())
@@ -799,21 +883,28 @@ fn describe_workflow_request(
     })
 }
 
-fn describe_workflow_response(v: h::DescribeWorkflowExecutionResponse) -> Result<Struct, tonic::Status> {
-    Ok(cv::describe_response_in(api::DescribeWorkflowExecutionResponse {
-        execution_configuration: v.execution_configuration,
-        workflow_execution_info: v.workflow_execution_info,
-        pending_activities: v.pending_activities,
-        pending_children: v.pending_children,
-        pending_decision: v.pending_decision,
-    })?.to_thrift())
+fn describe_workflow_response(
+    v: h::DescribeWorkflowExecutionResponse,
+) -> Result<Struct, tonic::Status> {
+    Ok(
+        cv::describe_response_in(api::DescribeWorkflowExecutionResponse {
+            execution_configuration: v.execution_configuration,
+            workflow_execution_info: v.workflow_execution_info,
+            pending_activities: v.pending_activities,
+            pending_children: v.pending_children,
+            pending_decision: v.pending_decision,
+        })?
+        .to_thrift(),
+    )
 }
 
 fn ratelimit_request(env: &Struct) -> Result<h::RatelimitUpdateRequest, CadenceError> {
     let data = match env.get(10) {
         Some(Value::Struct(data)) => Some(shared::Any {
             value_type: envelope_string(data, 10)?,
-            value: data.bytes_or_empty(20).map_err(|e| thrift_err("ratelimit data", e))?,
+            value: data
+                .bytes_or_empty(20)
+                .map_err(|e| thrift_err("ratelimit data", e))?,
         }),
         None => None,
         _ => return Err(internal("invalid ratelimit data")),
@@ -865,14 +956,33 @@ fn poll_decision_response(v: m::PollForDecisionTaskResponse) -> Result<Struct, t
     fields.obool(70, v.sticky_execution_enabled);
     fields.ostruct(80, v.query.map(cv::query_in).as_ref());
     push_transient(&mut fields, 90, v.decision_info)?;
-    fields.ostruct(100, v.workflow_execution_task_list.map(convert::task_list).transpose()?.as_ref());
+    fields.ostruct(
+        100,
+        v.workflow_execution_task_list
+            .map(convert::task_list)
+            .transpose()?
+            .as_ref(),
+    );
     fields.oi32(110, Some(v.event_store_version));
     fields.sbytes(120, &v.branch_token);
     fields.oi64(130, convert::nanos(v.scheduled_time));
     fields.oi64(140, convert::nanos(v.started_time));
-    fields.omap_str_struct(150, &Some(v.queries.into_iter().map(|(id, query)| (id, cv::query_in(query))).collect()));
+    fields.omap_str_struct(
+        150,
+        &Some(
+            v.queries
+                .into_iter()
+                .map(|(id, query)| (id, cv::query_in(query)))
+                .collect(),
+        ),
+    );
     fields.oi64(160, Some(v.total_history_bytes));
-    fields.ostruct(170, v.auto_config_hint.map(convert::auto_config_hint_in).as_ref());
+    fields.ostruct(
+        170,
+        v.auto_config_hint
+            .map(convert::auto_config_hint_in)
+            .as_ref(),
+    );
     let mut reply = fields.finish();
     push_poll_feedback(&mut reply, v.partition_config, v.load_balancer_hints);
     Ok(reply)
@@ -897,7 +1007,8 @@ fn poll_activity_response(v: m::PollForActivityTaskResponse) -> Result<Struct, t
         workflow_domain: v.workflow_domain,
         header: v.header,
         auto_config_hint: v.auto_config_hint,
-    })?.to_thrift();
+    })?
+    .to_thrift();
     push_poll_feedback(&mut reply, v.partition_config, v.load_balancer_hints);
     Ok(reply)
 }
@@ -907,6 +1018,7 @@ fn poll_activity_response(v: m::PollForActivityTaskResponse) -> Result<Struct, t
 const POLL_PARTITION_CONFIG: i16 = -1;
 const POLL_LOAD_BALANCER_HINTS: i16 = -2;
 
+#[allow(deprecated)]
 fn push_poll_feedback(
     reply: &mut Struct,
     config: Option<m::TaskListPartitionConfig>,
@@ -914,29 +1026,46 @@ fn push_poll_feedback(
 ) {
     if let Some(config) = config {
         let partitions = |map: HashMap<i32, m::TaskListPartition>| {
-            Value::Map(map.into_iter().map(|(id, partition)| {
-                (Value::I32(id), Value::List(partition.isolation_groups.into_iter()
-                    .map(|group| Value::Bytes(group.into_bytes()))
-                    .collect()))
-            }).collect())
+            Value::Map(
+                map.into_iter()
+                    .map(|(id, partition)| {
+                        (
+                            Value::I32(id),
+                            Value::List(
+                                partition
+                                    .isolation_groups
+                                    .into_iter()
+                                    .map(|group| Value::Bytes(group.into_bytes()))
+                                    .collect(),
+                            ),
+                        )
+                    })
+                    .collect(),
+            )
         };
-        reply.fields.push((POLL_PARTITION_CONFIG, Value::Struct(Struct {
-            fields: vec![
-                (10, Value::I64(config.version)),
-                (20, Value::I32(config.num_read_partitions)),
-                (30, partitions(config.read_partitions)),
-                (40, Value::I32(config.num_write_partitions)),
-                (50, partitions(config.write_partitions)),
-            ],
-        })));
+        reply.fields.push((
+            POLL_PARTITION_CONFIG,
+            Value::Struct(Struct {
+                fields: vec![
+                    (10, Value::I64(config.version)),
+                    (20, Value::I32(config.num_read_partitions)),
+                    (30, partitions(config.read_partitions)),
+                    (40, Value::I32(config.num_write_partitions)),
+                    (50, partitions(config.write_partitions)),
+                ],
+            }),
+        ));
     }
     if let Some(hints) = hints {
-        reply.fields.push((POLL_LOAD_BALANCER_HINTS, Value::Struct(Struct {
-            fields: vec![
-                (10, Value::I64(hints.backlog_count)),
-                (20, Value::F64(hints.rate_per_second)),
-            ],
-        })));
+        reply.fields.push((
+            POLL_LOAD_BALANCER_HINTS,
+            Value::Struct(Struct {
+                fields: vec![
+                    (10, Value::I64(hints.backlog_count)),
+                    (20, Value::F64(hints.rate_per_second)),
+                ],
+            }),
+        ));
     }
 }
 
@@ -951,17 +1080,22 @@ pub(crate) fn poll_feedback(
     let config = match reply.get(POLL_PARTITION_CONFIG) {
         Some(Value::Struct(config)) => {
             let partitions = |field| match config.get(field) {
-                Some(Value::Map(entries)) => entries.iter().filter_map(|(id, groups)| {
-                    match (id, groups) {
-                        (Value::I32(id), Value::List(groups)) => Some((*id, groups.iter()
-                            .filter_map(|group| match group {
-                                Value::Bytes(bytes) => String::from_utf8(bytes.clone()).ok(),
-                                _ => None,
-                            })
-                            .collect())),
+                Some(Value::Map(entries)) => entries
+                    .iter()
+                    .filter_map(|(id, groups)| match (id, groups) {
+                        (Value::I32(id), Value::List(groups)) => Some((
+                            *id,
+                            groups
+                                .iter()
+                                .filter_map(|group| match group {
+                                    Value::Bytes(bytes) => String::from_utf8(bytes.clone()).ok(),
+                                    _ => None,
+                                })
+                                .collect(),
+                        )),
                         _ => None,
-                    }
-                }).collect(),
+                    })
+                    .collect(),
                 _ => HashMap::new(),
             };
             Some(PartitionConfig::from_parts(
@@ -1059,7 +1193,16 @@ mod tests {
         env.fields.extend([
             (30, Value::I64(42)),
             (40, Value::Bytes(vec![1, 2])),
-            (50, Value::Struct(ty::VersionHistoryItem { event_id: 17, version: 3 }.to_thrift())),
+            (
+                50,
+                Value::Struct(
+                    ty::VersionHistoryItem {
+                        event_id: 17,
+                        version: 3,
+                    }
+                    .to_thrift(),
+                ),
+            ),
         ]);
         let req = poll_mutable_state_request(&env, domain_of(&env).unwrap()).unwrap();
         assert_eq!(req.domain_id, "domain-id");
@@ -1072,18 +1215,30 @@ mod tests {
                 current_version_history_index: 0,
                 histories: vec![ty::VersionHistory {
                     branch_token: vec![1, 2],
-                    items: vec![ty::VersionHistoryItem { event_id: 17, version: 3 }],
+                    items: vec![ty::VersionHistoryItem {
+                        event_id: 17,
+                        version: 3,
+                    }],
                 }],
             })),
             workflow_state: 2,
             ..Default::default()
-        }).unwrap();
-        assert_eq!(reply.opt_struct::<ty::WorkflowExecution>(10).unwrap(), Some(execution));
+        })
+        .unwrap();
+        assert_eq!(
+            reply.opt_struct::<ty::WorkflowExecution>(10).unwrap(),
+            Some(execution)
+        );
         assert_eq!(reply.opt_i64(30).unwrap(), Some(42));
         assert_eq!(reply.opt_i64(35).unwrap(), Some(0));
         assert_eq!(reply.bytes_or_empty(110).unwrap(), vec![1, 2]);
-        let Value::Struct(histories) = reply.get(130).unwrap() else { panic!("version histories missing") };
-        let histories = histories.opt_list::<ty::VersionHistory>(20).unwrap().unwrap();
+        let Value::Struct(histories) = reply.get(130).unwrap() else {
+            panic!("version histories missing")
+        };
+        let histories = histories
+            .opt_list::<ty::VersionHistory>(20)
+            .unwrap()
+            .unwrap();
         assert_eq!(histories[0].items[0].version, 3);
         assert_eq!(reply.opt_i32(140).unwrap(), Some(1));
         assert_eq!(reply.opt_i32(150).unwrap(), Some(0));
@@ -1107,16 +1262,25 @@ mod tests {
                 scheduled_time: Some(convert::timestamp_from_nanos(123456789)),
                 ..Default::default()
             }),
-            activities_to_dispatch_locally: HashMap::from([("activity".into(), api::ActivityLocalDispatchInfo {
-                task_token: complete.task_token,
-                ..Default::default()
-            })]),
-        }).unwrap();
-        let Value::Struct(started) = reply.get(10).unwrap() else { panic!("started response missing") };
+            activities_to_dispatch_locally: HashMap::from([(
+                "activity".into(),
+                api::ActivityLocalDispatchInfo {
+                    task_token: complete.task_token,
+                    ..Default::default()
+                },
+            )]),
+        })
+        .unwrap();
+        let Value::Struct(started) = reply.get(10).unwrap() else {
+            panic!("started response missing")
+        };
         assert_eq!(started.opt_i64(30).unwrap(), Some(7));
         assert_eq!(started.opt_i64(60).unwrap(), Some(2));
         assert_eq!(started.opt_i64(120).unwrap(), Some(123456789));
-        let dispatch = reply.opt_map_str::<tk::ActivityLocalDispatchInfo>(20).unwrap().unwrap();
+        let dispatch = reply
+            .opt_map_str::<tk::ActivityLocalDispatchInfo>(20)
+            .unwrap()
+            .unwrap();
         assert_eq!(dispatch["activity"].task_token, vec![8, 9]);
     }
 
@@ -1139,25 +1303,39 @@ mod tests {
                 ..Default::default()
             }),
             ..Default::default()
-        }).unwrap();
+        })
+        .unwrap();
         let described = st::DescribeWorkflowExecutionResponse::from_thrift(&reply)
-            .unwrap().workflow_execution_info.unwrap();
+            .unwrap()
+            .workflow_execution_info
+            .unwrap();
         assert_eq!(described.execution, Some(execution));
         assert_eq!(described.start_time, Some(123456789));
     }
 
     #[test]
     fn ratelimit_mapping_round_trip() {
-        let env = Struct { fields: vec![(10, Value::Struct(Struct { fields: vec![
-            (10, Value::Bytes(b"usage".to_vec())),
-            (20, Value::Bytes(vec![0, 255])),
-        ] }))] };
+        let env = Struct {
+            fields: vec![(
+                10,
+                Value::Struct(Struct {
+                    fields: vec![
+                        (10, Value::Bytes(b"usage".to_vec())),
+                        (20, Value::Bytes(vec![0, 255])),
+                    ],
+                }),
+            )],
+        };
         let req = ratelimit_request(&env).unwrap();
         assert_eq!(req.data.as_ref().unwrap().value_type, "usage");
-        assert_eq!(ratelimit_response(h::RatelimitUpdateResponse { data: req.data }), env);
+        assert_eq!(
+            ratelimit_response(h::RatelimitUpdateResponse { data: req.data }),
+            env
+        );
     }
 
     #[test]
+    #[allow(deprecated)]
     fn decision_poll_mapping_round_trip() {
         let mut env = envelope(&tk::PollForDecisionTaskRequest {
             identity: "worker".into(),
@@ -1184,9 +1362,12 @@ mod tests {
             partition_config: Some(m::TaskListPartitionConfig {
                 version: 5,
                 num_read_partitions: 2,
-                read_partitions: HashMap::from([(0, m::TaskListPartition {
-                    isolation_groups: vec!["group".into()],
-                })]),
+                read_partitions: HashMap::from([(
+                    0,
+                    m::TaskListPartition {
+                        isolation_groups: vec!["group".into()],
+                    },
+                )]),
                 ..Default::default()
             }),
             auto_config_hint: Some(api::AutoConfigHint {
@@ -1194,12 +1375,27 @@ mod tests {
                 poller_wait_time_in_ms: 37,
             }),
             ..Default::default()
-        }).unwrap();
+        })
+        .unwrap();
         assert!(reply.get(20).is_none()); // Empty poll still carries feedback and auto-config.
         assert_eq!(reply.opt_i64(40).unwrap(), Some(0));
         assert_eq!(reply.opt_i64(51).unwrap(), Some(2));
-        assert_eq!(reply.opt_struct::<tk::WorkflowQuery>(80).unwrap().unwrap().query_args, vec![1, 2]);
-        assert_eq!(reply.opt_struct::<ty::AutoConfigHint>(170).unwrap().unwrap().poller_wait_time_in_ms, 37);
+        assert_eq!(
+            reply
+                .opt_struct::<tk::WorkflowQuery>(80)
+                .unwrap()
+                .unwrap()
+                .query_args,
+            vec![1, 2]
+        );
+        assert_eq!(
+            reply
+                .opt_struct::<ty::AutoConfigHint>(170)
+                .unwrap()
+                .unwrap()
+                .poller_wait_time_in_ms,
+            37
+        );
         let (config, _) = poll_feedback(&reply);
         let config = config.unwrap();
         assert_eq!(config.version, 5);
@@ -1237,11 +1433,17 @@ mod tests {
             task_token: proto.task_token,
             activity_id: proto.activity_id,
             input: proto.input,
-            scheduled_time: activity.scheduled_timestamp.map(convert::timestamp_from_nanos),
+            scheduled_time: activity
+                .scheduled_timestamp
+                .map(convert::timestamp_from_nanos),
             heartbeat_timeout: proto.heartbeat_timeout,
-            load_balancer_hints: Some(m::LoadBalancerHints { backlog_count: 3, rate_per_second: 1.5 }),
+            load_balancer_hints: Some(m::LoadBalancerHints {
+                backlog_count: 3,
+                rate_per_second: 1.5,
+            }),
             ..Default::default()
-        }).unwrap();
+        })
+        .unwrap();
         let decoded = tk::PollForActivityTaskResponse::from_thrift(&reply).unwrap();
         assert_eq!(decoded, activity);
         let (_, hints) = poll_feedback(&reply);
@@ -1263,7 +1465,12 @@ mod tests {
         let reply = start_workflow_response(h::StartWorkflowExecutionResponse {
             run_id: req.request.unwrap().workflow_id,
         });
-        assert_eq!(ty::StartWorkflowExecutionResponse::from_thrift(&reply).unwrap().run_id, "workflow");
+        assert_eq!(
+            ty::StartWorkflowExecutionResponse::from_thrift(&reply)
+                .unwrap()
+                .run_id,
+            "workflow"
+        );
     }
 
     #[test]
@@ -1278,15 +1485,23 @@ mod tests {
         let request = req.request.unwrap();
         assert_eq!(request.signal_name, "signal");
         let reply = signal_with_start_response(h::SignalWithStartWorkflowExecutionResponse {
-            run_id: request.workflow_id,
+            run_id: request.start_request.unwrap().workflow_id,
         });
-        assert_eq!(ty::StartWorkflowExecutionResponse::from_thrift(&reply).unwrap().run_id, "workflow");
+        assert_eq!(
+            ty::StartWorkflowExecutionResponse::from_thrift(&reply)
+                .unwrap()
+                .run_id,
+            "workflow"
+        );
     }
 
     #[test]
     fn existing_reset_workflow_mapping_round_trip() {
         let env = envelope(&ty::ResetWorkflowExecutionRequest {
-            workflow_execution: Some(ty::WorkflowExecution { workflow_id: "workflow".into(), run_id: "run".into() }),
+            workflow_execution: Some(ty::WorkflowExecution {
+                workflow_id: "workflow".into(),
+                run_id: "run".into(),
+            }),
             decision_finish_event_id: 5,
             ..Default::default()
         });
@@ -1297,7 +1512,12 @@ mod tests {
         let reply = reset_workflow_response(h::ResetWorkflowExecutionResponse {
             run_id: request.workflow_execution.unwrap().run_id,
         });
-        assert_eq!(ty::ResetWorkflowExecutionResponse::from_thrift(&reply).unwrap().run_id, "run");
+        assert_eq!(
+            ty::ResetWorkflowExecutionResponse::from_thrift(&reply)
+                .unwrap()
+                .run_id,
+            "run"
+        );
     }
 
     #[test]
@@ -1316,8 +1536,16 @@ mod tests {
         let reply = query_workflow_response(h::QueryWorkflowResponse {
             query_result: query.query_args,
             query_rejected: None,
-        }).unwrap();
-        assert_eq!(reply.opt_struct::<tk::QueryWorkflowResponse>(10).unwrap().unwrap().query_result, vec![1, 2]);
+        })
+        .unwrap();
+        assert_eq!(
+            reply
+                .opt_struct::<tk::QueryWorkflowResponse>(10)
+                .unwrap()
+                .unwrap()
+                .query_result,
+            vec![1, 2]
+        );
     }
 
     #[test]
@@ -1331,7 +1559,11 @@ mod tests {
         let reply = heartbeat_response(h::RecordActivityTaskHeartbeatResponse {
             cancel_requested: req.request.unwrap().task_token == vec![1, 2],
         });
-        assert!(tk::RecordActivityTaskHeartbeatResponse::from_thrift(&reply).unwrap().cancel_requested);
+        assert!(
+            tk::RecordActivityTaskHeartbeatResponse::from_thrift(&reply)
+                .unwrap()
+                .cancel_requested
+        );
     }
 
     #[tokio::test]
