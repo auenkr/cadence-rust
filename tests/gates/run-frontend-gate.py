@@ -112,10 +112,11 @@ if args.es_url:
     assert 'value: "db"' in dyn
     dyn = dyn.replace('value: "db"', 'value: "es"')
 # development.yaml already sets system.minRetentionDays=0 and system.workflowDeletionJitterRange=1 (retention-0 archival scenario).
+go_dyn = dyn
 if args.rust_outbound == 'tchannel':
     # Whole cluster (Go services too, as Go would be configured) uses TChannel/Thrift outbound.
-    dyn += ('' if dyn.endswith('\n') else '\n') + '\nsystem.enableGRPCOutbound:\n  - value: false\n'
-(work / 'dynamic-config.yaml').write_text(dyn)
+    go_dyn = dyn + ('' if dyn.endswith('\n') else '\n') + '\nsystem.enableGRPCOutbound:\n  - value: false\n'
+(work / 'dynamic-config.yaml').write_text(go_dyn)
 rust_dyn = dyn
 isolation_poll_seconds = 2
 if plugin in ('mysql', 'postgres'):
