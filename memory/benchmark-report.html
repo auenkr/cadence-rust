@@ -1,0 +1,180 @@
+<!doctype html><html><head><meta charset="utf-8">
+<title>Cadence Rust vs Go Benchmark</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@500;700&display=swap">
+<style>
+/* Layout: single reading column, summary verdicts first, then per-metric charts, then raw tables and caveats */
+:root{--bg:transparent;--panel:var(--card);--fg:var(--foreground);--muted:var(--muted-foreground);--line:var(--border);--go:var(--chart-1);--rust:var(--chart-2);--good:var(--success);--warn:var(--warning);--bad:var(--destructive);--display:var(--font-sans);--body:var(--font-sans);--mono:var(--font-mono)}
+body{color:var(--fg);font-family:var(--body);font-size:15px;line-height:1.55}
+.wrap{max-width:980px;margin:0 auto;padding-block:32px 64px;display:flex;flex-direction:column;gap:36px}
+h1,h2{font-family:var(--display);text-wrap:balance;margin:0}
+h1{font-size:2rem;line-height:1.15}
+h2{font-size:1.3rem}
+p{margin:0;max-width:68ch}
+.meta{color:var(--muted);font-size:.85rem;font-family:var(--mono)}
+.legend{display:flex;gap:18px;font-size:.85rem;color:var(--muted);flex-wrap:wrap}
+.sw{display:inline-block;width:12px;height:12px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+section{display:flex;flex-direction:column;gap:14px}
+.verdicts{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
+.v{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.v h3{margin:0;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.v ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px}
+.v.rust h3{color:var(--rust)} .v.go h3{color:var(--go)}
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px}
+.chart{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;min-width:0}
+.chart h3{margin:0 0 4px;font-size:.95rem}
+.chart .sub{font-size:.8rem;color:var(--muted)}
+svg{display:block;width:100%;height:auto}
+svg text{font-family:var(--mono);font-size:11px;fill:var(--muted)}
+svg .val{fill:var(--fg)}
+.tbl{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:8px}
+table{border-collapse:collapse;width:100%;font-size:.85rem;font-variant-numeric:tabular-nums}
+th,td{padding:7px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th:first-child,td:first-child,th:nth-child(2),td:nth-child(2){text-align:left}
+th{font-weight:600;color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.04em}
+tr.ratio td{font-weight:600}
+.g{color:var(--good)} .b{color:var(--bad)} .n{color:var(--muted)}
+code{font-family:var(--mono);font-size:.85em}
+a{color:var(--go)}
+</style>
+</head><body>
+
+<div class="wrap">
+<header style="display:flex;flex-direction:column;gap:10px">
+  <h1>Cadence Rust vs Go benchmark</h1>
+  <p><b>Latest (2026-11-24):</b> with all three services in Rust, throughput is 1.04×, 1.46× and 2.65× Go at 1, 16 and 64 concurrent workflows.</p>
+  <p>Earlier open-loop rerun (lower sections), 2026-11-23, on master <code>efd0f6baf</code> (includes rate limiter, caller-type and header forwarding, shard pump changes). Each lane replaces one Go service with its Rust port (or all of them in "All") and drives SDK workflows at a fixed rate. Values are medians over 3 alternating Go/Rust pairs, 10 s warmup + 60 s measurement, MySQL on tmpfs, fresh Rust builds. Runs on EPYC 7763 runners were rejected as noisy.</p>
+  <div class="meta">workflow sdk-matching-benchmark.yml · 0 errors in every arm · lower is better for every metric below</div>
+  <div class="legend"><span><span class="sw" style="background:var(--go)"></span>Go</span><span><span class="sw" style="background:var(--rust)"></span>Rust</span></div>
+</header>
+
+<section id="latest-closed-loop">
+  <h2>Latest: all three services in Rust, 2026-11-24</h2>
+  <p>Master <code>eac7234cc</code> (fat LTO, shared MySQL pool within maxConns, History cache index, shard write-lock ordering, TCP_NODELAY, memory tuning, fewer blob copies). Closed-loop paired run: Frontend, Matching and History in Rust vs Go, Go Worker in both, 5 interleaved reps × 1000 workflows, medians. <a href="https://github.com/auenkr/cadence-rust/actions/runs/45408864439">Run 45408864439</a>.</p>
+  <div class="meta">Machine: AMD EPYC 9V45, 4 vCPU, 15 GiB, Ubuntu 26.04.1 · each service 1 CPU / 1400 MiB · mysql:8.0 1.5 CPU / 1800 MiB</div>
+  <svg viewBox="0 0 360 140" role="img" aria-label="Throughput Go vs Rust" style="max-width:520px;width:100%"><text x="0" y="26" font-size="12" fill="var(--fg)">c1</text><rect x="40" y="10" width="82" height="14" fill="var(--go)" rx="2"/><text x="126" y="21" font-size="11" fill="var(--fg)">24.3</text><rect x="40" y="27" width="85" height="14" fill="var(--rust)" rx="2"/><text x="129" y="38" font-size="11" fill="var(--fg)">25.2</text><text x="0" y="70" font-size="12" fill="var(--fg)">c16</text><rect x="40" y="54" width="179" height="14" fill="var(--go)" rx="2"/><text x="223" y="65" font-size="11" fill="var(--fg)">52.9</text><rect x="40" y="71" width="261" height="14" fill="var(--rust)" rx="2"/><text x="305" y="82" font-size="11" fill="var(--fg)">77.4</text><text x="0" y="114" font-size="12" fill="var(--fg)">c64</text><rect x="40" y="98" width="85" height="14" fill="var(--go)" rx="2"/><text x="129" y="109" font-size="11" fill="var(--fg)">25.2</text><rect x="40" y="115" width="226" height="14" fill="var(--rust)" rx="2"/><text x="270" y="126" font-size="11" fill="var(--fg)">66.9</text></svg>
+  <p class="meta">Throughput in workflows/s (higher is better), by number of concurrent workflows.</p>
+  <div style="overflow-x:auto"><table><thead><tr><th>Concurrency</th><th>Go wf/s</th><th>Rust wf/s</th><th>Speedup</th><th>Go p50/p95/p99 ms</th><th>Rust p50/p95/p99 ms</th><th>History CPU s (Go → Rust)</th><th>History mem Δ</th></tr></thead><tbody><tr><td>1</td><td>24.3</td><td>25.2</td><td><b>1.04×</b></td><td>34 / 92 / 109</td><td>24 / 101 / 110</td><td>14.8 → 6.1</td><td>+10.4 MiB</td></tr><tr><td>16</td><td>52.9</td><td>77.4</td><td><b>1.46×</b></td><td>308 / 416 / 451</td><td>205 / 299 / 332</td><td>14.3 → 9.1</td><td>+1.5 MiB</td></tr><tr><td>64</td><td>25.2</td><td>66.9</td><td><b>2.65×</b></td><td>2853 / 3796 / 4021</td><td>955 / 1315 / 1451</td><td>37.4 → 10.8</td><td>+12.1 MiB</td></tr></tbody></table></div>
+  <p>Frontend and Matching also use less CPU and 8–11 MiB less memory in Rust at every level. Concurrency 1 is capped by the per-shard transfer-queue limit (20/s), shared with Go. Today's changes alone have no same-runner measurement yet (three-arm run 45446890614 pending).</p>
+</section>
+
+<h2 style="margin-top:2rem">Earlier: open-loop lanes, 2026-11-23</h2>
+<section>
+  <h2>Verdict</h2>
+  <div class="verdicts">
+    <div class="v rust"><h3>Where Rust wins</h3><ul>
+      <li>CPU: 18–47% less in every lane (History 0.56×, All 40/s 0.53×).</li>
+      <li>Memory: 12–39% less RSS (Matching 0.62×).</li>
+      <li>p99 lower in every lane (0.88–0.94× at 25/s).</li>
+      <li>At 40/s Go p99 is 1158 ms; Rust stays at 107 ms.</li>
+      <li>13–16% fewer MySQL queries when History is Rust.</li>
+    </ul></div>
+    <div class="v go"><h3>Where Go is close</h3><ul>
+      <li>No lane where Go is better on p50, p99, CPU or memory.</li>
+      <li>Matching p50: Rust 33.6 vs Go 34.4 ms (0.98×, noise).</li>
+      <li>Matching / Frontend MySQL load: identical (1.00×).</li>
+      <li>Matching CPU gap is the smallest (0.82×).</li>
+    </ul></div>
+    <div class="v"><h3>Throughput</h3><ul>
+      <li>At 25/s both keep up (≈25 compl/s).</li>
+      <li>At 40/s: Rust 39.95/s, Go 39.77/s on the accepted run; on 5 other runners the Go arm could not sustain 40 starts/s and timed out.</li>
+    </ul></div>
+  </div>
+</section>
+
+<section>
+  <h2>Rust ÷ Go ratio per lane</h2>
+  <p class="sub" style="color:var(--muted);font-size:.9rem">Bars left of 1.0 mean Rust is lower (better). Green: Rust better by more than 5%. Amber: within ±5%.</p>
+  <div class="chart"><svg id="ratio" role="img" aria-label="Rust to Go ratio chart"></svg></div>
+</section>
+
+<section>
+  <h2>Absolute values</h2>
+  <div class="charts" id="abs"></div>
+</section>
+
+<section>
+  <h2>Full results</h2>
+  <div class="tbl"><table id="tbl"></table></div>
+</section>
+
+<section>
+  <h2>Trend versus 2026-11-21</h2>
+  <div class="tbl"><table>
+    <tr><th>Lane</th><th>p99 R/Go</th><th>CPU R/Go</th><th>RSS R/Go</th><th>Rust p99 ms</th></tr>
+    <tr><td>History 25</td><td>0.91 → 0.89</td><td>0.63 → 0.56</td><td>0.88 → 0.88</td><td>104.3 → 103.2</td></tr>
+    <tr><td>Matching 25</td><td>0.96 → 0.94</td><td>0.87 → 0.82</td><td>0.62 → 0.62</td><td>108.2 → 104.9</td></tr>
+    <tr><td>Frontend 25</td><td>1.03 → 0.88</td><td>0.58 → 0.63</td><td>0.69 → 0.69</td><td>112.4 → 124.9</td></tr>
+    <tr><td>All 25</td><td>0.65 → 0.88</td><td>0.57 → 0.63</td><td>0.77 → 0.75</td><td>104.0 → 102.6</td></tr>
+    <tr><td>All 40</td><td>0.19 → 0.09</td><td>0.53 → 0.53</td><td>0.75 → 0.74</td><td>107.6 → 106.9</td></tr>
+  </table></div>
+  <p>Rust p99 stays at 103–125 ms in every lane. The Frontend and All 25 lanes ran on a different runner type (EPYC 9V74) than last time, which explains most ratio shifts.</p>
+</section>
+
+<section>
+  <h2>Caveats</h2>
+  <p>GitHub runners vary in CPU model, so only same-runner Go/Rust pairs are compared. History and Matching ran on EPYC 9V45, Frontend and All 25 on EPYC 9V74, All 40 on Xeon 6975P-C. One Matching run on EPYC 7763 was rejected.</p>
+  <p class="meta">Source: memory/evidence/bench-rerun-20261123.md</p>
+</section>
+</div>
+
+<script>
+const L=[
+ {n:"History 25",go:{p50:41.9,p99:115.5,cpu:24.32,rss:154,q:2085},ru:{p50:30.4,p99:103.2,cpu:13.50,rss:135,q:1804},cg:24.98,cr:25.00},
+ {n:"Matching 25",go:{p50:34.4,p99:111.9,cpu:3.92,rss:99,q:2082},ru:{p50:33.6,p99:104.9,cpu:3.21,rss:61,q:2080},cg:24.98,cr:24.98},
+ {n:"Frontend 25",go:{p50:63.2,p99:141.4,cpu:9.65,rss:105,q:2065},ru:{p50:59.5,p99:124.9,cpu:6.05,rss:72,q:2067},cg:24.98,cr:24.98},
+ {n:"All 25",go:{p50:54.7,p99:116.1,cpu:39.97,rss:364,q:2065},ru:{p50:33.5,p99:102.6,cpu:25.33,rss:274,q:1779},cg:24.98,cr:25.00},
+ {n:"All 40",go:{p50:97.7,p99:1157.7,cpu:44.77,rss:378,q:3360},ru:{p50:75.0,p99:106.9,cpu:23.85,rss:281,q:2837},cg:39.77,cr:39.95}];
+const M=[["p50","p50 latency","ms"],["p99","p99 latency","ms"],["cpu","CPU of replaced service(s)","CPU s"],["rss","Peak memory of replaced service(s)","MiB"],["q","MySQL queries","q/s"]];
+const NS="http://www.w3.org/2000/svg";
+const el=(t,a,p)=>{const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);p&&p.appendChild(e);return e};
+const txt=(p,x,y,s,a={})=>{const t=el("text",Object.assign({x,y},a),p);t.textContent=s;return t};
+const col=r=>r<0.95?"var(--good)":r<=1.05?"var(--warn)":"var(--bad)";
+
+// ratio chart: rows = lanes, each row 5 metric bars on a 0..1.2 scale
+(function(){
+ const s=document.getElementById("ratio"),W=900,lab=110,row=20,gap=16,top=26,max=1.2;
+ const H=top+L.length*(M.length*row+gap)+10;s.setAttribute("viewBox",`0 0 ${W} ${H}`);
+ const x=v=>lab+70+(W-lab-110)*Math.min(v,max)/max;
+ [0,0.25,0.5,0.75,1].forEach(t=>{el("line",{x1:x(t),x2:x(t),y1:top-6,y2:H-6,stroke:"var(--line)","stroke-width":t===1?2:1},s);txt(s,x(t),top-10,t.toFixed(2),{"text-anchor":"middle"})});
+ let y=top;
+ L.forEach(l=>{txt(s,0,y+12,l.n,{class:"val","font-weight":"600"});
+  M.forEach(([k,lbl])=>{const r=l.ru[k]/l.go[k];
+   txt(s,lab,y+13,k==="q"?"MySQL":k==="rss"?"RSS":k==="cpu"?"CPU":k);
+   el("rect",{x:x(0),y:y+3,width:Math.max(1,x(r)-x(0)),height:row-7,fill:col(r),rx:2},s);
+   txt(s,x(r)+6,y+13,r.toFixed(2)+"×",{class:"val"});y+=row});
+  y+=gap});
+})();
+
+// absolute grouped bars per metric
+(function(){
+ const box=document.getElementById("abs");
+ M.forEach(([k,lbl,u])=>{
+  const c=document.createElement("div");c.className="chart";
+  c.innerHTML=`<h3>${lbl}</h3><div class="sub">${u}, lower is better${k==="p99"?" · All 40 Go bar clipped":""}</div>`;
+  const s=el("svg",{viewBox:"0 0 420 230",role:"img","aria-label":lbl},c);box.appendChild(c);
+  const vals=L.flatMap(l=>[l.go[k],l.ru[k]]);let max=Math.max(...vals);
+  if(k==="p99")max=220;
+  const base=195,h=160,bw=24,gx=78;
+  for(let i=0;i<=4;i++){const yv=base-h*i/4;el("line",{x1:30,x2:415,y1:yv,y2:yv,stroke:"var(--line)"},s);txt(s,26,yv+4,(max*i/4).toFixed(max<20?1:0),{"text-anchor":"end"})}
+  L.forEach((l,i)=>{const x0=40+i*gx;
+   [["go",l.go[k]],["ru",l.ru[k]]].forEach(([a,v],j)=>{const vh=Math.min(v,max)/max*h;
+    el("rect",{x:x0+j*(bw+3),y:base-vh,width:bw,height:vh,fill:a==="go"?"var(--go)":"var(--rust)",rx:2},s);
+    txt(s,x0+j*(bw+3)+bw/2,base-vh-4,v>max?Math.round(v)+"↑":(v<20?v.toFixed(1):Math.round(v)),{"text-anchor":"middle",class:"val","font-size":"9.5"})});
+   txt(s,x0+bw+1,base+14,l.n.replace(" 25","").replace(" 40",""),{"text-anchor":"middle"});
+   txt(s,x0+bw+1,base+27,l.n.endsWith("40")?"40/s":"25/s",{"text-anchor":"middle"})});
+ });
+})();
+
+// table
+(function(){
+ const t=document.getElementById("tbl");
+ let h="<tr><th>Lane</th><th>Arm</th><th>p50 ms</th><th>p99 ms</th><th>CPU s</th><th>RSS MiB</th><th>MySQL q/s</th><th>compl/s</th></tr>";
+ L.forEach(l=>{
+  h+=`<tr><td>${l.n}</td><td>Go</td><td>${l.go.p50}</td><td>${l.go.p99}</td><td>${l.go.cpu}</td><td>${l.go.rss}</td><td>${l.go.q}</td><td>${l.cg}</td></tr>`;
+  h+=`<tr><td></td><td>Rust</td><td>${l.ru.p50}</td><td>${l.ru.p99}</td><td>${l.ru.cpu}</td><td>${l.ru.rss}</td><td>${l.ru.q}</td><td>${l.cr}</td></tr>`;
+  h+=`<tr class="ratio"><td></td><td>Rust/Go</td>`+M.map(([k])=>{const r=l.ru[k]/l.go[k];return `<td class="${r<0.95?"g":r<=1.05?"n":"b"}">${r.toFixed(2)}</td>`}).join("")+`<td></td></tr>`;
+ });t.innerHTML=h;
+})();
+</script>
+</body></html>
