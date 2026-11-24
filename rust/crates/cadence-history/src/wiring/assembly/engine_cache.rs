@@ -609,6 +609,7 @@ impl<V> CacheMap<V> {
     fn get(&self, key: &Key) -> Option<&Arc<CacheEntry<V>>> {
         self.map.get(key).map(|s| &s.entry)
     }
+    #[cfg(test)]
     fn clear(&mut self) {
         self.map.clear();
         self.by_created.clear();
