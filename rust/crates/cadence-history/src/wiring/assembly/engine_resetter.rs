@@ -468,7 +468,7 @@ impl EngineWorkflowResetter {
                 to_history_error(e)
             })
         };
-        let result = match result {
+        match result {
             Ok(completed) => {
                 // Publishes the reset run's tasks (the current run's own write,
                 // if any, published its tasks itself).
@@ -483,8 +483,7 @@ impl EngineWorkflowResetter {
                 WorkflowContextHooks::<super::ndc_context_hooks::NdcStateBox>::write_failed(&mut hooks, &err);
                 Err(err)
             }
-        };
-        result
+        }
     }
 }
 

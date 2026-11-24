@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use cadence_persistence::history_contract as pc;
 use pc::PersistenceError;
+use tokio::sync::Notify;
 
 use crate::config::Config;
 use crate::engine::deps::{DomainCache, DomainCacheEntry, DomainInfo, HResult, HistoryError, TimeSource};
@@ -27,6 +28,7 @@ pub const CLUSTER: &str = "cluster-a";
 
 type RunKey = (String, String, String);
 pub type ConflictHook = Box<dyn FnOnce(&mut HashMap<RunKey, pc::WorkflowSnapshot>) + Send>;
+pub type PersistencePause = (Arc<Notify>, Arc<Notify>);
 
 #[derive(Default)]
 pub struct Inner {
@@ -54,7 +56,7 @@ pub struct Inner {
 #[derive(Default)]
 pub struct MemExecutions {
     pub inner: Mutex<Inner>,
-    pub update_pause: Mutex<Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>>,
+    pub update_pause: Mutex<Option<PersistencePause>>,
 }
 
 fn merge_keyed<K: Clone + Ord>(dst: &mut Vec<pc::KeyedBlob<K>>, upserts: &[pc::KeyedBlob<K>], deletes: &[K]) {
@@ -404,7 +406,7 @@ impl pc::GoExecutionStore for MemExecutions {
 #[derive(Default)]
 pub struct MemHistory {
     pub nodes: Mutex<Vec<pc::HistoryBranchRequest>>,
-    pub append_pause: Mutex<Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>>,
+    pub append_pause: Mutex<Option<PersistencePause>>,
 }
 
 #[async_trait]
