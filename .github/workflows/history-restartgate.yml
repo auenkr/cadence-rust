@@ -89,7 +89,6 @@ jobs:
         env:
           CARGO_PROFILE_RELEASE_LTO: ${{ (inputs.release_profile || 'gate') == 'release' && 'fat' || 'thin' }}
           CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ (inputs.release_profile || 'gate') == 'release' && '1' || '16' }}
-        env:
           HISTORY_JEMALLOC: ${{ inputs.history_jemalloc }}
         run: |
           echo "CARGO PROFILE: release_profile=${{ inputs.release_profile || 'gate' }} lto=$CARGO_PROFILE_RELEASE_LTO codegen_units=$CARGO_PROFILE_RELEASE_CODEGEN_UNITS fresh=${{ inputs.fresh || false }}" | tee -a out/profile.txt
