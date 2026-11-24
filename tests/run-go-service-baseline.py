@@ -1342,6 +1342,7 @@ finally:
     results['failure'] = failure
     (work / 'run.exit').write_text(f'{exit_code}\n')
     (work / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
+    print('GATE SUMMARY failed:', [failure or 'run exit code %s' % exit_code] if exit_code else [], flush=True)
     if args.evidence_dir:
         copied = copy_evidence(args.evidence_dir, results)
         print(f'Selected evidence copied to {args.evidence_dir}: {copied}', flush=True)

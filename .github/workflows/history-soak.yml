@@ -7,6 +7,15 @@ on:
     paths: ['.github/workflows/history-soak.yml', 'tests/history-soak/**', 'tests/gates/run-history-soak.py']
   workflow_dispatch:
     inputs:
+      fresh:
+        description: Disable the cargo cache and build in a fresh target dir (required for final validation evidence)
+        type: boolean
+        default: false
+      release_profile:
+        description: "gate = thin LTO, codegen-units 16 (fast, behaviour gates); release = fat LTO, codegen-units 1 (benchmarks, final binaries)"
+        type: choice
+        options: [gate, release]
+        default: gate
       database:
         description: Persistence lane
         type: choice
@@ -51,7 +60,7 @@ jobs:
       TWO_HISTORY: ${{ github.event_name == 'push' && 'true' || inputs.two_history }}
       DURATION: ${{ inputs.duration_minutes || '45' }}
       RATE: ${{ inputs.rate || '4' }}
-      CARGO_TARGET_DIR: /tmp/cadence-history-soak-${{ github.run_id }}-${{ github.run_attempt }}
+      CARGO_TARGET_DIR: ${{ github.workspace }}/cadence-target
       CARGO_BUILD_JOBS: 2
     steps:
       - uses: actions/checkout@v5
@@ -65,6 +74,14 @@ jobs:
             go/go.sum
             tests/history-soak/go.sum
       - uses: dtolnay/rust-toolchain@stable
+      - name: Cargo cache (disabled with fresh=true)
+        if: ${{ !inputs.fresh }}
+        uses: Swatinem/rust-cache@v2.7.8
+        with:
+          workspaces: "rust -> ../cadence-target"
+          shared-key: gate-release
+          # Only master (and this branch while it is tested) saves, to stay inside the 10GB repo quota.
+          save-if: ${{ github.ref == 'refs/heads/master' || github.ref == 'refs/heads/ci-speedup' }}
       - name: Install probe dependencies
         run: python3 -m pip install --user grpcio grpcio-tools
       - name: Validate harness syntax and record source identity
@@ -76,7 +93,10 @@ jobs:
       - name: Build Rust services in fresh target directory
         env:
           HISTORY_JEMALLOC: ${{ inputs.history_jemalloc }}
+          CARGO_PROFILE_RELEASE_LTO: ${{ (inputs.release_profile || 'gate') == 'release' && 'fat' || 'thin' }}
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ (inputs.release_profile || 'gate') == 'release' && '1' || '16' }}
         run: |
+          echo "CARGO PROFILE: release_profile=${{ inputs.release_profile || 'gate' }} lto=$CARGO_PROFILE_RELEASE_LTO codegen_units=$CARGO_PROFILE_RELEASE_CODEGEN_UNITS fresh=${{ inputs.fresh || false }}" | tee -a out/profile.txt
           set +e
           features=()
           if [[ "$HISTORY_JEMALLOC" == true ]]; then
