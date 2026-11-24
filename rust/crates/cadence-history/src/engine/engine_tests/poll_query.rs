@@ -118,7 +118,9 @@ impl HistoryEventNotifier for SilentNotifier {
 
     fn unwatch_history_event(&self, domain: &str, execution: &WorkflowExecution, subscriber: &str) {
         assert_eq!(domain, DOMAIN);
-        assert_eq!(execution, &wf());
+        // FakeCtx supplies an empty canonical run ID.
+        assert_eq!(execution.workflow_id, "wf");
+        assert!(execution.run_id.is_empty());
         assert_eq!(subscriber, "sub");
         self.0.lock().unwrap().take().unwrap();
     }
