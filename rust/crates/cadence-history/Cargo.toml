@@ -6,6 +6,7 @@ license.workspace = true
 
 [features]
 default = []
+heap-profile = ["jemalloc-default", "tikv-jemallocator/profiling"]
 jemalloc-default = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]
 
 [[bin]]

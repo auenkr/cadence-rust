@@ -2,7 +2,10 @@
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
-#[cfg(feature = "jemalloc-default")]
+#[cfg(all(feature = "jemalloc-default", feature = "heap-profile"))]
+const JEMALLOC_CONFIG: &[u8] = b"background_thread:true,dirty_decay_ms:250,muzzy_decay_ms:0,narenas:1,tcache_max:4096,prof:true,prof_active:true,lg_prof_sample:15\0";
+
+#[cfg(all(feature = "jemalloc-default", not(feature = "heap-profile")))]
 const JEMALLOC_CONFIG: &[u8] = b"background_thread:true,dirty_decay_ms:250,muzzy_decay_ms:0,narenas:1,tcache_max:4096\0";
 
 // tikv-jemalloc-sys prefixes its symbols. One arena (small tcache, fast decay) lets the main and runtime

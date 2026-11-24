@@ -9,6 +9,8 @@ pub fn start() {
     let _ = std::thread::Builder::new().name("mem-report".into()).spawn(|| loop {
         std::thread::sleep(Duration::from_secs(10));
         eprintln!("{}", report());
+        #[cfg(feature = "heap-profile")]
+        dump_heap();
     });
 }
 
@@ -44,4 +46,22 @@ fn report() -> String {
     }
     out += &format!(" threads_by_name={names:?}");
     out
+}
+
+/// With CADENCE_HEAP_PROFILE_DIR set (feature heap-profile), write a jemalloc heap profile each report tick,
+/// named heap-<seq>-<allocated MiB>.heap so the peak dump can be picked without parsing.
+#[cfg(feature = "heap-profile")]
+fn dump_heap() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static SEQ: AtomicUsize = AtomicUsize::new(0);
+    let Some(dir) = std::env::var_os("CADENCE_HEAP_PROFILE_DIR") else { return };
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = tikv_jemalloc_ctl::epoch::advance();
+    let mib = tikv_jemalloc_ctl::stats::allocated::read().unwrap_or(0) >> 20;
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    let path = std::path::PathBuf::from(dir).join(format!("heap-{seq:04}-{mib:04}.heap"));
+    if let Ok(c) = std::ffi::CString::new(path.to_string_lossy().as_bytes()) {
+        // jemalloc copies the NUL-terminated filename synchronously.
+        let _ = unsafe { tikv_jemalloc_ctl::raw::write(b"prof.dump\0", c.as_ptr()) };
+    }
 }

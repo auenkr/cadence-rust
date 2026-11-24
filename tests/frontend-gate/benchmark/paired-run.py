@@ -95,9 +95,10 @@ def main():
     override.write_text("services:\n" + "".join(
         f"  {name}:\n    mem_limit: 1400m\n    memswap_limit: 1400m\n    cpus: 1.0\n    pids_limit: 2048\n"
         + ("    environment:\n"
-           + ("      CADENCE_MEM_REPORT: \"1\"\n" if os.environ.get("BENCH_MEM_REPORT") == "1" else "")
+           + ("      CADENCE_MEM_REPORT: \"1\"\n" if (os.environ.get("BENCH_MEM_REPORT") == "1" or os.environ.get("BENCH_HEAP_PROFILE") == "1") else "")
+           + ("      CADENCE_HEAP_PROFILE_DIR: /tmp/heap\n" if os.environ.get("BENCH_HEAP_PROFILE") == "1" else "")
            + (f"      CADENCE_HISTORY_SQL_SLOW_MS: \"{os.environ['BENCH_SQL_SLOW_MS']}\"\n" if os.environ.get("BENCH_SQL_SLOW_MS") else "")
-           if name == "history" and (os.environ.get("BENCH_MEM_REPORT") == "1" or os.environ.get("BENCH_SQL_SLOW_MS")) else "")
+           if name == "history" and (os.environ.get("BENCH_MEM_REPORT") == "1" or os.environ.get("BENCH_HEAP_PROFILE") == "1" or os.environ.get("BENCH_SQL_SLOW_MS")) else "")
         for name in ("frontend", "matching", "history", "worker")))
     env["COMPOSE_FILE"] = os.pathsep.join((str(COMPOSE), str(override)))
     for service in ("FRONTEND", "MATCHING", "HISTORY", "WORKER"):
@@ -235,6 +236,11 @@ def main():
                             "exit_code": monitor.returncode, "log": str(collector_log.relative_to(ROOT)),
                             "started_unix": collector_started, "elapsed_seconds": time.time() - collector_started})
                         persist_events()
+                if os.environ.get("BENCH_HEAP_PROFILE") == "1" and arm in ("rust", "control"):
+                    hd = OUT / f"heap-{rep:02d}-{arm}"
+                    hd.mkdir(exist_ok=True)
+                    run(["docker", "compose", "-p", PROJECT, "cp", "history:/tmp/heap/.", str(hd)], f"heapcp-{rep:02d}-{arm}", env=arm_env, check=False)
+                    run(["docker", "compose", "-p", PROJECT, "cp", "history:/usr/local/bin/cadence-history", str(hd / "cadence-history")], f"heapbin-{rep:02d}-{arm}", env=arm_env, check=False)
                 run(["docker", "compose", "-p", PROJECT, "logs", "--no-color"],
                     f"services-{rep:02d}-{arm}", env=arm_env, check=False)
                 slow = sum(1 for l in (OUT / f"services-{rep:02d}-{arm}.log").read_text(errors="replace").splitlines() if "sql transaction slow" in l)
