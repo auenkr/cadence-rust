@@ -470,6 +470,30 @@ impl Value {
             _ => Err(internal("expected SQL bytes")),
         }
     }
+    pub fn as_bytes(&self) -> Result<&[u8], PersistenceError> {
+        match self {
+            Self::Bytes(v) => Ok(v),
+            _ => Err(internal("expected SQL bytes")),
+        }
+    }
+    pub fn as_text(&self) -> Result<&str, PersistenceError> {
+        match self {
+            Self::Text(v) => Ok(v),
+            _ => Err(internal("expected SQL text")),
+        }
+    }
+    pub fn into_bytes(self) -> Result<Vec<u8>, PersistenceError> {
+        match self {
+            Self::Bytes(v) => Ok(v),
+            _ => Err(internal("expected SQL bytes")),
+        }
+    }
+    pub fn into_text(self) -> Result<String, PersistenceError> {
+        match self {
+            Self::Text(v) => Ok(v),
+            _ => Err(internal("expected SQL text")),
+        }
+    }
     pub fn text(&self) -> Result<String, PersistenceError> {
         match self {
             Self::Text(v) => Ok(v.clone()),
@@ -483,7 +507,7 @@ pub fn uuid(value: &str) -> Result<Value, PersistenceError> {
         .map_err(|e| PersistenceError::InvalidPersistenceRequest(e.to_string()))
 }
 pub fn uuid_string(value: &Value) -> Result<String, PersistenceError> {
-    uuid::Uuid::from_slice(&value.bytes()?)
+    uuid::Uuid::from_slice(value.as_bytes()?)
         .map(|v| v.to_string())
         .map_err(|e| PersistenceError::InternalDataInconsistency(e.to_string()))
 }

@@ -108,12 +108,13 @@ pub fn decode_history_node_page_token(token: &[u8]) -> Result<i64, HistoryPersis
 /// SQL read. MySQL rows carry negative transaction IDs in storage and must be
 /// normalized before calling this helper.
 pub fn build_history_branch_page(
-    rows: &[HistoryNode],
+    rows: Vec<HistoryNode>,
     mut last_node_id: i64,
     mut last_transaction_id: i64,
     page_size: i32,
 ) -> Result<crate::history_contract::HistoryBranchPage, HistoryPersistenceError> {
     let mut nodes = Vec::with_capacity(page_size.max(0) as usize);
+    let row_count = rows.len();
     for row in rows {
         if row.transaction_id < last_transaction_id {
             if row.node_id < last_node_id {
@@ -130,9 +131,9 @@ pub fn build_history_branch_page(
         }
         last_transaction_id = row.transaction_id;
         last_node_id = row.node_id;
-        nodes.push(crate::history_contract::DataBlob { data: row.data.clone(), encoding: row.data_encoding.clone() });
+        nodes.push(crate::history_contract::DataBlob { data: row.data, encoding: row.data_encoding });
     }
-    let next_page_token = if rows.len() >= page_size.max(0) as usize { encode_history_node_page_token(last_node_id) } else { Vec::new() };
+    let next_page_token = if row_count >= page_size.max(0) as usize { encode_history_node_page_token(last_node_id) } else { Vec::new() };
     Ok(crate::history_contract::HistoryBranchPage { nodes, next_page_token, last_node_id, last_transaction_id })
 }
 
@@ -173,7 +174,7 @@ mod history_v2_tests {
             HistoryNode { node_id: 2, transaction_id: 8, data: vec![8], data_encoding: "thriftrw".into() },
             HistoryNode { node_id: 4, transaction_id: 10, data: vec![10], data_encoding: "thriftrw".into() },
         ];
-        let page = build_history_branch_page(&rows, 0, 0, 3).unwrap();
+        let page = build_history_branch_page(rows, 0, 0, 3).unwrap();
         assert_eq!(page.nodes.iter().map(|blob| blob.data[0]).collect::<Vec<_>>(), [9, 10]);
         assert_eq!((page.last_node_id, page.last_transaction_id), (4, 10));
         assert_eq!(decode_history_node_page_token(&page.next_page_token).unwrap(), 4);
@@ -185,7 +186,7 @@ mod history_v2_tests {
             HistoryNode { node_id: 4, transaction_id: 5, data: vec![], data_encoding: "thriftrw".into() },
             HistoryNode { node_id: 2, transaction_id: 6, data: vec![], data_encoding: "thriftrw".into() },
         ];
-        assert!(matches!(build_history_branch_page(&rows, 0, 0, 10), Err(HistoryPersistenceError::InternalDataInconsistency(_))));
+        assert!(matches!(build_history_branch_page(rows, 0, 0, 10), Err(HistoryPersistenceError::InternalDataInconsistency(_))));
     }
 }
 

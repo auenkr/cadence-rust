@@ -43,7 +43,7 @@ impl SqlHistoryV2Store {
         data: &Value,
         encoding: &Value,
     ) -> Result<HistoryTreeBranch, PersistenceError> {
-        let info = history_sql::decode_history_tree_info(&data.bytes()?, &encoding.text()?)
+        let info = history_sql::decode_history_tree_info(data.as_bytes()?, encoding.as_text()?)
             .map_err(internal)?;
         Ok(HistoryTreeBranch {
             shard_id,
@@ -153,18 +153,24 @@ impl GoHistoryV2Store for SqlHistoryV2Store {
             return Ok(HistoryBranchPage::default());
         }
         let nodes = rows
-            .iter()
+            .into_iter()
             .map(|row| {
+                let mut cols = row.into_iter();
+                let mut next = || cols.next().ok_or_else(|| internal("missing SQL column"));
+                let node_id = next()?.integer()?;
+                let transaction_id = next()?.integer()?.wrapping_neg();
+                let data = next()?.into_bytes()?;
+                let data_encoding = next()?.into_text()?;
                 Ok(history_sql::HistoryNode {
-                    node_id: row[0].integer()?,
-                    transaction_id: row[1].integer()?.wrapping_neg(),
-                    data: row[2].bytes()?,
-                    data_encoding: row[3].text()?,
+                    node_id,
+                    transaction_id,
+                    data,
+                    data_encoding,
                 })
             })
             .collect::<Result<Vec<_>, PersistenceError>>()?;
         history_sql::build_history_branch_page(
-            &nodes,
+            nodes,
             request.last_node_id,
             request.last_transaction_id,
             request.page_size,
