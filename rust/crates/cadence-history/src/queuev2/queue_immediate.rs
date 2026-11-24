@@ -101,6 +101,9 @@ impl ImmediateQueue {
         loop {
             tokio::select! {
                 Some(()) = notify_rx.recv() => {
+                    if crate::transfer_trace::enabled() {
+                        crate::transfer_trace::emit("v2_notify_recv", format_args!(""));
+                    }
                     self.base.process_new_tasks().await;
                     *self.last_poll_time.lock().unwrap() = self.base.time_source.now();
                 }
@@ -185,6 +188,9 @@ impl Queue for ImmediateQueue {
         let num_tasks = info.tasks.len();
         if num_tasks == 0 {
             return;
+        }
+        if crate::transfer_trace::enabled() {
+            crate::transfer_trace::emit("v2_notify", format_args!("tasks={num_tasks}"));
         }
         self.notify();
         self.base

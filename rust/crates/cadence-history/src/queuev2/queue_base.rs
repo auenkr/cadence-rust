@@ -284,8 +284,15 @@ impl QueueBase {
     pub fn unlock_task_processing(&self) {}
 
     pub async fn process_new_tasks(&self) -> bool {
+        let trace_t0 = crate::transfer_trace::now_us();
         if self.category.type_() == HISTORY_TASK_CATEGORY_TYPE_IMMEDIATE {
             self.shard.wait_for_task_writes().await;
+        }
+        if crate::transfer_trace::enabled() {
+            crate::transfer_trace::emit(
+                "v2_process_new_tasks",
+                format_args!("wait_writes_us={}", crate::transfer_trace::now_us() - trace_t0),
+            );
         }
         let mut new_exclusive_max_task_key = self
             .shard

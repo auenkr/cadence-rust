@@ -319,6 +319,7 @@ impl VirtualQueueImpl {
     }
 
     async fn load_and_submit_tasks(&self) {
+        let trace_t0 = crate::transfer_trace::now_us();
         if let Err(e) = self.task_load_rate_limiter.wait(&self.ctx).await {
             if self.ctx.is_cancelled() {
                 return;
@@ -328,7 +329,9 @@ impl VirtualQueueImpl {
             ));
         }
 
+        let trace_t1 = crate::transfer_trace::now_us();
         let mut inner = self.inner.lock().await;
+        let trace_t2 = crate::transfer_trace::now_us();
 
         let slice_to_read = match &inner.slice_to_read {
             None => return,
@@ -379,6 +382,23 @@ impl VirtualQueueImpl {
         };
         self.logger
             .debug(&format!("got tasks from virtual queue counter={}", tasks.len()));
+        if crate::transfer_trace::enabled() {
+            let t3 = crate::transfer_trace::now_us();
+            for task in &tasks {
+                crate::transfer_trace::emit(
+                    "v2_loaded",
+                    format_args!(
+                        "task_id={} created_us={} limiter_us={} lock_us={} read_us={} count={}",
+                        task.get_task_key().get_task_id(),
+                        task.get_visibility_timestamp().timestamp_micros(),
+                        trace_t1 - trace_t0,
+                        trace_t2 - trace_t1,
+                        t3 - trace_t2,
+                        tasks.len()
+                    ),
+                );
+            }
+        }
 
         self.monitor.set_slice_pending_task_count(
             &slice_to_read,
