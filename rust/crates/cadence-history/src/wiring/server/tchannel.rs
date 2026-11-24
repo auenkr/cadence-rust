@@ -55,8 +55,10 @@ async fn write_frame(w: &Mutex<OwnedWriteHalf>, f: Frame) -> Result<()> {
     h[2] = f.kind;
     h[4..8].copy_from_slice(&f.id.to_be_bytes());
     let mut w = w.lock().await;
-    w.write_all(&h).await?;
-    w.write_all(&f.payload).await?;
+    let mut buf = Vec::with_capacity(HDR + f.payload.len());
+    buf.extend_from_slice(&h);
+    buf.extend_from_slice(&f.payload);
+    w.write_all(&buf).await?;
     Ok(())
 }
 
