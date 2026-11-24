@@ -101,6 +101,20 @@ fn validate_mysql_shards(config: &MySqlTaskStoreConfig) -> Result<()> {
     Ok(())
 }
 
+/// Splits Go's single maxConns budget between the sync pool and the async
+/// (deadline-read) pool so their combined physical connections never exceed it.
+/// Returns (sync_cap, async_cap); async_cap 0 means no async budget.
+fn split_max_conns(max_conns: usize) -> (usize, usize) {
+    if max_conns == usize::MAX {
+        return (usize::MAX, 1024);
+    }
+    if max_conns < 2 {
+        return (max_conns, 0);
+    }
+    let async_cap = (max_conns / 2).min(1024);
+    (max_conns - async_cap, async_cap)
+}
+
 struct IdleConnection {
     connection: Conn,
     created_at: Instant,
@@ -118,7 +132,10 @@ pub(crate) struct SyncConnectionPool {
     async_pool: std::sync::OnceLock<mysql_async::Pool>,
     async_options: mysql_async::Opts,
     query_runtime: QueryRuntimeOwner,
+    /// Sync-pool cap; `max_open + async_max <= maxConns` (Go SetMaxOpenConns).
     max_open: usize,
+    /// Async-pool cap, 0 = no budget (per-query dedicated connection).
+    async_max: usize,
     max_idle: usize,
     max_lifetime: Option<Duration>,
     state: Mutex<PoolState>,
@@ -299,23 +316,38 @@ impl SyncConnectionPool {
             > + Send
             + 'static,
     {
-        if !self.reserve_until(deadline) {
+        // With a dedicated async budget (async_max > 0) the async pool owns its
+        // own share of maxConns, so total open <= sync cap + async cap = maxConns.
+        // With no budget (maxConns == 1) use a per-query connection that is
+        // disconnected before the sync-pool reservation is released.
+        let dedicated = self.async_max == 0;
+        if dedicated && !self.reserve_until(deadline) {
             return Err(TimedQueryError::Timeout);
         }
         let (result_tx, result_rx) = mpsc::channel();
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
-            self.release_reserved();
+            if dedicated {
+                self.release_reserved();
+            }
             return Err(TimedQueryError::Timeout);
         }
-        let slot = ReservedConnectionSlot(self.clone());
-        let async_pool = self.async_pool().clone();
+        let slot = dedicated.then(|| ReservedConnectionSlot(self.clone()));
+        let async_pool = (!dedicated).then(|| self.async_pool().clone());
+        let async_options = self.async_options.clone();
         let task = self.query_runtime.spawn(async move {
             let _slot = slot;
             let result = tokio::time::timeout(remaining, async move {
-                // Connection is returned to the shared pool on drop.
-                let mut connection = async_pool.get_conn().await?;
-                operation(&mut connection).await
+                if let Some(async_pool) = async_pool {
+                    // Connection is returned to the shared pool on drop.
+                    let mut connection = async_pool.get_conn().await?;
+                    operation(&mut connection).await
+                } else {
+                    let mut connection = mysql_async::Conn::new(async_options).await?;
+                    let result = operation(&mut connection).await;
+                    let _ = connection.disconnect().await;
+                    result
+                }
             })
             .await
             .map_err(|_| TimedQueryError::Timeout)
@@ -345,12 +377,18 @@ impl SyncConnectionPool {
             // maxConns<=0 means unlimited (usize::MAX); mysql_async pre-allocates
             // for the maximum, so bound it. The shared max-open reservation in
             // `reserve_until` still enforces the real limit.
-            let max = self.max_open.clamp(1, 1024);
+            let max = self.async_max.clamp(1, 1024);
+            // Idle sockets beyond maxIdleConns are not kept; Go opens lazily,
+            // and abs_conn_ttl mirrors SetConnMaxLifetime.
             let min = self.max_idle.min(max);
             let constraints = mysql_async::PoolConstraints::new(min, max)
                 .unwrap_or_default();
             let opts = mysql_async::OptsBuilder::from_opts(self.async_options.clone())
-                .pool_opts(mysql_async::PoolOpts::default().with_constraints(constraints));
+                .pool_opts(
+                    mysql_async::PoolOpts::default()
+                        .with_constraints(constraints)
+                        .with_abs_conn_ttl(self.max_lifetime),
+                );
             mysql_async::Pool::new(opts)
         })
     }
@@ -589,6 +627,7 @@ impl MySqlTaskStore {
         } else {
             usize::try_from(config.max_conns).unwrap_or(usize::MAX)
         };
+        let (max_open, async_max) = split_max_conns(max_open);
         let max_idle = max_idle.min(max_open);
         let options = mysql_options(config)?;
         let async_options = mysql_async_options(config)?;
@@ -599,6 +638,7 @@ impl MySqlTaskStore {
             async_options,
             query_runtime,
             max_open,
+            async_max,
             max_idle,
             max_lifetime: config.max_conn_lifetime.filter(|value| !value.is_zero()),
             state: Mutex::new(PoolState::default()),
@@ -1971,6 +2011,18 @@ impl MySqlTaskStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn split_max_conns_never_exceeds_total() {
+        for total in 1..=2048usize {
+            let (sync_cap, async_cap) = split_max_conns(total);
+            assert!(sync_cap + async_cap <= total, "total={total}");
+            assert!(sync_cap >= 1, "total={total}");
+        }
+        assert_eq!(split_max_conns(1), (1, 0));
+        assert_eq!(split_max_conns(4), (2, 2));
+        assert_eq!(split_max_conns(usize::MAX).0, usize::MAX);
+    }
 
     #[test]
     fn mysql_physical_database_follows_go_logical_shard_index() {
