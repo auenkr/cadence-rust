@@ -18,3 +18,5 @@ Branch `perf-history-memory` starts from master `ac5df792cce5116c4b96e3c38f78050
 | Tuned paired benchmark | `ad82d13990838c5fbb395f1414411eae99ef7bb8` | [45343599527](https://github.com/auenkr/cadence-rust/actions/runs/45343599527) | Pending |
 
 Both benchmark dispatches use `rust_services=frontend,matching,history` with defaults from run 45291978847. Each run uses five paired repetitions, 1,000 workflows per arm at concurrency 1, 16 and 64, 10 warmups, a 1,024-byte payload, and the Go SDK over TChannel.
+
+At 07:46 UTC, the mixed gate and soak had built the jemalloc History binary and entered their workload steps. Both paired jobs had finished building the Go and Rust images and started the SDK workload.
