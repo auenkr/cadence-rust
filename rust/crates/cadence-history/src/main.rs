@@ -12,6 +12,7 @@ const JEMALLOC_CONFIG: &[u8] = b"background_thread:true,dirty_decay_ms:250,muzzy
 #[export_name = "_rjem_malloc_conf"]
 pub static MALLOC_CONF: &u8 = &JEMALLOC_CONFIG[0];
 
+mod mem_report;
 use tracing_subscriber::EnvFilter;
 
 fn main() -> anyhow::Result<()> {
@@ -28,6 +29,7 @@ fn main() -> anyhow::Result<()> {
 }
 
 async fn run() -> anyhow::Result<()> {
+    mem_report::start();
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
     tracing_subscriber::fmt()
         .with_env_filter(filter)

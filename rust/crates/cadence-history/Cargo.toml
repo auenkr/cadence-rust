@@ -6,7 +6,7 @@ license.workspace = true
 
 [features]
 default = []
-jemalloc-default = ["dep:tikv-jemallocator"]
+jemalloc-default = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]
 
 [[bin]]
 name = "cadence-history"
@@ -14,6 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 tikv-jemallocator = { version = "0.6", features = ["background_threads"], optional = true }
+tikv-jemalloc-ctl = { version = "0.6", features = ["stats"], optional = true }
 base64 = "0.22"
 anyhow = "1"
 tokio = { version = "1", features = ["full"] }
