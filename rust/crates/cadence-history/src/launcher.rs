@@ -225,6 +225,10 @@ fn matching_resolver(
     provider: Arc<MatchingRingpopProvider>,
     tls: Option<cadence_service_core::grpc_tls::ClientTls>,
 ) -> ChannelResolver {
+    // Go's yarpc dispatcher keeps one pooled connection per peer; reuse one lazy channel per
+    // address instead of opening a new TCP/HTTP2 connection for every AddDecisionTask/AddActivityTask.
+    let channels: std::sync::Mutex<std::collections::HashMap<String, tonic::transport::Channel>> =
+        std::sync::Mutex::new(std::collections::HashMap::new());
     Arc::new(move |task_list: &str| {
         let hosts: Vec<Host> = provider
             .snapshot()
@@ -238,8 +242,14 @@ fn matching_resolver(
             return Err(format!("matching host {} has no gRPC address", host.address));
         }
         // Go dials Matching with the matching service's rpc.tls client config.
-        cadence_service_core::grpc_tls::endpoint_channel(&host.grpc_address, tls.as_ref())
-            .map_err(|e| e.to_string())
+        let mut cache = channels.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(c) = cache.get(&host.grpc_address) {
+            return Ok(c.clone());
+        }
+        let c = cadence_service_core::grpc_tls::endpoint_channel(&host.grpc_address, tls.as_ref())
+            .map_err(|e| e.to_string())?;
+        cache.insert(host.grpc_address.clone(), c.clone());
+        Ok(c)
     })
 }
 
