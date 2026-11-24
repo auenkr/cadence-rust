@@ -4,6 +4,7 @@ import argparse
 import json
 import subprocess
 import time
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -45,11 +46,16 @@ def snapshot(containers):
             cpu_stat = dict(line.split() for line in (paths / "cpu.stat").read_text().splitlines())
             cpu_ns = int(cpu_stat["usage_usec"]) * 1000
             memory_bytes = int((paths / "memory.current").read_text())
+            memory = paths
+            anon_key, file_key = "anon", "file"
         else:
             cpu, memory = paths
             cpu_ns = int((cpu / "cpuacct.usage").read_text())
             memory_bytes = int((memory / "memory.usage_in_bytes").read_text())
-        current[name] = {"cpu_ns": cpu_ns, "memory_bytes": memory_bytes}
+            anon_key, file_key = "total_rss", "total_cache"
+        memory_stat = dict(line.split() for line in (memory / "memory.stat").read_text().splitlines())
+        current[name] = {"cpu_ns": cpu_ns, "memory_bytes": memory_bytes,
+                         "anon_bytes": int(memory_stat[anon_key]), "file_bytes": int(memory_stat[file_key])}
     return current
 
 
@@ -105,7 +111,16 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
     extra_first = extra_snapshot(all_cgroups) if extra_output else None
     if ready_event:
         Path(ready_event).write_text(started_at, encoding="utf-8")
-    peak = dict((name, data["memory_bytes"]) for name, data in first.items())
+    memory_metrics = {"memory_bytes": "peak_cgroup_memory_bytes",
+                      "anon_bytes": "peak_cgroup_anon_bytes", "file_bytes": "peak_cgroup_file_bytes"}
+    peaks = defaultdict(dict)
+
+    def record_peaks(readings):
+        for name, data in readings.items():
+            for counter, metric in memory_metrics.items():
+                peaks[name][metric] = max(peaks[name].get(metric, 0), data[counter])
+
+    record_peaks(first)
     samples = 1
     while True:
         if end_event and Path(end_event).exists():
@@ -116,10 +131,7 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
         if duration is not None and elapsed >= duration:
             break
         time.sleep(min(interval, max(0.01, duration - elapsed)) if duration is not None else interval)
-        now = snapshot(selected)
-        for name, data in now.items():
-            peak[name] = max(peak[name], data["memory_bytes"])
-        last = now
+        record_peaks(snapshot(selected))
         samples += 1
     last = snapshot(selected)
     if extra_output:
@@ -127,8 +139,7 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
         delta = {n: {k: extra_last[n][k] - extra_first[n][k] for k in ("usage_usec", "nr_periods", "nr_throttled", "throttled_usec")} for n in extra_last}
         Path(extra_output).write_text(json.dumps({"before": extra_first, "after": extra_last, "delta": delta}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     samples += 1
-    for name, data in last.items():
-        peak[name] = max(peak[name], data["memory_bytes"])
+    record_peaks(last)
     elapsed = time.monotonic() - started
     containers_result = {}
     for name, (_, version) in selected.items():
@@ -137,13 +148,13 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
         except ValueError as error:
             raise RuntimeError(f"{error} for {name}") from error
         containers_result[name] = {"cpu_seconds": consumed_cpu_seconds, "average_cpu_cores": consumed_cpu_seconds / elapsed,
-                                   "peak_cgroup_memory_bytes": peak[name], "cgroup_version": version,
+                                   **peaks[name], "cgroup_version": version,
                                    "initial_cpu_ns": first[name]["cpu_ns"], "final_cpu_ns": last[name]["cpu_ns"]}
     result = {"schema_version": 2, "started_at_utc": started_at, "duration_seconds": elapsed,
               "ended_at_utc": datetime.now(timezone.utc).isoformat(),
               "sampling_interval_seconds": interval, "samples": samples,
               "cpu_method": "exact delta of cumulative cgroup cpu usage counters",
-              "memory_method": "peak sampled cgroup memory usage; includes charged cache and is not RSS",
+              "memory_method": "independent sampled peaks of cgroup total, anon and file (v1: total RSS and cache)",
               "interval_method": "start/end marker files" if start_event else "fixed duration",
               "containers": containers_result}
     Path(output).write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
