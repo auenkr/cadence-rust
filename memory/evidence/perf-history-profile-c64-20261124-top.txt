@@ -1,0 +1,93 @@
+total samples 8484848400
+== self ==
+  7.50% memcpy
+  5.24% finish_task_switch.isra.0
+  4.05% _raw_spin_unlock_irqrestore
+  2.98% handle_softirqs
+  1.31% _rjem_malloc
+  1.31% memcmp
+  0.95% [[kernel.kallsyms]]
+  0.95% _rjem_sdallocx
+  0.71% _copy_to_iter
+  0.60% trace_syscall_enter
+  0.60% <mysql_common::misc::raw::int::LenEnc as mysql_common::misc::raw::bytes::BytesRepr>::deserialize
+  0.60% <alloc::sync::Arc<[mysql_common::packets::Column]>>::drop_slow
+  0.60% <cadence_api::service_types::HistoryEvent as core::clone::Clone>::clone
+  0.60% <mysql::conn::ResultSetInfo>::into_statement_meta
+  0.60% __nf_conntrack_find_get
+  0.60% do_rallocx
+  0.48% _raw_spin_lock_bh
+  0.48% nf_nat_inet_fn
+  0.48% _raw_spin_unlock_irq
+  0.48% <cadence_history::wiring::assembly::engine_cache::EngineExecutionCache>::acquire_in::{closure#0}
+  0.48% <core::hash::sip::Hasher<core::hash::sip::Sip13Rounds> as core::hash::Hasher>::write
+  0.48% <tokio::sync::notify::NotifiedProject>::poll_notified
+  0.48% <tokio::sync::batch_semaphore::Acquire as core::future::future::Future>::poll
+  0.48% <cadence_history::wiring::resources::metrics::MetricsRegistry>::add::{closure#0}
+  0.48% kmem_cache_free
+  0.48% <mysql_common::named_params::ParsedNamedParams>::parse
+  0.48% try_charge_memcg
+  0.48% memmove
+  0.36% __raw_callee_save___pv_queued_spin_unlock
+  0.36% udp_sendmsg
+== inclusive ==
+100.00% tokio-rt-worker
+ 93.33% start
+ 93.33% <std::sys::thread::unix::Thread>::new::thread_start
+ 93.33% <std::thread::lifecycle::spawn_unchecked<<tokio::runtime::blocking::pool::Spawner>::spawn_thread::{closure#0}, 
+ 93.21% std::sys::backtrace::__rust_begin_short_backtrace::<<tokio::runtime::blocking::pool::Spawner>::spawn_thread::{closure#0}, 
+ 88.21% tokio::runtime::scheduler::multi_thread::worker::run
+ 87.26% <tokio::runtime::scheduler::multi_thread::worker::Context>::run_task
+ 77.74% tokio::runtime::task::raw::poll::<tokio::runtime::blocking::task::BlockingTask<tokio::runtime::scheduler::multi_thread::worker::block_in_place<<cadence_persistence::history_sql_backend::SqlBackend>::transaction<cadence_persistence::history_contract::CurrentExecution, <cadence_persistence::sql_workflow_store::SqlWorkflowStore>::create::{closure#0}>::{closure#0}, core::result::Result<cadence_persistence::history_contract::CurrentExecution, cadence_persistence::history_contract::PersistenceError>>::{closure#0}::{closure#0}>, tokio::runtime::blocking::schedule::BlockingSchedule>
+ 60.00% tokio::runtime::task::raw::poll::<hyper::proto::h2::server::H2Stream<hyper_util::service::glue::TowerToHyperServiceFuture<tower::util::map_request::MapRequest<tower::util::boxed_clone::BoxCloneService<http::request::Request<http_body_util::combinators::box_body::UnsyncBoxBody<bytes::bytes::Bytes, tonic::status::Status>>, http::response::Response<http_body_util::combinators::box_body::UnsyncBoxBody<bytes::bytes::Bytes, tonic::status::Status>>, alloc::boxed::Box<dyn core::error::Error + core::marker::Sync + core::marker::Send>>, <tonic::transport::server::Server<tower_layer::stack::Stack<tower_layer::layer_fn::LayerFn<cadence_matching::grpc_matching::CallerTypeScope<tonic::service::router::Routes>>, tower_layer::identity::Identity>>>::serve_with_shutdown<tonic::service::router::Routes, tokio_stream::stream_ext::map::Map<tokio_stream::wrappers::tcp_listener::TcpListenerStream, cadence_history::wiring::server::grpc::serve::{closure#0}::{closure#1}>, cadence_history::wiring::server::grpc::serve::{closure#0}::{closure#0}, tokio::net::tcp::stream::TcpStream, core::io::error::Error, http_body_util::combinators::box_body::UnsyncBoxBody<bytes::bytes::Bytes, tonic::status::Status>>::{closure#0}::{closure#3}>, http::request::Request<hyper::body::incoming::Incoming>>, http_body_util::combinators::box_body::UnsyncBoxBody<bytes::bytes::Bytes, tonic::status::Status>, hyper_util::rt::tokio::TokioExecutor>, alloc::sync::Arc<tokio::runtime::scheduler::multi_thread::handle::Handle>>
+ 59.64% <hyper::proto::h2::server::H2Stream<hyper_util::service::glue::TowerToHyperServiceFuture<tower::util::map_request::MapRequest<tower::util::boxed_clone::BoxCloneService<http::request::Request<http_body_util::combinators::box_body::UnsyncBoxBody<bytes::bytes::Bytes, tonic::status::Status>>, http::response::Response<http_body_util::combinators::box_body::UnsyncBoxBody<bytes::bytes::Bytes, tonic::status::Status>>, alloc::boxed::Box<dyn core::error::Error + core::marker::Sync + core::marker::Send>>, <tonic::transport::server::Server<tower_layer::stack::Stack<tower_layer::layer_fn::LayerFn<cadence_matching::grpc_matching::CallerTypeScope<tonic::service::router::Routes>>, tower_layer::identity::Identity>>>::serve_with_shutdown<tonic::service::router::Routes, tokio_stream::stream_ext::map::Map<tokio_stream::wrappers::tcp_listener::TcpListenerStream, cadence_history::wiring::server::grpc::serve::{closure#0}::{closure#1}>, cadence_history::wiring::server::grpc::serve::{closure#0}::{closure#0}, tokio::net::tcp::stream::TcpStream, core::io::error::Error, http_body_util::combinators::box_body::UnsyncBoxBody<bytes::bytes::Bytes, tonic::status::Status>>::{closure#0}::{closure#3}>, http::request::Request<hyper::body::incoming::Incoming>>, http_body_util::combinators::box_body::UnsyncBoxBody<bytes::bytes::Bytes, tonic::status::Status>, hyper_util::rt::tokio::TokioExecutor> as core::future::future::Future>::poll
+ 58.69% <hyper_util::service::glue::TowerToHyperServiceFuture<tower::util::map_request::MapRequest<tower::util::boxed_clone::BoxCloneService<http::request::Request<http_body_util::combinators::box_body::UnsyncBoxBody<bytes::bytes::Bytes, tonic::status::Status>>, http::response::Response<http_body_util::combinators::box_body::UnsyncBoxBody<bytes::bytes::Bytes, tonic::status::Status>>, alloc::boxed::Box<dyn core::error::Error + core::marker::Sync + core::marker::Send>>, <tonic::transport::server::Server<tower_layer::stack::Stack<tower_layer::layer_fn::LayerFn<cadence_matching::grpc_matching::CallerTypeScope<tonic::service::router::Routes>>, tower_layer::identity::Identity>>>::serve_with_shutdown<tonic::service::router::Routes, tokio_stream::stream_ext::map::Map<tokio_stream::wrappers::tcp_listener::TcpListenerStream, cadence_matching::grpc_matching::serve_with_listener_tls_inner::{closure#0}::{closure#1}>, core::future::ready::Ready<
+ 57.98% <tonic::transport::server::SvcFuture<tonic::transport::server::service::recover_error::ResponseFuture<tower::util::either::Either<tower::limit::concurrency::future::ResponseFuture<tonic::transport::service::grpc_timeout::ResponseFuture<core::pin::Pin<alloc::boxed::Box<dyn core::future::future::Future<Output = core::result::Result<http::response::Response<http_body_util::combinators::box_body::UnsyncBoxBody<bytes::bytes::Bytes, tonic::status::Status>>, alloc::boxed::Box<dyn core::error::Error + core::marker::Sync + core::marker::Send>>> + core::marker::Send>>>>, tonic::transport::service::grpc_timeout::ResponseFuture<core::pin::Pin<alloc::boxed::Box<dyn core::future::future::Future<Output = core::result::Result<http::response::Response<http_body_util::combinators::box_body::UnsyncBoxBody<bytes::bytes::Bytes, tonic::status::Status>>, alloc::boxed::Box<dyn core::error::Error + core::marker::Sync + core::marker::Send>>> + core::marker::Send>>>>>> as core::future::future::Future>::poll
+ 57.86% <cadence_matching::grpc_matching::CallerTypeScope<tonic::service::router::Routes> as tower_service::Service<http::request::Request<http_body_util::combinators::box_body::UnsyncBoxBody<bytes::bytes::Bytes, tonic::status::Status>>>>::call::{closure#1}
+ 57.14% <tonic::service::router::RoutesFuture as core::future::future::Future>::poll
+ 57.02% <tower::util::map_response::MapResponseFuture<core::pin::Pin<alloc::boxed::Box<dyn core::future::future::Future<Output = core::result::Result<http::response::Response<http_body_util::combinators::box_body::UnsyncBoxBody<bytes::bytes::Bytes, tonic::status::Status>>, !>> + core::marker::Send>>, <http::response::Response<http_body_util::combinators::box_body::UnsyncBoxBody<bytes::bytes::Bytes, tonic::status::Status>> as axum_core::response::into_response::IntoResponse>::into_response> as core::future::future::Future>::poll
+ 39.05% entry_SYSCALL_64_after_hwframe
+ 39.05% do_syscall_64
+ 36.31% x64_sys_call
+ 33.69% <cadence_history::wiring::assembly::engine_cache::EngineExecutionContext>::update_as_active::{closure#0}
+ 33.21% <cadence_history::wiring::assembly::engine_cache::EngineExecutionContext>::persist::{closure#0}
+ 32.62% sccp
+ 20.12% <cadence_history::wiring::assembly::engine_cache::EngineExecutionContext>::write_update::{closure#0}
+ 19.64% <cadence_persistence::history_sql_backend::SqlBackend>::transaction::<
+ 18.45% <mysql::conn::Conn as mysql::conn::queryable::Queryable>::exec_iter::<&str, mysql_common::params::Params>
+ 18.10% <cadence_persistence::rate_limited::RateLimitedExecutionStore as cadence_persistence::history_contract::GoExecutionStore>::update_workflow_execution::{closure#0}
+ 17.98% <cadence_persistence::sql_workflow_store::SqlWorkflowStore as cadence_persistence::history_contract::GoExecutionStore>::update_workflow_execution::{closure#0}
+ 17.62% <cadence_proto::uber::cadence::history::v1::history_api_server::HistoryApiServer<cadence_history::wiring::server::grpc::GrpcHistory> as tower_service::Service<http::request::Request<http_body_util::combinators::box_body::UnsyncBoxBody<bytes::bytes::Bytes, tonic::status::Status>>>>::call::{closure#11}
+ 17.14% <<cadence_proto::uber::cadence::history::v1::history_api_server::HistoryApiServer<_> as tower_service::Service<http::request::Request<_>>>::call::RespondDecisionTaskCompletedSvc<cadence_history::wiring::server::grpc::GrpcHistory> as tonic::server::service::UnaryService<cadence_proto::uber::cadence::history::v1::RespondDecisionTaskCompletedRequest>>::call::{closure#0}
+ 16.90% <cadence_history::wiring::server::grpc::GrpcHistory as cadence_proto::uber::cadence::history::v1::history_api_server::HistoryApi>::respond_decision_task_completed::{closure#0}
+ 16.67% <cadence_history::wrappers::ratelimited::HistoryHandler as cadence_history::handler::interface::Handler>::respond_decision_task_completed::{closure#0}
+ 16.55% <cadence_history::handler::metrics_handler::MetricsHandler as cadence_history::handler::interface::Handler>::respond_decision_task_completed::{closure#0}
+ 16.19% <cadence_history::handler::handler_impl::HandlerImpl as cadence_history::handler::interface::Handler>::respond_decision_task_completed::{closure#0}
+ 15.71% <cadence_history::wiring::assembly::engine_decision::EngineDecisionHandler as cadence_history::engine::runtime::DecisionHandler>::handle_decision_task_completed::{closure#0}
+ 15.48% inet_sendmsg
+ 15.24% <cadence_proto::uber::cadence::history::v1::history_api_server::HistoryApiServer<cadence_history::wiring::server::grpc::GrpcHistory> as tower_service::Service<http::request::Request<http_body_util::combinators::box_body::UnsyncBoxBody<bytes::bytes::Bytes, tonic::status::Status>>>>::call::{closure#10}
+ 14.88% <cadence_history::wiring::server::grpc::GrpcHistory as cadence_proto::uber::cadence::history::v1::history_api_server::HistoryApi>::record_decision_task_started::{closure#0}
+ 14.88% <<cadence_proto::uber::cadence::history::v1::history_api_server::HistoryApiServer<_> as tower_service::Service<http::request::Request<_>>>::call::RecordDecisionTaskStartedSvc<cadence_history::wiring::server::grpc::GrpcHistory> as tonic::server::service::UnaryService<cadence_proto::uber::cadence::history::v1::RecordDecisionTaskStartedRequest>>::call::{closure#0}
+ 14.88% <cadence_history::wrappers::ratelimited::HistoryHandler as cadence_history::handler::interface::Handler>::record_decision_task_started::{closure#0}
+ 14.76% <cadence_history::wiring::assembly::engine_decision::EngineDecisionHandler>::completed_run::{closure#0}
+ 14.52% <cadence_history::handler::metrics_handler::MetricsHandler as cadence_history::handler::interface::Handler>::record_decision_task_started::{closure#0}
+ 14.29% <cadence_history::wiring::persistence::engine_ndc::SqlHistoryManager>::append_history_nodes::{closure#0}
+ 13.93% handle_softirqs
+ 13.81% __tcp_transmit_skb
+ 13.81% <cadence_history::handler::handler_impl::HandlerImpl as cadence_history::handler::interface::Handler>::record_decision_task_started::{closure#0}
+ 13.69% tcp_sendmsg
+ 13.45% <cadence_history::wiring::assembly::engine_decision::EngineDecisionHandler as cadence_history::engine::runtime::DecisionHandler>::handle_decision_task_started::{closure#0}
+ 13.45% <cadence_persistence::sql_workflow_store::SqlWorkflowStore>::update::{closure#0}
+ 13.21% ip_local_out
+ 13.21% ip_queue_xmit
+ 13.21% __ip_queue_xmit
+ 12.98% tcp_sendmsg_locked
+ 12.86% <cadence_persistence::rate_limited::RateLimitedHistoryV2Store as cadence_persistence::history_contract::GoHistoryV2Store>::append_history_nodes::{closure#0}
+ 12.74% <cadence_history::wiring::assembly::engine_cache::EngineExecutionContext>::prepare_update::{closure#0}
+ 12.62% __sys_sendto
+ 12.62% __x64_sys_sendto
+ 12.62% <cadence_persistence::sql_history_store::SqlHistoryV2Store as cadence_persistence::history_contract::GoHistoryV2Store>::append_history_nodes::{closure#0}
+ 12.26% <mysql::conn::Conn>::write_packet::<&[u8]>
+ 11.79% tcp_write_xmit
+ 11.79% __tcp_push_pending_frames
+ 11.79% <mysql::conn::Conn>::_execute
