@@ -32,6 +32,7 @@ WORKDIR /src/rust
 ARG RELEASE_LTO=fat
 ARG RELEASE_CODEGEN_UNITS=1
 ENV CARGO_BUILD_JOBS=2 OPENSSL_STATIC=1 OPENSSL_DIR=/usr CARGO_PROFILE_RELEASE_DEBUG=0 CARGO_PROFILE_RELEASE_LTO=${RELEASE_LTO} CARGO_PROFILE_RELEASE_CODEGEN_UNITS=${RELEASE_CODEGEN_UNITS}
+COPY rust/vendor /src/rust/vendor
 COPY --from=planner /recipe.json /recipe.json
 RUN cargo chef cook --release --recipe-path /recipe.json -p cadence-server -p cadence-history --features jemalloc-default,cadence-history/jemalloc-default
 COPY rust /src/rust
