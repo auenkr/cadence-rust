@@ -342,8 +342,12 @@ impl SyncConnectionPool {
 
     fn async_pool(&self) -> &mysql_async::Pool {
         self.async_pool.get_or_init(|| {
-            let min = self.max_idle.min(self.max_open);
-            let constraints = mysql_async::PoolConstraints::new(min, self.max_open.max(1))
+            // maxConns<=0 means unlimited (usize::MAX); mysql_async pre-allocates
+            // for the maximum, so bound it. The shared max-open reservation in
+            // `reserve_until` still enforces the real limit.
+            let max = self.max_open.clamp(1, 1024);
+            let min = self.max_idle.min(max);
+            let constraints = mysql_async::PoolConstraints::new(min, max)
                 .unwrap_or_default();
             let opts = mysql_async::OptsBuilder::from_opts(self.async_options.clone())
                 .pool_opts(mysql_async::PoolOpts::default().with_constraints(constraints));
