@@ -19,6 +19,10 @@ fn main() -> anyhow::Result<()> {
     // quotas, and honors an explicit TOKIO_WORKER_THREADS override.
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
+        // Default is 512 blocking threads kept alive 10s; each retains a stack
+        // and allocator cache. Cap and shorten idle life for a small host.
+        .max_blocking_threads(64)
+        .thread_keep_alive(std::time::Duration::from_secs(2))
         .build()?
         .block_on(run())
 }
