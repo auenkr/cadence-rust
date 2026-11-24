@@ -149,8 +149,52 @@ jobs:
             Benchmark/evidence/run/drivers.sha256
             Benchmark/evidence/run/*-build.log
           retention-days: 3
+  build-control:
+    if: ${{ inputs.sdk_openloop != true && inputs.control_ref != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    outputs:
+      same: ${{ steps.cmp.outputs.same }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - name: Check out control ref and compare Rust inputs
+        id: cmp
+        env:
+          CONTROL_REF: ${{ inputs.control_ref }}
+        run: |
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*' >/dev/null 2>&1 || true
+          git worktree add /tmp/control "$CONTROL_REF"
+          git -C /tmp/control submodule update --init --recursive
+          (cd /tmp/control && scripts/go-overlay.sh)
+          same=1; for d in rust go go-overlay; do [ "$(git rev-parse HEAD:$d)" = "$(git -C /tmp/control rev-parse HEAD:$d)" ] || same=0; done
+          echo "same=$same" >> "$GITHUB_OUTPUT"
+          mkdir -p /tmp/ctrlbin; git -C /tmp/control rev-parse HEAD > /tmp/ctrlbin/control-head.txt
+      - uses: docker/setup-buildx-action@v3.10.0
+        if: ${{ steps.cmp.outputs.same != '1' }}
+      - uses: crazy-max/ghaction-github-runtime@v3.0.0
+        if: ${{ steps.cmp.outputs.same != '1' }}
+      - name: Build control Rust binaries (same recipe as candidate)
+        if: ${{ steps.cmp.outputs.same != '1' }}
+        run: |
+          docker buildx build -f /tmp/control/rust/Dockerfile --target binaries --build-arg PROFILE=0 --output type=local,dest=/tmp/ctrlbin/bin \
+            --cache-from type=gha,scope=rust-image-fat-ctrl --cache-to type=gha,mode=max,scope=rust-image-fat-ctrl /tmp/control 2>&1 | tail -80
+          test "${PIPESTATUS[0]}" = 0
+          tar -C /tmp/ctrlbin -czf /tmp/ctrlbin/bin.tgz -C /tmp/ctrlbin/bin .
+          rm -rf /tmp/ctrlbin/bin
+      - uses: actions/upload-artifact@v4
+        if: ${{ steps.cmp.outputs.same != '1' }}
+        with:
+          name: rust-control-binaries
+          path: |
+            /tmp/ctrlbin/bin.tgz
+            /tmp/ctrlbin/control-head.txt
+          retention-days: 1
   paired-benchmark:
-    if: ${{ inputs.sdk_openloop != true }}
+    if: ${{ always() && inputs.sdk_openloop != true && (needs.build-control.result == 'success' || needs.build-control.result == 'skipped') }}
+    needs: [build-control]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -195,26 +239,29 @@ jobs:
           docker run --entrypoint cat cadence-rust:ci /etc/cadence/cadence-server.sha256 > out/rust-binary.sha256
           docker run --entrypoint sha256sum cadence-rust:ci /usr/local/bin/cadence-history >> out/rust-binary.sha256
           docker run --entrypoint sha256sum cadence-rust:ci /usr/local/bin/cadence-server-real >> out/rust-binary.sha256
-      - name: Build Rust control image (three-arm mode)
+      - name: Download control Rust binaries
+        if: ${{ inputs.control_ref != '' && needs.build-control.outputs.same != '1' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: rust-control-binaries
+          path: /tmp/ctrlbin
+      - name: Rust control image (three-arm mode, built in build-control job)
         if: ${{ inputs.control_ref != '' }}
-        env:
-          CONTROL_REF: ${{ inputs.control_ref }}
         run: |
-          git fetch origin '+refs/heads/*:refs/remotes/origin/*' >/dev/null 2>&1 || true
-          git worktree add /tmp/control "$CONTROL_REF" > out/control-worktree.log 2>&1
-          git -C /tmp/control submodule update --init --recursive >> out/control-worktree.log 2>&1
-          git -C /tmp/control rev-parse HEAD > out/control-head.txt
-          (cd /tmp/control && scripts/go-overlay.sh) >> out/control-worktree.log 2>&1
-          # Identical Rust inputs (rust, go, go-overlay trees) => identical binaries: retag instead of a second ~45 min LTO build (A/A case).
-          same=1; for d in rust go go-overlay; do [ "$(git rev-parse HEAD:$d)" = "$(git -C /tmp/control rev-parse HEAD:$d)" ] || same=0; done
-          echo "$same" > out/control-same-tree.txt
-          if [ "$same" = 1 ]; then docker tag cadence-rust:ci cadence-rust-control:ci; else
-          docker build --pull=false -f /tmp/control/rust/Dockerfile --build-arg GO_IMAGE=cadence-go:ci -t cadence-rust-control:ci /tmp/control > out/control-image-build.log 2>&1 || { tail -80 out/control-image-build.log; exit 1; }
+          lscpu | sed -n 's/^Model name:[[:space:]]*//p' > out/cpu-model.txt
+          if [ "${{ needs.build-control.outputs.same }}" = 1 ]; then
+            # Identical Rust inputs (rust, go, go-overlay trees) => identical binaries: retag (A/A case).
+            echo 1 > out/control-same-tree.txt
+            docker tag cadence-rust:ci cadence-rust-control:ci
+          else
+            echo 0 > out/control-same-tree.txt
+            cp /tmp/ctrlbin/control-head.txt out/control-head.txt
+            tar -C /tmp/ctrlbin -xzf /tmp/ctrlbin/bin.tgz
+            docker buildx build --builder default --load --pull=false -f rust/Dockerfile --build-context builder=/tmp/ctrlbin/bin --build-arg GO_IMAGE=cadence-go:ci -t cadence-rust-control:ci . > out/control-image-build.log 2>&1 || { tail -80 out/control-image-build.log; exit 1; }
           fi
           docker run --entrypoint cat cadence-rust-control:ci /etc/cadence/cadence-server.sha256 > out/control-binary.sha256
           docker run --entrypoint sha256sum cadence-rust-control:ci /usr/local/bin/cadence-history >> out/control-binary.sha256
           docker run --entrypoint sha256sum cadence-rust-control:ci /usr/local/bin/cadence-server-real >> out/control-binary.sha256
-          lscpu | sed -n 's/^Model name:[[:space:]]*//p' > out/cpu-model.txt
       - name: Build CLI and SDK benchmark driver
         working-directory: tests/frontend-gate
         run: |
