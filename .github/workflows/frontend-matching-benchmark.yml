@@ -70,6 +70,9 @@ on:
       profile:
         description: 'perf record Rust History (PROFILE_SERVICES) during measurement (1 = on, builds rust image with frame pointers)'
         default: '0'
+      control_ref:
+        description: Enables three-arm mode (Go, Rust control built from this ref, Rust candidate = dispatched ref), same job/runner, interleaved. Empty = two-arm. Use 'origin/master' for A/B.
+        default: ''
       sql_slow_ms:
         description: Diagnostic - set CADENCE_HISTORY_SQL_SLOW_MS on history (both arms; empty = off) and count slow-transaction log lines
         default: ''
@@ -146,8 +149,52 @@ jobs:
             Benchmark/evidence/run/drivers.sha256
             Benchmark/evidence/run/*-build.log
           retention-days: 3
+  build-control:
+    if: ${{ inputs.sdk_openloop != true && inputs.control_ref != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    outputs:
+      same: ${{ steps.cmp.outputs.same }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - name: Check out control ref and compare Rust inputs
+        id: cmp
+        env:
+          CONTROL_REF: ${{ inputs.control_ref }}
+        run: |
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*' >/dev/null 2>&1 || true
+          git worktree add /tmp/control "$CONTROL_REF"
+          git -C /tmp/control submodule update --init --recursive
+          (cd /tmp/control && scripts/go-overlay.sh)
+          same=1; for d in rust go go-overlay; do [ "$(git rev-parse HEAD:$d)" = "$(git -C /tmp/control rev-parse HEAD:$d)" ] || same=0; done
+          echo "same=$same" >> "$GITHUB_OUTPUT"
+          mkdir -p /tmp/ctrlbin; git -C /tmp/control rev-parse HEAD > /tmp/ctrlbin/control-head.txt
+      - uses: docker/setup-buildx-action@v3.10.0
+        if: ${{ steps.cmp.outputs.same != '1' }}
+      - uses: crazy-max/ghaction-github-runtime@v3.0.0
+        if: ${{ steps.cmp.outputs.same != '1' }}
+      - name: Build control Rust binaries (same recipe as candidate)
+        if: ${{ steps.cmp.outputs.same != '1' }}
+        run: |
+          docker buildx build -f /tmp/control/rust/Dockerfile --target binaries --build-arg PROFILE=0 --output type=local,dest=/tmp/ctrlbin/bin \
+            --cache-from type=gha,scope=rust-image-fat-ctrl --cache-to type=gha,mode=max,scope=rust-image-fat-ctrl /tmp/control 2>&1 | tail -80
+          test "${PIPESTATUS[0]}" = 0
+          tar -C /tmp/ctrlbin -czf /tmp/ctrlbin/bin.tgz -C /tmp/ctrlbin/bin .
+          rm -rf /tmp/ctrlbin/bin
+      - uses: actions/upload-artifact@v4
+        if: ${{ steps.cmp.outputs.same != '1' }}
+        with:
+          name: rust-control-binaries
+          path: |
+            /tmp/ctrlbin/bin.tgz
+            /tmp/ctrlbin/control-head.txt
+          retention-days: 1
   paired-benchmark:
-    if: ${{ inputs.sdk_openloop != true }}
+    if: ${{ always() && inputs.sdk_openloop != true && (needs.build-control.result == 'success' || needs.build-control.result == 'skipped') }}
+    needs: [build-control]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -192,6 +239,29 @@ jobs:
           docker run --entrypoint cat cadence-rust:ci /etc/cadence/cadence-server.sha256 > out/rust-binary.sha256
           docker run --entrypoint sha256sum cadence-rust:ci /usr/local/bin/cadence-history >> out/rust-binary.sha256
           docker run --entrypoint sha256sum cadence-rust:ci /usr/local/bin/cadence-server-real >> out/rust-binary.sha256
+      - name: Download control Rust binaries
+        if: ${{ inputs.control_ref != '' && needs.build-control.outputs.same != '1' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: rust-control-binaries
+          path: /tmp/ctrlbin
+      - name: Rust control image (three-arm mode, built in build-control job)
+        if: ${{ inputs.control_ref != '' }}
+        run: |
+          lscpu | sed -n 's/^Model name:[[:space:]]*//p' > out/cpu-model.txt
+          if [ "${{ needs.build-control.outputs.same }}" = 1 ]; then
+            # Identical Rust inputs (rust, go, go-overlay trees) => identical binaries: retag (A/A case).
+            echo 1 > out/control-same-tree.txt
+            docker tag cadence-rust:ci cadence-rust-control:ci
+          else
+            echo 0 > out/control-same-tree.txt
+            cp /tmp/ctrlbin/control-head.txt out/control-head.txt
+            mkdir -p /tmp/ctrlbin/bin && tar -C /tmp/ctrlbin/bin -xzf /tmp/ctrlbin/bin.tgz
+            docker buildx build --builder default --load --pull=false -f rust/Dockerfile --build-context builder=/tmp/ctrlbin/bin --build-arg GO_IMAGE=cadence-go:ci -t cadence-rust-control:ci . > out/control-image-build.log 2>&1 || { tail -80 out/control-image-build.log; exit 1; }
+          fi
+          docker run --entrypoint cat cadence-rust-control:ci /etc/cadence/cadence-server.sha256 > out/control-binary.sha256
+          docker run --entrypoint sha256sum cadence-rust-control:ci /usr/local/bin/cadence-history >> out/control-binary.sha256
+          docker run --entrypoint sha256sum cadence-rust-control:ci /usr/local/bin/cadence-server-real >> out/control-binary.sha256
       - name: Build CLI and SDK benchmark driver
         working-directory: tests/frontend-gate
         run: |
@@ -225,12 +295,13 @@ jobs:
           python3 tests/frontend-gate/benchmark/paired-run.py \
             --requests "$REQUESTS" --warmup "$WARMUP" \
             --repetitions "$REPETITIONS" --concurrency "$CONCURRENCY" \
-            --payload-bytes "$PAYLOAD_BYTES" --rust-services "${{ inputs.rust_services || 'frontend,matching' }}" > out/paired-runner.log 2>&1
+            --payload-bytes "$PAYLOAD_BYTES" ${{ inputs.control_ref != '' && '--control-image cadence-rust-control:ci' || '' }} --rust-services "${{ inputs.rust_services || 'frontend,matching' }}" > out/paired-runner.log 2>&1
           status=$?
           echo "$status" > out/paired-runner.exit
           cat out/paired-runner.log
           exit "$status"
       - name: Verify complete paired benchmark evidence
+        if: ${{ inputs.control_ref == '' }}
         run: |
           set +e
           python3 tests/benchmark/verify_artifacts.py --out out --expected-head "$GITHUB_SHA" > out/artifact-verification.json
