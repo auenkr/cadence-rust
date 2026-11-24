@@ -26,6 +26,7 @@ use crate::engine::deps::{
 use crate::engine::runtime::{UpdateAction, UpdateFn, WorkflowUpdater};
 use crate::shard_context::{ShardContext, ShardContextError};
 use crate::task::deps::MetricsScope;
+use crate::wiring::assembly::engine_close::ClosedTxn;
 use crate::wiring::assembly::engine_state::{EngineMutableState, StateParams};
 use crate::wiring::persistence::engine_ndc::{to_history_error, SqlHistoryManager};
 
@@ -187,6 +188,25 @@ pub struct EngineExecutionContext {
     state: Mutex<Option<Arc<EngineMutableState>>>,
 }
 
+pub(super) struct PreparedUpdate {
+    txn: ClosedTxn,
+    transfer_slots: Vec<(i64, i64)>,
+    timer_slots: Vec<(i64, i64)>,
+    completion: UpdateCompletion,
+}
+
+pub(super) struct UpdateCompletion {
+    state: Arc<EngineMutableState>,
+    history_size: i64,
+    last_event_task_id: Option<i64>,
+}
+
+pub(super) struct NewWorkflowWrite<'a> {
+    pub snapshot: pc::WorkflowSnapshot,
+    pub transfer: &'a [pc::TransferTask],
+    pub timer: &'a [pc::TimerTask],
+}
+
 impl EngineExecutionContext {
     pub(super) fn new(core: Arc<EngineCore>, domain_id: &str, execution: &WorkflowExecution) -> Arc<Self> {
         Arc::new(Self {
@@ -336,26 +356,13 @@ impl EngineExecutionContext {
         if !state.is_dirty() {
             return Ok(());
         }
-        self.persist(&state, now, true, None, None, None).await
+        self.persist(state, now, true).await
     }
 
     /// Go `UpdateWorkflowExecutionAsPassive`.
     pub async fn update_as_passive(&self, now: i64) -> HResult<()> {
         let state = self.load_state().await?;
-        self.persist(&state, now, false, None, None, None).await
-    }
-
-    /// Go `UpdateWorkflowExecutionWithNewAsActive`: persists this (terminated)
-    /// run together with the snapshot of the new run.
-    pub(super) async fn update_with_new_as_active(
-        &self,
-        now: i64,
-        new_snapshot: pc::WorkflowSnapshot,
-        new_tasks: (&[pc::TransferTask], &[pc::TimerTask]),
-        held_gate: &tokio::sync::OwnedMutexGuard<()>,
-    ) -> HResult<()> {
-        let state = self.load_state().await?;
-        self.persist(&state, now, true, Some(new_snapshot), Some(new_tasks), Some(held_gate)).await
+        self.persist(state, now, false).await
     }
 
     /// Go `UpdateWorkflowExecutionWithNewAsActive` with the new run's mutable state:
@@ -369,15 +376,23 @@ impl EngineExecutionContext {
         };
         let mut txn = new_run.close_transaction(now, true)?;
         let (size, last, _blob) = crate::wiring::assembly::engine_start::append_new_branch(core, &mut txn, &info).await?;
-        // Go holds the shard lock from task-id allocation through the write.
-        let gate = core.shard.lock_task_writes().await;
-        let (snapshot, max_read_level, transfer, timer) = crate::wiring::assembly::engine_start::snapshot_of(core, txn)?;
-        // The new run's tasks are notified inside persist, before the read level moves
-        // (Go notifyingExecutionManager runs before updateMaxReadLevelLocked).
-        self.update_with_new_as_active(now, snapshot, (&transfer, &timer), &gate).await?;
-        core.shard.update_max_read_level(max_read_level);
-        drop(gate);
+        self.update_with_new_transaction(now, txn).await?;
         new_run.finish_transaction(size, last);
+        Ok(())
+    }
+
+    /// Go `UpdateWorkflowExecutionWithNewAsActive`.
+    pub(super) async fn update_with_new_transaction(&self, now: i64, new_txn: ClosedTxn) -> HResult<()> {
+        let prepared = self.prepare_active_update(now).await?;
+        let shard = &self.core.shard;
+        let gate = shard.lock_task_writes().await;
+        let (snapshot, max_read_level, transfer, timer) =
+            crate::wiring::assembly::engine_start::snapshot_of(&self.core, new_txn)?;
+        let new_workflow = NewWorkflowWrite { snapshot, transfer: &transfer, timer: &timer };
+        let completed = self.write_update(prepared, now, true, Some(new_workflow), &gate).await?;
+        shard.update_max_read_level(max_read_level);
+        drop(gate);
+        self.finish_update(completed);
         Ok(())
     }
 
@@ -387,20 +402,30 @@ impl EngineExecutionContext {
         if !state.is_dirty() {
             return Ok(());
         }
-        self.persist(&state, now, false, None, None, None).await
+        self.persist(state, now, false).await
     }
 
-    /// Close the transaction, assign task ids, append the history batch and
-    /// write the mutation (Go `updateWorkflowExecutionWithNew` without a new run).
-    async fn persist(
+    async fn persist(&self, state: Arc<EngineMutableState>, now: i64, active: bool) -> HResult<()> {
+        let prepared = self.prepare_update(state, now, active, false).await?;
+        let gate = self.core.shard.lock_task_writes().await;
+        let completed = self.write_update(prepared, now, active, None, &gate).await?;
+        drop(gate);
+        self.finish_update(completed);
+        Ok(())
+    }
+
+    pub(super) async fn prepare_active_update(&self, now: i64) -> HResult<PreparedUpdate> {
+        self.prepare_update(self.load_state().await?, now, true, true).await
+    }
+
+    /// Prepare the workflow mutation and persist its history before entering the shard write gate.
+    async fn prepare_update(
         &self,
-        state: &Arc<EngineMutableState>,
+        state: Arc<EngineMutableState>,
         now: i64,
         active: bool,
-        new_snapshot: Option<pc::WorkflowSnapshot>,
-        new_tasks: Option<(&[pc::TransferTask], &[pc::TimerTask])>,
-        held_gate: Option<&tokio::sync::OwnedMutexGuard<()>>,
-    ) -> HResult<()> {
+        lock_history_ids: bool,
+    ) -> HResult<PreparedUpdate> {
         let core = &self.core;
         let shard = &core.shard;
         let mut txn = state.close_transaction(now, active)?;
@@ -409,12 +434,21 @@ impl EngineExecutionContext {
         let mut history_size = state.history_size();
         let mut last_event_task_id = None;
         if !txn.events.is_empty() {
+            // Combined updates already serialize history ID allocation with queue writes.
+            // Keep range renewal ordered with those writes while allowing the history append
+            // to run independently of the execution write.
+            let history_id_gate = if lock_history_ids {
+                Some(shard.lock_task_writes().await)
+            } else {
+                None
+            };
             let ids = shard.generate_task_ids(txn.events.len()).map_err(shard_err(shard.shard_id()))?;
+            let transaction_id = shard.generate_task_id().map_err(shard_err(shard.shard_id()))?;
+            drop(history_id_gate);
             for (ev, id) in txn.events.iter_mut().zip(ids.iter()) {
                 ev.task_id = *id;
             }
             last_event_task_id = ids.last().copied();
-            let transaction_id = shard.generate_task_id().map_err(shard_err(shard.shard_id()))?;
             let manager = SqlHistoryManager::new(core.history_v2.clone(), shard.shard_id())
                 .with_transaction_size_limit(core.transaction_size_limit.clone());
             let blob = manager
@@ -430,20 +464,28 @@ impl EngineExecutionContext {
                 txn.events.last().map(|e| e.version).unwrap_or(txn.mutation.last_write_version);
         }
 
-        // Task ids. The gate stays held until the write finished (see ShardContext::lock_task_writes).
-        // When the caller already holds it (task ids allocated for a new run), do not lock again.
-        let _task_write_gate = match held_gate {
-            Some(_) => None,
-            None => Some(shard.lock_task_writes().await),
-        };
+        let transfer_slots = vec![(0, 0); txn.transfer.len()];
+        let timer_slots = txn.timer.iter().map(|t| (0, t.visibility_timestamp_unix_nanos)).collect();
+        let completion = UpdateCompletion { state, history_size, last_event_task_id };
+        Ok(PreparedUpdate { txn, transfer_slots, timer_slots, completion })
+    }
+
+    pub(super) async fn write_update(
+        &self,
+        prepared: PreparedUpdate,
+        now: i64,
+        active: bool,
+        new_workflow: Option<NewWorkflowWrite<'_>>,
+        _gate: &OwnedMutexGuard<()>,
+    ) -> HResult<UpdateCompletion> {
+        let core = &self.core;
+        let shard = &core.shard;
+        let PreparedUpdate { mut txn, mut transfer_slots, mut timer_slots, completion } = prepared;
         let mut max_read_level = 0i64;
-        let mut transfer_slots: Vec<(i64, i64)> = txn.transfer.iter().map(|_| (0, 0)).collect();
         shard.allocate_transfer_ids(&mut transfer_slots, &mut max_read_level).map_err(shard_err(shard.shard_id()))?;
-        let mut timer_slots: Vec<(i64, i64)> =
-            txn.timer.iter().map(|t| (0, t.visibility_timestamp_unix_nanos)).collect();
         shard.allocate_timer_ids(&core.current_cluster, &mut timer_slots).map_err(shard_err(shard.shard_id()))?;
 
-        let mut transfer_tasks = Vec::new();
+        let mut transfer_tasks = Vec::with_capacity(transfer_slots.len());
         for (t, slot) in txn.transfer.iter_mut().zip(transfer_slots.iter()) {
             t.task_id = slot.0;
             t.visibility_time_unix_nanos = slot.1;
@@ -455,7 +497,7 @@ impl EngineExecutionContext {
                 data: task_blob(Encoding::ThriftRW.encode(&s))?,
             });
         }
-        let mut timer_tasks = Vec::new();
+        let mut timer_tasks = Vec::with_capacity(timer_slots.len());
         for (t, slot) in txn.timer.iter_mut().zip(timer_slots.iter()) {
             t.task_id = slot.0;
             t.visibility_timestamp_unix_nanos = slot.1;
@@ -467,7 +509,10 @@ impl EngineExecutionContext {
                 data: task_blob(Encoding::ThriftRW.encode(&s))?,
             });
         }
-        let mut new_snapshot = new_snapshot;
+        let (mut new_snapshot, new_tasks) = match new_workflow {
+            Some(new) => (Some(new.snapshot), Some((new.transfer, new.timer))),
+            None => (None, None),
+        };
         crate::wiring::assembly::engine_close::merge_continue_as_new_replication(
             &mut txn.replication,
             txn.mutation.execution_info.close_status,
@@ -508,22 +553,7 @@ impl EngineExecutionContext {
                     core.notify_tasks(t, tm);
                 }
                 shard.update_max_read_level(max_read_level);
-                state.finish_transaction(history_size, last_event_task_id);
-                // Go execution/context.go updateWorkflowExecutionWithNew: every successful
-                // mutation wakes history long polls, including close and continue-as-new.
-                let info = state.get_execution_info();
-                core.notify_history_event(crate::engine::runtime::HistoryNotification {
-                    domain_id: self.domain_id.clone(),
-                    workflow_id: self.execution.workflow_id.clone(),
-                    run_id: self.execution.run_id.clone(),
-                    last_first_event_id: state.get_last_first_event_id(),
-                    next_event_id: state.get_next_event_id(),
-                    previous_started_event_id: state.get_previous_started_event_id(),
-                    workflow_state: info.state,
-                    workflow_close_state: info.close_status,
-                    version_histories: state.get_version_histories().unwrap_or_default(),
-                });
-                Ok(())
+                Ok(completion)
             }
             Err(e) => {
                 core.notify_tasks_after_failed_write(&e, &txn.transfer, &txn.timer);
@@ -539,6 +569,25 @@ impl EngineExecutionContext {
                 Err(to_history_error(e))
             }
         }
+    }
+
+    pub(super) fn finish_update(&self, completed: UpdateCompletion) {
+        let UpdateCompletion { state, history_size, last_event_task_id } = completed;
+        state.finish_transaction(history_size, last_event_task_id);
+        // Go execution/context.go updateWorkflowExecutionWithNew: every successful
+        // mutation wakes history long polls, including close and continue-as-new.
+        let info = state.get_execution_info();
+        self.core.notify_history_event(crate::engine::runtime::HistoryNotification {
+            domain_id: self.domain_id.clone(),
+            workflow_id: self.execution.workflow_id.clone(),
+            run_id: self.execution.run_id.clone(),
+            last_first_event_id: state.get_last_first_event_id(),
+            next_event_id: state.get_next_event_id(),
+            previous_started_event_id: state.get_previous_started_event_id(),
+            workflow_state: info.state,
+            workflow_close_state: info.close_status,
+            version_histories: state.get_version_histories().unwrap_or_default(),
+        });
     }
 }
 

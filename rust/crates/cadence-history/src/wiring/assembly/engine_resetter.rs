@@ -15,7 +15,7 @@ use cadence_api::service_types::HistoryEvent;
 use cadence_api::tasks::RespondActivityTaskFailedRequest;
 use cadence_persistence::history_contract as pc;
 
-use super::engine_cache::{shard_err, EngineCore, EngineExecutionContext};
+use super::engine_cache::{shard_err, EngineCore, EngineExecutionContext, NewWorkflowWrite};
 use super::ndc_adapters::new_state_rebuilder;
 use super::ndc_context_hooks::{ndc_err, EngineNdcContextHooks};
 use super::ndc_rebuild::{RebuildPager, UnavailableRebuildPager};
@@ -425,23 +425,31 @@ impl EngineWorkflowResetter {
             prepared.snapshot.execution_info.last_event_task_id = *id;
         }
 
-        // Go holds the shard lock from task-id allocation until the write and read-level update finish.
-        let gate = shard.lock_task_writes().await;
-        let mut hooks = EngineNdcContextHooks::new(core.clone());
-        WorkflowContextHooks::<super::ndc_context_hooks::NdcStateBox>::allocate_task_ids(
-            &mut hooks,
-            &mut prepared.snapshot.tasks_by_category,
-        )?;
-
-        let result = if current_terminated {
-            // Go UpdateWorkflowExecutionWithNewAsActive.
+        let current_update = if current_terminated {
             let context = request
                 .current_context
                 .as_any()
                 .and_then(|a| a.downcast_ref::<EngineExecutionContext>())
                 .ok_or_else(|| HistoryError::internal("workflow resetter: current context is not an engine context"))?;
+            Some((context, context.prepare_active_update(prepared.now).await?))
+        } else {
+            None
+        };
+        let mut hooks = EngineNdcContextHooks::new(core.clone());
+        let gate = shard.lock_task_writes().await;
+        WorkflowContextHooks::<super::ndc_context_hooks::NdcStateBox>::allocate_task_ids(
+            &mut hooks,
+            &mut prepared.snapshot.tasks_by_category,
+        )?;
+
+        let result = if let Some((context, update)) = current_update {
+            // Go UpdateWorkflowExecutionWithNewAsActive.
             let (transfer, timer) = hooks.take_pending_tasks();
-            context.update_with_new_as_active(prepared.now, prepared.snapshot, (&transfer, &timer), &gate).await
+            let new_workflow = NewWorkflowWrite { snapshot: prepared.snapshot, transfer: &transfer, timer: &timer };
+            context
+                .write_update(update, prepared.now, true, Some(new_workflow), &gate)
+                .await
+                .map(|completed| Some((context, completed)))
         } else {
             let create = pc::CreateWorkflowExecutionRequest {
                 shard_id: shard.shard_id(),
@@ -453,27 +461,29 @@ impl EngineWorkflowResetter {
                 workflow_request_mode: pc::WorkflowRequestMode::New,
                 current_timestamp_unix_nanos: prepared.now,
             };
-            core.executions.create_workflow_execution(create).await.map(|_| ()).map_err(|e| {
+            core.executions.create_workflow_execution(create).await.map(|_| None).map_err(|e| {
                 if super::engine_cache::write_outcome_unknown(&e) {
                     shard.renew_range_after_unknown_write_error();
                 }
                 to_history_error(e)
             })
         };
-        let result = match result {
-            Ok(()) => {
+        match result {
+            Ok(completed) => {
                 // Publishes the reset run's tasks (the current run's own write,
                 // if any, published its tasks itself).
                 WorkflowContextHooks::<super::ndc_context_hooks::NdcStateBox>::tasks_committed(&mut hooks);
+                drop(gate);
+                if let Some((context, completed)) = completed {
+                    context.finish_update(completed);
+                }
                 Ok(())
             }
             Err(err) => {
                 WorkflowContextHooks::<super::ndc_context_hooks::NdcStateBox>::write_failed(&mut hooks, &err);
                 Err(err)
             }
-        };
-        drop(gate);
-        result
+        }
     }
 }
 
