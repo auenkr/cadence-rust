@@ -12,28 +12,16 @@ These runs use the final code head `98047b4fcc5c78e2e8b506be39c84ff94ce11f3a`.
 
 | Check | Run | Conclusion | Rust History binary SHA256 |
 |---|---|---|---|
-| History Clippy and tests, fresh target | [45356902402](https://github.com/auenkr/cadence-rust/actions/runs/45356902402) | Success. | |
-| Workspace Clippy and tests, fresh target | [45356908753](https://github.com/auenkr/cadence-rust/actions/runs/45356908753) | Success. | |
+| History Clippy and tests, fresh target | [45374014119](https://github.com/auenkr/cadence-rust/actions/runs/45374014119) | Success. Clippy and all 944 History tests passed. | |
+| Workspace Clippy and tests, fresh target | [45374013966](https://github.com/auenkr/cadence-rust/actions/runs/45374013966) | Success. Workspace Clippy and tests passed. | |
 | MySQL mixed gate, two History hosts, jemalloc, gRPC | [45356914667](https://github.com/auenkr/cadence-rust/actions/runs/45356914667) | Success. 430 checks, `GATE SUMMARY failed: []`. | `1b6ce016e51bab7bb5c8798866a4c97db5a97aaa5c6b8a526c0e7318d248b676` |
 | MySQL mixed gate, two History hosts, jemalloc, TChannel | [45356919332](https://github.com/auenkr/cadence-rust/actions/runs/45356919332) | Success. 430 checks, `GATE SUMMARY failed: []`. | `83253dd9de52e48264a47709219cc93ead14c34f9a514bf346c694591fe3eb51` |
 | MySQL soak, two History hosts, jemalloc, 45 min at 4 workflows/s | [45356929391](https://github.com/auenkr/cadence-rust/actions/runs/45356929391) | Success. 35 checks and 10,800 workflows passed. | `0a96565c8c2bc0cd5f45ae3a8f75677c7e2e14e751ebba5e26df8ede1dbcc540` |
-| Final paired benchmark | [45366356133](https://github.com/auenkr/cadence-rust/actions/runs/45366356133) | Success. See final benchmark below. | |
+| Final paired benchmark | [45366356133](https://github.com/auenkr/cadence-rust/actions/runs/45366356133) | Success. Strict artifact verification passed. | `30af6eee79024fc712e2362017545d8eede03bf1be5316eac6da72035f09f525` |
 
 The [initial debug gate](https://github.com/auenkr/cadence-rust/actions/runs/45343599787) at `ad82d13990838c5fbb395f1414411eae99ef7bb8` failed when both History binaries overflowed their 1 MiB worker stacks during schedule backfill. Debug History SHA256 `37ee7b257661ac165a9c50853e91a82bffb0847995bbda1f2c5f3db4212fc515`. The [TChannel attempt](https://github.com/auenkr/cadence-rust/actions/runs/45350728318) at `57ec600c2786f8f80a4049e0783317c7d224b029` used the same stack and was canceled after the overflow diagnosis. The intermediate fix `dd6ef15ec0ea4cb1cb228ae36554ba4c79f4aea4` restored the default debug stack and passed the [debug](https://github.com/auenkr/cadence-rust/actions/runs/45354892737) and [release](https://github.com/auenkr/cadence-rust/actions/runs/45354892340) gates. The final code keeps the default in both profiles.
 
 The paired benchmark dispatches use `rust_services=frontend,matching,history` with defaults from run 45291978847. Each run uses five paired repetitions, 1,000 workflows per arm at concurrency 1, 16 and 64, 10 warmups, a 1,024-byte payload, and the Go SDK over TChannel.
-
-## Final paired benchmark (default stack, head `98047b4fc`)
-
-History container, median of five pairs, Go → Rust. Anon is the `memory.stat anon` peak.
-
-| Concurrency | CPU seconds (cumulative) | Peak anon MiB | Peak total MiB |
-|---:|---:|---:|---:|
-| 1 | 22.7 → 7.5 | 76.5 → 80.9 | 80.0 → 83.7 |
-| 16 | 23.0 → 11.4 | 95.6 → 94.8 | 101.4 → 98.9 |
-| 64 | 43.3 → 12.5 | 104.0 → 123.1 | 112.5 → 129.7 |
-
-Anonymous gap is +4.4, -0.8 and +19.1 MiB. Rust History used 40-70% less CPU. The c64 gap is larger than in the 1 MiB stack run (+3.6 MiB), but that run used a different runner CPU; no isolated stack-size A/B was done, and stability was chosen over any stack saving.
 
 ## Instrumented baseline
 
@@ -48,6 +36,18 @@ Each cell is Go → Rust, with the median of five per-run peaks for memory and f
 | 64 | 49.50 → 10.41 | 103.35 → 130.32 | 0.00 → 0.00 | 110.89 → 135.82 |
 
 Rust History's baseline anonymous-memory gap was 16.29, 23.54 and 26.97 MiB. The excess in this rerun was predominantly anonymous memory.
+
+## Final paired benchmark
+
+Runner AMD EPYC 7763, 4 logical CPUs, 15 GiB, Ubuntu 26.04.1. Go server binary SHA256 `270777d38975006305bed475ae57f11b00722af365c22e7051c11ce6633c96de`. The benchmark completed 30,000 workflows with zero failures. Each cell is Go → Rust.
+
+| Concurrency | CPU seconds per 1,000 workflows | Peak anon MiB | Peak file MiB | Peak total MiB |
+|---:|---:|---:|---:|---:|
+| 1 | 22.74 → 7.51 | 76.47 → 80.94 | 0.00 → 0.00 | 80.04 → 83.71 |
+| 16 | 23.00 → 11.35 | 95.57 → 94.75 | 0.00 → 0.00 | 101.44 → 98.91 |
+| 64 | 43.28 → 12.47 | 103.98 → 123.14 | 0.00 → 0.00 | 112.52 → 129.69 |
+
+The final Rust-minus-Go anonymous-memory gaps were +4.46, −0.82 and +19.16 MiB. Rust History used 67.0%, 50.7% and 71.2% less CPU than its paired Go arm. The paired gap narrowed at all three concurrency levels relative to the instrumented baseline. Baseline and final runs landed on different CPU models, so the cross-run change is indicative. The final run keeps Tokio's default stack and measures jemalloc and subscription cleanup together.
 
 ## Paired benchmark with the experimental 1 MiB stack
 
