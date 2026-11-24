@@ -216,6 +216,8 @@ def main():
                             env=arm_env, timeout=1800)
                         if monitor.wait(timeout=15) != 0:
                             raise RuntimeError(f"resource collector failed; see {collector_log}")
+                        print(f"[progress] rep {rep + 1}/{args.repetitions} arm={arm} c{conc} done "
+                              f"({time.time() - collector_started:.0f}s)", flush=True)
                         if profiler is not None and profiler.wait(timeout=1200):
                             raise RuntimeError("profiler failed")
                     finally:

@@ -292,13 +292,12 @@ jobs:
           BENCH_SQL_SLOW_MS: ${{ inputs.sql_slow_ms }}
         run: |
           set +e
-          python3 tests/frontend-gate/benchmark/paired-run.py \
+          python3 -u tests/frontend-gate/benchmark/paired-run.py \
             --requests "$REQUESTS" --warmup "$WARMUP" \
             --repetitions "$REPETITIONS" --concurrency "$CONCURRENCY" \
-            --payload-bytes "$PAYLOAD_BYTES" ${{ inputs.control_ref != '' && '--control-image cadence-rust-control:ci' || '' }} --rust-services "${{ inputs.rust_services || 'frontend,matching' }}" > out/paired-runner.log 2>&1
-          status=$?
+            --payload-bytes "$PAYLOAD_BYTES" ${{ inputs.control_ref != '' && '--control-image cadence-rust-control:ci' || '' }} --rust-services "${{ inputs.rust_services || 'frontend,matching' }}" 2>&1 | tee out/paired-runner.log
+          status=${PIPESTATUS[0]}
           echo "$status" > out/paired-runner.exit
-          cat out/paired-runner.log
           exit "$status"
       - name: Verify complete paired benchmark evidence
         if: ${{ inputs.control_ref == '' }}
@@ -331,6 +330,13 @@ jobs:
             echo "- rust_services: ${{ inputs.rust_services || 'frontend,matching' }}"
           } > out/machine-spec.md 2>&1 || true
           cat out/machine-spec.md
+          {
+            echo "# Benchmark report ($(git rev-parse --short HEAD))"
+            for f in out/paired-benchmark/three-arm-report.md out/three-arm-report.md out/paired-benchmark/comparison-c*.md out/comparison-c*.md; do
+              [ -f "$f" ] && { echo; cat "$f"; }
+            done
+            echo; cat out/machine-spec.md
+          } >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
           git rev-parse HEAD > out/head-sha.txt
           git status --short > out/worktree-status.txt
       - uses: actions/upload-artifact@v4
