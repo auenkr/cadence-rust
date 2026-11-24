@@ -94,9 +94,10 @@ def main():
     override = OUT / "resource-limits.yaml"
     override.write_text("services:\n" + "".join(
         f"  {name}:\n    mem_limit: 1400m\n    memswap_limit: 1400m\n    cpus: 1.0\n    pids_limit: 2048\n"
-        + ("    environment:\n      CADENCE_MEM_REPORT: \"1\"\n"
+        + ("    environment:\n"
+           + ("      CADENCE_MEM_REPORT: \"1\"\n" if os.environ.get("BENCH_MEM_REPORT") == "1" else "")
            + (f"      CADENCE_HISTORY_SQL_SLOW_MS: \"{os.environ['BENCH_SQL_SLOW_MS']}\"\n" if os.environ.get("BENCH_SQL_SLOW_MS") else "")
-           if name == "history" else "")
+           if name == "history" and (os.environ.get("BENCH_MEM_REPORT") == "1" or os.environ.get("BENCH_SQL_SLOW_MS")) else "")
         for name in ("frontend", "matching", "history", "worker")))
     env["COMPOSE_FILE"] = os.pathsep.join((str(COMPOSE), str(override)))
     for service in ("FRONTEND", "MATCHING", "HISTORY", "WORKER"):

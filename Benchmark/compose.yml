@@ -21,7 +21,7 @@ services:
     healthcheck: { test: ["CMD", "mysqladmin", "ping", "-proot", "-h", "127.0.0.1"], interval: 5s, retries: 40 }
   history:
     image: ${CADENCE_IMAGE_HISTORY:-cadence-go:ci}
-    environment: { <<: *env, SERVICES: history, CADENCE_AUTO_SETUP: "true", CADENCE_HISTORY_SQL_SLOW_MS: "${CADENCE_HISTORY_SQL_SLOW_MS:-}", CADENCE_SQL_STATS_SECS: "${CADENCE_SQL_STATS_SECS:-}", CADENCE_MEM_REPORT: "${CADENCE_MEM_REPORT:-1}" }
+    environment: { <<: *env, SERVICES: history, CADENCE_AUTO_SETUP: "true", CADENCE_HISTORY_SQL_SLOW_MS: "${CADENCE_HISTORY_SQL_SLOW_MS:-}", CADENCE_SQL_STATS_SECS: "${CADENCE_SQL_STATS_SECS:-}", CADENCE_MEM_REPORT: "${CADENCE_MEM_REPORT:-}" }
     depends_on: { mysql: { condition: service_healthy } }
     healthcheck: { test: ["CMD", "bash", "-c", "echo > /dev/tcp/$$(hostname -i)/7934"], interval: 5s, retries: 60 }
   matching:
