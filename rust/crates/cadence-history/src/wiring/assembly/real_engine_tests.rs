@@ -710,6 +710,12 @@ async fn request_cancel_activity_decision_before_start_cancels_activity() {
 
 #[tokio::test]
 async fn respond_decision_continue_as_new_closes_run_and_starts_new() {
+    use std::future::{poll_fn, Future};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use tokio::{sync::Notify, time::timeout};
+
     let h = Harness::new();
     let d = Decision {
         decision_type: Some(DecisionType::ContinueAsNewWorkflowExecution),
@@ -723,7 +729,29 @@ async fn respond_decision_continue_as_new_closes_run_and_starts_new() {
         }),
         ..Default::default()
     };
-    let run = run_first_decision(&h, d).await;
+    let run = start(&h).await;
+    decision_started(&h, &run, 2, "dec-req").await.unwrap();
+    let append_entered = Arc::new(Notify::new());
+    let append_resume = Arc::new(Notify::new());
+    let update_entered = Arc::new(Notify::new());
+    let update_resume = Arc::new(Notify::new());
+    *h.history.append_pause.lock().unwrap() = Some((append_entered.clone(), append_resume.clone()));
+    *h.execs.update_pause.lock().unwrap() = Some((update_entered.clone(), update_resume.clone()));
+    let core = h.cache.core();
+    let check_gate = async {
+        let wait = Duration::from_secs(5);
+        timeout(wait, append_entered.notified()).await.expect("closing run history append");
+        let mut gate = std::pin::pin!(core.shard.lock_task_writes());
+        assert!(poll_fn(|cx| std::task::Poll::Ready(gate.as_mut().poll(cx).is_ready())).await);
+        append_resume.notify_one();
+
+        timeout(wait, update_entered.notified()).await.expect("combined execution write");
+        let mut gate = std::pin::pin!(core.shard.lock_task_writes());
+        assert!(poll_fn(|cx| std::task::Poll::Ready(gate.as_mut().poll(cx).is_pending())).await);
+        update_resume.notify_one();
+    };
+    let (result, ()) = tokio::join!(decision_completed(&h, &run, 2, vec![d]), check_gate);
+    result.unwrap();
     let old = h.execs.snapshot(WF, &run).unwrap().execution_info;
     assert_eq!(old.state, WORKFLOW_STATE_COMPLETED);
     assert_eq!(old.close_status, WORKFLOW_CLOSE_STATUS_CONTINUED_AS_NEW);

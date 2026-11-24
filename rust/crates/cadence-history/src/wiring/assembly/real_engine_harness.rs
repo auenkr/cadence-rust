@@ -404,11 +404,19 @@ impl pc::GoExecutionStore for MemExecutions {
 #[derive(Default)]
 pub struct MemHistory {
     pub nodes: Mutex<Vec<pc::HistoryBranchRequest>>,
+    pub append_pause: Mutex<Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>>,
 }
 
 #[async_trait]
 impl pc::GoHistoryV2Store for MemHistory {
     async fn append_history_nodes(&self, r: pc::HistoryBranchRequest) -> Result<(), PersistenceError> {
+        if !r.is_new_branch {
+            let pause = self.append_pause.lock().unwrap().take();
+            if let Some((entered, resume)) = pause {
+                entered.notify_one();
+                resume.notified().await;
+            }
+        }
         self.nodes.lock().unwrap().push(r);
         Ok(())
     }
