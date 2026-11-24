@@ -11,9 +11,8 @@
 //! appends the history batch, allocates task ids and writes the mutation.
 //! Replication tasks and new-run (continue-as-new / reset) writes are not ported.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicI64, Ordering};
 
 use async_trait::async_trait;
 use cadence_persistence::history_contract::{self as pc, GoExecutionStore, GoHistoryV2Store};
@@ -572,21 +571,98 @@ struct CacheEntry<V> {
     lock: Arc<tokio::sync::Mutex<()>>,
     context: V,
     created: i64,
-    accessed: AtomicI64,
 }
 
 type Entry = CacheEntry<Arc<EngineExecutionContext>>;
 type Key = (String, String, String);
 
+fn is_pinned<V>(e: &CacheEntry<V>) -> bool {
+    Arc::strong_count(&e.lock) > 1
+}
+
+struct Slot<V> {
+    entry: Arc<CacheEntry<V>>,
+    created_seq: u64,
+    accessed: i64,
+    access_seq: u64,
+}
+
+/// Cache map with access-order and creation-order indexes (Go lru.go keeps an
+/// access-ordered list), so expiry and victim selection avoid full scans.
+struct CacheMap<V> {
+    map: HashMap<Key, Slot<V>>,
+    by_created: BTreeMap<(i64, u64), Key>,
+    by_access: BTreeMap<(i64, u64), Key>,
+    seq: u64,
+}
+
+impl<V> CacheMap<V> {
+    fn new() -> Self {
+        Self { map: HashMap::new(), by_created: BTreeMap::new(), by_access: BTreeMap::new(), seq: 0 }
+    }
+    fn len(&self) -> usize {
+        self.map.len()
+    }
+    fn contains_key(&self, key: &Key) -> bool {
+        self.map.contains_key(key)
+    }
+    fn get(&self, key: &Key) -> Option<&Arc<CacheEntry<V>>> {
+        self.map.get(key).map(|s| &s.entry)
+    }
+    #[cfg(test)]
+    fn clear(&mut self) {
+        self.map.clear();
+        self.by_created.clear();
+        self.by_access.clear();
+    }
+    fn remove(&mut self, key: &Key) {
+        if let Some(s) = self.map.remove(key) {
+            self.by_created.remove(&(s.entry.created, s.created_seq));
+            self.by_access.remove(&(s.accessed, s.access_seq));
+        }
+    }
+    fn insert(&mut self, key: Key, entry: Arc<CacheEntry<V>>, accessed: i64) {
+        self.remove(&key);
+        self.seq += 1;
+        let seq = self.seq;
+        self.by_created.insert((entry.created, seq), key.clone());
+        self.by_access.insert((accessed, seq), key.clone());
+        self.map.insert(key, Slot { entry, created_seq: seq, accessed, access_seq: seq });
+    }
+    /// Update-on-access: move the entry to the most recently used position.
+    fn touch(&mut self, key: &Key, now: i64) {
+        self.seq += 1;
+        let seq = self.seq;
+        if let Some(s) = self.map.get_mut(key) {
+            self.by_access.remove(&(s.accessed, s.access_seq));
+            s.accessed = now;
+            s.access_seq = seq;
+            self.by_access.insert((now, seq), key.clone());
+        }
+    }
+}
+
 /// Go LRU: expire only unpinned entries, then evict the least recently accessed
 /// unpinned entry. Never invalidate a context held by a caller waiting on its lock.
-fn make_cache_room<V>(entries: &mut HashMap<Key, Arc<CacheEntry<V>>>, now: i64, ttl: i64, max: usize) -> bool {
-    entries.retain(|_, e| Arc::strong_count(&e.lock) > 1 || ttl == 0 || now <= e.created.saturating_add(ttl));
+fn make_cache_room<V>(entries: &mut CacheMap<V>, now: i64, ttl: i64, max: usize) -> bool {
+    if ttl != 0 {
+        let expired: Vec<Key> = entries
+            .by_created
+            .iter()
+            .take_while(|((created, _), _)| now > created.saturating_add(ttl))
+            .filter(|(_, k)| !is_pinned(&entries.map[*k].entry))
+            .map(|(_, k)| k.clone())
+            .collect();
+        for k in expired {
+            entries.remove(&k);
+        }
+    }
     while entries.len() >= max {
-        let oldest = entries.iter()
-            .filter(|(_, e)| Arc::strong_count(&e.lock) == 1)
-            .min_by_key(|(_, e)| e.accessed.load(Ordering::Relaxed))
-            .map(|(key, _)| key.clone());
+        let oldest = entries
+            .by_access
+            .values()
+            .find(|k| !is_pinned(&entries.map[*k].entry))
+            .cloned();
         let Some(oldest) = oldest else { return false; };
         entries.remove(&oldest);
     }
@@ -595,17 +671,25 @@ fn make_cache_room<V>(entries: &mut HashMap<Key, Arc<CacheEntry<V>>>, now: i64, 
 
 #[cfg(test)]
 mod evict_tests {
+    use std::sync::atomic::Ordering;
     use super::*;
 
     fn key(n: &str) -> Key { ("d".into(), n.into(), "r".into()) }
-    fn entry(created: i64, accessed: i64) -> Arc<CacheEntry<()>> {
-        Arc::new(CacheEntry { lock: Arc::new(tokio::sync::Mutex::new(())), context: (), created, accessed: AtomicI64::new(accessed) })
+    fn entry(created: i64) -> Arc<CacheEntry<()>> {
+        Arc::new(CacheEntry { lock: Arc::new(tokio::sync::Mutex::new(())), context: (), created })
+    }
+    fn map(items: &[(&str, i64, i64)]) -> CacheMap<()> {
+        let mut m = CacheMap::new();
+        for (n, created, accessed) in items {
+            m.insert(key(n), entry(*created), *accessed);
+        }
+        m
     }
 
     #[tokio::test]
     async fn eviction_respects_lru_ttl_and_pins() {
-        let mut entries = HashMap::from([(key("old"), entry(0, 1)), (key("recent"), entry(0, 3)), (key("pinned"), entry(0, 0))]);
-        let pin = entries[&key("pinned")].lock.clone();
+        let mut entries = map(&[("old", 0, 1), ("recent", 0, 3), ("pinned", 0, 0)]);
+        let pin = entries.get(&key("pinned")).unwrap().lock.clone();
         assert!(make_cache_room(&mut entries, 5, 10, 3));
         assert!(!entries.contains_key(&key("old")));
         assert!(entries.contains_key(&key("recent")));
@@ -614,7 +698,82 @@ mod evict_tests {
         assert!(!make_cache_room(&mut entries, 11, 10, 1));
         drop(pin);
         assert!(make_cache_room(&mut entries, 11, 10, 1));
-        assert!(entries.is_empty());
+        assert_eq!(entries.len(), 0);
+    }
+
+    #[test]
+    fn eviction_order_follows_access_and_touch() {
+        let mut entries = map(&[("a", 0, 1), ("b", 0, 2), ("c", 0, 3)]);
+        entries.touch(&key("a"), 4);
+        assert!(make_cache_room(&mut entries, 5, 0, 3));
+        assert!(!entries.contains_key(&key("b")));
+        assert!(make_cache_room(&mut entries, 5, 0, 2));
+        assert!(!entries.contains_key(&key("c")));
+        assert!(entries.contains_key(&key("a")));
+        assert_eq!(entries.by_access.len(), entries.len());
+        assert_eq!(entries.by_created.len(), entries.len());
+    }
+
+    #[test]
+    fn eviction_ties_break_by_insertion_order() {
+        let mut entries = map(&[("a", 0, 1), ("b", 0, 1)]);
+        assert!(make_cache_room(&mut entries, 1, 0, 2));
+        assert!(!entries.contains_key(&key("a")));
+        assert!(entries.contains_key(&key("b")));
+    }
+
+    #[test]
+    fn pinned_entries_are_skipped_for_eviction_and_expiry() {
+        let mut entries = map(&[("a", 0, 1), ("b", 0, 2)]);
+        let pin = entries.get(&key("a")).unwrap().lock.clone();
+        assert!(make_cache_room(&mut entries, 1, 0, 2));
+        assert!(entries.contains_key(&key("a")));
+        assert!(!entries.contains_key(&key("b")));
+        entries.insert(key("c"), entry(0), 3);
+        // ttl expired: unpinned c removed, pinned a kept.
+        assert!(make_cache_room(&mut entries, 100, 10, 5));
+        assert!(entries.contains_key(&key("a")));
+        assert!(!entries.contains_key(&key("c")));
+        drop(pin);
+    }
+
+    #[test]
+    fn ttl_boundary_and_zero_ttl() {
+        let mut entries = map(&[("a", 0, 1)]);
+        assert!(make_cache_room(&mut entries, 10, 10, 5));
+        assert!(entries.contains_key(&key("a")));
+        assert!(make_cache_room(&mut entries, 11, 10, 5));
+        assert!(!entries.contains_key(&key("a")));
+        let mut entries = map(&[("a", 0, 1)]);
+        assert!(make_cache_room(&mut entries, i64::MAX, 0, 5));
+        assert!(entries.contains_key(&key("a")));
+    }
+
+    #[test]
+    fn full_of_pinned_entries_fails() {
+        let mut entries = map(&[("a", 0, 1), ("b", 0, 2)]);
+        let pins: Vec<_> = ["a", "b"].iter().map(|n| entries.get(&key(n)).unwrap().lock.clone()).collect();
+        assert!(!make_cache_room(&mut entries, 1, 0, 2));
+        assert_eq!(entries.len(), 2);
+        drop(pins);
+        assert!(make_cache_room(&mut entries, 1, 0, 2));
+        assert_eq!(entries.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn release_after_error_clears_context_and_unpins() {
+        use crate::wiring::assembly::real_engine_harness::{Harness, DOMAIN_ID};
+        let h = Harness::build_with_config(|_| {}, |config| {
+            config.history_cache_max_size = Arc::new(|| 1);
+        });
+        let a = WorkflowExecution { workflow_id: "a".into(), run_id: uuid::Uuid::new_v4().to_string() };
+        let b = WorkflowExecution { workflow_id: "b".into(), run_id: uuid::Uuid::new_v4().to_string() };
+        let (_, release) = h.cache.acquire(DOMAIN_ID, &a, false).await.unwrap();
+        assert!(h.cache.acquire(DOMAIN_ID, &b, false).await.is_err());
+        release(Some(&HistoryError::internal("boom")));
+        let (_, release_b) = h.cache.acquire(DOMAIN_ID, &b, false).await.unwrap();
+        release_b(None);
+        assert_eq!(h.cache.entries.lock().unwrap().len(), 1);
     }
 
     #[tokio::test]
@@ -645,7 +804,6 @@ mod evict_tests {
         assert!(!Arc::ptr_eq(&replacement, &expired));
         release(None);
     }
-
 }
 
 /// Owns the workflow lock until explicit release or cancellation. A dropped
@@ -683,7 +841,7 @@ impl Drop for ExecutionLease {
 /// by a lock held until the returned `ReleaseFunc` is called.
 pub struct EngineExecutionCache {
     core: Arc<EngineCore>,
-    entries: Mutex<HashMap<Key, Arc<Entry>>>,
+    entries: Mutex<CacheMap<Arc<EngineExecutionContext>>>,
     config: Arc<crate::config::Config>,
 }
 
@@ -699,7 +857,7 @@ impl EngineExecutionCache {
     }
 
     pub fn new(core: Arc<EngineCore>, config: Arc<crate::config::Config>) -> Arc<Self> {
-        Arc::new(Self { core, entries: Mutex::new(HashMap::new()), config })
+        Arc::new(Self { core, entries: Mutex::new(CacheMap::new()), config })
     }
 
     /// Go `validateWorkflowExecutionInfo`: fills the current run id when empty.
@@ -756,10 +914,10 @@ impl EngineExecutionCache {
         let mut entries = self.entries.lock().unwrap();
         let now = self.core.clock.now();
         let ttl = (self.config.history_cache_ttl)().as_nanos().min(i64::MAX as u128) as i64;
-        if let Some(e) = entries.get(key) {
-            if Arc::strong_count(&e.lock) > 1 || ttl == 0 || now <= e.created.saturating_add(ttl) {
+        if let Some(e) = entries.get(key).cloned() {
+            if is_pinned(&e) || ttl == 0 || now <= e.created.saturating_add(ttl) {
                 lru.inc_counter("BaseCacheHit");
-                e.accessed.store(now, Ordering::Relaxed);
+                entries.touch(key, now);
                 return Ok((e.clone(), e.lock.clone(), false));
             }
         }
@@ -776,10 +934,9 @@ impl EngineExecutionCache {
             lock: Arc::new(tokio::sync::Mutex::new(())),
             context: EngineExecutionContext::new(self.core.clone(), domain_id, execution),
             created: now,
-            accessed: AtomicI64::new(now),
         });
         let pin = entry.lock.clone();
-        entries.insert(key.clone(), entry.clone());
+        entries.insert(key.clone(), entry.clone(), now);
         lru.update_gauge("BaseCacheCount", entries.len() as f64);
         lru.update_gauge("BaseCacheCountLimitGauge", max_size as f64);
         Ok((entry, pin, true))
