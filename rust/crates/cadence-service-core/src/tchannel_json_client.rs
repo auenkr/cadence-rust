@@ -75,8 +75,10 @@ async fn write_frame(s: &mut TcpStream, kind: u8, id: u32, p: &[u8]) -> Result<(
     h[..2].copy_from_slice(&n.to_be_bytes());
     h[2] = kind;
     h[4..8].copy_from_slice(&id.to_be_bytes());
-    s.write_all(&h).await?;
-    s.write_all(p).await?;
+    let mut buf = Vec::with_capacity(16 + p.len());
+    buf.extend_from_slice(&h);
+    buf.extend_from_slice(p);
+    s.write_all(&buf).await?;
     Ok(())
 }
 async fn read_frame(s: &mut TcpStream) -> Result<(u8, u32, Vec<u8>)> {
