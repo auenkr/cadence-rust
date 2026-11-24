@@ -205,7 +205,12 @@ jobs:
           git -C /tmp/control submodule update --init --recursive >> out/control-worktree.log 2>&1
           git -C /tmp/control rev-parse HEAD > out/control-head.txt
           (cd /tmp/control && scripts/go-overlay.sh) >> out/control-worktree.log 2>&1
+          # Identical Rust inputs (rust, go, go-overlay trees) => identical binaries: retag instead of a second ~45 min LTO build (A/A case).
+          same=1; for d in rust go go-overlay; do [ "$(git rev-parse HEAD:$d)" = "$(git -C /tmp/control rev-parse HEAD:$d)" ] || same=0; done
+          echo "$same" > out/control-same-tree.txt
+          if [ "$same" = 1 ]; then docker tag cadence-rust:ci cadence-rust-control:ci; else
           docker build --pull=false -f /tmp/control/rust/Dockerfile --build-arg GO_IMAGE=cadence-go:ci -t cadence-rust-control:ci /tmp/control > out/control-image-build.log 2>&1 || { tail -80 out/control-image-build.log; exit 1; }
+          fi
           docker run --entrypoint cat cadence-rust-control:ci /etc/cadence/cadence-server.sha256 > out/control-binary.sha256
           docker run --entrypoint sha256sum cadence-rust-control:ci /usr/local/bin/cadence-history >> out/control-binary.sha256
           docker run --entrypoint sha256sum cadence-rust-control:ci /usr/local/bin/cadence-server-real >> out/control-binary.sha256
