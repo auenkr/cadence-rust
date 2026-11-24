@@ -31,11 +31,11 @@ WORKDIR /src/rust
 # Gates use RELEASE_LTO=thin RELEASE_CODEGEN_UNITS=16; benchmarks keep the fat/1 defaults.
 ARG RELEASE_LTO=fat
 ARG RELEASE_CODEGEN_UNITS=1
-ENV OPENSSL_STATIC=1 OPENSSL_DIR=/usr CARGO_PROFILE_RELEASE_DEBUG=0 CARGO_PROFILE_RELEASE_LTO=${RELEASE_LTO} CARGO_PROFILE_RELEASE_CODEGEN_UNITS=${RELEASE_CODEGEN_UNITS}
+ENV CARGO_BUILD_JOBS=2 OPENSSL_STATIC=1 OPENSSL_DIR=/usr CARGO_PROFILE_RELEASE_DEBUG=0 CARGO_PROFILE_RELEASE_LTO=${RELEASE_LTO} CARGO_PROFILE_RELEASE_CODEGEN_UNITS=${RELEASE_CODEGEN_UNITS}
 COPY --from=planner /recipe.json /recipe.json
-RUN cargo chef cook --release --recipe-path /recipe.json -p cadence-server -p cadence-history --features jemalloc-default,cadence-history/jemalloc-default -j2
+RUN cargo chef cook --release --recipe-path /recipe.json -p cadence-server -p cadence-history --features jemalloc-default,cadence-history/jemalloc-default
 COPY rust /src/rust
-RUN cargo build --release -p cadence-server -p cadence-history --features jemalloc-default,cadence-history/jemalloc-default -j2 \
+RUN cargo build --release -p cadence-server -p cadence-history --features jemalloc-default,cadence-history/jemalloc-default \
     && sha256sum target/release/cadence-server target/release/cadence-history > /cadence-server.sha256
 
 # Exportable binaries (same paths as the builder stage): `buildx build --target binaries --output type=local,dest=DIR`
