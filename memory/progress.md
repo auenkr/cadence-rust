@@ -1,5 +1,16 @@
 # Progress log
 
+- **2026-11-24 — Frontend review closed; final gates and benchmark.** All
+  Frontend review findings merged (gap #3, #6, #8, #12, dynconfig
+  throttledLogRPS, TChannel outbound gate lane). The gate sweep found a
+  History gate harness port gap (fixed) and a Frontend bug: one gRPC port
+  for all History hosts. That is now fixed with per-member `grpc` ring
+  labels, for History and Matching. Master 6939d2ab4 is green: workspace
+  rust-ci 45270749150, two-History mixed x3, Frontend mixed x3. Benchmark
+  report: memory/benchmark-results-6939d2ab4-20261124.md (runs 45273706507
+  and 45291978847, with machine spec). The Rust image now ships
+  cadence-history.
+
 - **2026-10-31 — Frontend Rust bootstrap skeleton.** Added the
   `cadence-frontend` executable, Frontend handler/config/validator/lifecycle
   boundaries and wrapper module layout. The executable reuses the shared
