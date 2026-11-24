@@ -174,9 +174,17 @@ jobs:
           docker build -f /tmp/gobuild/Dockerfile --target cadence-auto-setup -t cadence-go:ci /tmp/gobuild > out/go-image-build.log 2>&1 || { tail -60 out/go-image-build.log; exit 1; }
           docker image inspect cadence-go:ci --format '{{.Id}} {{.Size}}' > out/go-image.txt
           docker run --entrypoint sha256sum cadence-go:ci /usr/local/bin/cadence-server > out/go-binary.sha256
+      - uses: docker/setup-buildx-action@v3.10.0
+      - uses: crazy-max/ghaction-github-runtime@v3.0.0
       - name: Build optimized Rust server image
         run: |
-          docker build --pull=false -f rust/Dockerfile --build-arg GO_IMAGE=cadence-go:ci -t cadence-rust:ci . > out/rust-image-build.log 2>&1 || { tail -80 out/rust-image-build.log; exit 1; }
+          # Benchmarks keep fat LTO / codegen-units=1. The dependency layer (cargo-chef) and the build are
+          # restored from the GHA layer cache when Cargo.toml/Cargo.lock/sources are unchanged.
+          rm -rf /tmp/rustbin
+          { echo "RUST IMAGE PROFILE: lto=fat codegen_units=1 (benchmark)"; echo "CPU: $(grep -m1 'model name' /proc/cpuinfo)"; } | tee out/rust-image-profile.txt
+          docker buildx build -f rust/Dockerfile --target binaries --output type=local,dest=/tmp/rustbin \
+            --cache-from type=gha,scope=rust-image-fat --cache-to type=gha,mode=max,scope=rust-image-fat . > out/rust-image-build.log 2>&1 || { tail -80 out/rust-image-build.log; exit 1; }
+          docker buildx build --builder default --load --pull=false -f rust/Dockerfile --build-context builder=/tmp/rustbin --build-arg GO_IMAGE=cadence-go:ci -t cadence-rust:ci . >> out/rust-image-build.log 2>&1 || { tail -80 out/rust-image-build.log; exit 1; }
           docker image inspect cadence-rust:ci --format '{{.Id}} {{.Size}}' > out/rust-image.txt
           docker run --entrypoint cat cadence-rust:ci /etc/cadence/cadence-server.sha256 > out/rust-binary.sha256
           docker run --entrypoint sha256sum cadence-rust:ci /usr/local/bin/cadence-history >> out/rust-binary.sha256

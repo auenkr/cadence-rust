@@ -9,19 +9,41 @@
 #   docker build -f rust/Dockerfile --build-arg GO_IMAGE=cadence-go:ci -t cadence-rust:ci .
 ARG GO_IMAGE=cadence-go:ci
 
-FROM rust:1-alpine AS builder
+FROM rust:1-alpine AS chef
 RUN apk add --no-cache musl-dev gcc g++ make cmake perl git pkgconf openssl-dev openssl-libs-static linux-headers
+RUN cargo install cargo-chef --locked --version 0.1.68
 WORKDIR /src
+
+# Dependency-only layer: the recipe only changes when Cargo.toml/Cargo.lock change, so the
+# (expensive) third-party crate compile is reused from the layer cache across source edits.
+FROM chef AS planner
 COPY go/idls go/idls
 COPY go/proto go/proto
 COPY rust rust
 WORKDIR /src/rust
+RUN cargo chef prepare --recipe-path /recipe.json
+
+FROM chef AS builder
+COPY go/idls go/idls
+COPY go/proto go/proto
+WORKDIR /src/rust
 # A/B with the old build: --build-arg RELEASE_LTO=off --build-arg RELEASE_CODEGEN_UNITS=16
+# Gates use RELEASE_LTO=thin RELEASE_CODEGEN_UNITS=16; benchmarks keep the fat/1 defaults.
 ARG RELEASE_LTO=fat
 ARG RELEASE_CODEGEN_UNITS=1
 ENV OPENSSL_STATIC=1 OPENSSL_DIR=/usr CARGO_PROFILE_RELEASE_DEBUG=0 CARGO_PROFILE_RELEASE_LTO=${RELEASE_LTO} CARGO_PROFILE_RELEASE_CODEGEN_UNITS=${RELEASE_CODEGEN_UNITS}
+COPY --from=planner /recipe.json /recipe.json
+RUN cargo chef cook --release --recipe-path /recipe.json -p cadence-server -p cadence-history --features jemalloc-default,cadence-history/jemalloc-default -j2
+COPY rust /src/rust
 RUN cargo build --release -p cadence-server -p cadence-history --features jemalloc-default,cadence-history/jemalloc-default -j2 \
     && sha256sum target/release/cadence-server target/release/cadence-history > /cadence-server.sha256
+
+# Exportable binaries (same paths as the builder stage): `buildx build --target binaries --output type=local,dest=DIR`
+# with a gha layer cache, then `--build-context builder=DIR` for the final image (GO_IMAGE stays in the local daemon).
+FROM scratch AS binaries
+COPY --from=builder /src/rust/target/release/cadence-server /src/rust/target/release/cadence-server
+COPY --from=builder /src/rust/target/release/cadence-history /src/rust/target/release/cadence-history
+COPY --from=builder /cadence-server.sha256 /cadence-server.sha256
 
 FROM ${GO_IMAGE} AS final
 USER root
