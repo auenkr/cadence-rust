@@ -344,8 +344,8 @@ impl ShardContext {
     }
 
     pub fn generate_task_ids(&self, number: usize) -> Result<Vec<i64>, ShardContextError> {
-        let mut g = self.inner.lock().unwrap();
         let mut out = Vec::with_capacity(number);
+        let mut g = self.inner.lock().unwrap();
         for _ in 0..number {
             out.push(self.generate_task_id_locked(&mut g)?);
         }
@@ -401,8 +401,9 @@ impl ShardContext {
         }
     }
 
-    /// Held by a writer from transfer-id allocation until the write result and read-level update are done, so a higher
-    /// read level never overtakes a lower, not yet committed task id (Go does this under the shard lock).
+    /// Acquire after preparing the workflow mutation and its history batches. Hold from queue task ID
+    /// allocation through the write result and read-level update, so readers never pass an
+    /// uncommitted task (Go does this under the shard lock).
     pub async fn lock_task_writes(&self) -> tokio::sync::OwnedMutexGuard<()> {
         self.task_write_gate.clone().lock_owned().await
     }

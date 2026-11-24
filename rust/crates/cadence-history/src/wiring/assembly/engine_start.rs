@@ -580,10 +580,11 @@ impl WorkflowStartHost for EngineStartHost {
             .unwrap()
             .clone()
             .ok_or_else(|| HistoryError::internal("start transaction not prepared"))?;
-        let _task_write_gate = self.core.shard.lock_task_writes().await;
-        let (snap, max_read_level, notify_transfer, notify_timer) = snapshot_of(&self.core, txn)?;
         let (size, last) = *new_run.history.lock().unwrap();
+        let previous_run_id = prev_run_id.to_string();
         let shard = &self.core.shard;
+        let task_write_gate = shard.lock_task_writes().await;
+        let (snap, max_read_level, notify_transfer, notify_timer) = snapshot_of(&self.core, txn)?;
         let request = pc::CreateWorkflowExecutionRequest {
             shard_id: shard.shard_id(),
             range_id: shard.range_id(),
@@ -593,7 +594,7 @@ impl WorkflowStartHost for EngineStartHost {
                 CreateWorkflowMode::ContinueAsNew => pc::CreateWorkflowMode::ContinueAsNew,
                 CreateWorkflowMode::Zombie => pc::CreateWorkflowMode::Zombie,
             },
-            previous_run_id: prev_run_id.to_string(),
+            previous_run_id,
             previous_last_write_version: prev_last_write_version,
             new_workflow_snapshot: snap,
             workflow_request_mode: match request_mode {
@@ -607,6 +608,7 @@ impl WorkflowStartHost for EngineStartHost {
                 // Go notifyingExecutionManager notifies (cache inject) before updateMaxReadLevelLocked.
                 self.core.notify_tasks(&notify_transfer, &notify_timer);
                 shard.update_max_read_level(max_read_level);
+                drop(task_write_gate);
                 new_run.state.finish_transaction(size, last);
                 ctx.set_state(new_run.state.clone());
                 Ok(())
@@ -636,13 +638,7 @@ impl WorkflowStartHost for EngineStartHost {
         let state = downcast_state(new_state)?;
         let mut txn = state.close_transaction(now, true)?;
         let (size, last, _blob) = append_new_branch(&self.core, &mut txn, &execution_info_string(new_context)).await?;
-        let gate = self.core.shard.lock_task_writes().await;
-        let (snap, max_read_level, notify_transfer, notify_timer) = snapshot_of(&self.core, txn)?;
-        // Go taskNotifier also notifies the new workflow snapshot's tasks (inside persist,
-        // before the read level moves) so the cached queue reader injects them.
-        running_ctx.update_with_new_as_active(now, snap, (&notify_transfer, &notify_timer), &gate).await?;
-        self.core.shard.update_max_read_level(max_read_level);
-        drop(gate);
+        running_ctx.update_with_new_transaction(now, txn).await?;
         state.finish_transaction(size, last);
         new_ctx.set_state(state);
         Ok(())
@@ -758,11 +754,11 @@ impl DomainFailoverHost for EngineFailoverHost {
 
     /// Go `shard.ReplicateFailoverMarkers`.
     async fn replicate_failover_markers(&self, markers: Vec<FailoverMarkerTask>) -> HResult<()> {
-        let _gate = self.shard.lock_task_writes().await;
+        let mut slots = vec![(0, 0); markers.len()];
+        let gate = self.shard.lock_task_writes().await;
         if let Some(e) = self.shard.closed_error() {
             return Err(shard_err(self.shard.shard_id())(e));
         }
-        let mut slots: Vec<(i64, i64)> = vec![(0, 0); markers.len()];
         let mut max_read_level = 0i64;
         self.shard.allocate_transfer_ids(&mut slots, &mut max_read_level).map_err(shard_err(self.shard.shard_id()))?;
         let tasks = markers
@@ -784,6 +780,7 @@ impl DomainFailoverHost for EngineFailoverHost {
                 Err(to_history_error(e))
             }
             Err(e) => {
+                drop(gate);
                 tracing::error!(error = ?e, "failed to add failover marker tasks");
                 Err(to_history_error(e))
             }
