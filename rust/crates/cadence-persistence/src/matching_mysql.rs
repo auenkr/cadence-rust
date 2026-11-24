@@ -113,6 +113,9 @@ struct PoolState {
 
 pub(crate) struct SyncConnectionPool {
     options: Opts,
+    /// Shared async pool for deadline-bound reads (Go's pooled database/sql DB).
+    /// Created lazily inside the query runtime; sized like the sync pool.
+    async_pool: std::sync::OnceLock<mysql_async::Pool>,
     async_options: mysql_async::Opts,
     query_runtime: QueryRuntimeOwner,
     max_open: usize,
@@ -306,20 +309,13 @@ impl SyncConnectionPool {
             return Err(TimedQueryError::Timeout);
         }
         let slot = ReservedConnectionSlot(self.clone());
-        let options = self.async_options.clone();
+        let async_pool = self.async_pool().clone();
         let task = self.query_runtime.spawn(async move {
             let _slot = slot;
             let result = tokio::time::timeout(remaining, async move {
-                let mut connection = mysql_async::Conn::new(options).await?;
-                let result = operation(&mut connection).await;
-                let disconnect = connection.disconnect().await;
-                match result {
-                    Ok(value) => {
-                        disconnect?;
-                        Ok(value)
-                    }
-                    Err(error) => Err(error),
-                }
+                // Connection is returned to the shared pool on drop.
+                let mut connection = async_pool.get_conn().await?;
+                operation(&mut connection).await
             })
             .await
             .map_err(|_| TimedQueryError::Timeout)
@@ -342,6 +338,21 @@ impl SyncConnectionPool {
                 Err(TimedQueryError::Timeout)
             }
         }
+    }
+
+    fn async_pool(&self) -> &mysql_async::Pool {
+        self.async_pool.get_or_init(|| {
+            // maxConns<=0 means unlimited (usize::MAX); mysql_async pre-allocates
+            // for the maximum, so bound it. The shared max-open reservation in
+            // `reserve_until` still enforces the real limit.
+            let max = self.max_open.clamp(1, 1024);
+            let min = self.max_idle.min(max);
+            let constraints = mysql_async::PoolConstraints::new(min, max)
+                .unwrap_or_default();
+            let opts = mysql_async::OptsBuilder::from_opts(self.async_options.clone())
+                .pool_opts(mysql_async::PoolOpts::default().with_constraints(constraints));
+            mysql_async::Pool::new(opts)
+        })
     }
 
     fn reserve_until(&self, deadline: Instant) -> bool {
@@ -584,6 +595,7 @@ impl MySqlTaskStore {
         let query_runtime = QueryRuntimeOwner::new().map_err(StorageError::BackendConfiguration)?;
         Ok(Arc::new(SyncConnectionPool {
             options,
+            async_pool: std::sync::OnceLock::new(),
             async_options,
             query_runtime,
             max_open,
@@ -2447,6 +2459,24 @@ mod tests {
             })
             .unwrap();
         assert_eq!(follow_up, Some(13));
+    }
+
+    #[test]
+    #[ignore = "requires the opt-in MySQL interoperability server"]
+    fn timed_domain_query_reuses_pooled_connection() {
+        use mysql_async::prelude::Queryable as _;
+
+        let pool = MySqlTaskStore::create_mysql_pool(&timed_mysql_test_config(1)).unwrap();
+        let mut ids = Vec::new();
+        for _ in 0..3 {
+            let id = pool
+                .query_until(Instant::now() + Duration::from_secs(2), |connection| {
+                    Box::pin(async move { connection.query_first::<u64, _>("SELECT CONNECTION_ID()").await })
+                })
+                .unwrap();
+            ids.push(id);
+        }
+        assert!(ids.windows(2).all(|w| w[0] == w[1]), "connections not reused: {ids:?}");
     }
 
     #[test]
