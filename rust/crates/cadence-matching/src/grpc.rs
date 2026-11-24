@@ -2853,6 +2853,7 @@ pub async fn serve(
         .with_service_name("uber.cadence.sharddistributor.v1.ShardDistributorExecutorCanaryAPI")
         .build_v1()?;
     tonic::transport::Server::builder()
+        .tcp_nodelay(true)
         .layer(tower::layer::layer_fn(CallerScope))
         .add_service(reflection)
         .add_service(

@@ -1214,6 +1214,7 @@ pub async fn serve(
         .with_service_name("uber.cadence.admin.v1.AdminAPI")
         .build_v1()?;
     tonic::transport::Server::builder()
+        .tcp_nodelay(true)
         .add_service(reflection)
         .add_service(
             a::admin_api_server::AdminApiServer::new(service).max_decoding_message_size(limit),
