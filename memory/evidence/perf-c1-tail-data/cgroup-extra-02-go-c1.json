@@ -1,0 +1,138 @@
+{
+  "after": {
+    "cadence-fm-benchmark-frontend-1": {
+      "cpu_max": "100000 100000",
+      "memory_bytes": 36630528,
+      "nr_periods": 453,
+      "nr_throttled": 0,
+      "system_usec": 1075839,
+      "throttled_usec": 0,
+      "usage_usec": 5081874,
+      "user_usec": 4006034
+    },
+    "cadence-fm-benchmark-history-1": {
+      "cpu_max": "100000 100000",
+      "memory_bytes": 77660160,
+      "nr_periods": 440,
+      "nr_throttled": 0,
+      "system_usec": 3735895,
+      "throttled_usec": 0,
+      "usage_usec": 12386068,
+      "user_usec": 8650172
+    },
+    "cadence-fm-benchmark-matching-1": {
+      "cpu_max": "100000 100000",
+      "memory_bytes": 34164736,
+      "nr_periods": 446,
+      "nr_throttled": 0,
+      "system_usec": 759374,
+      "throttled_usec": 0,
+      "usage_usec": 3009590,
+      "user_usec": 2250215
+    },
+    "cadence-fm-benchmark-mysql-1": {
+      "cpu_max": "150000 100000",
+      "memory_bytes": 726421504,
+      "nr_periods": 548,
+      "nr_throttled": 0,
+      "system_usec": 6402823,
+      "throttled_usec": 0,
+      "usage_usec": 18759832,
+      "user_usec": 12357009
+    },
+    "cadence-fm-benchmark-worker-1": {
+      "cpu_max": "100000 100000",
+      "memory_bytes": 28241920,
+      "nr_periods": 218,
+      "nr_throttled": 0,
+      "system_usec": 111671,
+      "throttled_usec": 0,
+      "usage_usec": 496882,
+      "user_usec": 385211
+    }
+  },
+  "before": {
+    "cadence-fm-benchmark-frontend-1": {
+      "cpu_max": "100000 100000",
+      "memory_bytes": 25468928,
+      "nr_periods": 61,
+      "nr_throttled": 0,
+      "system_usec": 68791,
+      "throttled_usec": 0,
+      "usage_usec": 240270,
+      "user_usec": 171479
+    },
+    "cadence-fm-benchmark-history-1": {
+      "cpu_max": "100000 100000",
+      "memory_bytes": 27377664,
+      "nr_periods": 48,
+      "nr_throttled": 0,
+      "system_usec": 97652,
+      "throttled_usec": 0,
+      "usage_usec": 289169,
+      "user_usec": 191517
+    },
+    "cadence-fm-benchmark-matching-1": {
+      "cpu_max": "100000 100000",
+      "memory_bytes": 24776704,
+      "nr_periods": 54,
+      "nr_throttled": 0,
+      "system_usec": 36033,
+      "throttled_usec": 0,
+      "usage_usec": 167780,
+      "user_usec": 131747
+    },
+    "cadence-fm-benchmark-mysql-1": {
+      "cpu_max": "150000 100000",
+      "memory_bytes": 560107520,
+      "nr_periods": 156,
+      "nr_throttled": 0,
+      "system_usec": 1450648,
+      "throttled_usec": 0,
+      "usage_usec": 3976091,
+      "user_usec": 2525442
+    },
+    "cadence-fm-benchmark-worker-1": {
+      "cpu_max": "100000 100000",
+      "memory_bytes": 21258240,
+      "nr_periods": 49,
+      "nr_throttled": 0,
+      "system_usec": 69615,
+      "throttled_usec": 0,
+      "usage_usec": 371973,
+      "user_usec": 302358
+    }
+  },
+  "delta": {
+    "cadence-fm-benchmark-frontend-1": {
+      "nr_periods": 392,
+      "nr_throttled": 0,
+      "throttled_usec": 0,
+      "usage_usec": 4841604
+    },
+    "cadence-fm-benchmark-history-1": {
+      "nr_periods": 392,
+      "nr_throttled": 0,
+      "throttled_usec": 0,
+      "usage_usec": 12096899
+    },
+    "cadence-fm-benchmark-matching-1": {
+      "nr_periods": 392,
+      "nr_throttled": 0,
+      "throttled_usec": 0,
+      "usage_usec": 2841810
+    },
+    "cadence-fm-benchmark-mysql-1": {
+      "nr_periods": 392,
+      "nr_throttled": 0,
+      "throttled_usec": 0,
+      "usage_usec": 14783741
+    },
+    "cadence-fm-benchmark-worker-1": {
+      "nr_periods": 169,
+      "nr_throttled": 0,
+      "throttled_usec": 0,
+      "usage_usec": 124909
+    }
+  }
+}
