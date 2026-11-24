@@ -198,7 +198,7 @@ pub fn mutation_to_persistence(
     result.upsert_semaphore_infos = mutation.upsert_semaphore_infos.iter().map(semaphore_to_record).collect();
     result.delete_semaphore_infos = mutation.delete_semaphore_infos.clone();
     if !mutation.new_buffered_events.is_empty() {
-        let blob = cadence_thrift::history_blob::encode(mutation.new_buffered_events.clone());
+        let blob = cadence_thrift::history_blob::encode_slice(&mutation.new_buffered_events);
         result.new_buffered_events = Some(pc::DataBlob { encoding: "thriftrw".into(), data: blob.data });
     }
     Ok(result)
