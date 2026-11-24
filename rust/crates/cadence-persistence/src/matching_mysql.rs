@@ -324,7 +324,7 @@ impl SyncConnectionPool {
         if dedicated && !self.reserve_until(deadline) {
             return Err(TimedQueryError::Timeout);
         }
-        let (result_tx, result_rx) = mpsc::channel();
+        let (result_tx, result_rx) = mpsc::sync_channel(1);
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             if dedicated {
@@ -352,8 +352,8 @@ impl SyncConnectionPool {
             .await
             .map_err(|_| TimedQueryError::Timeout)
             .and_then(|result| result.map_err(TimedQueryError::MySql));
-            // A successful result means both protocol cleanup and the shared
-            // max-open reservation have completed.
+            // A successful result means protocol cleanup has completed and any
+            // dedicated per-query reservation slot has been released.
             drop(_slot);
             let _ = result_tx.send(result);
         });
@@ -375,8 +375,8 @@ impl SyncConnectionPool {
     fn async_pool(&self) -> &mysql_async::Pool {
         self.async_pool.get_or_init(|| {
             // maxConns<=0 means unlimited (usize::MAX); mysql_async pre-allocates
-            // for the maximum, so bound it. The shared max-open reservation in
-            // `reserve_until` still enforces the real limit.
+            // for the maximum, so bound it. The async pool has its own budget
+            // (async_max); the sync pool's reservation covers the rest of maxConns.
             let max = self.async_max.clamp(1, 1024);
             // Idle sockets beyond maxIdleConns are not kept; Go opens lazily,
             // and abs_conn_ttl mirrors SetConnMaxLifetime.
