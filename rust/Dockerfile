@@ -16,7 +16,10 @@ COPY go/idls go/idls
 COPY go/proto go/proto
 COPY rust rust
 WORKDIR /src/rust
-ENV OPENSSL_STATIC=1 OPENSSL_DIR=/usr CARGO_PROFILE_RELEASE_DEBUG=0 CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
+# A/B with the old build: --build-arg RELEASE_LTO=off --build-arg RELEASE_CODEGEN_UNITS=16
+ARG RELEASE_LTO=fat
+ARG RELEASE_CODEGEN_UNITS=1
+ENV OPENSSL_STATIC=1 OPENSSL_DIR=/usr CARGO_PROFILE_RELEASE_DEBUG=0 CARGO_PROFILE_RELEASE_LTO=${RELEASE_LTO} CARGO_PROFILE_RELEASE_CODEGEN_UNITS=${RELEASE_CODEGEN_UNITS}
 RUN cargo build --release -p cadence-server -p cadence-history --features jemalloc-default,cadence-history/jemalloc-default -j2 \
     && sha256sum target/release/cadence-server target/release/cadence-history > /cadence-server.sha256
 

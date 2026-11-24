@@ -13,7 +13,10 @@ COPY rust rust
 WORKDIR /src/rust
 # PROFILE=1 (perf runs only): line tables + frame pointers, same opt level.
 ARG PROFILE=0
-ENV OPENSSL_STATIC=1 OPENSSL_DIR=/usr CARGO_PROFILE_RELEASE_DEBUG=0 CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
+# A/B with the old build: --build-arg RELEASE_LTO=off --build-arg RELEASE_CODEGEN_UNITS=16
+ARG RELEASE_LTO=fat
+ARG RELEASE_CODEGEN_UNITS=1
+ENV OPENSSL_STATIC=1 OPENSSL_DIR=/usr CARGO_PROFILE_RELEASE_DEBUG=0 CARGO_PROFILE_RELEASE_LTO=${RELEASE_LTO} CARGO_PROFILE_RELEASE_CODEGEN_UNITS=${RELEASE_CODEGEN_UNITS}
 RUN if [ "$PROFILE" = 1 ]; then printf 'CARGO_PROFILE_RELEASE_DEBUG=line-tables-only\nCARGO_PROFILE_RELEASE_STRIP=none\nRUSTFLAGS="-C force-frame-pointers=yes"\n' > /profile.env; else : > /profile.env; fi
 RUN rustc -Vv > /cadence-toolchain.txt
 ARG RUST_PACKAGE=cadence-server
