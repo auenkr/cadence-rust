@@ -41,6 +41,9 @@ on:
       dynamic_config_extra:
         description: YAML appended to dynamic config (literal \n for newlines; both arms)
         default: ''
+      rust_services:
+        description: Services run from the Rust image in the paired rust arm (all-Rust cluster = frontend,matching,history)
+        default: 'frontend,matching'
       sdk_repetitions:
         description: Fresh database pairs for SDK mode
         default: '1'
@@ -173,7 +176,8 @@ jobs:
           docker build --pull=false -f rust/Dockerfile --build-arg GO_IMAGE=cadence-go:ci -t cadence-rust:ci . > out/rust-image-build.log 2>&1 || { tail -80 out/rust-image-build.log; exit 1; }
           docker image inspect cadence-rust:ci --format '{{.Id}} {{.Size}}' > out/rust-image.txt
           docker run --entrypoint cat cadence-rust:ci /etc/cadence/cadence-server.sha256 > out/rust-binary.sha256
-          docker run --entrypoint sha256sum cadence-rust:ci /usr/local/bin/cadence-server >> out/rust-binary.sha256
+          docker run --entrypoint sha256sum cadence-rust:ci /usr/local/bin/cadence-history >> out/rust-binary.sha256
+          docker run --entrypoint sha256sum cadence-rust:ci /usr/local/bin/cadence-server-real >> out/rust-binary.sha256
       - name: Build CLI and SDK benchmark driver
         working-directory: tests/frontend-gate
         run: |
@@ -198,7 +202,7 @@ jobs:
           python3 tests/frontend-gate/benchmark/paired-run.py \
             --requests "$REQUESTS" --warmup "$WARMUP" \
             --repetitions "$REPETITIONS" --concurrency "$CONCURRENCY" \
-            --payload-bytes "$PAYLOAD_BYTES" > out/paired-runner.log 2>&1
+            --payload-bytes "$PAYLOAD_BYTES" --rust-services "${{ inputs.rust_services || 'frontend,matching' }}" > out/paired-runner.log 2>&1
           status=$?
           echo "$status" > out/paired-runner.exit
           cat out/paired-runner.log
@@ -217,6 +221,22 @@ jobs:
           uname -a > out/runner-uname.txt
           lscpu > out/runner-cpu.txt
           free -h > out/runner-memory.txt
+          {
+            echo "## Machine spec"
+            echo "- CPU model: $(lscpu | sed -n 's/^Model name:[[:space:]]*//p')"
+            echo "- Cores/threads: $(lscpu | sed -n 's/^Core(s) per socket:[[:space:]]*//p') cores x $(lscpu | sed -n 's/^Thread(s) per core:[[:space:]]*//p') threads/core; sockets $(lscpu | sed -n 's/^Socket(s):[[:space:]]*//p')"
+            echo "- nproc: $(nproc)"
+            echo "- RAM: $(free -h | awk '/^Mem:/{print $2}')"
+            echo "- Disk (work dir): $(df -h . | tail -1)"
+            echo "- Kernel: $(uname -r)"
+            echo "- OS: $(. /etc/os-release; echo "$PRETTY_NAME")"
+            echo "- Runner image: ${ImageOS:-?} ${ImageVersion:-?}; runner name: ${RUNNER_NAME:-?}"
+            echo "- Database: $(docker image inspect mysql:8.0 --format '{{index .RepoTags 0}} {{.Id}}' 2>/dev/null)"
+            echo "- Container limits (mem/cpu per service):"
+            for f in out/paired-benchmark/compose-*-rust.yaml; do [ -f "$f" ] && grep -E 'mem_limit|cpus:' "$f" | sort | uniq -c | sed 's/^/    /' && break; done
+            echo "- rust_services: ${{ inputs.rust_services || 'frontend,matching' }}"
+          } > out/machine-spec.md 2>&1 || true
+          cat out/machine-spec.md
           git rev-parse HEAD > out/head-sha.txt
           git status --short > out/worktree-status.txt
       - uses: actions/upload-artifact@v4

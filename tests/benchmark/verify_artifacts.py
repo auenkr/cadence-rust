@@ -190,17 +190,17 @@ def verify(out_root, expected_head, tolerance=1.0):
                     if event["exit_code"] != 0:
                         raise InvalidEvidence(f"{teardown}: teardown command failed")
                     _require_compose_down(event, teardown)
-                arm_tag = "cadence-rust:ci" if arm == "rust" else "cadence-go:ci"
+                rust_set = set(host.get("rust_services") or ["frontend", "matching"])
+                tag = lambda svc: "cadence-rust:ci" if arm == "rust" and svc in rust_set else "cadence-go:ci"
                 _validate_compose_config(out / f"compose-{stem}.yaml",
-                                         {"frontend": arm_tag, "matching": arm_tag,
-                                          "history": "cadence-go:ci", "worker": "cadence-go:ci",
+                                         {"frontend": tag("frontend"), "matching": tag("matching"),
+                                          "history": tag("history"), "worker": tag("worker"),
                                           "mysql": "mysql:8.0"})
                 identity = _read(out / f"identities-{stem}.json")
                 if not isinstance(identity, dict):
                     raise InvalidEvidence(f"identities-{stem}.json must contain a JSON object")
-                expected = {"frontend": source["go_image" if arm == "go" else "rust_image"],
-                            "matching": source["go_image" if arm == "go" else "rust_image"],
-                            "history": source["go_image"], "worker": source["go_image"]}
+                img = lambda svc: source["rust_image"] if tag(svc) == "cadence-rust:ci" else source["go_image"]
+                expected = {svc: img(svc) for svc in ("frontend", "matching", "history", "worker")}
                 names = set()
                 ids = set()
                 for service, image in expected.items():

@@ -74,9 +74,14 @@ def main():
     parser.add_argument("--repetitions", type=int, default=5)
     parser.add_argument("--payload-bytes", type=int, default=1024)
     parser.add_argument("--concurrency", default="1,16,64")
+    parser.add_argument("--rust-services", default="frontend,matching",
+                        help="comma list of services run from the Rust image in the rust arm")
     args = parser.parse_args()
     if args.requests < 1 or args.warmup < 0 or args.repetitions < 1 or args.payload_bytes < 0:
         parser.error("requests/repetitions must be positive and warmup nonnegative")
+    rust_services = {x for x in args.rust_services.split(",") if x}
+    if not rust_services <= {"frontend", "matching", "history", "worker"}:
+        parser.error("bad --rust-services")
     concurrency = [int(value) for value in args.concurrency.split(",")]
     if not concurrency or any(value < 1 for value in concurrency):
         parser.error("concurrency must be a comma separated list of positive integers")
@@ -105,7 +110,7 @@ def main():
         "repetitions": args.repetitions, "payload_bytes": args.payload_bytes,
         "concurrency": concurrency,
         "order": "alternates by repetition; each arm gets a new database",
-        "database": "mysql:8.0", "history": "Go image",
+        "database": "mysql:8.0", "rust_services": sorted(rust_services), "history": "Go image",
         "system_worker": "Go image", "transport": "TChannel",
         "frontend_matching_rust_image": "cadence-rust:ci",
         "cpu_memory_limits": "Each service: 1 CPU/1400 MiB, DB: 1.5 CPU/1800 MiB; see resolved compose configs",
@@ -119,8 +124,8 @@ def main():
                     f"down-{rep:02d}-{arm}", env=base_env)
                 arm_env = dict(base_env)
                 if arm == "rust":
-                    arm_env["CADENCE_IMAGE_FRONTEND"] = "cadence-rust:ci"
-                    arm_env["CADENCE_IMAGE_MATCHING"] = "cadence-rust:ci"
+                    for svc in rust_services:
+                        arm_env[f"CADENCE_IMAGE_{svc.upper()}"] = "cadence-rust:ci"
                 (OUT / f"compose-{rep:02d}-{arm}.yaml").write_text(
                     subprocess.check_output(["docker", "compose", "-p", PROJECT,
                         "config"], cwd=ROOT, env=arm_env, text=True))
@@ -140,9 +145,8 @@ def main():
                     raise RuntimeError(f"frontend did not become ready for {arm} rep {rep}")
                 # Assert only Frontend/Matching image identities vary; History and
                 # system Worker stay on Go for both arms.
-                expected = {"frontend": "cadence-rust:ci" if arm == "rust" else "cadence-go:ci",
-                            "matching": "cadence-rust:ci" if arm == "rust" else "cadence-go:ci",
-                            "history": "cadence-go:ci", "worker": "cadence-go:ci"}
+                expected = {svc: "cadence-rust:ci" if arm == "rust" and svc in rust_services else "cadence-go:ci"
+                            for svc in ("frontend", "matching", "history", "worker")}
                 containers = []
                 identities = {}
                 for service, expected_image in expected.items():
