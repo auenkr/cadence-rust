@@ -7,6 +7,10 @@ on:
         description: Build standalone History with jemalloc (as in the SDK benchmark)
         type: boolean
         default: false
+      release:
+        description: Build optimized Rust binaries for the gate
+        type: boolean
+        default: false
       database:
         description: Persistence lane
         type: choice
@@ -50,6 +54,7 @@ jobs:
     env:
       CARGO_TARGET_DIR: /tmp/cadence-history-gate-${{ github.run_id }}-${{ github.run_attempt }}
       CARGO_BUILD_JOBS: 2
+      RUST_PROFILE: ${{ inputs.release && 'release' || 'debug' }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -79,12 +84,16 @@ jobs:
           if [[ "$HISTORY_JEMALLOC" == true ]]; then
             features=(--features cadence-history/jemalloc-default)
           fi
-          cargo build --manifest-path rust/Cargo.toml -p cadence-server -p cadence-history "${features[@]}" > out/cargo-build.log 2>&1
+          profile=()
+          if [[ "$RUST_PROFILE" == release ]]; then
+            profile=(--release)
+          fi
+          cargo build --manifest-path rust/Cargo.toml -p cadence-server -p cadence-history "${profile[@]}" "${features[@]}" > out/cargo-build.log 2>&1
           result=$?
           echo "$result" > out/cargo-build.exit
           tail -60 out/cargo-build.log
           if [ "$result" -ne 0 ]; then exit "$result"; fi
-          sha256sum "$CARGO_TARGET_DIR/debug/cadence-server" "$CARGO_TARGET_DIR/debug/cadence-history" > out/rust-binaries.sha256
+          sha256sum "$CARGO_TARGET_DIR/$RUST_PROFILE/cadence-server" "$CARGO_TARGET_DIR/$RUST_PROFILE/cadence-history" > out/rust-binaries.sha256
       - name: Build Go Worker, CLI and existing SDK driver
         run: |
           (cd go && go build -p 2 -ldflags='-s -w' -o "$GITHUB_WORKSPACE/out/cadence-go-server" ./cmd/server)
@@ -103,8 +112,8 @@ jobs:
         run: |
           set +e
           tests/gates/run-frontend-${{ inputs.database }}-lane.sh out/gate \
-            --rust-binary "$CARGO_TARGET_DIR/debug/cadence-server" \
-            --rust-history-binary "$CARGO_TARGET_DIR/debug/cadence-history" \
+            --rust-binary "$CARGO_TARGET_DIR/$RUST_PROFILE/cadence-server" \
+            --rust-history-binary "$CARGO_TARGET_DIR/$RUST_PROFILE/cadence-history" \
             --go-server "$GITHUB_WORKSPACE/out/cadence-go-server" \
             --go-cli "$GITHUB_WORKSPACE/out/cadence-cli" \
             --driver "$GITHUB_WORKSPACE/out/frontend-gate-driver" \

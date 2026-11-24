@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from collect_resources import collect, cpu_seconds, parse_cgroups
+from collect_resources import collect, cpu_seconds, parse_cgroups, snapshot
 
 
 class ResourceCounterTests(unittest.TestCase):
@@ -16,8 +16,9 @@ class ResourceCounterTests(unittest.TestCase):
             def end_measurement(_):
                 self.assertTrue(ready.exists())
                 end.touch()
-            snapshots = [{"frontend": {"cpu_ns": cpu, "memory_bytes": memory}}
-                         for cpu, memory in ((1000, 10), (2000, 20), (4000, 30))]
+            snapshots = [{"frontend": {"cpu_ns": cpu, "memory_bytes": memory,
+                                        "anon_bytes": anon, "file_bytes": file}}
+                         for cpu, memory, anon, file in ((1000, 10, 2, 4), (2000, 20, 12, 7), (4000, 30, 9, 18))]
             with patch("collect_resources._container_cgroups", return_value={"frontend": (base, "v2")}), \
                  patch("collect_resources.snapshot", side_effect=snapshots), \
                  patch("collect_resources.time.sleep", side_effect=end_measurement):
@@ -26,7 +27,18 @@ class ResourceCounterTests(unittest.TestCase):
             self.assertEqual(metrics["initial_cpu_ns"], 1000)
             self.assertEqual(metrics["final_cpu_ns"], 4000)
             self.assertEqual(metrics["peak_cgroup_memory_bytes"], 30)
+            self.assertEqual(metrics["peak_cgroup_anon_bytes"], 12)
+            self.assertEqual(metrics["peak_cgroup_file_bytes"], 18)
             self.assertEqual(metrics["cpu_seconds"], .000003)
+
+    def test_snapshot_reads_anon_and_file_from_memory_stat(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            (base / "cpu.stat").write_text("usage_usec 42\n")
+            (base / "memory.current").write_text("100\n")
+            (base / "memory.stat").write_text("anon 25\nfile 60\nkernel 15\n")
+            self.assertEqual(snapshot({"history": (base, "v2")})["history"],
+                             {"cpu_ns": 42000, "memory_bytes": 100, "anon_bytes": 25, "file_bytes": 60})
 
     def test_unified_cgroup_uses_container_path(self):
         self.assertEqual(parse_cgroups(["0::/system.slice/docker-abc.scope"]),
