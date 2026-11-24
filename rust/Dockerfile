@@ -20,7 +20,10 @@ WORKDIR /src/rust
 ARG RELEASE_LTO=fat
 ARG RELEASE_CODEGEN_UNITS=1
 ENV OPENSSL_STATIC=1 OPENSSL_DIR=/usr CARGO_PROFILE_RELEASE_DEBUG=0 CARGO_PROFILE_RELEASE_LTO=${RELEASE_LTO} CARGO_PROFILE_RELEASE_CODEGEN_UNITS=${RELEASE_CODEGEN_UNITS}
-RUN cargo build --release -p cadence-server -p cadence-history --features jemalloc-default,cadence-history/jemalloc-default -j2 \
+ARG PROFILE=0
+# PROFILE=1 (perf runs only): line tables + frame pointers, same opt level.
+RUN if [ "$PROFILE" = 1 ]; then export CARGO_PROFILE_RELEASE_DEBUG=line-tables-only CARGO_PROFILE_RELEASE_STRIP=none RUSTFLAGS="-C force-frame-pointers=yes"; fi; \
+    cargo build --release -p cadence-server -p cadence-history --features jemalloc-default,cadence-history/jemalloc-default -j2 \
     && sha256sum target/release/cadence-server target/release/cadence-history > /cadence-server.sha256
 
 FROM ${GO_IMAGE} AS final

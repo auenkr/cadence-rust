@@ -187,6 +187,13 @@ def main():
                     collector_log = OUT / f"collector-{rep:02d}-{arm}-c{conc}.log"
                     collector_started = time.time()
                     collector_stream = collector_log.open("w")
+                    profiler = None
+                    if os.environ.get("PROFILE") == "1" and arm == "rust":
+                        pids = [subprocess.check_output(["docker", "inspect", "--format", "{{.State.Pid}}", identities[s]["container_id"]], text=True).strip()
+                                for s in sorted(rust_services & set(os.environ.get("PROFILE_SERVICES", "history").split(",")))]
+                        profiler = subprocess.Popen([sys.executable, str(ROOT / "Benchmark/profile.py"), "--start", start_marker, "--end", end_marker,
+                            "--output-prefix", str(OUT / f"profile-{rep:02d}-{arm}-c{conc}"), "--flamegraph-dir", os.environ["FLAMEGRAPH_DIR"],
+                            "--max-seconds", "1800", "--pids", *pids], stdout=(OUT / f"profile-{rep:02d}-{arm}-c{conc}.log").open("w"), stderr=subprocess.STDOUT)
                     monitor = subprocess.Popen(collector_command, cwd=ROOT, stdout=collector_stream, stderr=subprocess.STDOUT)
                     try:
                         run([str(ROOT / "out/cadence-benchmark"), "-endpoint", "127.0.0.1:7933",
@@ -199,6 +206,8 @@ def main():
                             env=arm_env, timeout=1800)
                         if monitor.wait(timeout=15) != 0:
                             raise RuntimeError(f"resource collector failed; see {collector_log}")
+                        if profiler is not None and profiler.wait(timeout=1200):
+                            raise RuntimeError("profiler failed")
                     finally:
                         if monitor.poll() is None:
                             monitor.terminate()
