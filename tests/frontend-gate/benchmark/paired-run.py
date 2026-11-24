@@ -18,6 +18,7 @@ EVENTS = []
 sys.path.insert(0, str(ROOT / "tests/benchmark"))
 from compare import compare, markdown
 from render_report import render_html
+import three_arm_report
 
 
 def run(args, name, env=None, timeout=None, check=True):
@@ -76,7 +77,10 @@ def main():
     parser.add_argument("--concurrency", default="1,16,64")
     parser.add_argument("--rust-services", default="frontend,matching",
                         help="comma list of services run from the Rust image in the rust arm")
+    parser.add_argument("--control-image", default="",
+                        help="enables three-arm mode (go, control, rust candidate); docker tag of the control Rust image")
     args = parser.parse_args()
+    three = bool(args.control_image)
     if args.requests < 1 or args.warmup < 0 or args.repetitions < 1 or args.payload_bytes < 0:
         parser.error("requests/repetitions must be positive and warmup nonnegative")
     rust_services = {x for x in args.rust_services.split(",") if x}
@@ -103,7 +107,8 @@ def main():
         f"rust_tree={subprocess.check_output(['git','rev-parse','HEAD:rust'], cwd=ROOT, text=True).strip()}\n"
         f"driver_tree={subprocess.check_output(['git','rev-parse','HEAD:tests/frontend-gate/benchmark'], cwd=ROOT, text=True).strip()}\n"
         f"go_image={subprocess.check_output(['docker','image','inspect','cadence-go:ci','--format','{{.Id}}'], text=True).strip()}\n"
-        f"rust_image={subprocess.check_output(['docker','image','inspect','cadence-rust:ci','--format','{{.Id}}'], text=True).strip()}\n")
+        f"rust_image={subprocess.check_output(['docker','image','inspect','cadence-rust:ci','--format','{{.Id}}'], text=True).strip()}\n"
+        + (f"control_image={subprocess.check_output(['docker','image','inspect',args.control_image,'--format','{{.Id}}'], text=True).strip()}\n" if three else ""))
     (OUT / "host.json").write_text(json.dumps({
         "runner_os": os.environ.get("RUNNER_OS"),
         "runner_arch": os.environ.get("RUNNER_ARCH"),
@@ -111,7 +116,8 @@ def main():
         "requests": args.requests, "warmup": args.warmup,
         "repetitions": args.repetitions, "payload_bytes": args.payload_bytes,
         "concurrency": concurrency,
-        "order": "alternates by repetition; each arm gets a new database",
+        "order": "three-arm: rotated go/control/rust per repetition" if three else "alternates by repetition; each arm gets a new database",
+        "control_image": args.control_image or None,
         "database": "mysql:8.0", "rust_services": sorted(rust_services), "history": "Go image",
         "system_worker": "Go image", "transport": "TChannel",
         "frontend_matching_rust_image": "cadence-rust:ci",
@@ -119,15 +125,19 @@ def main():
     }, indent=2) + "\n")
     try:
         for rep in range(args.repetitions):
-            order = ["go", "rust"] if rep % 2 == 0 else ["rust", "go"]
+            if three:
+                base = ["go", "control", "rust"]
+                order = base[rep % 3:] + base[:rep % 3]
+            else:
+                order = ["go", "rust"] if rep % 2 == 0 else ["rust", "go"]
             for arm in order:
                 # Recreate the entire project, including MySQL state, for every arm.
                 run(["docker", "compose", "-p", PROJECT, "down", "-v", "--remove-orphans"],
                     f"down-{rep:02d}-{arm}", env=base_env)
                 arm_env = dict(base_env)
-                if arm == "rust":
+                if arm in ("rust", "control"):
                     for svc in rust_services:
-                        arm_env[f"CADENCE_IMAGE_{svc.upper()}"] = "cadence-rust:ci"
+                        arm_env[f"CADENCE_IMAGE_{svc.upper()}"] = args.control_image if arm == "control" else "cadence-rust:ci"
                 (OUT / f"compose-{rep:02d}-{arm}.yaml").write_text(
                     subprocess.check_output(["docker", "compose", "-p", PROJECT,
                         "config"], cwd=ROOT, env=arm_env, text=True))
@@ -147,7 +157,7 @@ def main():
                     raise RuntimeError(f"frontend did not become ready for {arm} rep {rep}")
                 # Assert only Frontend/Matching image identities vary; History and
                 # system Worker stay on Go for both arms.
-                expected = {svc: "cadence-rust:ci" if arm == "rust" and svc in rust_services else "cadence-go:ci"
+                expected = {svc: ((args.control_image if arm == "control" else "cadence-rust:ci") if arm != "go" and svc in rust_services else "cadence-go:ci")
                             for svc in ("frontend", "matching", "history", "worker")}
                 containers = []
                 identities = {}
@@ -227,7 +237,10 @@ def main():
                 (OUT / f"slow-sql-count-{rep:02d}-{arm}.txt").write_text(f"{slow}\n")
                 run(["docker", "compose", "-p", PROJECT, "down", "-v", "--remove-orphans"],
                     f"down-after-{rep:02d}-{arm}", env=arm_env)
-        write_summary(args.repetitions, concurrency)
+        if three:
+            three_arm_report.write(OUT, args.repetitions, concurrency)
+        else:
+            write_summary(args.repetitions, concurrency)
     finally:
         run(["docker", "compose", "-p", PROJECT, "logs", "--no-color"],
             "final-compose-logs", env=base_env, check=False)
