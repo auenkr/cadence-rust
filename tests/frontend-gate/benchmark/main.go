@@ -164,6 +164,7 @@ func main() {
 		var wg sync.WaitGroup
 		latencies := []float64{}
 		failures := []string{}
+		samples := []sample{}
 		jobs := make(chan int)
 		start := time.Now()
 		for i := 0; i < *concurrency; i++ {
@@ -173,9 +174,11 @@ func main() {
 				for range jobs {
 					begin := time.Now()
 					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-					r, e := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: uuid.NewString(), TaskList: tl, ExecutionStartToCloseTimeout: time.Minute, DecisionTaskStartToCloseTimeout: 10 * time.Second}, flow, payload)
+					wfID, runID := uuid.NewString(), ""
+					r, e := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: wfID, TaskList: tl, ExecutionStartToCloseTimeout: time.Minute, DecisionTaskStartToCloseTimeout: 10 * time.Second}, flow, payload)
 					var value string
 					if e == nil {
+						runID = r.GetRunID()
 						e = r.Get(ctx, &value)
 					}
 					if e == nil && value != payload {
@@ -186,7 +189,9 @@ func main() {
 					if e != nil {
 						failures = append(failures, e.Error())
 					} else {
-						latencies = append(latencies, time.Since(begin).Seconds()*1000)
+						ms := time.Since(begin).Seconds() * 1000
+						latencies = append(latencies, ms)
+						samples = append(samples, sample{len(samples), begin.UnixNano(), ms, wfID, runID})
 					}
 					mu.Unlock()
 				}
