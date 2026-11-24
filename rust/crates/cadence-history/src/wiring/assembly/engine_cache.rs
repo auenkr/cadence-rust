@@ -548,9 +548,17 @@ impl EngineExecutionContext {
         match core.executions.update_workflow_execution(request).await {
             Ok(()) => {
                 // Go notifyingExecutionManager notifies (cache inject) before updateMaxReadLevelLocked.
+                let traced = crate::decision_trace::enabled()
+                    && txn.transfer.iter().any(|t| t.task_type == 0);
+                if traced {
+                    crate::decision_trace!("a_decision_scheduled_committed", self.execution.workflow_id, self.execution.run_id);
+                }
                 core.notify_tasks(&txn.transfer, &txn.timer);
                 if let Some((t, tm)) = new_tasks {
                     core.notify_tasks(t, tm);
+                }
+                if traced {
+                    crate::decision_trace!("b_transfer_notified", self.execution.workflow_id, self.execution.run_id);
                 }
                 shard.update_max_read_level(max_read_level);
                 Ok(completion)

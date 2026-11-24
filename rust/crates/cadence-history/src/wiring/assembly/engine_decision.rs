@@ -888,9 +888,15 @@ impl EngineDecisionHandler {
         execution: &WorkflowExecution,
         mut action: impl FnMut(&Arc<EngineMutableState>) -> HResult<Outcome<T>>,
     ) -> HResult<T> {
+        let t0 = std::time::Instant::now();
         let (context, release) = self.cache.get_or_create(domain_id, execution).await?;
+        if crate::decision_trace::enabled() {
+            let loaded = crate::engine::deps::ExecutionContext::get_workflow_execution(&*context).is_some();
+            crate::decision_trace!("f_lock_acquired", execution.workflow_id, execution.run_id, "lock_wait_ms={:.3} state_cached={}", t0.elapsed().as_secs_f64() * 1000.0, loaded);
+        }
         let result = self.run(&context, &mut action).await;
         release(result.as_ref().err());
+        crate::decision_trace!("f2_update_done", execution.workflow_id, execution.run_id, "total_ms={:.3} ok={}", t0.elapsed().as_secs_f64() * 1000.0, result.is_ok());
         result
     }
 
