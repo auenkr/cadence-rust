@@ -20,7 +20,7 @@ All builds and tests ran on standard GitHub-hosted Linux runners. The Rust CI ru
 | Workspace Clippy and tests | [45344205706](https://github.com/auenkr/cadence-rust/actions/runs/45344205706) | Success. Clippy and test exit codes were zero in `/home/runner/work/_temp/cargo-target-final`. |
 | History mixed gate, MySQL, two History hosts | [45344205813](https://github.com/auenkr/cadence-rust/actions/runs/45344205813) | Success. `GATE SUMMARY failed: []`. |
 | History mixed gate, Cassandra, two History hosts | [45344205547](https://github.com/auenkr/cadence-rust/actions/runs/45344205547) | Success. `GATE SUMMARY failed: []`. |
-| History restart gate, MySQL | [45344203999](https://github.com/auenkr/cadence-rust/actions/runs/45344203999) | Pending |
+| History restart gate, MySQL | [45344203999](https://github.com/auenkr/cadence-rust/actions/runs/45344203999) | Success. 52 checks, 4,500 of 4,500 workflows completed, zero failures. `GATE SUMMARY failed: []`. |
 | History swap, MySQL | [45344205618](https://github.com/auenkr/cadence-rust/actions/runs/45344205618) | Success. 47 checks, 36 workflow histories compared, zero differences. `GATE SUMMARY failed: []`. |
 | Paired benchmark, code head | [45344205512](https://github.com/auenkr/cadence-rust/actions/runs/45344205512) | Pending |
 | Paired benchmark, parent control | [45343784415](https://github.com/auenkr/cadence-rust/actions/runs/45343784415) | Pending |
@@ -34,6 +34,7 @@ The enforced CI rustfmt checks passed. The informational workspace-wide formatti
 |---|---|---|
 | MySQL mixed | `bf9d5b9b96a411d1f27a9139486644640cd4f77998ea5b06214bef05342f044f` | `4e1f78e6e41361895b24287e7b4afe4701ed2977ee574e842ea7ea47c4321d4d` |
 | Cassandra mixed | `ee802feb513a14059eb4d4cf0bcfd0d2944f12c2623314ad595f8a7500e1834a` | `a632f3270e4a5f510d9f274dc6f63cd79322f63c268d2cdde4d35134af6da8ef` |
+| MySQL restart | `147855bc4b5fce88684afb268bf00ead5a4164ce55e4de93038d20ccff66815b` | `63e5cef9753f9caa80f7709d3040e9266dd4769394ab47cc2007a5389291b2b7` |
 | MySQL swap | `abe73754ea2017a2917d2e152d0a0e08bc1d5189552b72d4e9d839cb5495e7ef` | `dec4a0574fa8bfa02b08e0f147cfab235733b753021eb814f34f4c70720fe472` |
 
 ## Benchmark
