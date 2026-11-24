@@ -1,6 +1,7 @@
 //! History service bootstrap and shard ownership primitives.
 
 pub mod wiring;
+pub mod transfer_trace;
 pub mod launcher;
 pub mod client_tls;
 pub mod lookup;

@@ -203,6 +203,9 @@ impl TransferQueueProcessorBase {
     /// Go `notifyNewTask`.
     pub fn notify_new_task(&self, info: &NotifyTaskInfo) {
         let _ = self.notify_tx.try_send(());
+        if crate::transfer_trace::enabled() {
+            crate::transfer_trace::emit("notify", format_args!("shard_queue_level=all"));
+        }
 
         if info.execution_info.is_some() {
             if let Some(v) = &self.validator {
@@ -364,6 +367,7 @@ impl TransferQueueProcessorBase {
             };
 
             // Go getImmediateTaskMaxReadLevel blocks on the shard lock held by an in-flight write.
+            let trace_t0 = crate::transfer_trace::now_us();
             self.base.shard.wait_in_flight_task_writes().await;
             let max_read_level = min_task_key(max_level, (self.base.update_max_read_level)());
 
@@ -381,6 +385,7 @@ impl TransferQueueProcessorBase {
                 continue;
             }
 
+            let trace_t1 = crate::transfer_trace::now_us();
             let (infos, more) = match self.read_tasks(read_level, max_read_level).await {
                 Ok(r) => r,
                 Err(e) => {
@@ -395,6 +400,24 @@ impl TransferQueueProcessorBase {
                 count = infos.len(),
                 "load transfer tasks from database"
             );
+
+            if crate::transfer_trace::enabled() {
+                let t2 = crate::transfer_trace::now_us();
+                for info in &infos {
+                    crate::transfer_trace::emit(
+                        "read",
+                        format_args!(
+                            "task_id={} type={} created_us={} inflight_plus_limiter_wait_us={} read_us={} count={}",
+                            info.get_task_id(),
+                            info.get_task_type(),
+                            info.get_visibility_timestamp().unix_nano() / 1000,
+                            trace_t1 - trace_t0,
+                            t2 - trace_t1,
+                            infos.len()
+                        ),
+                    );
+                }
+            }
 
             let mut tasks: HashMap<TaskKey, TaskRef> = HashMap::new();
             let mut task_ch_full = false;

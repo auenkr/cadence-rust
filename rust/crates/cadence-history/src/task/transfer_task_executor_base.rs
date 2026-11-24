@@ -103,7 +103,11 @@ impl TransferTaskExecutorBase {
    return f(task,post,&self.logger).await;
   }
   let request=AddMatchingTaskRequest {domain_uuid:if activity{target}else{task.get_domain_id()}.into(),source_domain_uuid:activity.then(||task.get_domain_id().into()),execution:WorkflowIdentifier {domain_id:task.get_domain_id().into(),workflow_id:task.get_workflow_id().into(),run_id:task.get_run_id().into()},task_list:info.task_list.clone(),schedule_id,schedule_to_start_timeout_seconds:info.schedule_to_start_timeout.min(MAX_TASK_TIMEOUT),partition_config:info.partition_config.clone()};
-  if activity {self.dependencies.add_activity_task(request).await}else{self.dependencies.add_decision_task(request).await}
+  let trace=crate::transfer_trace::enabled()&&!activity;
+  if trace{crate::transfer_trace::emit("add_decision_sent",format_args!("task_id={} wf={}",task.get_task_id(),task.get_workflow_id()));}
+  let res=if activity {self.dependencies.add_activity_task(request).await}else{self.dependencies.add_decision_task(request).await};
+  if trace{crate::transfer_trace::emit("add_decision_acked",format_args!("task_id={} ok={}",task.get_task_id(),res.is_ok()));}
+  res
  }
  pub async fn push_activity(&self,task:&ActivityTask,info:&PushMatchingInfo)->Result<()> {
   tokio::time::timeout(TASK_RPC_CALL_TIMEOUT,self.push(task,info,true,&task.target_domain_id,task.schedule_id)).await.map_err(|_|TaskError::ContextDeadlineExceeded)?

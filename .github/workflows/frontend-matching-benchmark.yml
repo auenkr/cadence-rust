@@ -67,6 +67,9 @@ on:
         description: Activity payload size in bytes
         type: number
         default: 1024
+      transfer_trace:
+        description: Set CADENCE_HISTORY_TRACE_TRANSFER=1 on History (diagnostics)
+        default: ''
       sql_slow_ms:
         description: Diagnostic - set CADENCE_HISTORY_SQL_SLOW_MS on history (both arms; empty = off) and count slow-transaction log lines
         default: ''
@@ -201,6 +204,7 @@ jobs:
           CONCURRENCY: ${{ inputs.concurrency || '1,16,64' }}
           PAYLOAD_BYTES: ${{ inputs.payload_bytes || 1024 }}
           BENCH_SQL_SLOW_MS: ${{ inputs.sql_slow_ms }}
+          BENCH_TRANSFER_TRACE: ${{ inputs.transfer_trace }}
         run: |
           set +e
           python3 tests/frontend-gate/benchmark/paired-run.py \

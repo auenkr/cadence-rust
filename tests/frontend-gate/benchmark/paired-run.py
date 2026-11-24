@@ -92,6 +92,8 @@ def main():
         f"  {name}:\n    mem_limit: 1400m\n    memswap_limit: 1400m\n    cpus: 1.0\n    pids_limit: 2048\n"
         + (f"    environment:\n      CADENCE_HISTORY_SQL_SLOW_MS: \"{os.environ['BENCH_SQL_SLOW_MS']}\"\n"
            if name == "history" and os.environ.get("BENCH_SQL_SLOW_MS") else "")
+        + ("    environment:\n      CADENCE_HISTORY_TRACE_TRANSFER: \"1\"\n"
+           if name == "history" and os.environ.get("BENCH_TRANSFER_TRACE") and not os.environ.get("BENCH_SQL_SLOW_MS") else "")
         for name in ("frontend", "matching", "history", "worker")))
     env["COMPOSE_FILE"] = os.pathsep.join((str(COMPOSE), str(override)))
     for service in ("FRONTEND", "MATCHING", "HISTORY", "WORKER"):
