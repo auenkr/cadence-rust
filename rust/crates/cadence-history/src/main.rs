@@ -3,9 +3,9 @@
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 #[cfg(feature = "jemalloc-default")]
-const JEMALLOC_CONFIG: &[u8] = b"background_thread:true,dirty_decay_ms:1000,narenas:2\0";
+const JEMALLOC_CONFIG: &[u8] = b"background_thread:true,dirty_decay_ms:250,muzzy_decay_ms:0,narenas:1,tcache_max:4096\0";
 
-// tikv-jemalloc-sys prefixes its symbols. Two arenas let the main and runtime
+// tikv-jemalloc-sys prefixes its symbols. One arena (small tcache, fast decay) lets the main and runtime
 // workers on a one-CPU History host share a small number of pools.
 // Deployments can override this via _RJEM_MALLOC_CONF.
 #[cfg(feature = "jemalloc-default")]
