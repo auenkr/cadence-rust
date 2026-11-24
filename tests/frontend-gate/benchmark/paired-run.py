@@ -90,6 +90,8 @@ def main():
     override = OUT / "resource-limits.yaml"
     override.write_text("services:\n" + "".join(
         f"  {name}:\n    mem_limit: 1400m\n    memswap_limit: 1400m\n    cpus: 1.0\n    pids_limit: 2048\n"
+        + (f"    environment:\n      CADENCE_HISTORY_SQL_SLOW_MS: \"{os.environ['BENCH_SQL_SLOW_MS']}\"\n"
+           if name == "history" and os.environ.get("BENCH_SQL_SLOW_MS") else "")
         for name in ("frontend", "matching", "history", "worker")))
     env["COMPOSE_FILE"] = os.pathsep.join((str(COMPOSE), str(override)))
     for service in ("FRONTEND", "MATCHING", "HISTORY", "WORKER"):
@@ -181,7 +183,7 @@ def main():
                     prepare_measurement_files((start_marker, end_marker, ready_marker, result, resources))
                     collector_command = [sys.executable, str(ROOT / "tests/benchmark/collect_resources.py"),
                         "--start-event", start_marker, "--end-event", end_marker, "--ready-event", ready_marker,
-                        "--event-timeout", "1800", "--interval", "0.05", "--output", str(resources), "--containers", *containers]
+                        "--event-timeout", "1800", "--interval", "0.05", "--output", str(resources), "--extra-output", str(OUT / f"cgroup-extra-{rep:02d}-{arm}-c{conc}.json"), "--containers", *containers]
                     collector_log = OUT / f"collector-{rep:02d}-{arm}-c{conc}.log"
                     collector_started = time.time()
                     collector_stream = collector_log.open("w")
@@ -212,6 +214,8 @@ def main():
                         persist_events()
                 run(["docker", "compose", "-p", PROJECT, "logs", "--no-color"],
                     f"services-{rep:02d}-{arm}", env=arm_env, check=False)
+                slow = sum(1 for l in (OUT / f"services-{rep:02d}-{arm}.log").read_text(errors="replace").splitlines() if "sql transaction slow" in l)
+                (OUT / f"slow-sql-count-{rep:02d}-{arm}.txt").write_text(f"{slow}\n")
                 run(["docker", "compose", "-p", PROJECT, "down", "-v", "--remove-orphans"],
                     f"down-after-{rep:02d}-{arm}", env=arm_env)
         write_summary(args.repetitions, concurrency)

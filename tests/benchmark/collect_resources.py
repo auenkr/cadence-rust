@@ -53,13 +53,27 @@ def snapshot(containers):
     return current
 
 
+def extra_snapshot(containers):
+    """cpu.stat throttling counters and memory for every container (cgroup v2 only)."""
+    out = {}
+    for name, (paths, version) in containers.items():
+        if version != "v2":
+            continue
+        stat = {k: int(v) for k, v in (l.split() for l in (paths / "cpu.stat").read_text().splitlines())}
+        out[name] = {k: stat.get(k, 0) for k in ("usage_usec", "user_usec", "system_usec", "nr_periods", "nr_throttled", "throttled_usec")}
+        out[name]["memory_bytes"] = int((paths / "memory.current").read_text())
+        cm = paths / "cpu.max"
+        out[name]["cpu_max"] = cm.read_text().strip() if cm.exists() else None
+    return out
+
+
 def cpu_seconds(before_ns, after_ns):
     if after_ns < before_ns:
         raise ValueError("cgroup CPU counter reset during measurement")
     return (after_ns - before_ns) / 1_000_000_000
 
 
-def collect(interval, output, names, start_event=None, end_event=None, duration=None, ready_event=None, event_timeout=180):
+def collect(interval, output, names, start_event=None, end_event=None, duration=None, ready_event=None, event_timeout=180, extra_output=None):
     if bool(start_event) != bool(end_event):
         raise ValueError("--start-event and --end-event must be provided together")
     if not start_event and duration is None:
@@ -87,6 +101,8 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
     started_at = datetime.now(timezone.utc).isoformat()
     started = time.monotonic()
     first = snapshot(selected)
+    all_cgroups = _container_cgroups() if extra_output else {}
+    extra_first = extra_snapshot(all_cgroups) if extra_output else None
     if ready_event:
         Path(ready_event).write_text(started_at, encoding="utf-8")
     peak = dict((name, data["memory_bytes"]) for name, data in first.items())
@@ -106,6 +122,10 @@ def collect(interval, output, names, start_event=None, end_event=None, duration=
         last = now
         samples += 1
     last = snapshot(selected)
+    if extra_output:
+        extra_last = extra_snapshot(all_cgroups)
+        delta = {n: {k: extra_last[n][k] - extra_first[n][k] for k in ("usage_usec", "nr_periods", "nr_throttled", "throttled_usec")} for n in extra_last}
+        Path(extra_output).write_text(json.dumps({"before": extra_first, "after": extra_last, "delta": delta}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     samples += 1
     for name, data in last.items():
         peak[name] = max(peak[name], data["memory_bytes"])
@@ -138,12 +158,13 @@ def main():
     ap.add_argument("--start-event", help="wait for this marker file before the measured interval")
     ap.add_argument("--end-event", help="stop the measured interval when this marker file appears")
     ap.add_argument("--ready-event", help="write after baseline capture; SDK waits for this before measured traffic")
+    ap.add_argument("--extra-output", help="also write cpu.stat throttling + memory before/after for ALL running containers (incl. MySQL)")
     ap.add_argument("--event-timeout", type=float, default=180, help="maximum seconds waiting for each marker")
     a = ap.parse_args()
     if a.duration is not None and a.duration <= 0 or a.interval <= 0 or a.event_timeout <= 0:
         ap.error("duration and interval must be positive")
     try:
-        collect(a.interval, a.output, a.containers, a.start_event, a.end_event, a.duration, a.ready_event, a.event_timeout)
+        collect(a.interval, a.output, a.containers, a.start_event, a.end_event, a.duration, a.ready_event, a.event_timeout, a.extra_output)
     except ValueError as error:
         ap.error(str(error))
 

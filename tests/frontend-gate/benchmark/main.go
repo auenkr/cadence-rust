@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"go.uber.org/cadence/.gen/go/cadence/workflowserviceclient"
+	"go.uber.org/cadence/.gen/go/shared"
 	"go.uber.org/cadence/client"
 	"go.uber.org/cadence/worker"
 	"go.uber.org/cadence/workflow"
@@ -28,6 +30,64 @@ func flow(ctx workflow.Context, payload string) (string, error) {
 	var result string
 	err := workflow.ExecuteActivity(ctx, echo, payload).Get(ctx, &result)
 	return result, err
+}
+
+type sample struct {
+	Seq       int     `json:"seq"`
+	StartUnix int64   `json:"start_unix_nano"`
+	LatencyMs float64 `json:"latency_ms"`
+	WorkflowID string `json:"workflow_id"`
+	RunID     string  `json:"run_id"`
+}
+
+// historyGaps fetches a workflow history and returns named gaps (ms) between consecutive milestone events.
+func historyGaps(c client.Client, id, runID string) map[string]float64 {
+	it := c.GetWorkflowHistory(context.Background(), id, runID, false, shared.HistoryEventFilterTypeAllEvent)
+	type ev struct {
+		t    shared.EventType
+		ts   int64
+	}
+	var evs []ev
+	for it.HasNext() {
+		e, err := it.Next()
+		if err != nil {
+			return map[string]float64{"error": -1}
+		}
+		evs = append(evs, ev{e.GetEventType(), e.GetTimestamp()})
+	}
+	nth := func(t shared.EventType, n int) (int64, bool) {
+		for _, e := range evs {
+			if e.t == t {
+				if n == 0 {
+					return e.ts, true
+				}
+				n--
+			}
+		}
+		return 0, false
+	}
+	out := map[string]float64{}
+	gap := func(name string, t1 shared.EventType, n1 int, t2 shared.EventType, n2 int) {
+		a, ok1 := nth(t1, n1)
+		b, ok2 := nth(t2, n2)
+		if ok1 && ok2 {
+			out[name] = float64(b-a) / 1e6
+		}
+	}
+	S, DS, DST, DC := shared.EventTypeWorkflowExecutionStarted, shared.EventTypeDecisionTaskScheduled, shared.EventTypeDecisionTaskStarted, shared.EventTypeDecisionTaskCompleted
+	AS, AST, AC, WC := shared.EventTypeActivityTaskScheduled, shared.EventTypeActivityTaskStarted, shared.EventTypeActivityTaskCompleted, shared.EventTypeWorkflowExecutionCompleted
+	gap("1_start_to_dec1_scheduled", S, 0, DS, 0)
+	gap("2_dec1_scheduled_to_started", DS, 0, DST, 0)
+	gap("3_dec1_started_to_completed", DST, 0, DC, 0)
+	gap("4_dec1_completed_to_activity_scheduled", DC, 0, AS, 0)
+	gap("5_activity_scheduled_to_started", AS, 0, AST, 0)
+	gap("6_activity_started_to_completed", AST, 0, AC, 0)
+	gap("7_activity_completed_to_dec2_scheduled", AC, 0, DS, 1)
+	gap("8_dec2_scheduled_to_started", DS, 1, DST, 1)
+	gap("9_dec2_started_to_completed", DST, 1, DC, 1)
+	gap("10_dec2_completed_to_workflow_completed", DC, 1, WC, 0)
+	gap("11_total_history_span", S, 0, WC, 0)
+	return out
 }
 
 func main() {
@@ -99,11 +159,12 @@ func main() {
 	defer w.Stop()
 	c := client.NewClient(rpc, *domain, nil)
 	payload := strings.Repeat("x", *bytes)
-	run := func(count int) ([]float64, []string, float64) {
+	run := func(count int) ([]float64, []string, float64, []sample) {
 		var mu sync.Mutex
 		var wg sync.WaitGroup
 		latencies := []float64{}
 		failures := []string{}
+		samples := []sample{}
 		jobs := make(chan int)
 		start := time.Now()
 		for i := 0; i < *concurrency; i++ {
@@ -113,9 +174,11 @@ func main() {
 				for range jobs {
 					begin := time.Now()
 					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-					r, e := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: uuid.NewString(), TaskList: tl, ExecutionStartToCloseTimeout: time.Minute, DecisionTaskStartToCloseTimeout: 10 * time.Second}, flow, payload)
+					wfID, runID := uuid.NewString(), ""
+					r, e := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: wfID, TaskList: tl, ExecutionStartToCloseTimeout: time.Minute, DecisionTaskStartToCloseTimeout: 10 * time.Second}, flow, payload)
 					var value string
 					if e == nil {
+						runID = r.GetRunID()
 						e = r.Get(ctx, &value)
 					}
 					if e == nil && value != payload {
@@ -126,7 +189,9 @@ func main() {
 					if e != nil {
 						failures = append(failures, e.Error())
 					} else {
-						latencies = append(latencies, time.Since(begin).Seconds()*1000)
+						ms := time.Since(begin).Seconds() * 1000
+						latencies = append(latencies, ms)
+						samples = append(samples, sample{len(samples), begin.UnixNano(), ms, wfID, runID})
 					}
 					mu.Unlock()
 				}
@@ -137,9 +202,9 @@ func main() {
 		}
 		close(jobs)
 		wg.Wait()
-		return latencies, failures, time.Since(start).Seconds()
+		return latencies, failures, time.Since(start).Seconds(), samples
 	}
-	_, warmupErrors, _ := run(*warmup)
+	_, warmupErrors, _, _ := run(*warmup)
 	if len(warmupErrors) != 0 {
 		panic(fmt.Sprintf("warmup failed: %s", warmupErrors[0]))
 	}
@@ -168,11 +233,43 @@ func main() {
 		}
 	}
 	measuredStartUTC = time.Now().UTC().Format(time.RFC3339Nano)
-	latencies, failures, seconds := run(*n)
+	latencies, failures, seconds, samples := run(*n)
 	measuredEndUTC = time.Now().UTC().Format(time.RFC3339Nano)
 	if *measurementEndFile != "" {
 		if err = writeMarker(*measurementEndFile); err != nil {
 			panic(err)
+		}
+	}
+	// Raw per-workflow samples in completion order (before sorting).
+	if rawF, rerr := os.Create(strings.TrimSuffix(*output, ".json") + "-samples.json"); rerr == nil {
+		_ = json.NewEncoder(rawF).Encode(samples)
+		_ = rawF.Close()
+	}
+	// History gap analysis for the slowest 5% and 20 random fast workflows.
+	if len(samples) > 0 {
+		order := append([]sample(nil), samples...)
+		sort.Slice(order, func(i, j int) bool { return order[i].LatencyMs > order[j].LatencyMs })
+		nSlow := (len(order) + 19) / 20
+		pick := map[string][]sample{"slow": order[:nSlow]}
+		fast := append([]sample(nil), order[nSlow:]...)
+		rand.Shuffle(len(fast), func(i, j int) { fast[i], fast[j] = fast[j], fast[i] })
+		if len(fast) > 20 {
+			fast = fast[:20]
+		}
+		pick["fast"] = fast
+		type rec struct {
+			sample
+			Gaps map[string]float64 `json:"gaps_ms"`
+		}
+		tail := map[string][]rec{}
+		for k, list := range pick {
+			for _, sm := range list {
+				tail[k] = append(tail[k], rec{sm, historyGaps(c, sm.WorkflowID, sm.RunID)})
+			}
+		}
+		if hf, herr := os.Create(strings.TrimSuffix(*output, ".json") + "-tail-history.json"); herr == nil {
+			_ = json.NewEncoder(hf).Encode(tail)
+			_ = hf.Close()
 		}
 	}
 	sort.Float64s(latencies)
