@@ -58,3 +58,28 @@ Old c16 p95: 619 / 709 ms; new 662 / 583 ms. Old c16 CPU (FE/Matching Go→Rust)
 - Rust now uses less or equal CPU than Go for both services (Frontend -16%, Matching -2%) versus up to +88% for Matching earlier, and less peak memory.
 - Caveats: different runner CPU than the old run, 10 instead of 100 warmups, c64 differences are in the noise range of 5 reps; absolute numbers are not comparable to the old run.
 - All-Rust cluster does not serve workflows (lane c); this must be fixed before an all-Rust benchmark. Raw artifacts for both runs are available for 3 days.
+
+
+## Lane (c) all-Rust FE+Matching+History, Go Worker — PASSED on rerun (run 45291978847)
+Run https://github.com/auenkr/cadence-rust/actions/runs/45291978847, head `500dec50a9ccc2660ad6a32ecfa8aa12e262dd74`, `-f rust_services=frontend,matching,history`, other inputs default (same as 45273706507). Conclusion success; strict `verify_artifacts.py` exit 0 (30,000 workflows, 0 failures). Rust binary sha256 cadence-server `3d39074f89e0…`, cadence-history `f549c3c9eb83…`. Earlier same-config run 45283282001 (head 6139aca03) also succeeded with identical numbers; its verify step was skipped by the workflow condition.
+
+**Machine:** AMD EPYC 7763 64-Core, nproc 4, 15 GiB, ubuntu26 20261116.202.1. It does NOT match the lane (a)/(b) run 45273706507 (EPYC 9V74); it matches the failed run 45273717881 (7763). Compare Go vs Rust only inside this run (same VM). Limits: 1 CPU/1400 MiB per service, MySQL 1.5 CPU/1800 MiB.
+
+**Root cause of the earlier failure (harness/packaging, not a service bug):** the Rust image shipped only `cadence-server`, which has no History service. `/start-cadence.sh` runs `cadence-server start --services=history`, which silently ran the matching/frontend launcher on the History port: it listened on 7934, did nothing else, and never joined ringpop. The History gates use the separate `cadence-history` binary. Fix: `rust/Dockerfile` builds and installs `cadence-history`; `rust/docker/cadence-server-dispatch.sh` (installed as `cadence-server`, real one `cadence-server-real`) execs `cadence-history` when `--services` includes history. `verify_artifacts.py` now honors `host.rust_services` and the workflow always runs strict verification and records both binary hashes.
+
+### Median of 5 paired repetitions (Go vs all-Rust)
+| Conc | Go wf/s | Rust wf/s | Go p50/p95/p99 ms | Rust p50/p95/p99 ms |
+|---:|---:|---:|---|---|
+| 1 | 22.67 | 25.17 | 42.6 / 53.0 / 75.0 | 29.2 / 99.7 / 107.1 |
+| 16 | 41.90 | 60.62 | 386.7 / 509.8 / 563.9 | 265.9 / 354.4 / 395.0 |
+| 64 | 20.67 | 57.08 | 3484 / 4593 / 5588 | 1281 / 1600 / 1719 |
+
+### Median per-run CPU seconds / peak cgroup memory MiB (Go -> Rust; cgroup, includes cache, not RSS)
+| Container | c1 CPU | c16 CPU | c64 CPU | c1 mem | c16 mem | c64 mem |
+|---|---|---|---|---|---|---|
+| frontend | 7.72 -> 4.58 | 6.57 -> 4.81 | 6.87 -> 4.87 | 34.9 -> 27.4 | 39.2 -> 31.0 | 45.9 -> 36.8 |
+| history | 22.38 -> 9.15 | 20.22 -> 13.02 | 46.02 -> 14.04 | 77.4 -> 89.2 | 98.0 -> 114.8 | 111.9 -> 137.3 |
+| matching | 4.66 -> 3.02 | 4.45 -> 4.10 | 4.92 -> 4.09 | 32.7 -> 22.5 | 35.5 -> 25.2 | 36.1 -> 28.1 |
+| worker (Go both) | 0.20 -> 0.28 | 0.14 -> 0.10 | 0.21 -> 0.17 | 27.4 -> 28.1 | 29.4 -> 28.4 | 30.0 -> 28.6 |
+
+Rust History uses ~12-25 MiB more cgroup memory than Go History but 2-3x less CPU. Rust p95/p99 at c1 is worse than Go (99.7/107 vs 53/75 ms).
