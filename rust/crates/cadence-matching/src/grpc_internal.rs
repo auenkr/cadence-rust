@@ -1283,6 +1283,7 @@ pub async fn serve(
         .with_service_name("uber.cadence.history.v1.HistoryAPI")
         .build_v1()?;
     tonic::transport::Server::builder()
+        .tcp_nodelay(true)
         .add_service(reflection)
         .add_service(
             h::history_api_server::HistoryApiServer::new(service).max_decoding_message_size(limit),

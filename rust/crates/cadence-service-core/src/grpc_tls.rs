@@ -235,7 +235,7 @@ pub fn endpoint_channel(
 
 /// Build the tonic server, applying TLS when configured.
 pub fn server_builder(tls: Option<ServerTlsConfig>) -> anyhow::Result<Server> {
-    let server = Server::builder();
+    let server = Server::builder().tcp_nodelay(true);
     Ok(match tls {
         Some(tls) => server.tls_config(tls)?,
         None => server,
