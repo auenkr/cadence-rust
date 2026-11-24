@@ -15,6 +15,7 @@ The candidate uses an explicit Tokio runtime builder in `rust/crates/cadence-his
 | --- | --- |
 | [History crate clippy and tests](https://github.com/auenkr/cadence-rust/actions/runs/45343382859) | Success, 943 tests passed, fresh target |
 | [Workspace clippy and tests](https://github.com/auenkr/cadence-rust/actions/runs/45343382840) | Success, 3,473 tests passed and 29 ignored, fresh target |
+| [Workspace rustfmt patch](https://github.com/auenkr/cadence-rust/actions/runs/45347246575) | Success, CI rustfmt produced no diff for the changed History entry point |
 | [MySQL History mixed gate](https://github.com/auenkr/cadence-rust/actions/runs/45343383091) | Success, `two_history=true`, `GATE SUMMARY failed: []` |
 | [PostgreSQL History mixed gate](https://github.com/auenkr/cadence-rust/actions/runs/45343382841) | Success, `two_history=true`, `GATE SUMMARY failed: []` |
 | [MySQL History restart gate](https://github.com/auenkr/cadence-rust/actions/runs/45343382706) | Pending, 1,500 s default load |
