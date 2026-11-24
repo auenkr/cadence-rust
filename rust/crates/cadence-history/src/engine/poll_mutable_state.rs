@@ -3,6 +3,21 @@ use std::time::{Duration, Instant};
 use cadence_api::{enums::TaskListKind, errors::EntityNotExistsError, types::{TaskList, VersionHistory, VersionHistoryItem, WorkflowType}};
 use cadence_persistence::version_history::{VersionHistoriesExt, VersionHistoryExt};
 use super::{common_util::validate_domain_uuid, deps::*, runtime::*, types::*};
+
+struct HistoryEventWatch<'a> {
+    notifier: &'a dyn HistoryEventNotifier,
+    domain_id: &'a str,
+    execution: &'a WorkflowExecution,
+    subscriber: String,
+}
+
+impl Drop for HistoryEventWatch<'_> {
+    fn drop(&mut self) {
+        self.notifier
+            .unwatch_history_event(self.domain_id, self.execution, &self.subscriber);
+    }
+}
+
 impl HistoryEngine {
     pub async fn get_mutable_state(&self, request: &GetMutableStateRequest, deadline: Option<Instant>) -> HResult<GetMutableStateResponse> {
         self.get_mutable_state_or_long_poll(request, deadline).await
@@ -69,7 +84,14 @@ impl HistoryEngine {
     }
     async fn long_poll_for_event_id(&self, expected: i64, domain_id: &str, execution: &WorkflowExecution, item: &VersionHistoryItem, deadline: Option<Instant>) -> HResult<GetMutableStateResponse> {
         let (subscriber, mut channel) = self.history_event_notifier.watch_history_event(domain_id, execution)?;
-        let result = async {
+        // The RPC future can be dropped while reloading state or waiting for events.
+        let _watch = HistoryEventWatch {
+            notifier: self.history_event_notifier.as_ref(),
+            domain_id,
+            execution,
+            subscriber,
+        };
+        async {
             // Recheck after subscribing to close the load/subscribe race.
             let (mut state, history) = self.get_mutable_state_with_current_version_history(domain_id, execution).await?;
             if !history.contains_item(item) { return Err(branch_changed(&state, false)); }
@@ -99,9 +121,7 @@ impl HistoryEngine {
                     _ = &mut timer => return Ok(state),
                 }
             }
-        }.await;
-        self.history_event_notifier.unwatch_history_event(domain_id, execution, &subscriber);
-        result
+        }.await
     }
     pub fn notify_new_history_event(&self, event: HistoryNotification) { self.history_event_notifier.notify_new_history_event(event); }
 }

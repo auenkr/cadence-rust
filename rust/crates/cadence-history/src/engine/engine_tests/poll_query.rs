@@ -102,22 +102,51 @@ async fn get_mutable_state_missing_version_histories() {
     assert!(matches!(e.get_mutable_state(&get_req(5), None).await.unwrap_err(), HistoryError::MissingVersionHistories));
 }
 
+#[derive(Default)]
+struct SilentNotifier(Mutex<Option<tokio::sync::mpsc::UnboundedSender<HistoryNotification>>>);
+
+impl HistoryEventNotifier for SilentNotifier {
+    fn watch_history_event(
+        &self,
+        _: &str,
+        _: &WorkflowExecution,
+    ) -> HResult<(String, tokio::sync::mpsc::UnboundedReceiver<HistoryNotification>)> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        *self.0.lock().unwrap() = Some(tx);
+        Ok(("sub".into(), rx))
+    }
+
+    fn unwatch_history_event(&self, domain: &str, execution: &WorkflowExecution, subscriber: &str) {
+        assert_eq!(domain, DOMAIN);
+        assert_eq!(execution, &wf());
+        assert_eq!(subscriber, "sub");
+        self.0.lock().unwrap().take().unwrap();
+    }
+
+    fn notify_new_history_event(&self, _: HistoryNotification) {}
+}
+
 #[tokio::test]
 async fn long_poll_times_out_with_current_state() {
-    struct Silent(Mutex<Option<tokio::sync::mpsc::UnboundedSender<HistoryNotification>>>);
-    impl HistoryEventNotifier for Silent {
-        fn watch_history_event(&self, _: &str, _: &WorkflowExecution) -> HResult<(String, tokio::sync::mpsc::UnboundedReceiver<HistoryNotification>)> {
-            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-            *self.0.lock().unwrap() = Some(tx);
-            Ok(("sub".into(), rx))
-        }
-        fn unwatch_history_event(&self, _: &str, _: &WorkflowExecution, _: &str) {}
-        fn notify_new_history_event(&self, _: HistoryNotification) {}
-    }
     let (mut e, _) = engine_with(base_ms());
-    e.history_event_notifier = Arc::new(Silent(Mutex::new(None)));
+    let notifier = Arc::new(SilentNotifier::default());
+    e.history_event_notifier = notifier.clone();
     let resp = e.get_mutable_state(&get_req(10), None).await.unwrap();
     assert_eq!(resp.next_event_id, 10);
+    assert!(notifier.0.lock().unwrap().is_none());
+}
+
+#[tokio::test]
+async fn dropping_long_poll_unsubscribes() {
+    let (mut e, _) = engine_with(base_ms());
+    let notifier = Arc::new(SilentNotifier::default());
+    e.history_event_notifier = notifier.clone();
+    let request = get_req(10);
+    let mut poll = Box::pin(e.get_mutable_state(&request, None));
+    assert!(futures_util::poll!(&mut poll).is_pending());
+    assert!(notifier.0.lock().unwrap().is_some());
+    drop(poll);
+    assert!(notifier.0.lock().unwrap().is_none());
 }
 
 #[tokio::test]
