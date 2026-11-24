@@ -213,8 +213,10 @@ async fn write_frame(writer: &mut OwnedWriteHalf, frame: Frame) -> Result<()> {
     header[..2].copy_from_slice(&size.to_be_bytes());
     header[2] = frame.kind;
     header[4..8].copy_from_slice(&frame.id.to_be_bytes());
-    writer.write_all(&header).await?;
-    writer.write_all(&frame.payload).await?;
+    let mut buf = Vec::with_capacity(FRAME_HEADER + frame.payload.len());
+    buf.extend_from_slice(&header);
+    buf.extend_from_slice(&frame.payload);
+    writer.write_all(&buf).await?;
     Ok(())
 }
 async fn error(
