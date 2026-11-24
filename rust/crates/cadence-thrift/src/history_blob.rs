@@ -52,7 +52,7 @@ mod tests {
     #[test]
     fn borrowed_encode_matches_owned_encode() {
         let events: Vec<HistoryEvent> = (1..4)
-            .map(|i| HistoryEvent { event_id: i, timestamp: 1_000 * i, version: 7, task_id: i, ..Default::default() })
+            .map(|i| HistoryEvent { event_id: i, timestamp: Some(1_000 * i), version: 7, task_id: i, ..Default::default() })
             .collect();
         let owned = encode(events.clone());
         let borrowed = encode_slice(&events);
