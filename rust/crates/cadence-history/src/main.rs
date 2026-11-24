@@ -18,7 +18,9 @@ fn main() -> anyhow::Result<()> {
     // Tokio defaults to available_parallelism, which accounts for Linux CPU
     // quotas, and honors an explicit TOKIO_WORKER_THREADS override.
     let mut runtime = tokio::runtime::Builder::new_multi_thread();
-    if std::env::var_os("RUST_MIN_STACK").is_none() {
+    // Unoptimized History task handlers need the default stack for their
+    // larger frames, including during schedule backfill.
+    if !cfg!(debug_assertions) && std::env::var_os("RUST_MIN_STACK").is_none() {
         runtime.thread_stack_size(1024 * 1024);
     }
     runtime.enable_all().build()?.block_on(run())
