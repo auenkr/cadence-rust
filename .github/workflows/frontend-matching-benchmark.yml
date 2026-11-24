@@ -256,7 +256,7 @@ jobs:
           else
             echo 0 > out/control-same-tree.txt
             cp /tmp/ctrlbin/control-head.txt out/control-head.txt
-            tar -C /tmp/ctrlbin -xzf /tmp/ctrlbin/bin.tgz
+            mkdir -p /tmp/ctrlbin/bin && tar -C /tmp/ctrlbin/bin -xzf /tmp/ctrlbin/bin.tgz
             docker buildx build --builder default --load --pull=false -f rust/Dockerfile --build-context builder=/tmp/ctrlbin/bin --build-arg GO_IMAGE=cadence-go:ci -t cadence-rust-control:ci . > out/control-image-build.log 2>&1 || { tail -80 out/control-image-build.log; exit 1; }
           fi
           docker run --entrypoint cat cadence-rust-control:ci /etc/cadence/cadence-server.sha256 > out/control-binary.sha256
