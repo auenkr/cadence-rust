@@ -407,7 +407,7 @@ impl EngineExecutionContext {
     }
 
     async fn persist(&self, state: Arc<EngineMutableState>, now: i64, active: bool) -> HResult<()> {
-        let prepared = self.prepare_update(state, now, active).await?;
+        let prepared = self.prepare_update(state, now, active, false).await?;
         let gate = self.core.shard.lock_task_writes().await;
         let completed = self.write_update(prepared, now, active, None, &gate).await?;
         drop(gate);
@@ -416,7 +416,7 @@ impl EngineExecutionContext {
     }
 
     pub(super) async fn prepare_active_update(&self, now: i64) -> HResult<PreparedUpdate> {
-        self.prepare_update(self.load_state().await?, now, true).await
+        self.prepare_update(self.load_state().await?, now, true, true).await
     }
 
     /// Prepare the workflow mutation and persist its history before entering the shard write gate.
@@ -425,6 +425,7 @@ impl EngineExecutionContext {
         state: Arc<EngineMutableState>,
         now: i64,
         active: bool,
+        lock_history_ids: bool,
     ) -> HResult<PreparedUpdate> {
         let core = &self.core;
         let shard = &core.shard;
@@ -434,12 +435,21 @@ impl EngineExecutionContext {
         let mut history_size = state.history_size();
         let mut last_event_task_id = None;
         if !txn.events.is_empty() {
+            // Combined updates already serialize history ID allocation with queue writes.
+            // Keep range renewal ordered with those writes while allowing the history append
+            // to run independently of the execution write.
+            let history_id_gate = if lock_history_ids {
+                Some(shard.lock_task_writes().await)
+            } else {
+                None
+            };
             let ids = shard.generate_task_ids(txn.events.len()).map_err(shard_err(shard.shard_id()))?;
+            let transaction_id = shard.generate_task_id().map_err(shard_err(shard.shard_id()))?;
+            drop(history_id_gate);
             for (ev, id) in txn.events.iter_mut().zip(ids.iter()) {
                 ev.task_id = *id;
             }
             last_event_task_id = ids.last().copied();
-            let transaction_id = shard.generate_task_id().map_err(shard_err(shard.shard_id()))?;
             let manager = SqlHistoryManager::new(core.history_v2.clone(), shard.shard_id())
                 .with_transaction_size_limit(core.transaction_size_limit.clone());
             let blob = manager
