@@ -211,7 +211,7 @@ impl SqlHistoryManager {
     ) -> Result<DataBlob, PersistenceError> {
         validate_history_event_batch(events)?;
         let first = &events[0];
-        let encoded = cadence_thrift::history_blob::encode(events.to_vec());
+        let encoded = cadence_thrift::history_blob::encode_slice(events);
         let blob = DataBlob { encoding: "thriftrw".to_string(), data: encoded.data };
         let size = blob.data.len() as i64;
         let size_limit = (self.transaction_size_limit)();

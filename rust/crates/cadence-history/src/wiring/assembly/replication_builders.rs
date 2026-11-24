@@ -222,7 +222,7 @@ impl ReplicationHydrator for EngineHydrator {
     async fn hydrate_immediate(&self, input: crate::engine::runtime::ImmediateHydration) -> HResult<Option<ReplicationTask>> {
         use crate::replication::deps::{REPLICATION_TASK_TYPE_HISTORY, REPLICATION_TASK_TYPE_SYNC_ACTIVITY};
         let blob_of = |b: &Option<crate::engine::notify_tasks::PersistedBlobRef>| {
-            b.as_ref().map(|b| cadence_thrift::history_blob::encode(b.events.clone()))
+            b.as_ref().map(|b| cadence_thrift::history_blob::encode_slice(&b.events))
         };
         let i = &input.info;
         let info = TaskInfo {

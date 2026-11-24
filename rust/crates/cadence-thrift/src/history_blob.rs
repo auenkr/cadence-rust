@@ -9,6 +9,11 @@ use crate::{Error, FromThrift, Reader, Result, ToThrift, Writer};
 
 /// `HistoryEvent.timestamp` is Unix nanoseconds in memory and on the wire (Go parity).
 pub fn encode(events: Vec<HistoryEvent>) -> DataBlob {
+    encode_slice(&events)
+}
+
+/// Borrowed-batch variant of [`encode`]; produces identical bytes without taking ownership.
+pub fn encode_slice(events: &[HistoryEvent]) -> DataBlob {
     let mut writer = Writer::new();
     writer.write_u8(0x59);
     // Preserve the element type even for an empty batch. Generic empty lists
@@ -38,4 +43,22 @@ pub fn decode(blob: &DataBlob) -> Result<Vec<HistoryEvent>> {
         return Err(Error::Invalid("trailing history blob bytes".into()));
     }
     Ok(history.events)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn borrowed_encode_matches_owned_encode() {
+        let events: Vec<HistoryEvent> = (1..4)
+            .map(|i| HistoryEvent { event_id: i, timestamp: 1_000 * i, version: 7, task_id: i, ..Default::default() })
+            .collect();
+        let owned = encode(events.clone());
+        let borrowed = encode_slice(&events);
+        assert_eq!(owned.data, borrowed.data);
+        assert_eq!(owned.encoding_type, borrowed.encoding_type);
+        assert_eq!(encode(vec![]).data, encode_slice(&[]).data);
+        assert_eq!(decode(&borrowed).unwrap().len(), 3);
+    }
 }

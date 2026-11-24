@@ -301,7 +301,7 @@ impl EngineMutableState {
         let new_buffered_events = if g.update_buffered.is_empty() {
             None
         } else {
-            let b = cadence_thrift::history_blob::encode(g.update_buffered.clone());
+            let b = cadence_thrift::history_blob::encode_slice(&g.update_buffered);
             Some(blob(b.data))
         };
 
