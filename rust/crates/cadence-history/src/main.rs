@@ -3,14 +3,14 @@
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 #[cfg(all(feature = "jemalloc-default", feature = "heap-profile"))]
-const JEMALLOC_CONFIG: &[u8] = b"background_thread:true,dirty_decay_ms:250,muzzy_decay_ms:0,narenas:2,tcache_max:4096,prof:true,prof_active:true,lg_prof_sample:15\0";
+const JEMALLOC_CONFIG: &[u8] = b"background_thread:true,dirty_decay_ms:100,muzzy_decay_ms:0,narenas:1,tcache_max:4096,prof:true,prof_active:true,lg_prof_sample:15\0";
 
 #[cfg(all(feature = "jemalloc-default", not(feature = "heap-profile")))]
-const JEMALLOC_CONFIG: &[u8] = b"background_thread:true,dirty_decay_ms:250,muzzy_decay_ms:0,narenas:2,tcache_max:4096\0";
+const JEMALLOC_CONFIG: &[u8] = b"background_thread:true,dirty_decay_ms:100,muzzy_decay_ms:0,narenas:1,tcache_max:4096\0";
 
-// tikv-jemalloc-sys prefixes its symbols. Two arenas (small tcache, fast decay) keep the footprint small on a one-CPU
-// History host while limiting arena-lock contention on multi-core hosts (narenas = min(CPUs, 2); the
-// config is static, so 2).
+// tikv-jemalloc-sys prefixes its symbols. One arena (small tcache, fast decay) keep the footprint small on a one-CPU
+// History host while limiting arena-lock contention on multi-core hosts (c1 peak anon is the target; the
+// config is static).
 // Deployments can override this via _RJEM_MALLOC_CONF.
 #[cfg(feature = "jemalloc-default")]
 #[export_name = "_rjem_malloc_conf"]
