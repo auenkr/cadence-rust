@@ -1,0 +1,84 @@
+name: Recovery timing (cold start + service kill)
+run-name: Recovery timing ${{ inputs.source_ref || github.sha }}
+on:
+  push:
+    branches: [perf-recovery-timing]
+    paths: ['.github/workflows/recovery-timing.yml', 'tests/frontend-gate/recovery/**']
+  workflow_dispatch:
+    inputs:
+      repetitions:
+        description: Alternating Go/Rust repetitions
+        default: '5'
+      rust_services:
+        description: Services run from the Rust image in the rust arm
+        default: 'frontend,matching,history'
+      scenarios:
+        description: Comma list of cold_fresh,kill_frontend,kill_matching,kill_history,cold_restart
+        default: 'cold_fresh,kill_frontend,kill_matching,kill_history,cold_restart'
+concurrency:
+  group: recovery-timing-${{ github.ref }}-${{ github.run_id }}
+  cancel-in-progress: true
+jobs:
+  recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: scripts/go-overlay.sh
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tests/frontend-gate/go.mod
+          cache-dependency-path: |
+            go/go.sum
+            tests/frontend-gate/go.sum
+      - name: Build Go server image
+        run: |
+          mkdir -p out
+          mkdir /tmp/gobuild
+          rsync -a --exclude .git go/ /tmp/gobuild/
+          git -C /tmp/gobuild init -q
+          git -C /tmp/gobuild add -A >/dev/null
+          git -C /tmp/gobuild -c user.email=ci@example.com -c user.name=ci commit -qm ci
+          docker build -f /tmp/gobuild/Dockerfile --target cadence-auto-setup -t cadence-go:ci /tmp/gobuild > out/go-image-build.log 2>&1 || { tail -60 out/go-image-build.log; exit 1; }
+          docker run --entrypoint sha256sum cadence-go:ci /usr/local/bin/cadence-server > out/go-binary.sha256
+      - uses: docker/setup-buildx-action@v3.10.0
+      - uses: crazy-max/ghaction-github-runtime@v3.0.0
+      - name: Build optimized Rust server image (same recipe/cache as the paired benchmark)
+        run: |
+          rm -rf /tmp/rustbin
+          docker buildx build -f rust/Dockerfile --target binaries --build-arg PROFILE=0 --build-arg HEAP_PROFILE=0 --output type=local,dest=/tmp/rustbin \
+            --cache-from type=gha,scope=rust-image-fat-p0 --cache-to type=gha,mode=max,scope=rust-image-fat-p0 . > out/rust-image-build.log 2>&1 || { tail -80 out/rust-image-build.log; exit 1; }
+          docker buildx build --builder default --load --pull=false -f rust/Dockerfile --build-context builder=/tmp/rustbin --build-arg GO_IMAGE=cadence-go:ci -t cadence-rust:ci . >> out/rust-image-build.log 2>&1 || { tail -80 out/rust-image-build.log; exit 1; }
+          docker run --entrypoint cat cadence-rust:ci /etc/cadence/cadence-server.sha256 > out/rust-binary.sha256
+          docker run --entrypoint sha256sum cadence-rust:ci /usr/local/bin/cadence-history >> out/rust-binary.sha256
+          docker run --entrypoint sha256sum cadence-rust:ci /usr/local/bin/cadence-server-real >> out/rust-binary.sha256
+          lscpu | sed -n 's/^Model name:[[:space:]]*//p' > out/cpu-model.txt
+          { echo "nproc $(nproc)"; free -h | head -2; uname -r; echo "${ImageOS:-?} ${ImageVersion:-?}"; } > out/machine-spec.txt
+          git rev-parse HEAD > out/head-sha.txt
+      - name: Build recovery SDK driver
+        working-directory: tests/frontend-gate
+        run: |
+          go vet ./recovery
+          go build -trimpath -o ../../out/recovery-driver ./recovery
+          sha256sum ../../out/recovery-driver > ../../out/driver.sha256
+      - name: Run paired recovery timing
+        run: |
+          set +e
+          python3 -u tests/frontend-gate/recovery/recovery-run.py \
+            --repetitions "${{ inputs.repetitions || '5' }}" \
+            --rust-services "${{ inputs.rust_services || 'frontend,matching,history' }}" \
+            --scenarios "${{ inputs.scenarios || 'cold_fresh,kill_frontend,kill_matching,kill_history,cold_restart' }}" 2>&1 | tee out/recovery-runner.log
+          status=${PIPESTATUS[0]}
+          echo "$status" > out/recovery-runner.exit
+          [ -f out/recovery/summary.md ] && cat out/recovery/summary.md >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: recovery-timing
+          path: |
+            out/
+            !out/recovery-driver
+          retention-days: 3
