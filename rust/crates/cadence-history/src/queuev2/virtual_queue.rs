@@ -312,6 +312,7 @@ impl VirtualQueueImpl {
                 _ = self.ctx.cancelled() => return,
                 m = rx.recv() => {
                     if m.is_none() { return; }
+                    crate::pump_trace!("v1_vq_notified");
                     self.load_and_submit_tasks().await;
                 }
             }
@@ -331,6 +332,7 @@ impl VirtualQueueImpl {
 
         let limit_wait_ms = wait_started.map(|start| crate::decision_trace::now_ms() - start);
         let mut inner = self.inner.lock().await;
+        crate::pump_trace!("v2_vq_locked", "slice_to_read={}", inner.slice_to_read.is_some());
 
         let slice_to_read = match &inner.slice_to_read {
             None => return,
@@ -381,6 +383,7 @@ impl VirtualQueueImpl {
         };
         self.logger
             .debug(&format!("got tasks from virtual queue counter={}", tasks.len()));
+        crate::pump_trace!("v3_got_tasks", "count={} paused={}", tasks.len(), self.pause_controller.is_paused());
 
         self.monitor.set_slice_pending_task_count(
             &slice_to_read,

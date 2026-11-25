@@ -36,3 +36,18 @@ macro_rules! decision_trace {
         }
     };
 }
+
+/// Workflow-independent pump trace: `pump_trace!("stage", "extra {}", x)` (same switch as `decision_trace!`).
+#[macro_export]
+macro_rules! pump_trace {
+    ($stage:expr) => {
+        if $crate::decision_trace::enabled() {
+            tracing::info!(target: "decision_trace", "DTRACE t_ms={:.3} stage={} wf=- run=-", $crate::decision_trace::now_ms(), $stage);
+        }
+    };
+    ($stage:expr, $($arg:tt)+) => {
+        if $crate::decision_trace::enabled() {
+            tracing::info!(target: "decision_trace", "DTRACE t_ms={:.3} stage={} wf=- run=- {}", $crate::decision_trace::now_ms(), $stage, format!($($arg)+));
+        }
+    };
+}

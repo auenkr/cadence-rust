@@ -102,7 +102,28 @@ def main():
            + ("      CADENCE_TRACE_DECISION: \"1\"\n" if os.environ.get("BENCH_TRACE_DECISION") == "true" else "")
            if name == "history" and (os.environ.get("BENCH_MEM_REPORT") == "1" or os.environ.get("BENCH_HEAP_PROFILE") == "1" or os.environ.get("BENCH_SQL_SLOW_MS") or os.environ.get("BENCH_TRACE_DECISION") == "true") else "")
         for name in ("frontend", "matching", "history", "worker")))
-    env["COMPOSE_FILE"] = os.pathsep.join((str(COMPOSE), str(override)))
+    if os.environ.get("BENCH_DYNAMIC_CONFIG_EXTRA"):
+        # Diagnostic: identical dynamic config for every arm; extra top-level keys replace base keys.
+        base = subprocess.check_output(["docker", "run", "--rm", "--entrypoint", "cat", "cadence-go:ci",
+                                        "/etc/cadence/dynamicconfig/development.yaml"], text=True)
+        extra = os.environ["BENCH_DYNAMIC_CONFIG_EXTRA"].replace("\\n", "\n")
+        keys = {l.split(":", 1)[0] for l in extra.splitlines() if l and not l[0].isspace() and not l.startswith("-")}
+        kept, skip = [], False
+        for l in base.splitlines():
+            if l and not l[0].isspace() and not l.startswith("-"):
+                skip = l.split(":", 1)[0] in keys
+            if not skip:
+                kept.append(l)
+        dyn = OUT / "development.yaml"
+        dyn.write_text("\n".join(kept).rstrip("\n") + "\n" + extra + "\n")
+        dyn_override = OUT / "dynamic-config-override.yaml"
+        dyn_override.write_text("services:\n" + "".join(
+            f"  {name}:\n    volumes:\n      - {dyn.resolve()}:/etc/cadence/dynamicconfig/development.yaml:ro\n"
+            for name in ("frontend", "matching", "history", "worker")))
+        compose_files = (str(COMPOSE), str(override), str(dyn_override))
+    else:
+        compose_files = (str(COMPOSE), str(override))
+    env["COMPOSE_FILE"] = os.pathsep.join(compose_files)
     for service in ("FRONTEND", "MATCHING", "HISTORY", "WORKER"):
         env[f"CADENCE_IMAGE_{service}"] = "cadence-go:ci"
     base_env = dict(env)

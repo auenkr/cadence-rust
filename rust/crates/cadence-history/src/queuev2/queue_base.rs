@@ -287,6 +287,7 @@ impl QueueBase {
         if self.category.type_() == HISTORY_TASK_CATEGORY_TYPE_IMMEDIATE {
             self.shard.wait_for_task_writes().await;
         }
+        crate::pump_trace!("q1b_after_gate");
         let mut new_exclusive_max_task_key = self
             .shard
             .update_if_needed_and_get_queue_max_read_level(
