@@ -3,13 +3,14 @@
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 #[cfg(all(feature = "jemalloc-default", feature = "heap-profile"))]
-const JEMALLOC_CONFIG: &[u8] = b"background_thread:true,dirty_decay_ms:250,muzzy_decay_ms:0,narenas:1,tcache_max:4096,prof:true,prof_active:true,lg_prof_sample:15\0";
+const JEMALLOC_CONFIG: &[u8] = b"background_thread:true,dirty_decay_ms:250,muzzy_decay_ms:0,narenas:2,tcache_max:4096,prof:true,prof_active:true,lg_prof_sample:15\0";
 
 #[cfg(all(feature = "jemalloc-default", not(feature = "heap-profile")))]
-const JEMALLOC_CONFIG: &[u8] = b"background_thread:true,dirty_decay_ms:250,muzzy_decay_ms:0,narenas:1,tcache_max:4096\0";
+const JEMALLOC_CONFIG: &[u8] = b"background_thread:true,dirty_decay_ms:250,muzzy_decay_ms:0,narenas:2,tcache_max:4096\0";
 
-// tikv-jemalloc-sys prefixes its symbols. One arena (small tcache, fast decay) lets the main and runtime
-// workers on a one-CPU History host share a small number of pools.
+// tikv-jemalloc-sys prefixes its symbols. Two arenas (small tcache, fast decay) keep the footprint small on a one-CPU
+// History host while limiting arena-lock contention on multi-core hosts (narenas = min(CPUs, 2); the
+// config is static, so 2).
 // Deployments can override this via _RJEM_MALLOC_CONF.
 #[cfg(feature = "jemalloc-default")]
 #[export_name = "_rjem_malloc_conf"]
@@ -32,10 +33,21 @@ fn main() -> anyhow::Result<()> {
         .enable_all()
         // Default is 512 blocking threads kept alive 10s; each retains a stack
         // and allocator cache. Cap and shorten idle life for a small host.
-        .max_blocking_threads(64)
+        .max_blocking_threads(max_blocking_threads())
         .thread_keep_alive(std::time::Duration::from_secs(2))
         .build()?
         .block_on(run())
+}
+
+/// Blocking-pool cap: `CADENCE_HISTORY_MAX_BLOCKING_THREADS` (default 64). The persistence config is
+/// parsed after the runtime exists, so operators with SQL maxConns above 48 should set this to
+/// at least maxConns + 16; the cap never goes below 64.
+fn max_blocking_threads() -> usize {
+    std::env::var("CADENCE_HISTORY_MAX_BLOCKING_THREADS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(64)
+        .max(64)
 }
 
 async fn run() -> anyhow::Result<()> {

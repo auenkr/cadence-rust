@@ -1587,3 +1587,65 @@ async fn check_child_completion_reload(cancel_update: bool) {
     assert!(h.engine.record_child_execution_completed(&request).await.unwrap_err().is_entity_not_exists());
     assert_eq!(h.execs.snapshot(WF, &run).unwrap().execution_info.next_event_id, after.execution_info.next_event_id);
 }
+
+// ---- transfer max read level is advanced before the notify callback fires
+mod notify_order {
+    use super::*;
+    use crate::engine::notify_tasks::NotifyTaskInfo;
+    use crate::engine::runtime::{QueueAction, QueueProcessor};
+    use crate::wiring::assembly::real_engine_harness::Harness;
+    use std::sync::{Arc, Mutex};
+
+    type Seen = Arc<Mutex<Vec<(i64, i64)>>>;
+
+    /// Records (max notified transfer task id, shard immediate max read level at notify time).
+    struct Recorder {
+        shard: Arc<Mutex<Option<Arc<crate::shard_context::ShardContext>>>>,
+        seen: Arc<Mutex<Vec<(i64, i64)>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl QueueProcessor for Recorder {
+        fn start(&self) {}
+        async fn stop(&self) {}
+        async fn handle_action(&self, _: &str, _: QueueAction) -> HResult<Vec<String>> {
+            Ok(vec![])
+        }
+        fn notify_new_task(&self, _: &str, info: &NotifyTaskInfo) {
+            let max_id = info.tasks.iter().map(|t| t.task_id).max().unwrap_or(0);
+            let shard = self.shard.lock().unwrap().clone().expect("shard set");
+            let level = shard
+                .update_if_needed_and_get_queue_max_read_level(crate::shard_context::HistoryTaskCategory::Transfer, CLUSTER)
+                .task_id;
+            self.seen.lock().unwrap().push((max_id, level));
+        }
+        async fn failover_domain(&self, _: &std::collections::HashSet<String>) {}
+        async fn lock_task_processing(&self) {}
+        fn unlock_task_processing(&self) {}
+    }
+
+    fn harness() -> (Harness, Seen) {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let shard = Arc::new(Mutex::new(None));
+        let rec = Arc::new(Recorder { shard: shard.clone(), seen: seen.clone() });
+        let h = Harness::build(move |e| {
+            e.queue_processors.insert(crate::engine::deps::HistoryTaskCategory::Transfer, rec);
+        });
+        *shard.lock().unwrap() = Some(h.core.shard.clone());
+        (h, seen)
+    }
+
+    /// Create path (engine_start.rs) and update path (engine_cache.rs): the level covers the notified ids.
+    #[tokio::test]
+    async fn level_advanced_before_notify_on_create_and_update() {
+        let (h, seen) = harness();
+        let run = start(&h).await;
+        decision_started(&h, &run, 2, "dec-req").await.expect("started");
+        decision_completed(&h, &run, 2, vec![schedule_activity_decision("act-1")]).await.expect("completed");
+        let seen = seen.lock().unwrap();
+        assert!(seen.len() >= 2, "expected create and update transfer notifications, got {seen:?}");
+        for (id, level) in seen.iter() {
+            assert!(level >= id, "max read level {level} behind notified transfer task {id}");
+        }
+    }
+}
