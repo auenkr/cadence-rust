@@ -260,11 +260,30 @@ func main() {
 					begin := time.Now()
 					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 					wfID, runID := uuid.NewString(), ""
-					r, e := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: wfID, TaskList: tl, ExecutionStartToCloseTimeout: time.Minute, DecisionTaskStartToCloseTimeout: 10 * time.Second}, flow, payload)
+					r, e := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: wfID, TaskList: tl, ExecutionStartToCloseTimeout: time.Minute, DecisionTaskStartToCloseTimeout: 10 * time.Second}, wfFn, payload)
 					var value string
 					if e == nil {
 						runID = r.GetRunID()
+						if *shape == "signal-timer" {
+							for k := 0; k < 2 && e == nil; k++ {
+								e = c.SignalWorkflow(ctx, wfID, runID, "go", "x")
+							}
+						}
+					}
+					if e == nil {
 						e = r.Get(ctx, &value)
+					}
+					if e == nil && *shape == "history" {
+						// Query after completion forces replay of the >1200-event history.
+						qv, qe := c.QueryWorkflow(ctx, wfID, runID, "state")
+						var qs string
+						if qe == nil {
+							qe = qv.Get(&qs)
+						}
+						if qe == nil && qs != fmt.Sprint(numBatches*batchSize) {
+							qe = fmt.Errorf("query state %q", qs)
+						}
+						e = qe
 					}
 					if e == nil && value != payload {
 						e = fmt.Errorf("activity output differs from input")
