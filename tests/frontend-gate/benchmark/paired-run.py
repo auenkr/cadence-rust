@@ -74,6 +74,7 @@ def main():
     parser.add_argument("--warmup", type=int, default=10)
     parser.add_argument("--repetitions", type=int, default=5)
     parser.add_argument("--target-rate", default="", help="optional cap on workflow start rate (wf/s); empty = unchanged")
+    parser.add_argument("--shape", default="echo", choices=["echo", "activities", "signal-timer", "child", "history"])
     parser.add_argument("--sticky", action="store_true")
     parser.add_argument("--payload-bytes", type=int, default=1024)
     parser.add_argument("--concurrency", default="1,16,64")
@@ -149,7 +150,7 @@ def main():
         "github_runner": os.environ.get("ImageOS"),
         "requests": args.requests, "warmup": args.warmup,
         "repetitions": args.repetitions, "payload_bytes": args.payload_bytes,
-        "concurrency": concurrency, "sticky_execution": args.sticky,
+        "concurrency": concurrency, "sticky_execution": args.sticky, "shape": args.shape,
         "order": "three-arm: rotated go/control/rust per repetition" if three else "alternates by repetition; each arm gets a new database",
         "control_image": args.control_image or None,
         "database": "mysql:8.0" if db_service == "mysql" else "postgres:13", "rust_services": sorted(rust_services), "history": "Go image",
@@ -244,7 +245,7 @@ def main():
                              "-domain", "benchmark", "-label", arm,
                              "-requests", str(args.requests), "-warmup", str(args.warmup),
                              "-concurrency", str(conc), "-payload-bytes", str(args.payload_bytes),
-                             f"-sticky={str(args.sticky).lower()}",
+                             f"-sticky={str(args.sticky).lower()}", "-shape", args.shape,
                              *(["-target-rate", args.target_rate] if args.target_rate else []),
                              "-measurement-start-file", start_marker, "-measurement-end-file", end_marker,
                              "-collector-ready-file", ready_marker,

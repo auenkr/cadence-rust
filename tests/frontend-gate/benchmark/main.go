@@ -32,6 +32,79 @@ func flow(ctx workflow.Context, payload string) (string, error) {
 	return result, err
 }
 
+const numBatches, batchSize = 4, 100
+
+func actFlow(ctx workflow.Context, payload string) (string, error) {
+	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{ScheduleToStartTimeout: time.Minute, StartToCloseTimeout: time.Minute})
+	var r string
+	for i := 0; i < 5; i++ {
+		if err := workflow.ExecuteActivity(ctx, echo, payload).Get(ctx, &r); err != nil {
+			return "", err
+		}
+	}
+	fs := []workflow.Future{}
+	for i := 0; i < 5; i++ {
+		fs = append(fs, workflow.ExecuteActivity(ctx, echo, payload))
+	}
+	for _, f := range fs {
+		if err := f.Get(ctx, &r); err != nil {
+			return "", err
+		}
+	}
+	return r, nil
+}
+
+func signalTimerFlow(ctx workflow.Context, payload string) (string, error) {
+	ch := workflow.GetSignalChannel(ctx, "go")
+	for i := 0; i < 2; i++ {
+		var s string
+		ch.Receive(ctx, &s)
+	}
+	if err := workflow.NewTimer(ctx, 200*time.Millisecond).Get(ctx, nil); err != nil {
+		return "", err
+	}
+	return payload, nil
+}
+
+func childFlow(ctx workflow.Context, payload string) (string, error) {
+	cctx := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{ExecutionStartToCloseTimeout: time.Minute, TaskStartToCloseTimeout: 10 * time.Second})
+	fs := []workflow.Future{}
+	for i := 0; i < 3; i++ {
+		fs = append(fs, workflow.ExecuteChildWorkflow(cctx, flow, payload))
+	}
+	var r string
+	for _, f := range fs {
+		if err := f.Get(ctx, &r); err != nil {
+			return "", err
+		}
+	}
+	return r, nil
+}
+
+// bigFlow runs numBatches*batchSize activities (>1200 history events) and exposes a query,
+// so the client's final query forces a full-history replay.
+func bigFlow(ctx workflow.Context, payload string) (string, error) {
+	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{ScheduleToStartTimeout: time.Minute, StartToCloseTimeout: time.Minute})
+	done := 0
+	if err := workflow.SetQueryHandler(ctx, "state", func() (string, error) { return fmt.Sprint(done), nil }); err != nil {
+		return "", err
+	}
+	var r string
+	for b := 0; b < numBatches; b++ {
+		fs := []workflow.Future{}
+		for i := 0; i < batchSize; i++ {
+			fs = append(fs, workflow.ExecuteActivity(ctx, echo, payload))
+		}
+		for _, f := range fs {
+			if err := f.Get(ctx, &r); err != nil {
+				return "", err
+			}
+			done++
+		}
+	}
+	return r, nil
+}
+
 type sample struct {
 	Seq       int     `json:"seq"`
 	StartUnix int64   `json:"start_unix_nano"`
@@ -99,6 +172,7 @@ func main() {
 	concurrency := flag.Int("concurrency", 16, "closed-loop workflow concurrency")
 	bytes := flag.Int("payload-bytes", 1024, "activity input/output bytes")
 	targetRate := flag.Float64("target-rate", 0, "optional cap on workflow start rate per second (0 = unpaced closed loop)")
+	shape := flag.String("shape", "echo", "workload shape: echo|activities|signal-timer|child|history")
 	sticky := flag.Bool("sticky", false, "enable worker sticky execution")
 	output := flag.String("output", "benchmark.json", "JSON result path")
 	measurementStartFile := flag.String("measurement-start-file", "", "write when warmup is complete and the collector may start its baseline")
@@ -154,12 +228,25 @@ func main() {
 	tl := "benchmark-" + uuid.NewString()
 	w := worker.New(rpc, *domain, tl, worker.Options{DisableStickyExecution: !*sticky})
 	w.RegisterWorkflow(flow)
+	w.RegisterWorkflow(actFlow)
+	w.RegisterWorkflow(signalTimerFlow)
+	w.RegisterWorkflow(childFlow)
+	w.RegisterWorkflow(bigFlow)
 	w.RegisterActivity(echo)
 	if err = w.Start(); err != nil {
 		panic(err)
 	}
 	defer w.Stop()
 	c := client.NewClient(rpc, *domain, nil)
+	wfFns := map[string]interface{}{"echo": flow, "activities": actFlow, "signal-timer": signalTimerFlow, "child": childFlow, "history": bigFlow}
+	wfFn, okShape := wfFns[*shape]
+	if !okShape {
+		panic("unknown shape " + *shape)
+	}
+	execTimeout := time.Minute
+	if *shape == "history" {
+		execTimeout = 10 * time.Minute // 400 activities per workflow cannot finish in 1m at benchmark worker settings
+	}
 	payload := strings.Repeat("x", *bytes)
 	run := func(count int) ([]float64, []string, float64, []sample) {
 		var mu sync.Mutex
@@ -175,13 +262,32 @@ func main() {
 				defer wg.Done()
 				for range jobs {
 					begin := time.Now()
-					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+					ctx, cancel := context.WithTimeout(context.Background(), execTimeout*2)
 					wfID, runID := uuid.NewString(), ""
-					r, e := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: wfID, TaskList: tl, ExecutionStartToCloseTimeout: time.Minute, DecisionTaskStartToCloseTimeout: 10 * time.Second}, flow, payload)
+					r, e := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: wfID, TaskList: tl, ExecutionStartToCloseTimeout: execTimeout, DecisionTaskStartToCloseTimeout: 10 * time.Second}, wfFn, payload)
 					var value string
 					if e == nil {
 						runID = r.GetRunID()
+						if *shape == "signal-timer" {
+							for k := 0; k < 2 && e == nil; k++ {
+								e = c.SignalWorkflow(ctx, wfID, runID, "go", "x")
+							}
+						}
+					}
+					if e == nil {
 						e = r.Get(ctx, &value)
+					}
+					if e == nil && *shape == "history" {
+						// Query after completion forces replay of the >1200-event history.
+						qv, qe := c.QueryWorkflow(ctx, wfID, runID, "state")
+						var qs string
+						if qe == nil {
+							qe = qv.Get(&qs)
+						}
+						if qe == nil && qs != fmt.Sprint(numBatches*batchSize) {
+							qe = fmt.Errorf("query state %q", qs)
+						}
+						e = qe
 					}
 					if e == nil && value != payload {
 						e = fmt.Errorf("activity output differs from input")
@@ -286,7 +392,7 @@ func main() {
 		}
 		return latencies[int(float64(len(latencies)-1)*p)]
 	}
-	result := map[string]interface{}{"label": *label, "endpoint": *peer, "requests": *n, "warmup": *warmup, "concurrency": *concurrency, "payload_bytes": *bytes, "successful": len(latencies), "failed": len(failures), "elapsed_seconds": seconds, "measured_start_utc": measuredStartUTC, "measured_end_utc": measuredEndUTC, "successful_workflows_per_second": float64(len(latencies)) / seconds, "latency_ms": map[string]interface{}{"p50": percentile(.50), "p95": percentile(.95), "p99": percentile(.99)}, "errors": failures, "successful_latency_samples_ms": latencies, "transport": "tchannel", "sticky_execution": *sticky}
+	result := map[string]interface{}{"label": *label, "shape": *shape, "endpoint": *peer, "requests": *n, "warmup": *warmup, "concurrency": *concurrency, "payload_bytes": *bytes, "successful": len(latencies), "failed": len(failures), "elapsed_seconds": seconds, "measured_start_utc": measuredStartUTC, "measured_end_utc": measuredEndUTC, "successful_workflows_per_second": float64(len(latencies)) / seconds, "latency_ms": map[string]interface{}{"p50": percentile(.50), "p95": percentile(.95), "p99": percentile(.99)}, "errors": failures, "successful_latency_samples_ms": latencies, "transport": "tchannel", "sticky_execution": *sticky}
 	f, err := os.Create(*output)
 	if err != nil {
 		panic(err)
