@@ -19,6 +19,13 @@ mod mem_report;
 use tracing_subscriber::EnvFilter;
 
 fn main() -> anyhow::Result<()> {
+    // mysql's global buffer pool keeps up to 128 buffers of up to 4 MiB each alive for the process lifetime
+    // (Go's driver pools nothing). Bound it before the first connection; explicit env values still win.
+    for (k, v) in [("RUST_MYSQL_BUFFER_POOL_CAP", "16"), ("RUST_MYSQL_BUFFER_SIZE_CAP", "32768")] {
+        if std::env::var_os(k).is_none() {
+            std::env::set_var(k, v);
+        }
+    }
     // Tokio defaults to available_parallelism, which accounts for Linux CPU
     // quotas, and honors an explicit TOKIO_WORKER_THREADS override.
     tokio::runtime::Builder::new_multi_thread()
