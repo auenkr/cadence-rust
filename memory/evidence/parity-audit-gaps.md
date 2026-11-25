@@ -35,4 +35,8 @@ The fresh validation used source head `2ee7dbda719cf85e03f7e5144b691a4a060d69e3`
 | Frontend PostgreSQL with Kafka, sample 2 | Success | `12e7799c28af502937a1b27cdbacb42013301d7db1d2e0ce1859158826acb2f5` | [44766613119](https://github.com/auenkr/cadence-rust/actions/runs/44766613119) |
 | History MySQL with two Rust History hosts | Success | Server `c358739e658bb727c32f5193cb027912dd7ee661c10d789af1e373d62102bd04`, History `d9c523a56b091d5d68b508be0ccb5630b67a3819dd933ddce1ebfb0a8a70deaf` | [44766621557](https://github.com/auenkr/cadence-rust/actions/runs/44766621557) |
 
-The gates cover the healthy maintenance response, CLI compatibility and durable deletion. They do not inject corrupt mutable state or exercise a dual advanced-visibility migration. The missing-execution gRPC probe asserts Go's `UNKNOWN` status. Rust Thrift still represents that input as a declared `BadRequestError`, while the Go generated Thrift wrapper propagates the untyped error.
+The gates cover the healthy maintenance response, CLI compatibility and durable deletion. They do not inject corrupt mutable state or exercise a dual advanced-visibility migration.
+
+## Thrift missing-execution error kind (branch `parity-deleteworkflow-thrift`)
+
+The earlier note conflated two handlers. Go admin `DeleteWorkflow` with no execution returns the pointer `validate.ErrRequestNotSet` (`*types.BadRequestError`, "Request is nil."), which `adh.error` passes through and both mappers convert, so a declared `BadRequestError` is correct on Thrift and `INVALID_ARGUMENT` on gRPC (the gate probe `delete-workflow-no-execution` asserts this). Only `MaintainCorruptWorkflow` returns a by-value error, which is untyped (`UNKNOWN`); Rust Thrift already maps it untyped since commit `438e6f143` (see `parity-maintain-corrupt.md`). No behavior change was needed. Added unit test `admin_missing_execution_thrift_tests` in `yarpc.rs` pinning both kinds. CI run: see below.

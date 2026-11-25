@@ -3670,3 +3670,33 @@ mod schedule_dispatch_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod admin_missing_execution_thrift_tests {
+    use super::*;
+
+    /// Go `DeleteWorkflow` returns the pointer `validate.ErrRequestNotSet`,
+    /// which the Thrift mapper converts to a declared `BadRequestError`
+    /// (unlike `MaintainCorruptWorkflow`, whose by-value error is untyped).
+    #[tokio::test]
+    async fn delete_workflow_missing_execution_is_declared_bad_request() {
+        let state = Arc::new(AppState::default());
+        let body = Struct::default();
+        let err = bridge_value::<_, cadence_api::admin::DeleteWorkflowResponse, _, _>(
+            "DeleteWorkflow",
+            &body,
+            |req: cadence_api::admin::DeleteWorkflowRequest| {
+                crate::admin::delete_workflow(State(state.clone()), Json(req))
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.exc_name, "BadRequestError");
+        assert_eq!(err.message, "Request is nil.");
+    }
+
+    #[test]
+    fn untyped_error_has_no_declared_exception() {
+        assert_eq!(AppError::untyped("Execution is missing".into()).exc_name, "");
+    }
+}
