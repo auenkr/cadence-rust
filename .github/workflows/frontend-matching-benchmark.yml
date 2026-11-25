@@ -225,11 +225,16 @@ jobs:
           python3 -m unittest discover -s tests/benchmark -p 'test_*.py' > out/python-tests.log 2>&1
           python3 -m py_compile tests/frontend-gate/benchmark/paired-run.py
       - name: Build Go server image
+        env:
+          BENCH_TRACE_DECISION: ${{ inputs.trace_decision }}
         run: |
           mkdir -p out
           mkdir /tmp/gobuild
           rsync -a --exclude .git go/ /tmp/gobuild/
           git -C /tmp/gobuild init -q
+          if [ "$BENCH_TRACE_DECISION" = true ]; then
+            git -C /tmp/gobuild apply "$GITHUB_WORKSPACE/tests/frontend-gate/benchmark/go-queuev2-trace.patch"
+          fi
           git -C /tmp/gobuild add -A >/dev/null
           git -C /tmp/gobuild -c user.email=ci@example.com -c user.name=ci commit -qm ci
           docker build -f /tmp/gobuild/Dockerfile --target cadence-auto-setup -t cadence-go:ci /tmp/gobuild > out/go-image-build.log 2>&1 || { tail -60 out/go-image-build.log; exit 1; }
