@@ -219,6 +219,24 @@ async fn dynamic_client_inner(cfg: &ServiceConfig, root: &std::path::Path) -> an
     }
 }
 
+/// Per-address channel cache; entries for hosts that left the membership are evicted when the snapshot
+/// generation changes.
+#[derive(Default)]
+struct ChannelCache {
+    generation: Option<u64>,
+    map: std::collections::HashMap<String, tonic::transport::Channel>,
+}
+
+impl ChannelCache {
+    fn prune_for_generation(&mut self, generation: u64, live: &std::collections::HashSet<String>) {
+        if self.generation == Some(generation) {
+            return;
+        }
+        self.generation = Some(generation);
+        self.map.retain(|addr, _| live.contains(addr));
+    }
+}
+
 /// Resolves the Matching host owning a task list (Ringpop members labelled
 /// `cadence-matching`, hashed with the shared ring) to a lazy gRPC channel.
 fn matching_resolver(
@@ -227,15 +245,15 @@ fn matching_resolver(
 ) -> ChannelResolver {
     // Go's yarpc dispatcher keeps one pooled connection per peer; reuse one lazy channel per
     // address instead of opening a new TCP/HTTP2 connection for every AddDecisionTask/AddActivityTask.
-    let channels: std::sync::Mutex<std::collections::HashMap<String, tonic::transport::Channel>> =
-        std::sync::Mutex::new(std::collections::HashMap::new());
+    let channels: std::sync::Mutex<ChannelCache> = std::sync::Mutex::new(ChannelCache::default());
     Arc::new(move |task_list: &str| {
-        let hosts: Vec<Host> = provider
-            .snapshot()
+        let snapshot = provider.snapshot();
+        let hosts: Vec<Host> = snapshot
             .members
             .iter()
             .filter_map(|m: &PeerMember| m.matching_host(MATCHING_RINGPOP_SERVICE))
             .collect();
+        let live: std::collections::HashSet<String> = hosts.iter().map(|h| h.grpc_address.clone()).collect();
         let ring = Ring::new(hosts);
         let host = ring.lookup(task_list).ok_or_else(|| "no matching hosts in the membership ring".to_string())?;
         if host.grpc_address.is_empty() {
@@ -243,12 +261,13 @@ fn matching_resolver(
         }
         // Go dials Matching with the matching service's rpc.tls client config.
         let mut cache = channels.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(c) = cache.get(&host.grpc_address) {
+        cache.prune_for_generation(snapshot.generation, &live);
+        if let Some(c) = cache.map.get(&host.grpc_address) {
             return Ok(c.clone());
         }
         let c = cadence_service_core::grpc_tls::endpoint_channel(&host.grpc_address, tls.as_ref())
             .map_err(|e| e.to_string())?;
-        cache.insert(host.grpc_address.clone(), c.clone());
+        cache.map.insert(host.grpc_address.clone(), c.clone());
         Ok(c)
     })
 }
@@ -448,5 +467,31 @@ mod dynamic_client_fallback_tests {
             ..Default::default()
         };
         assert!(file_based_client(&cfg, std::path::Path::new("/")).is_err());
+    }
+}
+
+#[cfg(test)]
+mod channel_cache_tests {
+    use super::ChannelCache;
+    use std::collections::HashSet;
+
+    fn ch(addr: &str) -> tonic::transport::Channel {
+        cadence_service_core::grpc_tls::endpoint_channel(addr, None).expect("lazy channel")
+    }
+
+    #[tokio::test]
+    async fn departed_host_channel_is_evicted_on_membership_change() {
+        let mut c = ChannelCache::default();
+        let both: HashSet<String> = ["127.0.0.1:1".to_string(), "127.0.0.1:2".to_string()].into();
+        c.prune_for_generation(1, &both);
+        c.map.insert("127.0.0.1:1".into(), ch("127.0.0.1:1"));
+        c.map.insert("127.0.0.1:2".into(), ch("127.0.0.1:2"));
+        let only_a: HashSet<String> = ["127.0.0.1:1".to_string()].into();
+        // Same generation: nothing pruned.
+        c.prune_for_generation(1, &only_a);
+        assert_eq!(c.map.len(), 2);
+        c.prune_for_generation(2, &only_a);
+        assert!(c.map.contains_key("127.0.0.1:1"));
+        assert!(!c.map.contains_key("127.0.0.1:2"));
     }
 }

@@ -499,6 +499,8 @@ pub struct Harness {
     pub domain_active_clusters: ActiveClusters,
     /// `system.transactionSizeLimit` served to the engine (bytes).
     pub txn_size_limit: Arc<AtomicI64>,
+    /// The engine core (shard, executions) for tests that inspect shard state.
+    pub core: Arc<EngineCore>,
 }
 
 impl Default for Harness {
@@ -584,7 +586,7 @@ impl Harness {
         configure(&mut engine);
         let engine = Arc::new(engine);
         let _ = core.engine_slot.set(Arc::downgrade(&engine));
-        Self { engine, execs, history, clock, cache, domain_status, domain_active_clusters, txn_size_limit }
+        Self { engine, execs, history, clock, cache, domain_status, domain_active_clusters, txn_size_limit, core }
     }
 }
 

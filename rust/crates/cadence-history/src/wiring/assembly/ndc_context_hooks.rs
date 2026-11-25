@@ -733,3 +733,64 @@ pub(super) fn placeholder_state(
         crate::execution::mutable_state_methods_common::TaskGenEnv::default(),
     ))
 }
+
+#[cfg(test)]
+mod notify_order_tests {
+    use super::*;
+    use crate::engine::notify_tasks::NotifyTaskInfo;
+    use crate::engine::runtime::{QueueAction, QueueProcessor};
+    use crate::wiring::assembly::real_engine_harness::Harness;
+    use std::sync::Mutex;
+
+    struct Recorder {
+        shard: Arc<Mutex<Option<Arc<crate::shard_context::ShardContext>>>>,
+        seen: Arc<Mutex<Vec<(i64, i64)>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl QueueProcessor for Recorder {
+        fn start(&self) {}
+        async fn stop(&self) {}
+        async fn handle_action(&self, _: &str, _: QueueAction) -> HResult<Vec<String>> {
+            Ok(vec![])
+        }
+        fn notify_new_task(&self, _: &str, info: &NotifyTaskInfo) {
+            let id = info.tasks.iter().map(|t| t.task_id).max().unwrap_or(0);
+            let level = self
+                .shard
+                .lock()
+                .unwrap()
+                .clone()
+                .expect("shard")
+                .update_if_needed_and_get_queue_max_read_level(crate::shard_context::HistoryTaskCategory::Transfer, "cluster-a")
+                .task_id;
+            self.seen.lock().unwrap().push((id, level));
+        }
+        async fn failover_domain(&self, _: &std::collections::HashSet<String>) {}
+        async fn lock_task_processing(&self) {}
+        fn unlock_task_processing(&self) {}
+    }
+
+    /// `tasks_committed` must advance the immediate max read level before notifying the queues.
+    #[tokio::test]
+    async fn tasks_committed_advances_level_before_notify() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let shard_slot: Arc<Mutex<Option<Arc<crate::shard_context::ShardContext>>>> = Arc::new(Mutex::new(None));
+        let rec = Arc::new(Recorder { shard: shard_slot.clone(), seen: seen.clone() });
+        let h = Harness::build(move |e| {
+            e.queue_processors.insert(crate::engine::deps::HistoryTaskCategory::Transfer, rec);
+        });
+        *shard_slot.lock().unwrap() = Some(h.core.shard.clone());
+        let core = h.core.clone();
+        let mut slots = vec![(0i64, 0i64)];
+        let mut level = 0i64;
+        core.shard.allocate_transfer_ids(&mut slots, &mut level).expect("allocate");
+        let mut hooks = EngineNdcContextHooks::new(core);
+        hooks.pending.max_read_level = level;
+        hooks.pending.transfer.push(pc::TransferTask { task_id: slots[0].0, ..Default::default() });
+        WorkflowContextHooks::<NdcStateBox>::tasks_committed(&mut hooks);
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 1, "{seen:?}");
+        assert!(seen[0].1 >= seen[0].0, "level {} behind notified task {}", seen[0].1, seen[0].0);
+    }
+}
