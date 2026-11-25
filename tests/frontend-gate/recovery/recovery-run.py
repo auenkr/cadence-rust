@@ -123,7 +123,8 @@ def main():
                 for p in (samples, stop, ready):
                     p.unlink(missing_ok=True)
                 driver = subprocess.Popen([str(ROOT / "out/recovery-driver"), "-output", str(samples), "-stop-file", str(stop),
-                                           "-ready-file", str(ready)], cwd=ROOT, stdout=(OUT / f"driver-{tag}.log").open("w"), stderr=subprocess.STDOUT)
+                                           "-ready-file", str(ready),
+                                           "-lost-dir", str(OUT / f"lost-{tag}")], cwd=ROOT, stdout=(OUT / f"driver-{tag}.log").open("w"), stderr=subprocess.STDOUT)
                 events = []
                 baseline_sv = None
                 try:
