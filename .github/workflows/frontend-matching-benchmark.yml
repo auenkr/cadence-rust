@@ -41,6 +41,9 @@ on:
       dynamic_config_extra:
         description: YAML appended to dynamic config (literal \n for newlines; both arms)
         default: ''
+      target_rate:
+        description: Optional cap on workflow start rate in wf/s (empty = unchanged closed loop; both arms)
+        default: ''
       rust_services:
         description: Services run from the Rust image in the paired rust arm (all-Rust cluster = frontend,matching,history)
         default: 'frontend,matching'
@@ -309,12 +312,13 @@ jobs:
           BENCH_SQL_SLOW_MS: ${{ inputs.sql_slow_ms }}
           BENCH_TRACE_DECISION: ${{ inputs.trace_decision }}
           BENCH_DYNAMIC_CONFIG_EXTRA: ${{ inputs.dynamic_config_extra }}
+          TARGET_RATE: ${{ inputs.target_rate }}
         run: |
           set +e
           python3 -u tests/frontend-gate/benchmark/paired-run.py \
             --requests "$REQUESTS" --warmup "$WARMUP" \
             --repetitions "$REPETITIONS" --concurrency "$CONCURRENCY" \
-            --payload-bytes "$PAYLOAD_BYTES" ${{ inputs.sticky && '--sticky' || '' }} ${{ inputs.control_ref != '' && '--control-image cadence-rust-control:ci' || '' }} --rust-services "${{ inputs.rust_services || 'frontend,matching' }}" 2>&1 | tee out/paired-runner.log
+            --payload-bytes "$PAYLOAD_BYTES" ${TARGET_RATE:+--target-rate "$TARGET_RATE"} ${{ inputs.sticky && '--sticky' || '' }} ${{ inputs.control_ref != '' && '--control-image cadence-rust-control:ci' || '' }} --rust-services "${{ inputs.rust_services || 'frontend,matching' }}" 2>&1 | tee out/paired-runner.log
           status=${PIPESTATUS[0]}
           echo "$status" > out/paired-runner.exit
           exit "$status"

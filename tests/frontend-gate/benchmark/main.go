@@ -98,6 +98,7 @@ func main() {
 	warmup := flag.Int("warmup", 100, "unmeasured workflows")
 	concurrency := flag.Int("concurrency", 16, "closed-loop workflow concurrency")
 	bytes := flag.Int("payload-bytes", 1024, "activity input/output bytes")
+	targetRate := flag.Float64("target-rate", 0, "optional cap on workflow start rate per second (0 = unpaced closed loop)")
 	sticky := flag.Bool("sticky", false, "enable worker sticky execution")
 	output := flag.String("output", "benchmark.json", "JSON result path")
 	measurementStartFile := flag.String("measurement-start-file", "", "write when warmup is complete and the collector may start its baseline")
@@ -199,6 +200,11 @@ func main() {
 			}()
 		}
 		for i := 0; i < count; i++ {
+			if *targetRate > 0 {
+				if d := time.Until(start.Add(time.Duration(float64(i) / *targetRate * float64(time.Second)))); d > 0 {
+					time.Sleep(d)
+				}
+			}
 			jobs <- i
 		}
 		close(jobs)
