@@ -18,4 +18,14 @@ Inner::write_event_to_cache 2.9, completed_run 0.6, rest <0.5 each. Mutable-stat
 
 ## Verification
 Three-arm benchmark 45518274418 (3 reps) was cancelled after 60 min, stuck in the Rust image build. Re-dispatched 45525993111
-(1 rep, c1+c64, control 39aa8be14). Peak-memory numbers: see below if filled.
+(1 rep, c1+c64, control 39aa8be14). 
+
+Run 45525993111 (head 168812c66, control 39aa8be14, 1 rep, success). History peak_cgroup_anon MiB:
+| conc | go | control (master) | candidate |
+|---|---|---|---|
+| 1 | 71.9 | 76.3 | 70.1 |
+| 64 | 93.3 | 96.3 | 89.2 |
+Throughput cand/control: c1 1.020, c64 1.014 (p50 latency 1.001 / 0.970): no loss. Candidate is -6 / -7 MiB vs control and
+-2 / -4 MiB vs Go. Single repetition, ~+-5 MiB noise, so the gap to Go is modest; the direction (-6..-7 vs control) matches the
+profile (33.6 MB buffer pool). Kept. Further gap candidates: load_state 4 MB, write_event_to_cache 2.9 MB.
+Not run: history mixed gate (the change only bounds an allocator-level pool; no behaviour/API change).
