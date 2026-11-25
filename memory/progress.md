@@ -2065,3 +2065,6 @@ During handoff merged documentation-only tips `origin/frontend-core2`
 - Go source is now a `go/` submodule plus `go-overlay`. See `memory/evidence/go-submodule-defork-20261123.md`.
 - Benchmark rerun: Rust is better or equal in all lanes. See `memory/evidence/bench-rerun-20261123.md`.
 - Remaining: Frontend review item 6, then a final gate sweep.
+
+## 2026-11-25 (post-compaction)
+- Merged workload-shape coverage (4219d987b): Rust trails on child (0.84x wf/s) and history-shape memory (1.21x). Workers started: perf-child-shape, perf-history-shape-mem. Council round 10 to follow.
