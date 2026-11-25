@@ -1,0 +1,65 @@
+# History queue v2 transfer load counts (2026-11-25)
+
+Base `f3479cb2b8c47b581fc184b30dae29b7045d366b`, with Go submodule
+`bb4833c865311f2e22eb6dfe73cad52b53dbaf4b`. The branch is
+`perf-queuev2-loads`.
+
+## Source audit
+
+- Go and Rust cached queues inject one batch before forwarding its notification.
+  The immediate queue coalesces notifications in a one-slot channel in both
+  implementations. It creates a new slice only if the exclusive shard read
+  level splits the remaining range. Fallback polling uses the same configured
+  interval, jitter and backoff comparison.
+- Both managers notify only the root queue when appending or merging a new
+  transfer slice. They share a single limiter across the virtual queues of each
+  shard/category. Each virtual queue coalesces load notifications in a one-slot
+  channel. Both reserve the permit before checking whether a slice is available
+  or the queue is paused.
+- Both slice readers follow persistence or cache progress up to the page size or
+  end of range. Both virtual queue loops re-notify if the slice still has progress,
+  or if another slice follows it. In particular, moving to the next slice
+  without testing its progress is copied from Go's linked-list traversal.
+- In the running Rust queue v2 implementation, `V2RateLimiter` uses the
+  History `wiring/assembly/queue_exec.rs` bucket. Its 20 rps steady-state rate
+  and burst of 20 match Go's default. Rust reads dynamic config on every
+  reservation. Go's `common/quotas/dynamicratelimiter.go` refreshes at most
+  every five seconds. The configured rate is constant in this benchmark.
+- Go reads the immediate max-read-level under a shard read lock. Rust waits
+  for a current writer via the task-write gate, then snapshots the level.
+  The two steps use separate locks in Rust. No deterministic extra-notify
+  path was found in the audited source.
+
+## Prior c1 trace
+
+The [previous History-only trace](https://github.com/auenkr/cadence-rust/actions/runs/45549320491)
+contains 6,000 decision transfer task reads for 3,000 measured Rust workflows.
+Joining both Rust stages by workflow, run and task ID yields 1,045 decision
+task waits above 5 ms (0.348 per workflow) and 892 above 30 ms (0.297 per
+workflow). The corresponding Rust `c1_queue_rate_limiter_wait` stage
+contains 2,186 records across all transfer task types (0.729 per workflow).
+A batch can contribute multiple records, and empty attempts contribute zero.
+Go did not emit per-permit traces in that run.
+
+## New trace and validation
+
+| Run | Head | Configuration |
+|---|---|---|
+| [Paired c1 trace](https://github.com/auenkr/cadence-rust/actions/runs/45556131815) | `127b63a153cce98a1632f3628867cb2ec9f47bf5` | 3 pairs, all Rust services except Worker, trace enabled |
+| [Untraced benchmark](https://github.com/auenkr/cadence-rust/actions/runs/45555552504) | `d44b307437d484fbe469925a4947316a6050e8eb` | Go, master Rust control, branch Rust, c1/c16/c64, 3 repetitions |
+| [History CI](https://github.com/auenkr/cadence-rust/actions/runs/45555667273) | `7fb1fc575ad9eee97251e91b6e2e9ac15e04230e` | Fresh target, includes one-notification test |
+| [Queue v2 History recovery gate](https://github.com/auenkr/cadence-rust/actions/runs/45555465722) | `d44b307437d484fbe469925a4947316a6050e8eb` | Fresh target, MySQL, gRPC, queue v2, two History hosts |
+
+The benchmark applies the diagnostic Go patch only when `trace_decision=true`.
+The Rust diagnostic adds one record per permit attempt, independent of how
+many tasks the read returns. The first trace dispatch was superseded after
+identifying that the benchmark's default Rust log filter discarded queue v2
+logger output.
+
+For permit counts in the trace artifact, use `services-*-{go,rust}.log` and
+filter to `DTRACE queuev2 load` in the transfer v2 component. Restrict timestamps
+to `measured_start_utc` through `measured_end_utc` from the corresponding
+`result-*-c1.json`. Normalize by successful workflows. For decision waits,
+join `result-*-c1-samples.json` on workflow and run ID, using Go task type 0
+and Rust `c0_transfer_task_read`. Each task identity is workflow, run and task
+ID. Count a delayed task if the joined wait duration exceeds the given threshold.
