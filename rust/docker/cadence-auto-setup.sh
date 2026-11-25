@@ -42,8 +42,12 @@ case "$DB" in
       # and update-schema would replay (and fail on) every migration.
       # Cassandra `create` is IF NOT EXISTS (no "exists" error), so also treat a working
       # update-schema (schema_version table present) as an initialized keyspace.
-      if ! t -k "$ks" update-schema -d "$SCHEMA_DIR/cassandra/$kind/versioned"; then
-        t -k "$ks" setup-schema -v 0.0 || true
+      # Initialize only a confirmed-fresh keyspace (no schema_version table); any other
+      # update failure is fatal and leaves the existing schema version untouched.
+      if ! out="$(t -k "$ks" update-schema -d "$SCHEMA_DIR/cassandra/$kind/versioned" 2>&1)"; then
+        echo "$out" >&2
+        echo "$out" | grep -qiE 'schema_version.*(does not exist|unconfigured)|unconfigured table schema_version' || exit 1
+        t -k "$ks" setup-schema -v 0.0
         t -k "$ks" update-schema -d "$SCHEMA_DIR/cassandra/$kind/versioned"
       fi
     done
