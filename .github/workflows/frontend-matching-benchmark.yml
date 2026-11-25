@@ -299,6 +299,7 @@ jobs:
           PAYLOAD_BYTES: ${{ inputs.payload_bytes || 1024 }}
           BENCH_SQL_SLOW_MS: ${{ inputs.sql_slow_ms }}
           BENCH_TRACE_DECISION: ${{ inputs.trace_decision }}
+          BENCH_DYNAMIC_CONFIG_EXTRA: ${{ inputs.dynamic_config_extra }}
         run: |
           set +e
           python3 -u tests/frontend-gate/benchmark/paired-run.py \
