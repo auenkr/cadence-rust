@@ -2,7 +2,7 @@ name: Recovery timing (cold start + service kill)
 run-name: Recovery timing ${{ inputs.source_ref || github.sha }}
 on:
   push:
-    branches: [perf-recovery-timing]
+    branches: [perf-recovery-timing, perf-recovery-pooled]
     paths: ['.github/workflows/recovery-timing.yml', 'tests/frontend-gate/recovery/**']
   workflow_dispatch:
     inputs:
@@ -12,6 +12,9 @@ on:
       rust_services:
         description: Services run from the Rust image in the rust arm
         default: 'frontend,matching,history'
+      database:
+        description: mysql or cassandra
+        default: 'mysql'
       scenarios:
         description: Comma list of cold_fresh,kill_frontend,kill_matching,kill_history,cold_restart
         default: 'cold_fresh,kill_frontend,kill_matching,kill_history,cold_restart'
@@ -19,7 +22,26 @@ concurrency:
   group: recovery-timing-${{ github.ref }}-${{ github.run_id }}
   cancel-in-progress: true
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: m
+        run: |
+          if [ "${{ github.event_name }}" = push ]; then
+            echo "matrix=$(jq -c . tests/frontend-gate/recovery/push-matrix.json)" >> "$GITHUB_OUTPUT"
+          else
+            jq -nc --arg r "${{ inputs.repetitions }}" --arg s "${{ inputs.rust_services }}" --arg c "${{ inputs.scenarios }}" --arg d "${{ inputs.database }}" \
+              '{include:[{name:"manual",repetitions:$r,rust_services:$s,scenarios:$c,database:$d}]}' | sed 's/^/matrix=/' >> "$GITHUB_OUTPUT"
+          fi
   recovery:
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    name: recovery ${{ matrix.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -67,9 +89,10 @@ jobs:
         run: |
           set +e
           python3 -u tests/frontend-gate/recovery/recovery-run.py \
-            --repetitions "${{ inputs.repetitions || '5' }}" \
-            --rust-services "${{ inputs.rust_services || 'frontend,matching,history' }}" \
-            --scenarios "${{ inputs.scenarios || 'cold_fresh,kill_frontend,kill_matching,kill_history,cold_restart' }}" 2>&1 | tee out/recovery-runner.log
+            --repetitions "${{ matrix.repetitions }}" \
+            --rust-services "${{ matrix.rust_services }}" \
+            --database "${{ matrix.database }}" \
+            --scenarios "${{ matrix.scenarios }}" 2>&1 | tee out/recovery-runner.log
           status=${PIPESTATUS[0]}
           echo "$status" > out/recovery-runner.exit
           [ -f out/recovery/summary.md ] && cat out/recovery/summary.md >> "$GITHUB_STEP_SUMMARY"
@@ -77,7 +100,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: recovery-timing
+          name: recovery-timing-${{ matrix.name }}
           path: |
             out/
             !out/recovery-driver
