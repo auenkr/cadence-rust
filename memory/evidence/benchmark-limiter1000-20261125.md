@@ -14,3 +14,15 @@ With the shared limit removed, the c1 tail gap goes away: Rust is 50% faster wit
 Gaps left:
 - History memory at c1 is 81.4 vs 72.3 MiB, though Rust does 50% more work in that time.
 - c16 p99 is 506 vs 482 ms, about +5%.
+
+## c16 p99 rerun, 5 reps (run 45574797809)
+
+https://github.com/auenkr/cadence-rust/actions/runs/45574797809 finished with success. Source and control are both master; transferProcessorMaxPollRPS is 1000 on every arm. Values are medians over 5 reps.
+
+| arm | wf/s | p50 / p95 / p99 ms | per-rep p99 | History MiB |
+|---|---|---|---|---|
+| go | 49.6 | 315 / 472 / 502 | 488,502,501,515,503 | 86.8 |
+| control (rust) | 77.9 | 195 / 339 / 413 | 414,382,414,413,338 | 79.7 |
+| rust | 79.0 | 192 / 324 / 360 | 432,378,360,345,344 | 79.9 |
+
+Verdict: the earlier 506 vs 482 ms at c16 p99 was noise. In this run, Rust's p99 was below Go's in all 10 Rust reps, by 18–28% at the median. Throughput is about 1.6× Go's. History memory is 7 MiB lower than Go's.
