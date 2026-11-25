@@ -97,12 +97,6 @@ def main():
     for s in ("FRONTEND", "MATCHING", "HISTORY", "WORKER"):
         env[f"CADENCE_IMAGE_{s}"] = "cadence-go:ci"
     base_env = dict(env)
-    # Restarting the history container re-runs its auto-setup; the Rust image's script is not idempotent
-    # ("database exists" -> exit 1, see evidence). Restarts therefore recreate history with auto-setup off
-    # (both arms identically) so recovery of the service itself is what is timed.
-    noauto = OUT / "history-noauto.yaml"
-    noauto.write_text('services:\n  history:\n    environment:\n      CADENCE_AUTO_SETUP: "false"\n')
-    restart_env = lambda e: {**e, "COMPOSE_FILE": e["COMPOSE_FILE"] + os.pathsep + str(noauto)}
     compose = lambda *a: ["docker", "compose", "-p", PROJECT, *a]
     results = []
     try:
@@ -131,14 +125,14 @@ def main():
                             sh(compose("kill", "-s", "KILL", *SERVICES), arm_env, f"killall-{tag}")
                             time.sleep(2)
                             ev["t0_ns"] = time.time_ns()
-                            sh(compose("up", "-d", "--no-deps", *SERVICES), restart_env(arm_env), f"startall-{tag}")
+                            sh(compose("start", *SERVICES), arm_env, f"startall-{tag}")
                             fresh = True
                         elif sc.startswith("kill_"):
                             svc = sc[5:]
                             ev["t0_ns"] = time.time_ns()
                             sh(compose("kill", "-s", "KILL", svc), arm_env, f"kill-{svc}-{tag}")
                             ev["killed_ns"] = time.time_ns()
-                            sh(compose("up", "-d", "--no-deps", svc), restart_env(arm_env) if svc == "history" else arm_env, f"start-{svc}-{tag}") if svc == "history" else sh(compose("start", svc), arm_env, f"start-{svc}-{tag}")
+                            sh(compose("start", svc), arm_env, f"start-{svc}-{tag}")
                             ev["restarted_ns"] = time.time_ns()
                             fresh = True
                         else:

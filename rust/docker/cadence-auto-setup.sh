@@ -8,9 +8,22 @@ DB="$(echo "${DB:-cassandra}" | tr '[:upper:]' '[:lower:]')"
 SCHEMA_DIR="${SCHEMA_DIR:-/etc/cadence/schema}"
 RF="${CADENCE_SETUP_OPTION_REPLICATION_FACTOR:-${CASSANDRA_REPLICATION_FACTOR:-1}}"
 
+EXISTED=0
 retry() { # retry <attempts> cmd...
   local n=$1; shift
   for ((i = 1; i <= n; i++)); do "$@" && return 0; echo "retry $i/$n: $*" >&2; sleep 2; done
+  return 1
+}
+
+# retry_idem <attempts> cmd...: like retry, but "already exists" counts as success so a container
+# restart against an initialized DB behaves like Go's auto-setup (idempotent).
+retry_idem() {
+  local n=$1 out; shift
+  for ((i = 1; i <= n; i++)); do
+    if out="$("$@" 2>&1)"; then return 0; fi
+    if echo "$out" | grep -qiE 'exists|already'; then echo "already exists, continuing: $*" >&2; EXISTED=1; return 0; fi
+    echo "$out" >&2; echo "retry $i/$n: $*" >&2; sleep 2
+  done
   return 1
 }
 
@@ -23,8 +36,11 @@ case "$DB" in
     t() { cadence-cassandra-tool --ep "$ep" -p "$port" --protocol-version "${CASSANDRA_PROTO_VERSION:-4}" "${auth[@]}" "$@"; }
     for pair in "${KEYSPACE:-cadence}:cadence" "${VISIBILITY_KEYSPACE:-cadence_visibility}:visibility"; do
       ks="${pair%%:*}"; kind="${pair##*:}"
-      retry 60 t create -k "$ks" --rf "$RF"
-      t -k "$ks" setup-schema -v 0.0 || true
+      EXISTED=0
+      retry_idem 60 t create -k "$ks" --rf "$RF"
+      # On restart the schema is already initialized: setup-schema would reset the version to 0.0
+      # and update-schema would replay (and fail on) every migration.
+      [ "$EXISTED" = 1 ] || t -k "$ks" setup-schema -v 0.0 || true
       t -k "$ks" update-schema -d "$SCHEMA_DIR/cassandra/$kind/versioned"
     done
     ;;
@@ -39,8 +55,9 @@ case "$DB" in
     t() { cadence-sql-tool --plugin "$DB" --ep "$ep" -p "$port" -u "$user" --pw "$pw" "$@"; }
     for pair in "${DBNAME:-cadence}:cadence" "${VISIBILITY_DBNAME:-cadence_visibility}:visibility"; do
       name="${pair%%:*}"; kind="${pair##*:}"
-      retry 60 t create-database --db "$name"
-      t --db "$name" setup-schema -v 0.0 || true
+      EXISTED=0
+      retry_idem 60 t create-database --db "$name"
+      [ "$EXISTED" = 1 ] || t --db "$name" setup-schema -v 0.0 || true
       t --db "$name" update-schema -d "$sdir/$kind/versioned"
     done
     ;;
