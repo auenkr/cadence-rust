@@ -78,10 +78,15 @@ def main():
     parser.add_argument("--concurrency", default="1,16,64")
     parser.add_argument("--rust-services", default="frontend,matching",
                         help="comma list of services run from the Rust image in the rust arm")
+    parser.add_argument("--database", choices=["mysql", "postgres"], default="mysql")
     parser.add_argument("--control-image", default="",
                         help="enables three-arm mode (go, control, rust candidate); docker tag of the control Rust image")
     args = parser.parse_args()
     three = bool(args.control_image)
+    global COMPOSE
+    db_service = args.database
+    if db_service == "postgres":
+        COMPOSE = ROOT / "tests/docker-drop-in/docker-compose.split.postgres.yml"
     if args.requests < 1 or args.warmup < 0 or args.repetitions < 1 or args.payload_bytes < 0:
         parser.error("requests/repetitions must be positive and warmup nonnegative")
     rust_services = {x for x in args.rust_services.split(",") if x}
@@ -146,7 +151,7 @@ def main():
         "concurrency": concurrency, "sticky_execution": args.sticky,
         "order": "three-arm: rotated go/control/rust per repetition" if three else "alternates by repetition; each arm gets a new database",
         "control_image": args.control_image or None,
-        "database": "mysql:8.0", "rust_services": sorted(rust_services), "history": "Go image",
+        "database": "mysql:8.0" if db_service == "mysql" else "postgres:13", "rust_services": sorted(rust_services), "history": "Go image",
         "system_worker": "Go image", "transport": "TChannel",
         "frontend_matching_rust_image": "cadence-rust:ci",
         "cpu_memory_limits": "Each service: 1 CPU/1400 MiB, DB: 1.5 CPU/1800 MiB; see resolved compose configs",
@@ -201,8 +206,8 @@ def main():
                     image_id = subprocess.check_output(["docker", "inspect", "--format", "{{.Image}}", container], text=True).strip()
                     identities[service] = {"container_id": container, "container_name": name, "image": actual, "image_id": image_id}
                     run(["docker", "top", container, "-eo", "pid,comm,args"], f"process-{rep:02d}-{arm}-{service}")
-                database = subprocess.check_output(["docker", "compose", "-p", PROJECT, "ps", "-q", "mysql"], cwd=ROOT, env=arm_env, text=True).strip()
-                identities["mysql"] = json.loads(subprocess.check_output(["docker", "inspect", "--format", "{{json .}}", database], text=True))
+                database = subprocess.check_output(["docker", "compose", "-p", PROJECT, "ps", "-q", db_service], cwd=ROOT, env=arm_env, text=True).strip()
+                identities[db_service] = json.loads(subprocess.check_output(["docker", "inspect", "--format", "{{json .}}", database], text=True))
                 (OUT / f"identities-{rep:02d}-{arm}.json").write_text(json.dumps(identities, indent=2) + "\n")
                 cli = [str(ROOT / "out/cadence-cli"), "--address", "127.0.0.1:7833", "--transport", "grpc", "--domain", "benchmark", "domain"]
                 for attempt in range(30):

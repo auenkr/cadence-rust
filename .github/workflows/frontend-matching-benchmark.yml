@@ -83,6 +83,11 @@ on:
         description: Enable SDK worker sticky execution in both benchmark arms
         type: boolean
         default: false
+      database:
+        description: Persistence for the paired benchmark (mysql = unchanged default)
+        type: choice
+        options: [mysql, postgres]
+        default: mysql
       trace_decision:
         description: Diagnostic - trace queue v2 permits in Go and Rust and decision timings in Rust
         type: boolean
@@ -314,7 +319,7 @@ jobs:
           python3 -u tests/frontend-gate/benchmark/paired-run.py \
             --requests "$REQUESTS" --warmup "$WARMUP" \
             --repetitions "$REPETITIONS" --concurrency "$CONCURRENCY" \
-            --payload-bytes "$PAYLOAD_BYTES" ${{ inputs.sticky && '--sticky' || '' }} ${{ inputs.control_ref != '' && '--control-image cadence-rust-control:ci' || '' }} --rust-services "${{ inputs.rust_services || 'frontend,matching' }}" 2>&1 | tee out/paired-runner.log
+            --payload-bytes "$PAYLOAD_BYTES" ${{ inputs.sticky && '--sticky' || '' }} ${{ inputs.control_ref != '' && '--control-image cadence-rust-control:ci' || '' }} ${{ inputs.database == 'postgres' && '--database postgres' || '' }} --rust-services "${{ inputs.rust_services || 'frontend,matching' }}" 2>&1 | tee out/paired-runner.log
           status=${PIPESTATUS[0]}
           echo "$status" > out/paired-runner.exit
           exit "$status"
@@ -330,7 +335,7 @@ jobs:
             jeprof --text --inuse_space --lines "$d/cadence-history" "$best" 2>&1 | head -80 > "$d/jeprof-top-lines.txt" || true
           done
       - name: Verify complete paired benchmark evidence
-        if: ${{ inputs.control_ref == '' }}
+        if: ${{ inputs.control_ref == '' && inputs.database != 'postgres' }}
         run: |
           set +e
           python3 tests/benchmark/verify_artifacts.py --out out --expected-head "$GITHUB_SHA" > out/artifact-verification.json
@@ -354,7 +359,7 @@ jobs:
             echo "- Kernel: $(uname -r)"
             echo "- OS: $(. /etc/os-release; echo "$PRETTY_NAME")"
             echo "- Runner image: ${ImageOS:-?} ${ImageVersion:-?}; runner name: ${RUNNER_NAME:-?}"
-            echo "- Database: $(docker image inspect mysql:8.0 --format '{{index .RepoTags 0}} {{.Id}}' 2>/dev/null)"
+            echo "- Database: $(docker image inspect ${{ inputs.database == 'postgres' && 'postgres:13' || 'mysql:8.0' }} --format '{{index .RepoTags 0}} {{.Id}}' 2>/dev/null)"
             echo "- Container limits (mem/cpu per service):"
             for f in out/paired-benchmark/compose-*-rust.yaml; do [ -f "$f" ] && grep -E 'mem_limit|cpus:' "$f" | sort | uniq -c | sed 's/^/    /' && break; done
             echo "- rust_services: ${{ inputs.rust_services || 'frontend,matching' }}"
