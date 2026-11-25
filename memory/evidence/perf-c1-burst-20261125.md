@@ -53,5 +53,5 @@ limiter, not a parity defect, and no code change was made. Consequently `cadence
 c1/16/64 benchmark were not re-run (nothing changed; master results remain the reference).
 
 Not done: matched-rate (`target_rate`) traced run to show Go saturating at equal permit rates. The dispatch failed with
-HTTP 422 ("up to 25 inputs") on `frontend-matching-benchmark.yml`; the workflow has 26 inputs and needs trimming first. The earlier
+HTTP 422 ("up to 25 inputs") on `frontend-matching-benchmark.yml`; the workflow file defines 25 inputs on this branch, so the 422 cause is unconfirmed (possibly the dispatch API counting target_rate over a limit); not investigated further. The earlier
 matched-rate memory evidence (`perf-c1-rate-mem-20261125.md`) covers the memory side only.
