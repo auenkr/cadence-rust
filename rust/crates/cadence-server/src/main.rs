@@ -52,7 +52,14 @@ async fn run(_arena_cap_applied: bool) -> anyhow::Result<()> {
     system_heap_profile::start();
 
     // Unset RUST_LOG keeps the default `warn` level, so nothing new is logged unless it is set.
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        // CADENCE_TRACE_DECISION=1 additionally enables the info-level decision timing trace.
+        if std::env::var("CADENCE_TRACE_DECISION").map(|v| v == "1" || v == "true").unwrap_or(false) {
+            EnvFilter::new("warn,decision_trace=info")
+        } else {
+            EnvFilter::new("warn")
+        }
+    });
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_writer(std::io::stderr)

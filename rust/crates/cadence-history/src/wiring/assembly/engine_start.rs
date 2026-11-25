@@ -605,9 +605,11 @@ impl WorkflowStartHost for EngineStartHost {
         };
         match self.core.executions.create_workflow_execution(request).await {
             Ok(_) => {
-                // Go notifyingExecutionManager notifies (cache inject) before updateMaxReadLevelLocked.
-                self.core.notify_tasks(&notify_transfer, &notify_timer);
+                // Go's queue reader takes the shard RLock for the max read level, so it never observes the notify
+                // before the level advanced; here the level is advanced first so a woken pump cannot read a stale level
+                // and miss the new task (~40ms stall until the next poll).
                 shard.update_max_read_level(max_read_level);
+                self.core.notify_tasks(&notify_transfer, &notify_timer);
                 drop(task_write_gate);
                 new_run.state.finish_transaction(size, last);
                 ctx.set_state(new_run.state.clone());

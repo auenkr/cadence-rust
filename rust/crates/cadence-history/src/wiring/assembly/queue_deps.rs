@@ -327,7 +327,9 @@ impl TransferDependencies for TransferDepsImpl {
             partition_config: Self::partition_config(&request),
         });
         matching_metadata(&mut rpc);
+        crate::decision_trace!("d_add_decision_sent", request.execution.workflow_id, request.execution.run_id);
         let response = client.add_decision_task(rpc).await.map_err(|e| self.matching_add_err(&request, tt, e))?.into_inner();
+        crate::decision_trace!("d2_add_decision_returned", request.execution.workflow_id, request.execution.run_id);
         self.update_partition_config(&request, tt, response.partition_config);
         Ok(())
     }

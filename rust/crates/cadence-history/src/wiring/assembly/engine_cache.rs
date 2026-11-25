@@ -548,11 +548,21 @@ impl EngineExecutionContext {
         match core.executions.update_workflow_execution(request).await {
             Ok(()) => {
                 // Go notifyingExecutionManager notifies (cache inject) before updateMaxReadLevelLocked.
+                let traced = crate::decision_trace::enabled()
+                    && txn.transfer.iter().any(|t| t.task_type == 0);
+                if traced {
+                    crate::decision_trace!("a_decision_scheduled_committed", self.execution.workflow_id, self.execution.run_id);
+                }
+                // Go readers block on the shard lock until the level advanced, so advance it before notifying:
+                // otherwise the woken transfer pump reads a stale level, misses the task and stalls ~40ms.
+                shard.update_max_read_level(max_read_level);
                 core.notify_tasks(&txn.transfer, &txn.timer);
                 if let Some((t, tm)) = new_tasks {
                     core.notify_tasks(t, tm);
                 }
-                shard.update_max_read_level(max_read_level);
+                if traced {
+                    crate::decision_trace!("b_transfer_notified", self.execution.workflow_id, self.execution.run_id);
+                }
                 Ok(completion)
             }
             Err(e) => {

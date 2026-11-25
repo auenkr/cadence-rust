@@ -97,7 +97,8 @@ def main():
         + ("    environment:\n"
            + ("      CADENCE_MEM_REPORT: \"1\"\n" if os.environ.get("BENCH_MEM_REPORT") == "1" else "")
            + (f"      CADENCE_HISTORY_SQL_SLOW_MS: \"{os.environ['BENCH_SQL_SLOW_MS']}\"\n" if os.environ.get("BENCH_SQL_SLOW_MS") else "")
-           if name == "history" and (os.environ.get("BENCH_MEM_REPORT") == "1" or os.environ.get("BENCH_SQL_SLOW_MS")) else "")
+           + ("      CADENCE_TRACE_DECISION: \"1\"\n" if os.environ.get("BENCH_TRACE_DECISION") == "true" else "")
+           if name == "history" and (os.environ.get("BENCH_MEM_REPORT") == "1" or os.environ.get("BENCH_SQL_SLOW_MS") or os.environ.get("BENCH_TRACE_DECISION") == "true") else "")
         for name in ("frontend", "matching", "history", "worker")))
     env["COMPOSE_FILE"] = os.pathsep.join((str(COMPOSE), str(override)))
     for service in ("FRONTEND", "MATCHING", "HISTORY", "WORKER"):

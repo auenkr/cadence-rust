@@ -370,9 +370,9 @@ impl WorkflowContextHooks<NdcStateBox> for EngineNdcContextHooks {
 
     fn tasks_committed(&mut self) {
         let pending = std::mem::take(&mut self.pending);
-        // Go notifyingExecutionManager notifies (cache inject) before updateMaxReadLevelLocked.
-        self.core.notify_tasks(&pending.transfer, &pending.timer);
+        // Advance the max read level before notifying (Go readers block on the shard lock until both are done).
         self.core.shard.update_max_read_level(pending.max_read_level);
+        self.core.notify_tasks(&pending.transfer, &pending.timer);
         self.task_write_gate = None;
     }
 

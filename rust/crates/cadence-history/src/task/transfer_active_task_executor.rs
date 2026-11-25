@@ -279,8 +279,10 @@ impl TransferActiveTaskExecutor {
   result
  }
  pub async fn process_decision_task(&self,task:&DecisionTask)->Result<()> {
+  crate::decision_trace!("c_transfer_picked_up",task.workflow_id(),task.run_id(),"schedule_id={}",task.schedule_id);
   tracing::debug!("process_decision_task: get_context");
   let ctx=self.get_context(task.domain_id(),task.workflow_id(),task.run_id()).await;
+  crate::decision_trace!("c2_transfer_lock_acquired",task.workflow_id(),task.run_id());
   tracing::debug!(ok=ctx.is_ok(),"process_decision_task: got context");
   let ctx=ctx?;
   let result=self.process_decision_task_locked(ctx.as_ref(),task).await;

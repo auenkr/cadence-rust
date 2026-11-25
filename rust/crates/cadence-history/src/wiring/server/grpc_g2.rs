@@ -187,8 +187,12 @@ pub async fn record_decision_task_started(
         request_id: req.request_id,
         poll_request: req.poll_request.map(cv::poll_for_decision_task_request_in).transpose()?,
     };
+    let (tw, tr) = r.workflow_execution.as_ref().map(|e| (e.workflow_id.clone(), e.run_id.clone())).unwrap_or_default();
+    crate::decision_trace!("e_record_started_received", tw, tr, "schedule_id={}", r.schedule_id);
     let resp = state.handler.record_decision_task_started(Some(&r)).await.map_err(err)?;
-    decision_started_out(resp)
+    let out = decision_started_out(resp);
+    crate::decision_trace!("g_record_started_returned", tw, tr);
+    out
 }
 
 pub async fn record_activity_task_started(
