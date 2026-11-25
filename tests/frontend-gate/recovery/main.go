@@ -51,6 +51,7 @@ func main() {
 	out := flag.String("output", "samples.jsonl", "JSONL output")
 	stopFile := flag.String("stop-file", "", "exit gracefully (after in-flight workflows finish) when this file appears")
 	readyFile := flag.String("ready-file", "", "written once domain registered and worker started")
+	lostDir := flag.String("lost-dir", "", "directory to dump event history of lost workflows")
 	flag.Parse()
 
 	tr, err := tchannel.NewTransport(tchannel.ServiceName("cadence-recovery"))
@@ -166,10 +167,41 @@ loop:
 				r.Err = e.Error()
 			}
 			emit(r)
+			if e != nil && *lostDir != "" {
+				dumpHistory(rpc, *domain, id, *lostDir)
+			}
 		}(seq)
 	}
 	wg.Wait()
 	_ = f.Close()
+}
+
+// dumpHistory writes the full event history (with timestamps) of a lost workflow to dir/<id>.json.
+func dumpHistory(rpc workflowserviceclient.Interface, domain, id, dir string) {
+	_ = os.MkdirAll(dir, 0o755)
+	var events []*shared.HistoryEvent
+	var token []byte
+	for i := 0; i < 20; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		resp, err := rpc.GetWorkflowExecutionHistory(ctx, &shared.GetWorkflowExecutionHistoryRequest{
+			Domain: &domain, Execution: &shared.WorkflowExecution{WorkflowId: &id}, NextPageToken: token,
+		})
+		cancel()
+		if err != nil {
+			events = append(events, &shared.HistoryEvent{}) // marker; error below
+			_ = os.WriteFile(dir+"/"+id+".err", []byte(err.Error()), 0o644)
+			break
+		}
+		if resp.History != nil {
+			events = append(events, resp.History.Events...)
+		}
+		token = resp.NextPageToken
+		if len(token) == 0 {
+			break
+		}
+	}
+	b, _ := json.MarshalIndent(events, "", " ")
+	_ = os.WriteFile(dir+"/"+id+".json", b, 0o644)
 }
 
 func must(err error) {
