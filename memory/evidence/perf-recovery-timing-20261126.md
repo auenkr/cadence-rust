@@ -38,3 +38,22 @@ First attempt, run [45691181739](https://github.com/auenkr/cadence-rust/actions/
 
 ## Reproduce
 `gh workflow run recovery-timing.yml --ref master` (after merge) with optional `repetitions`, `rust_services`, `scenarios`. Raw per-workflow samples, per-event JSON, service logs and image identities are in the artifact (`recovery/`).
+
+## Fix: idempotent Rust auto-setup restart (branch fix-history-restart)
+Fix in `rust/docker/cadence-auto-setup.sh` (shell only, no Rust code, so rust-ci not needed): `create-database`/`create` now treat "exists/already" as success (`retry_idem`), and `setup-schema -v 0.0` is skipped when the DB already existed. Run [45696036284](https://github.com/auenkr/cadence-rust/actions/runs/45696036284) (first fix only) still failed on cold_restart: setup-schema reset the version to 0.0 and update-schema replayed `CREATE TABLE domains` ("already exists"). Second fix passed.
+
+The harness workaround (recreate with auto-setup off) is removed: both arms now use plain `docker compose kill -s KILL` + `docker compose start` (history included).
+
+Run [45701788183](https://github.com/auenkr/cadence-rust/actions/runs/45701788183), head 9b1d1af8c7688f62ddacaa0ece2e789496829325, conclusion success, 5 reps, no crash-loop, 0 lost (Go 2074/2074, Rust 1804/1804). Rust cadence-server sha256 f510cc3c7fd1fda7b5fa1b7c376fab803282685d5ea8e96fe3149a40f90c0f74.
+
+| scenario | arm | first NEW median | stable median | stable p95 |
+|---|---|---|---|---|
+| kill_history | go | 1220 | 1396 | 1435 |
+| kill_history | rust | 1168 | 1210 | 1259 |
+| kill_frontend | go / rust | 1529 / 1682 | 2164 / 2462 | 2790 / 2572 |
+| kill_matching | go / rust | 2268 / 2191 | 2448 / 2275 | 2477 / 2280 |
+| cold_fresh | go / rust | 17507 / 13205 | 18047 / 13313 | 22609 / 14013 |
+| cold_restart | go / rust | 11172 / 9150 | 12728 / 10308 | 13818 / 11663 |
+
+Rust history restart (1210 ms stable) <= Go (1396 ms). Only frontend kill is slightly slower in Rust (2462 vs 2164 ms median, p95 lower), within the bimodal noise noted earlier.
+Caveat: Cassandra path only has the idempotent `create` (keyspace create is IF NOT EXISTS, so the setup-schema skip does not trigger there); not exercised by this run (MySQL only).
