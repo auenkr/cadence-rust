@@ -73,6 +73,7 @@ def main():
     parser.add_argument("--requests", type=int, default=1000)
     parser.add_argument("--warmup", type=int, default=10)
     parser.add_argument("--repetitions", type=int, default=5)
+    parser.add_argument("--target-rate", default="", help="optional cap on workflow start rate (wf/s); empty = unchanged")
     parser.add_argument("--sticky", action="store_true")
     parser.add_argument("--payload-bytes", type=int, default=1024)
     parser.add_argument("--concurrency", default="1,16,64")
@@ -239,6 +240,7 @@ def main():
                              "-requests", str(args.requests), "-warmup", str(args.warmup),
                              "-concurrency", str(conc), "-payload-bytes", str(args.payload_bytes),
                              f"-sticky={str(args.sticky).lower()}",
+                             *(["-target-rate", args.target_rate] if args.target_rate else []),
                              "-measurement-start-file", start_marker, "-measurement-end-file", end_marker,
                              "-collector-ready-file", ready_marker,
                              "-output", str(result)], f"run-{rep:02d}-{arm}-c{conc}",
