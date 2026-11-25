@@ -32,7 +32,7 @@ Candidate `d263b752ae926d051ea5a22267be2d6c22c74ac3` vendors the existing synchr
 | [45550041086](https://github.com/auenkr/cadence-rust/actions/runs/45550041086) | History Clippy and tests, clean target | Success, 953 History tests passed |
 | [45550104677](https://github.com/auenkr/cadence-rust/actions/runs/45550104677) | Workspace Clippy and tests, clean target | Success |
 | [45550060945](https://github.com/auenkr/cadence-rust/actions/runs/45550060945) | MySQL mixed gate, two History hosts, jemalloc, clean target | Success, no failed workflow checks. History SHA256 `58df5bee1cd03af90b0e366cae87cdde28fe524847efa32cbf259db2f5910ad2` |
-| [45550044918](https://github.com/auenkr/cadence-rust/actions/runs/45550044918) | Three-arm c1/c16/c64, three repetitions | Pending |
+| [45550044918](https://github.com/auenkr/cadence-rust/actions/runs/45550044918) | Three-arm c1/c16/c64, three repetitions | Success (table below) |
 
 ## Identical-binary benchmark variation
 
@@ -66,3 +66,21 @@ Run [45550044918](https://github.com/auenkr/cadence-rust/actions/runs/4555004491
 - c16: memory matches control (88.8 against 88.9 MiB). Throughput is 63.3 against 53.1 wf/s, but the control runs vary from 50.3 to 66.5, so this is noise.
 - c64: memory is 111.2 MiB against control 101.6 and Go 101.1. The three runs are 111.2, 112.3 and 99.6, and control had a 121.7 outlier, so the c64 comparison is inconclusive. The patch removes a fixed per-connection reservation and should not raise memory. Throughput is within noise (62.2 against 59.6). p99 is higher (2467 against 1898 ms), which is within the spread seen across runs.
 - Conclusion: c1 History memory is now below Go with no throughput regression. A c64 memory increase is not ruled out. Only one three-repetition run exists, so a repeat would be needed to settle it.
+
+## Final 5-rep confirmation (run 45562949464)
+
+https://github.com/auenkr/cadence-rust/actions/runs/45562949464 succeeded with 0 failed workflows. Candidate: perf-history-bootmem; control: master. Concurrency 1/16/64, 5 repetitions, default config. Runner: GitHub-hosted ubuntu-latest, 4 vCPU, about 15 GiB, 1 CPU per service. (Run 45550044918 above also completed with success; its results are in the table above.)
+
+| c | arm | wf/s | p50 / p95 / p99 ms | History anon MiB |
+|---|---|---|---|---|
+| 1 | go | 22.7 | 40.9 / 56.8 / 100.8 | 72.6 |
+| 1 | control | 25.4 | 27.0 / 100.1 / 104.0 | 74.7 |
+| 1 | candidate | 25.5 | 25.4 / 100.4 / 103.5 | 74.5 |
+| 16 | go | 43.2 | 373.1 / 510.2 / 564.1 | 93.8 |
+| 16 | control | 62.8 | 257.7 / 342.9 / 374.5 | 89.7 |
+| 16 | candidate | 64.2 | 251.1 / 336.1 / 378.3 | 89.7 |
+| 64 | go | 21.6 | 3422 / 4236 / 5255 | 104.3 |
+| 64 | control | 58.6 | 1243 / 1526 / 1583 | 100.3 |
+| 64 | candidate | 59.3 | 1257 / 1513 / 1566 | 98.9 |
+
+Verdict: neutral or better than control at every concurrency, so it was merged (ccc19bac0). The c64 memory rise seen in 45550044918 did not repeat. The c1 p95 of about 100 ms is the shared queue limiter, not something only Rust does (see benchmark-limiter1000-20261125.md).
