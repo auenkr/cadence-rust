@@ -26,9 +26,11 @@ on:
       capacity_rates:
         description: Comma separated capacity starts/s (suite mode); capacity_only skips fixed/recovery
         default: '25,100'
-      capacity_only:
-        type: boolean
-        default: false
+      shape:
+        description: Workload shape for the paired benchmark (replaces capacity_only; the SDK suite is not capacity_only-capable on this branch)
+        type: choice
+        options: [echo, activities, signal-timer, child, history]
+        default: echo
       worker_pollers:
         description: SDK worker decision/activity pollers (0 = SDK default)
         default: '0'
@@ -133,7 +135,6 @@ jobs:
         env:
           SUITE: ${{ inputs.sdk_suite }}
           CAPACITY_RATES: ${{ inputs.capacity_rates }}
-          CAPACITY_ONLY: ${{ inputs.capacity_only }}
           WORKER_POLLERS: ${{ inputs.worker_pollers }}
           MYSQL_ARGS: ${{ inputs.mysql_args }}
           NUM_HISTORY_SHARDS: ${{ inputs.history_shards || '4' }}
@@ -320,7 +321,7 @@ jobs:
           python3 -u tests/frontend-gate/benchmark/paired-run.py \
             --requests "$REQUESTS" --warmup "$WARMUP" \
             --repetitions "$REPETITIONS" --concurrency "$CONCURRENCY" \
-            --payload-bytes "$PAYLOAD_BYTES" ${TARGET_RATE:+--target-rate "$TARGET_RATE"} ${{ inputs.sticky && '--sticky' || '' }} ${{ inputs.control_ref != '' && '--control-image cadence-rust-control:ci' || '' }} ${{ inputs.database == 'postgres' && '--database postgres' || '' }} --rust-services "${{ inputs.rust_services || 'frontend,matching' }}" 2>&1 | tee out/paired-runner.log
+            --payload-bytes "$PAYLOAD_BYTES" --shape "${{ inputs.shape }}" ${TARGET_RATE:+--target-rate "$TARGET_RATE"} ${{ inputs.sticky && '--sticky' || '' }} ${{ inputs.control_ref != '' && '--control-image cadence-rust-control:ci' || '' }} ${{ inputs.database == 'postgres' && '--database postgres' || '' }} --rust-services "${{ inputs.rust_services || 'frontend,matching' }}" 2>&1 | tee out/paired-runner.log
           status=${PIPESTATUS[0]}
           echo "$status" > out/paired-runner.exit
           exit "$status"
@@ -378,7 +379,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: frontend-matching-paired-benchmark
+          name: frontend-matching-paired-benchmark-${{ inputs.shape }}
           path: |
             out/
             !out/cadence-benchmark
