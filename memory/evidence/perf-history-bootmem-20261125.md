@@ -23,11 +23,11 @@ The diagnostic dispatch uses `heap_profile=1`. The paired-run harness enables th
 
 The early `heap-0000-0031.heap` dump in [45511252648](https://github.com/auenkr/cadence-rust/actions/runs/45511252648) contains six leading 4 MiB stacks symbolized to `mysql::conn::Conn::connect_stream`. Their callers include operational config polling, queue task reads and visibility writes. The next sampled stack was about 0.04 MiB. This predates the current base. The same upstream driver code still runs on master. Its `MySyncFramed::new` allocates two `BytesMut` buffers at `DEFAULT_MAX_ALLOWED_PACKET` (4 MiB) as soon as a connection opens. The earlier buffer-pool environment changes govern a distinct allocation path and cannot change this constructor.
 
-Candidate `d263b752ae926d051ea5a22267be2d6c22c74ac3` vendors the existing synchronous mysql 26.0.1 driver and uses its existing framing constructor with two 4 KiB buffers. Buffer growth, SSL upgrade, and packet limit negotiation use the existing code. Allocation capacity is distinct from anonymous resident bytes, so the 8 MiB per-connection reservation cannot be used to estimate the measured cgroup difference.
+Candidate `d263b752ae926d051ea5a22267be2d6c22c74ac3` vendors the existing synchronous mysql 26.0.1 driver and uses its existing framing constructor with two 4 KiB buffers, using the initial size from the [Go MySQL driver](https://github.com/go-sql-driver/mysql/blob/v1.9.3/buffer.go). Buffer growth, SSL upgrade, and packet limit negotiation use the existing code. Allocation capacity is distinct from anonymous resident bytes, so the 8 MiB per-connection reservation cannot be used to estimate the measured cgroup difference.
 
 | Run | Purpose | Result |
 |---|---|---|
-| [45550041086](https://github.com/auenkr/cadence-rust/actions/runs/45550041086) | History Clippy and tests, clean target | Pending |
-| [45550104677](https://github.com/auenkr/cadence-rust/actions/runs/45550104677) | Workspace Clippy and tests, clean target | Pending |
-| [45550060945](https://github.com/auenkr/cadence-rust/actions/runs/45550060945) | MySQL mixed gate, two History hosts, jemalloc, clean target | Pending |
+| [45550041086](https://github.com/auenkr/cadence-rust/actions/runs/45550041086) | History Clippy and tests, clean target | Success, 953 History tests passed |
+| [45550104677](https://github.com/auenkr/cadence-rust/actions/runs/45550104677) | Workspace Clippy and tests, clean target | Success |
+| [45550060945](https://github.com/auenkr/cadence-rust/actions/runs/45550060945) | MySQL mixed gate, two History hosts, jemalloc, clean target | Success, no failed workflow checks. History SHA256 `58df5bee1cd03af90b0e366cae87cdde28fe524847efa32cbf259db2f5910ad2` |
 | [45550044918](https://github.com/auenkr/cadence-rust/actions/runs/45550044918) | Three-arm c1/c16/c64, three repetitions | Pending |
