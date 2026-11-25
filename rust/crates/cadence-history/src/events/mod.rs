@@ -19,9 +19,9 @@ pub const ERR_EVENT_NOT_FOUND_IN_BATCH:&str="History event not found within expe
 pub trait HistoryEventReader:Send+Sync {fn read_event(&self,shard_id:i32,domain_id:&str,first_event_id:i64,event_id:i64,branch_token:&[u8])->Result<HistoryEvent,EventCacheError>;}
 struct CachedEvent{event:Arc<HistoryEvent>,inserted:Instant,weight:u64,seq:u64}
 /// LRU ordered by access sequence (oldest first); O(log n) per operation like Go's list-based lru.
-struct EventCacheState{events:HashMap<EventKey,CachedEvent>,lru:BTreeMap<u64,EventKey>,next_seq:u64,total_weight:u64}
+struct EventCacheState{events:HashMap<Arc<EventKey>,CachedEvent>,lru:BTreeMap<u64,Arc<EventKey>>,next_seq:u64,total_weight:u64}
 impl EventCacheState{
- fn touch(&mut self,key:&EventKey){let seq=self.next_seq;if let Some(e)=self.events.get_mut(key){self.lru.remove(&e.seq);e.seq=seq;self.lru.insert(seq,key.clone());self.next_seq+=1;}}
+ fn touch(&mut self,key:&EventKey){let seq=self.next_seq;if let Some((k,e))=self.events.get_key_value(key).map(|(k,_)|k.clone()).and_then(|k|self.events.get_mut(&k).map(|e|(k,e))){self.lru.remove(&e.seq);e.seq=seq;self.lru.insert(seq,k);self.next_seq+=1;}}
  fn remove(&mut self,key:&EventKey){if let Some(e)=self.events.remove(key){self.lru.remove(&e.seq);self.total_weight-=e.weight;}}
 }
 pub trait EventCachePolicy:Send+Sync { fn size_based(&self)->bool; fn max_size(&self)->u64; fn event_byte_size(&self,event:&HistoryEvent)->u64; }
@@ -45,10 +45,10 @@ impl<R:HistoryEventReader> EventCache<R>{pub fn new(reader:Arc<R>,max_count:usiz
  let weight=self.policy.as_ref().map_or(1,|p|p.event_byte_size(&event));
  let configured_max=self.policy.as_ref().map_or(0,|p|p.max_size());
  if size_based && weight>configured_max{return}
- c.remove(&key);let seq=c.next_seq;c.next_seq+=1;c.total_weight+=weight;c.events.insert(key.clone(),CachedEvent{event,inserted:Instant::now(),weight,seq});c.lru.insert(seq,key);
+ c.remove(&key);let seq=c.next_seq;c.next_seq+=1;c.total_weight+=weight;let key=Arc::new(key);c.events.insert(key.clone(),CachedEvent{event,inserted:Instant::now(),weight,seq});c.lru.insert(seq,key);
  let max_size=if configured_max==0{1<<30}else{configured_max};
  loop{let full=if size_based{c.total_weight>max_size}else{c.events.len()>self.max_count};if !full&&c.events.len()<=1<<25{break}
-if let Some((_,oldest))=c.lru.pop_first(){if let Some(e)=c.events.remove(&oldest){c.total_weight-=e.weight;}}else{break}}
+if let Some((_,oldest))=c.lru.pop_first(){if let Some(e)=c.events.remove(&*oldest){c.total_weight-=e.weight;}}else{break}}
  }
 
 }
