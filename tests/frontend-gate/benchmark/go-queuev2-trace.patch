@@ -1,0 +1,49 @@
+--- a/service/history/queuev2/virtual_queue.go
++++ b/service/history/queuev2/virtual_queue.go
+@@ -26,6 +26,7 @@
+ import (
+ 	"container/list"
+ 	"context"
++	"os"
+ 	"sync"
+ 	"sync/atomic"
+ 	"time"
+@@ -42,6 +43,7 @@
+ )
+ 
+ var (
++	traceDecision = os.Getenv("CADENCE_TRACE_DECISION") == "1"
+ 	taskSchedulerThrottleBackoffInterval = time.Second * 5
+ 	taskReaderErrorBackoffInterval       = time.Second
+ )
+@@ -338,7 +340,17 @@
+ }
+ 
+ func (q *virtualQueueImpl) loadAndSubmitTasks() {
+-	if err := q.taskLoadRateLimiter.Wait(q.ctx); err != nil {
++	var started time.Time
++	if traceDecision {
++		started = time.Now()
++	}
++	waitErr := q.taskLoadRateLimiter.Wait(q.ctx)
++	var wait time.Duration
++	if traceDecision {
++		wait = time.Since(started)
++		q.logger.Info("DTRACE queuev2 load", tag.Dynamic("wait_ms", float64(wait)/float64(time.Millisecond)))
++	}
++	if err := waitErr; err != nil {
+ 		if q.ctx.Err() != nil {
+ 			return
+ 		}
+@@ -394,6 +406,11 @@
+ 
+ 	now := q.timeSource.Now()
+ 	for _, task := range tasks {
++		if traceDecision && task.GetTaskCategory() == persistence.HistoryTaskCategoryTransfer {
++			q.logger.Info("DTRACE queuev2 task", tag.Dynamic("wf", task.GetWorkflowID()),
++				tag.Dynamic("run", task.GetRunID()), tag.Dynamic("task_id", task.GetTaskID()),
++				tag.Dynamic("wait_ms", float64(wait)/float64(time.Millisecond)), tag.Dynamic("task_type", task.GetTaskType()))
++		}
+ 		if persistence.IsTaskCorrupted(task) {
+ 			q.logger.Error("Virtual queue encountered a corrupted task", tag.Dynamic("task", task))
+ 			q.metricsScope.IncCounter(metrics.CorruptedHistoryTaskCounter)

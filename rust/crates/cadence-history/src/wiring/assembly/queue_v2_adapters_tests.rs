@@ -314,11 +314,13 @@ async fn timer_task_executes_end_to_end() {
 #[derive(Default)]
 struct DbReader {
     reads: AtomicUsize,
+    read: tokio::sync::Notify,
 }
 #[async_trait]
 impl QueueReader for DbReader {
     async fn get_task(&self, req: &GetTaskRequest) -> Result<GetTaskResponse, v2::DepError> {
         self.reads.fetch_add(1, Ordering::SeqCst);
+        self.read.notify_one();
         Ok(GetTaskResponse {
             tasks: vec![],
             progress: GetTaskProgress {
@@ -346,6 +348,85 @@ fn req(min: i64, max: i64) -> GetTaskRequest {
         predicate: Predicate::new_universal(),
         page_size: 100,
     }
+}
+
+#[derive(Default)]
+struct CountingLimiter {
+    waits: AtomicUsize,
+    waited: tokio::sync::Notify,
+}
+
+#[async_trait]
+impl v2::Limiter for CountingLimiter {
+    async fn wait(&self, _: &v2::CancelToken) -> Result<(), v2::DepError> {
+        self.waits.fetch_add(1, Ordering::SeqCst);
+        self.waited.notify_one();
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn single_slice_notification_reserves_one_load_permit() {
+    use crate::queuev2::interface::Daemon;
+    use crate::queuev2::monitor::{new_monitor, MonitorOptions};
+    use crate::queuev2::queue_state::VirtualSliceState;
+    use crate::queuev2::virtual_queue::{new_virtual_queue, VirtualQueue, VirtualQueueOptions};
+    use crate::queuev2::virtual_slice::new_virtual_slice;
+
+    let shard: Arc<dyn v2::ShardContext> = Arc::new(V2Shard);
+    let processor: Arc<dyn v2::Processor> = V2ProcessorAdapter::new(Arc::new(RunProcessor));
+    let logger: Arc<dyn v2::Logger> = Arc::new(Log);
+    let scope: Arc<dyn v2::MetricsScope> = Arc::new(Scope);
+    let rescheduler = env().new_rescheduler(&shard, processor.clone(), logger.clone(), scope.clone());
+    let limiter = Arc::new(CountingLimiter::default());
+    let queue = new_virtual_queue(
+        processor,
+        rescheduler,
+        logger.clone(),
+        scope,
+        shard.get_time_source(),
+        limiter.clone(),
+        new_monitor(
+            v2::HistoryTaskCategory::TRANSFER,
+            MonitorOptions {
+                enable_pending_task_count_alert: Arc::new(|| false),
+                critical_pending_task_count: Arc::new(|| 100),
+            },
+        ),
+        vec![],
+        VirtualQueueOptions {
+            page_size: Arc::new(|| 100),
+            max_pending_tasks_count: Arc::new(|| 100),
+            poll_backoff_interval: Arc::new(|| Duration::from_secs(1)),
+            poll_backoff_interval_jitter_coefficient: Arc::new(|| 0.0),
+        },
+    );
+
+    queue.start().await;
+    tokio::time::timeout(Duration::from_secs(5), limiter.waited.notified())
+        .await
+        .expect("startup permit");
+
+    let reader = Arc::new(DbReader::default());
+    queue
+        .append_slices(vec![new_virtual_slice(
+            VirtualSliceState {
+                range: req(11, 13).progress.range,
+                predicate: Predicate::new_universal(),
+            },
+            Arc::new(|_| panic!("an empty persistence page has no task to initialize")),
+            reader.clone(),
+            crate::queuev2::pending_task_tracker::new_pending_task_tracker(),
+            logger,
+        )])
+        .await;
+    tokio::time::timeout(Duration::from_secs(5), reader.read.notified())
+        .await
+        .expect("notified slice was read");
+    queue.stop().await;
+
+    assert_eq!(reader.reads.load(Ordering::SeqCst), 1);
+    assert_eq!(limiter.waits.load(Ordering::SeqCst), 2);
 }
 
 #[tokio::test]

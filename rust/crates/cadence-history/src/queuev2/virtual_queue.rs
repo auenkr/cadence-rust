@@ -321,7 +321,15 @@ impl VirtualQueueImpl {
 
     async fn load_and_submit_tasks(&self) {
         let wait_started = crate::decision_trace::enabled().then(crate::decision_trace::now_ms);
-        if let Err(e) = self.task_load_rate_limiter.wait(&self.ctx).await {
+        let wait_result = self.task_load_rate_limiter.wait(&self.ctx).await;
+        let limit_wait_ms = wait_started.map(|start| crate::decision_trace::now_ms() - start);
+        if let Some(wait_ms) = limit_wait_ms {
+            let limiter = Arc::as_ptr(&self.task_load_rate_limiter) as *const () as usize;
+            self.logger.info(&format!(
+                "DTRACE queuev2 load wait_ms={wait_ms:.3} limiter={limiter:x}"
+            ));
+        }
+        if let Err(e) = wait_result {
             if self.ctx.is_cancelled() {
                 return;
             }
@@ -330,7 +338,6 @@ impl VirtualQueueImpl {
             ));
         }
 
-        let limit_wait_ms = wait_started.map(|start| crate::decision_trace::now_ms() - start);
         let mut inner = self.inner.lock().await;
         crate::pump_trace!("v2_vq_locked", "slice_to_read={}", inner.slice_to_read.is_some());
 
