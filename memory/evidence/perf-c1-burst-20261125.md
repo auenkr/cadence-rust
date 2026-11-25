@@ -55,3 +55,19 @@ c1/16/64 benchmark were not re-run (nothing changed; master results remain the r
 Not done: matched-rate (`target_rate`) traced run to show Go saturating at equal permit rates. The dispatch failed with
 HTTP 422 ("up to 25 inputs") on `frontend-matching-benchmark.yml`; the workflow file defines 25 inputs on this branch, so the 422 cause is unconfirmed (possibly the dispatch API counting target_rate over a limit); not investigated further. The earlier
 matched-rate memory evidence (`perf-c1-rate-mem-20261125.md`) covers the memory side only.
+
+## Matched-rate c1 follow-up (run 45610228028)
+
+https://github.com/auenkr/cadence-rust/actions/runs/45610228028 finished with success. Source is master, control is origin/master, all three Rust services, c1, 5 reps, default config, target_rate=20. Before this run I fixed the workflow's input count: it had 26 inputs and GitHub allows 25, so I removed the sql_slow_ms input. Values are medians.
+
+| arm | wf/s | p50 | p95 | p99 | per-rep p95 | History MiB |
+|---|---|---|---|---|---|---|
+| go | 16.4 (could not sustain 20) | 38.6 | 167.5 | 265.6 | 168,105,136,201,195 | 72.4 |
+| control (rust) | 20.0 | 24.2 | 117.0 | 255.7 | 111,99,117,143,180 | 68.5 |
+| rust | 19.8 | 24.2 | 158.2 | 312.7 | 183,128,158,167,155 | 67.5 |
+
+Verdict:
+- Go reached only 16.4 of the 20 wf/s target. Both Rust arms held about 20 wf/s while using less History memory.
+- Rust's p50 is 37% lower than Go's.
+- p95 is lower than Go's on both Rust arms (117 and 158 vs 167.5).
+- p99 is mixed: the control arm is below Go (256 vs 266) and the rust arm is above (313 vs 266). The two Rust arms run the same binary, so a 57 ms spread at p99 is within the noise of this run.
