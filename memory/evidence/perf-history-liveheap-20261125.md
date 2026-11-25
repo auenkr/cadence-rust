@@ -28,4 +28,4 @@ Run 45525993111 (head 168812c66, control 39aa8be14, 1 rep, success). History pea
 Throughput cand/control: c1 1.020, c64 1.014 (p50 latency 1.001 / 0.970): no loss. Candidate is -6 / -7 MiB vs control and
 -2 / -4 MiB vs Go. Single repetition, ~+-5 MiB noise, so the gap to Go is modest; the direction (-6..-7 vs control) matches the
 profile (33.6 MB buffer pool). Kept. Further gap candidates: load_state 4 MB, write_event_to_cache 2.9 MB.
-Not run: history mixed gate (the change only bounds an allocator-level pool; no behaviour/API change).
+History mixed gate 45527364178 (head 168812c66): success.
