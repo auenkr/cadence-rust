@@ -37,9 +37,11 @@ COPY --from=planner /recipe.json /recipe.json
 RUN cargo chef cook --release --recipe-path /recipe.json -p cadence-server -p cadence-history --features jemalloc-default,cadence-history/jemalloc-default
 COPY rust /src/rust
 ARG PROFILE=0
+ARG HEAP_PROFILE=0
 # PROFILE=1 (perf runs only): frame pointers + symbols (no line tables: the line-tables LTO build killed the runner), same opt level.
 RUN if [ "$PROFILE" = 1 ]; then export CARGO_PROFILE_RELEASE_STRIP=none RUSTFLAGS="-C force-frame-pointers=yes"; fi; \
-    cargo build --release -p cadence-server -p cadence-history --features jemalloc-default,cadence-history/jemalloc-default \
+    HF=""; if [ "$HEAP_PROFILE" = 1 ]; then export CARGO_PROFILE_RELEASE_STRIP=none; HF=",cadence-history/heap-profile"; fi; \
+    cargo build --release -p cadence-server -p cadence-history --features jemalloc-default,cadence-history/jemalloc-default$HF \
     && sha256sum target/release/cadence-server target/release/cadence-history > /cadence-server.sha256
 
 # Exportable binaries (same paths as the builder stage): `buildx build --target binaries --output type=local,dest=DIR`

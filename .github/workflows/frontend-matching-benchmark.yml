@@ -70,6 +70,9 @@ on:
       profile:
         description: 'perf record Rust History (PROFILE_SERVICES) during measurement (1 = on, builds rust image with frame pointers)'
         default: '0'
+      heap_profile:
+        description: 'Build Rust History with jemalloc heap profiling and attach jeprof --text of the peak dump (1 = on)'
+        default: '0'
       control_ref:
         description: Enables three-arm mode (Go, Rust control built from this ref, Rust candidate = dispatched ref), same job/runner, interleaved. Empty = two-arm. Use 'origin/master' for A/B.
         default: ''
@@ -109,7 +112,7 @@ jobs:
         id: binkey
         run: |
           src=benchmark-source
-          key="bench-bin-v1-${{ inputs.service || 'matching' }}-p${{ inputs.profile || '0' }}-$(git -C $src rev-parse HEAD:rust)-$(git -C $src rev-parse HEAD:go)-$(git -C $src rev-parse HEAD:go-overlay)-$(sha256sum Benchmark/Dockerfile | cut -c1-16)"
+          key="bench-bin-v1-${{ inputs.service || 'matching' }}-p${{ inputs.profile || '0' }}-h${{ inputs.heap_profile || '0' }}-$(git -C $src rev-parse HEAD:rust)-$(git -C $src rev-parse HEAD:go)-$(git -C $src rev-parse HEAD:go-overlay)-$(sha256sum Benchmark/Dockerfile | cut -c1-16)"
           echo "key=$key" >> "$GITHUB_OUTPUT"; echo "$key"
       - uses: actions/cache/restore@v4
         id: bincache
@@ -236,7 +239,7 @@ jobs:
           # restored from the GHA layer cache when Cargo.toml/Cargo.lock/sources are unchanged.
           rm -rf /tmp/rustbin
           { echo "RUST IMAGE PROFILE: lto=fat codegen_units=1 (benchmark)"; echo "CPU: $(grep -m1 'model name' /proc/cpuinfo)"; } | tee out/rust-image-profile.txt
-          docker buildx build -f rust/Dockerfile --target binaries --build-arg PROFILE="${{ inputs.profile || '0' }}" --output type=local,dest=/tmp/rustbin \
+          docker buildx build -f rust/Dockerfile --target binaries --build-arg PROFILE="${{ inputs.profile || '0' }}" --build-arg HEAP_PROFILE="${{ inputs.heap_profile || '0' }}" --output type=local,dest=/tmp/rustbin \
             --cache-from type=gha,scope=rust-image-fat-p${{ inputs.profile || '0' }} --cache-to type=gha,mode=max,scope=rust-image-fat-p${{ inputs.profile || '0' }} . > out/rust-image-build.log 2>&1 || { tail -80 out/rust-image-build.log; exit 1; }
           docker buildx build --builder default --load --pull=false -f rust/Dockerfile --build-context builder=/tmp/rustbin --build-arg GO_IMAGE=cadence-go:ci -t cadence-rust:ci . >> out/rust-image-build.log 2>&1 || { tail -80 out/rust-image-build.log; exit 1; }
           docker image inspect cadence-rust:ci --format '{{.Id}} {{.Size}}' > out/rust-image.txt
@@ -287,6 +290,7 @@ jobs:
       - name: Run paired Go and Rust workload
         env:
           PROFILE: ${{ inputs.profile }}
+          BENCH_HEAP_PROFILE: ${{ inputs.heap_profile }}
           FLAMEGRAPH_DIR: /tmp/FlameGraph
           REQUESTS: ${{ inputs.requests || 1000 }}
           WARMUP: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.warmup) || '10' }}
@@ -304,6 +308,17 @@ jobs:
           status=${PIPESTATUS[0]}
           echo "$status" > out/paired-runner.exit
           exit "$status"
+      - name: jeprof heap profile text
+        if: ${{ always() && inputs.heap_profile == '1' }}
+        run: |
+          sudo apt-get install -y -q libjemalloc-dev > /dev/null 2>&1 || true
+          for d in out/paired-benchmark/heap-*; do
+            [ -d "$d" ] || continue
+            best=$(ls "$d"/*.heap 2>/dev/null | sort -t- -k3 -n | tail -1)
+            [ -n "$best" ] || continue
+            jeprof --text --inuse_space "$d/cadence-history" "$best" 2>&1 | head -80 > "$d/jeprof-top.txt" || true
+            jeprof --text --inuse_space --lines "$d/cadence-history" "$best" 2>&1 | head -80 > "$d/jeprof-top-lines.txt" || true
+          done
       - name: Verify complete paired benchmark evidence
         if: ${{ inputs.control_ref == '' }}
         run: |

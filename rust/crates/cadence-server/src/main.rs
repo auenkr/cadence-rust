@@ -24,6 +24,13 @@ pub static malloc_conf: &[u8] = b"background_thread:true\0";
 use tracing_subscriber::EnvFilter;
 
 fn main() -> anyhow::Result<()> {
+    // mysql's global buffer pool keeps up to 128 buffers of up to 4 MiB each alive for the process lifetime
+    // (Go's driver pools nothing). Bound it before the first connection; explicit env values still win.
+    for (k, v) in [("RUST_MYSQL_BUFFER_POOL_CAP", "16"), ("RUST_MYSQL_BUFFER_SIZE_CAP", "32768")] {
+        if std::env::var_os(k).is_none() {
+            std::env::set_var(k, v);
+        }
+    }
     // Apply glibc's arena cap before Tokio creates its worker threads. The
     // default multi-thread runtime settings match #[tokio::main].
     #[cfg(all(

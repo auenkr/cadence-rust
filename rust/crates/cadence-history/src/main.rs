@@ -2,7 +2,10 @@
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
-#[cfg(feature = "jemalloc-default")]
+#[cfg(all(feature = "jemalloc-default", feature = "heap-profile"))]
+const JEMALLOC_CONFIG: &[u8] = b"background_thread:true,dirty_decay_ms:250,muzzy_decay_ms:0,narenas:1,tcache_max:4096,prof:true,prof_active:true,lg_prof_sample:15\0";
+
+#[cfg(all(feature = "jemalloc-default", not(feature = "heap-profile")))]
 const JEMALLOC_CONFIG: &[u8] = b"background_thread:true,dirty_decay_ms:250,muzzy_decay_ms:0,narenas:1,tcache_max:4096\0";
 
 // tikv-jemalloc-sys prefixes its symbols. One arena (small tcache, fast decay) lets the main and runtime
@@ -16,6 +19,13 @@ mod mem_report;
 use tracing_subscriber::EnvFilter;
 
 fn main() -> anyhow::Result<()> {
+    // mysql's global buffer pool keeps up to 128 buffers of up to 4 MiB each alive for the process lifetime
+    // (Go's driver pools nothing). Bound it before the first connection; explicit env values still win.
+    for (k, v) in [("RUST_MYSQL_BUFFER_POOL_CAP", "16"), ("RUST_MYSQL_BUFFER_SIZE_CAP", "32768")] {
+        if std::env::var_os(k).is_none() {
+            std::env::set_var(k, v);
+        }
+    }
     // Tokio defaults to available_parallelism, which accounts for Linux CPU
     // quotas, and honors an explicit TOKIO_WORKER_THREADS override.
     tokio::runtime::Builder::new_multi_thread()
