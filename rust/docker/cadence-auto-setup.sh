@@ -14,6 +14,18 @@ retry() { # retry <attempts> cmd...
   return 1
 }
 
+# retry_idem <attempts> cmd...: like retry, but "already exists" counts as success so a container
+# restart against an initialized DB behaves like Go's auto-setup (idempotent).
+retry_idem() {
+  local n=$1 out; shift
+  for ((i = 1; i <= n; i++)); do
+    if out="$("$@" 2>&1)"; then return 0; fi
+    if echo "$out" | grep -qiE 'exists|already'; then echo "already exists, continuing: $*" >&2; return 0; fi
+    echo "$out" >&2; echo "retry $i/$n: $*" >&2; sleep 2
+  done
+  return 1
+}
+
 case "$DB" in
   cassandra | scylla)
     ep="${CASSANDRA_SEEDS:?CASSANDRA_SEEDS required}"
@@ -23,7 +35,7 @@ case "$DB" in
     t() { cadence-cassandra-tool --ep "$ep" -p "$port" --protocol-version "${CASSANDRA_PROTO_VERSION:-4}" "${auth[@]}" "$@"; }
     for pair in "${KEYSPACE:-cadence}:cadence" "${VISIBILITY_KEYSPACE:-cadence_visibility}:visibility"; do
       ks="${pair%%:*}"; kind="${pair##*:}"
-      retry 60 t create -k "$ks" --rf "$RF"
+      retry_idem 60 t create -k "$ks" --rf "$RF"
       t -k "$ks" setup-schema -v 0.0 || true
       t -k "$ks" update-schema -d "$SCHEMA_DIR/cassandra/$kind/versioned"
     done
@@ -39,7 +51,7 @@ case "$DB" in
     t() { cadence-sql-tool --plugin "$DB" --ep "$ep" -p "$port" -u "$user" --pw "$pw" "$@"; }
     for pair in "${DBNAME:-cadence}:cadence" "${VISIBILITY_DBNAME:-cadence_visibility}:visibility"; do
       name="${pair%%:*}"; kind="${pair##*:}"
-      retry 60 t create-database --db "$name"
+      retry_idem 60 t create-database --db "$name"
       t --db "$name" setup-schema -v 0.0 || true
       t --db "$name" update-schema -d "$sdir/$kind/versioned"
     done
