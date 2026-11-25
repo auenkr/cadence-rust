@@ -40,8 +40,12 @@ case "$DB" in
       retry_idem 60 t create -k "$ks" --rf "$RF"
       # On restart the schema is already initialized: setup-schema would reset the version to 0.0
       # and update-schema would replay (and fail on) every migration.
-      [ "$EXISTED" = 1 ] || t -k "$ks" setup-schema -v 0.0 || true
-      t -k "$ks" update-schema -d "$SCHEMA_DIR/cassandra/$kind/versioned"
+      # Cassandra `create` is IF NOT EXISTS (no "exists" error), so also treat a working
+      # update-schema (schema_version table present) as an initialized keyspace.
+      if ! t -k "$ks" update-schema -d "$SCHEMA_DIR/cassandra/$kind/versioned"; then
+        t -k "$ks" setup-schema -v 0.0 || true
+        t -k "$ks" update-schema -d "$SCHEMA_DIR/cassandra/$kind/versioned"
+      fi
     done
     ;;
   mysql | postgres)
