@@ -84,7 +84,7 @@ on:
         type: boolean
         default: false
       trace_decision:
-        description: Diagnostic - set CADENCE_TRACE_DECISION=1 on Rust History (decision scheduled->started timing trace in services-*.log)
+        description: Diagnostic - trace queue v2 permits in Go and Rust and decision timings in Rust
         type: boolean
         default: false
 concurrency:

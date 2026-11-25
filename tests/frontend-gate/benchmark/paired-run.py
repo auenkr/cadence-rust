@@ -99,7 +99,9 @@ def main():
            + ("      CADENCE_MEM_REPORT: \"1\"\n" if (os.environ.get("BENCH_MEM_REPORT") == "1" or os.environ.get("BENCH_HEAP_PROFILE") == "1") else "")
            + ("      CADENCE_HEAP_PROFILE_DIR: /tmp/heap\n" if os.environ.get("BENCH_HEAP_PROFILE") == "1" else "")
            + (f"      CADENCE_HISTORY_SQL_SLOW_MS: \"{os.environ['BENCH_SQL_SLOW_MS']}\"\n" if os.environ.get("BENCH_SQL_SLOW_MS") else "")
-           + ("      CADENCE_TRACE_DECISION: \"1\"\n" if os.environ.get("BENCH_TRACE_DECISION") == "true" else "")
+           + ("      CADENCE_TRACE_DECISION: \"1\"\n"
+              "      RUST_LOG: warn,decision_trace=info,cadence_history::wiring::assembly::queue_v2_wiring=info\n"
+              if os.environ.get("BENCH_TRACE_DECISION") == "true" else "")
            if name == "history" and (os.environ.get("BENCH_MEM_REPORT") == "1" or os.environ.get("BENCH_HEAP_PROFILE") == "1" or os.environ.get("BENCH_SQL_SLOW_MS") or os.environ.get("BENCH_TRACE_DECISION") == "true") else "")
         for name in ("frontend", "matching", "history", "worker")))
     env["COMPOSE_FILE"] = os.pathsep.join((str(COMPOSE), str(override)))
