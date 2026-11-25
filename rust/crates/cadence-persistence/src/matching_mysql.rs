@@ -148,7 +148,7 @@ pub(crate) struct SyncConnectionPool {
 /// panic); the owner thread accepts a shutdown signal and drops it safely.
 struct QueryRuntimeOwner {
     handle: tokio::runtime::Handle,
-    shutdown: Option<mpsc::Sender<()>>,
+    shutdown: Option<tokio::sync::oneshot::Sender<()>>,
     owner_thread: Option<thread::JoinHandle<()>>,
     #[cfg(test)]
     stopped: Arc<AtomicBool>,
@@ -157,7 +157,7 @@ struct QueryRuntimeOwner {
 impl QueryRuntimeOwner {
     fn new() -> std::result::Result<Self, String> {
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
-        let (shutdown_tx, shutdown_rx) = mpsc::channel();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         #[cfg(test)]
         let stopped = Arc::new(AtomicBool::new(false));
         #[cfg(test)]
@@ -165,15 +165,17 @@ impl QueryRuntimeOwner {
         let owner_thread = thread::Builder::new()
             .name("cadence-mysql-domain-runtime-owner".into())
             .spawn(move || {
-                let runtime = tokio::runtime::Builder::new_multi_thread()
-                    .worker_threads(1)
+                // One thread both owns and drives the runtime (was owner + one worker thread).
+                let runtime = tokio::runtime::Builder::new_current_thread()
                     .thread_name("cadence-mysql-domain-query")
                     .enable_all()
                     .build();
                 match runtime {
                     Ok(runtime) => {
                         let _ = ready_tx.send(Ok(runtime.handle().clone()));
-                        let _ = shutdown_rx.recv();
+                        runtime.block_on(async move {
+                            let _ = shutdown_rx.await;
+                        });
                         // This thread is outside every Tokio runtime context.
                         drop(runtime);
                     }
