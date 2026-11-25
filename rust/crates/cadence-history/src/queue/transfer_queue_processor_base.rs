@@ -277,6 +277,7 @@ impl TransferQueueProcessorBase {
             tokio::select! {
                 _ = self.base.shutdown_ch.cancelled() => return,
                 _ = notify_rx.recv() => {
+                    crate::pump_trace!("p1_notify_recv");
                     // notify all queue collections as they are waiting for the notification when there's
                     // no more task to process.
                     self.notify_all_queue_collections().await;
@@ -286,6 +287,7 @@ impl TransferQueueProcessorBase {
                     max_poll_timer.as_mut().reset(tokio::time::Instant::now() + poll_d());
                 }
                 _ = process_rx.recv() => {
+                    crate::pump_trace!("p2_process_recv");
                     let max_redispatch = (opts.max_redispatch_queue_size)() as usize;
                     let size = self.base.redispatcher.size();
                     if size > max_redispatch {
@@ -366,6 +368,7 @@ impl TransferQueueProcessorBase {
             // Go getImmediateTaskMaxReadLevel blocks on the shard lock held by an in-flight write.
             self.base.shard.wait_in_flight_task_writes().await;
             let max_read_level = min_task_key(max_level, (self.base.update_max_read_level)());
+            crate::pump_trace!("p3_levels", "read={} max_read={}", transfer_task_id(read_level), transfer_task_id(max_read_level));
 
             if !read_level.less(&max_read_level) {
                 // no task need to be processed for now, wait for new task notification
@@ -389,6 +392,7 @@ impl TransferQueueProcessorBase {
                     continue;
                 }
             };
+            crate::pump_trace!("p4_read_done", "count={} more={}", infos.len(), more);
             tracing::debug!(
                 read_level = transfer_task_id(read_level),
                 max_level = transfer_task_id(max_read_level),
@@ -422,6 +426,7 @@ impl TransferQueueProcessorBase {
                 }
             }
 
+            crate::pump_trace!("p5_submitted");
             let new_read_level = if !more {
                 max_read_level
             } else {
