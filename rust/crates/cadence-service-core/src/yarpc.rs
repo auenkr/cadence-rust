@@ -3681,12 +3681,11 @@ mod admin_missing_execution_thrift_tests {
     #[tokio::test]
     async fn delete_workflow_missing_execution_is_declared_bad_request() {
         let state = Arc::new(AppState::default());
-        let req = cadence_api::admin::DeleteWorkflowRequest {
-            domain: "d".into(),
-            ..Default::default()
+        let req = Struct {
+            fields: vec![(10, Value::Bytes(b"d".to_vec()))],
         };
         let body = Struct {
-            fields: vec![(1, Value::Struct(req.to_thrift()))],
+            fields: vec![(1, Value::Struct(req))],
         };
         let err = bridge_value::<_, cadence_api::admin::DeleteWorkflowResponse, _, _>(
             "DeleteWorkflow",
