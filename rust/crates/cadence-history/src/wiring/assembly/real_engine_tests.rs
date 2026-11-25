@@ -1622,7 +1622,7 @@ mod notify_order {
         fn unlock_task_processing(&self) {}
     }
 
-    fn harness() -> (Harness, Arc<Mutex<Vec<(i64, i64)>>>, Arc<Mutex<Option<Arc<crate::shard_context::ShardContext>>>>) {
+    fn harness() -> (Harness, Arc<Mutex<Vec<(i64, i64)>>>) {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let shard = Arc::new(Mutex::new(None));
         let rec = Arc::new(Recorder { shard: shard.clone(), seen: seen.clone() });
@@ -1630,13 +1630,13 @@ mod notify_order {
             e.queue_processors.insert(crate::engine::deps::HistoryTaskCategory::Transfer, rec);
         });
         *shard.lock().unwrap() = Some(h.core.shard.clone());
-        (h, seen, shard)
+        (h, seen)
     }
 
     /// Create path (engine_start.rs) and update path (engine_cache.rs): the level covers the notified ids.
     #[tokio::test]
     async fn level_advanced_before_notify_on_create_and_update() {
-        let (h, seen, _s) = harness();
+        let (h, seen) = harness();
         let run = start(&h).await;
         decision_started(&h, &run, 2, "dec-req").await.expect("started");
         decision_completed(&h, &run, 2, vec![schedule_activity_decision("act-1")]).await.expect("completed");
