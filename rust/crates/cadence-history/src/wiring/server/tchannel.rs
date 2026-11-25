@@ -398,6 +398,29 @@ async fn handle_call(w: Arc<Mutex<OwnedWriteHalf>>, id: u32, call: Call, state: 
     let client_headers = crate::wiring::assembly::engine_decision::ClientHeaders::from_lookup(|k| app_headers.get(k).cloned());
     let mut rd = Reader::new(&call.args[2]);
     let args = read_struct(&mut rd)?;
+    let decision = if crate::decision_trace::enabled()
+        && procedure.rsplit("::").next() == Some("RecordDecisionTaskStarted")
+    {
+        match args.get(1) {
+            Some(Value::Struct(request)) => request
+                .opt_struct::<cadence_api::types::WorkflowExecution>(20)
+                .ok()
+                .flatten()
+                .map(|execution| (execution, request.i64_or_zero(30).unwrap_or_default())),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    if let Some((execution, schedule_id)) = &decision {
+        crate::decision_trace!(
+            "e_record_started_received",
+            execution.workflow_id,
+            execution.run_id,
+            "schedule_id={} transport=tchannel",
+            schedule_id
+        );
+    }
     let remaining = (call.started + call.ttl).saturating_duration_since(Instant::now());
     let res = tokio::time::timeout(
         remaining,
@@ -437,6 +460,15 @@ async fn handle_call(w: Arc<Mutex<OwnedWriteHalf>>, id: u32, call: Call, state: 
     write_struct(&mut body, &result);
     for f in response_frames(id, call.trace, app, headers16(&meta), body.into_bytes()) {
         write_frame(&w, f).await?;
+    }
+    if let Some((execution, schedule_id)) = decision {
+        crate::decision_trace!(
+            "h_record_started_socket_written",
+            execution.workflow_id,
+            execution.run_id,
+            "schedule_id={} transport=tchannel",
+            schedule_id
+        );
     }
     Ok(())
 }

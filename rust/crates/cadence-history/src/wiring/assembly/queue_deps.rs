@@ -309,6 +309,13 @@ impl TransferDependencies for TransferDepsImpl {
     async fn add_decision_task(&self, request: AddMatchingTaskRequest) -> TaskResult<()> {
         let tt = cadence_common::matching_lb::TASK_LIST_TYPE_DECISION;
         let partition = self.pick_write_partition(&request, tt);
+        crate::decision_trace!(
+            "d0_matching_resolve_started",
+            request.execution.workflow_id,
+            request.execution.run_id,
+            "schedule_id={}",
+            request.schedule_id
+        );
         let mut client = self.matching_client(&partition).await?;
         let mut rpc = tonic::Request::new(cadence_proto::matching::AddDecisionTaskRequest {
             domain_id: request.domain_uuid.clone(),
@@ -327,9 +334,21 @@ impl TransferDependencies for TransferDepsImpl {
             partition_config: Self::partition_config(&request),
         });
         matching_metadata(&mut rpc);
-        crate::decision_trace!("d_add_decision_sent", request.execution.workflow_id, request.execution.run_id);
+        crate::decision_trace!(
+            "d_add_decision_sent",
+            request.execution.workflow_id,
+            request.execution.run_id,
+            "schedule_id={}",
+            request.schedule_id
+        );
         let response = client.add_decision_task(rpc).await.map_err(|e| self.matching_add_err(&request, tt, e))?.into_inner();
-        crate::decision_trace!("d2_add_decision_returned", request.execution.workflow_id, request.execution.run_id);
+        crate::decision_trace!(
+            "d2_add_decision_returned",
+            request.execution.workflow_id,
+            request.execution.run_id,
+            "schedule_id={}",
+            request.schedule_id
+        );
         self.update_partition_config(&request, tt, response.partition_config);
         Ok(())
     }
