@@ -243,6 +243,10 @@ func main() {
 	if !okShape {
 		panic("unknown shape " + *shape)
 	}
+	execTimeout := time.Minute
+	if *shape == "history" {
+		execTimeout = 10 * time.Minute // 400 activities per workflow cannot finish in 1m at benchmark worker settings
+	}
 	payload := strings.Repeat("x", *bytes)
 	run := func(count int) ([]float64, []string, float64, []sample) {
 		var mu sync.Mutex
@@ -258,9 +262,9 @@ func main() {
 				defer wg.Done()
 				for range jobs {
 					begin := time.Now()
-					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+					ctx, cancel := context.WithTimeout(context.Background(), execTimeout*2)
 					wfID, runID := uuid.NewString(), ""
-					r, e := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: wfID, TaskList: tl, ExecutionStartToCloseTimeout: time.Minute, DecisionTaskStartToCloseTimeout: 10 * time.Second}, wfFn, payload)
+					r, e := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: wfID, TaskList: tl, ExecutionStartToCloseTimeout: execTimeout, DecisionTaskStartToCloseTimeout: 10 * time.Second}, wfFn, payload)
 					var value string
 					if e == nil {
 						runID = r.GetRunID()
