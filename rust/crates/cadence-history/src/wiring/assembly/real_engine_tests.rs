@@ -1596,6 +1596,8 @@ mod notify_order {
     use crate::wiring::assembly::real_engine_harness::Harness;
     use std::sync::{Arc, Mutex};
 
+    type Seen = Arc<Mutex<Vec<(i64, i64)>>>;
+
     /// Records (max notified transfer task id, shard immediate max read level at notify time).
     struct Recorder {
         shard: Arc<Mutex<Option<Arc<crate::shard_context::ShardContext>>>>,
@@ -1622,7 +1624,7 @@ mod notify_order {
         fn unlock_task_processing(&self) {}
     }
 
-    fn harness() -> (Harness, Arc<Mutex<Vec<(i64, i64)>>>) {
+    fn harness() -> (Harness, Seen) {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let shard = Arc::new(Mutex::new(None));
         let rec = Arc::new(Recorder { shard: shard.clone(), seen: seen.clone() });
