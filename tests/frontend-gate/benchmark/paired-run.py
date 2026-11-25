@@ -73,6 +73,7 @@ def main():
     parser.add_argument("--requests", type=int, default=1000)
     parser.add_argument("--warmup", type=int, default=10)
     parser.add_argument("--repetitions", type=int, default=5)
+    parser.add_argument("--sticky", action="store_true")
     parser.add_argument("--payload-bytes", type=int, default=1024)
     parser.add_argument("--concurrency", default="1,16,64")
     parser.add_argument("--rust-services", default="frontend,matching",
@@ -119,7 +120,7 @@ def main():
         "github_runner": os.environ.get("ImageOS"),
         "requests": args.requests, "warmup": args.warmup,
         "repetitions": args.repetitions, "payload_bytes": args.payload_bytes,
-        "concurrency": concurrency,
+        "concurrency": concurrency, "sticky_execution": args.sticky,
         "order": "three-arm: rotated go/control/rust per repetition" if three else "alternates by repetition; each arm gets a new database",
         "control_image": args.control_image or None,
         "database": "mysql:8.0", "rust_services": sorted(rust_services), "history": "Go image",
@@ -214,6 +215,7 @@ def main():
                              "-domain", "benchmark", "-label", arm,
                              "-requests", str(args.requests), "-warmup", str(args.warmup),
                              "-concurrency", str(conc), "-payload-bytes", str(args.payload_bytes),
+                             f"-sticky={str(args.sticky).lower()}",
                              "-measurement-start-file", start_marker, "-measurement-end-file", end_marker,
                              "-collector-ready-file", ready_marker,
                              "-output", str(result)], f"run-{rep:02d}-{arm}-c{conc}",

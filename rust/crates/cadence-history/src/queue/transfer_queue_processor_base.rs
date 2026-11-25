@@ -400,6 +400,15 @@ impl TransferQueueProcessorBase {
             let mut task_ch_full = false;
             let now = self.base.shard.now();
             for info in &infos {
+                if crate::decision_trace::enabled() && info.get_task_type() == 0 {
+                    crate::decision_trace!(
+                        "c0_transfer_task_read",
+                        info.get_workflow_id(),
+                        info.get_run_id(),
+                        "task_id={}",
+                        info.get_task_id()
+                    );
+                }
                 if !domain_filter.filter(&info.get_domain_id()) {
                     tracing::debug!(task_id = info.get_task_id(), "transfer task filtered");
                     continue;

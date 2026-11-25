@@ -440,9 +440,22 @@ impl v2::QueueEnv for V2QueueEnv {
             v2::QueueType::Timer => v2::HistoryTaskCategory::TIMER,
         };
         let key = task.get_task_key();
+        let task_info = to_task_info(&task, category);
+        if crate::decision_trace::enabled()
+            && category == v2::HistoryTaskCategory::TRANSFER
+            && t::PersistenceTask::get_task_type(&*task_info) == 0
+        {
+            crate::decision_trace!(
+                "c0_transfer_task_read",
+                t::PersistenceTask::get_workflow_id(&*task_info),
+                t::PersistenceTask::get_run_id(&*task_info),
+                "task_id={} queue=v2",
+                key.get_task_id()
+            );
+        }
         let inner = new_history_task_v2(
             self.task_shard.clone(),
-            to_task_info(&task, category),
+            task_info,
             to_ti_queue_type(queue_type),
             self.logger.clone(),
             executor,

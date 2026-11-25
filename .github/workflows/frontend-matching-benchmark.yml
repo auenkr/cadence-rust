@@ -79,6 +79,10 @@ on:
       sql_slow_ms:
         description: Diagnostic - set CADENCE_HISTORY_SQL_SLOW_MS on history (both arms; empty = off) and count slow-transaction log lines
         default: ''
+      sticky:
+        description: Enable SDK worker sticky execution in both benchmark arms
+        type: boolean
+        default: false
       trace_decision:
         description: Diagnostic - set CADENCE_TRACE_DECISION=1 on Rust History (decision scheduled->started timing trace in services-*.log)
         type: boolean
@@ -304,7 +308,7 @@ jobs:
           python3 -u tests/frontend-gate/benchmark/paired-run.py \
             --requests "$REQUESTS" --warmup "$WARMUP" \
             --repetitions "$REPETITIONS" --concurrency "$CONCURRENCY" \
-            --payload-bytes "$PAYLOAD_BYTES" ${{ inputs.control_ref != '' && '--control-image cadence-rust-control:ci' || '' }} --rust-services "${{ inputs.rust_services || 'frontend,matching' }}" 2>&1 | tee out/paired-runner.log
+            --payload-bytes "$PAYLOAD_BYTES" ${{ inputs.sticky && '--sticky' || '' }} ${{ inputs.control_ref != '' && '--control-image cadence-rust-control:ci' || '' }} --rust-services "${{ inputs.rust_services || 'frontend,matching' }}" 2>&1 | tee out/paired-runner.log
           status=${PIPESTATUS[0]}
           echo "$status" > out/paired-runner.exit
           exit "$status"

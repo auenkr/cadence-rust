@@ -319,6 +319,7 @@ impl VirtualQueueImpl {
     }
 
     async fn load_and_submit_tasks(&self) {
+        let wait_started = crate::decision_trace::enabled().then(crate::decision_trace::now_ms);
         if let Err(e) = self.task_load_rate_limiter.wait(&self.ctx).await {
             if self.ctx.is_cancelled() {
                 return;
@@ -328,6 +329,7 @@ impl VirtualQueueImpl {
             ));
         }
 
+        let limit_wait_ms = wait_started.map(|start| crate::decision_trace::now_ms() - start);
         let mut inner = self.inner.lock().await;
 
         let slice_to_read = match &inner.slice_to_read {
@@ -387,6 +389,16 @@ impl VirtualQueueImpl {
 
         let now = self.time_source.now();
         for task in tasks {
+            if let Some(wait_ms) = limit_wait_ms.filter(|wait_ms| *wait_ms > 5.0) {
+                crate::decision_trace!(
+                    "c1_queue_rate_limiter_wait",
+                    task.get_workflow_id(),
+                    task.get_run_id(),
+                    "task_id={} wait_ms={:.3}",
+                    task.get_task_id(),
+                    wait_ms
+                );
+            }
             if is_task_corrupted(task.as_ref()) {
                 self.logger
                     .error("Virtual queue encountered a corrupted task");

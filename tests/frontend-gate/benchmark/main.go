@@ -98,6 +98,7 @@ func main() {
 	warmup := flag.Int("warmup", 100, "unmeasured workflows")
 	concurrency := flag.Int("concurrency", 16, "closed-loop workflow concurrency")
 	bytes := flag.Int("payload-bytes", 1024, "activity input/output bytes")
+	sticky := flag.Bool("sticky", false, "enable worker sticky execution")
 	output := flag.String("output", "benchmark.json", "JSON result path")
 	measurementStartFile := flag.String("measurement-start-file", "", "write when warmup is complete and the collector may start its baseline")
 	measurementEndFile := flag.String("measurement-end-file", "", "write after the last measured workflow (also written on failure)")
@@ -150,7 +151,7 @@ func main() {
 	defer d.Stop()
 	rpc := workflowserviceclient.New(d.ClientConfig("cadence-frontend"))
 	tl := "benchmark-" + uuid.NewString()
-	w := worker.New(rpc, *domain, tl, worker.Options{DisableStickyExecution: true})
+	w := worker.New(rpc, *domain, tl, worker.Options{DisableStickyExecution: !*sticky})
 	w.RegisterWorkflow(flow)
 	w.RegisterActivity(echo)
 	if err = w.Start(); err != nil {
@@ -279,7 +280,7 @@ func main() {
 		}
 		return latencies[int(float64(len(latencies)-1)*p)]
 	}
-	result := map[string]interface{}{"label": *label, "endpoint": *peer, "requests": *n, "warmup": *warmup, "concurrency": *concurrency, "payload_bytes": *bytes, "successful": len(latencies), "failed": len(failures), "elapsed_seconds": seconds, "measured_start_utc": measuredStartUTC, "measured_end_utc": measuredEndUTC, "successful_workflows_per_second": float64(len(latencies)) / seconds, "latency_ms": map[string]interface{}{"p50": percentile(.50), "p95": percentile(.95), "p99": percentile(.99)}, "errors": failures, "successful_latency_samples_ms": latencies, "transport": "tchannel", "sticky_execution": false}
+	result := map[string]interface{}{"label": *label, "endpoint": *peer, "requests": *n, "warmup": *warmup, "concurrency": *concurrency, "payload_bytes": *bytes, "successful": len(latencies), "failed": len(failures), "elapsed_seconds": seconds, "measured_start_utc": measuredStartUTC, "measured_end_utc": measuredEndUTC, "successful_workflows_per_second": float64(len(latencies)) / seconds, "latency_ms": map[string]interface{}{"p50": percentile(.50), "p95": percentile(.95), "p99": percentile(.99)}, "errors": failures, "successful_latency_samples_ms": latencies, "transport": "tchannel", "sticky_execution": *sticky}
 	f, err := os.Create(*output)
 	if err != nil {
 		panic(err)
