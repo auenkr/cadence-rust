@@ -45,3 +45,24 @@ Run [45548657226](https://github.com/auenkr/cadence-rust/actions/runs/4554865722
 | 64 | 102.98 | 99.20 | 103.12 | 1.002 [0.993, 1.017] |
 
 Between identical binaries, c1 peak-anon differences per pair ranged from −1.08 to +3.15 MiB. The A/A run also produced a 2.6% c16 throughput shift in the median paired ratio.
+
+## Three-arm result for 4 KiB framing buffers
+
+Run [45550044918](https://github.com/auenkr/cadence-rust/actions/runs/45550044918), success, source head `d263b752a`, control `dc642b9f8` (master). 27,000 workflows, 0 failed. Rust History SHA256 `e70f47f0af3a4d11459b63d6dc83ae53730c3203ea8d5306687836d6d81014eb`; cadence-server `4b8c1cd73a206d53957a974b4b78d0af259af8ddb4a6a47833b7fb39daacc07f`. Runner: AMD EPYC 9V74, 4 vCPU, 15 GiB RAM, Ubuntu 26.04.1, kernel 7.0.0-1020-azure, mysql:8.0; services 1 CPU each, History limit 1.8 GiB. Memory is History `peak_cgroup_anon_bytes`; each cell is the median across three repetitions, followed by the individual runs.
+
+| c | arm | History anon MiB (med; runs) | wf/s (med; runs) | p50 ms | p95 ms | p99 ms | failed |
+|--:|---|---|---|---|---|---|--:|
+| 1 | go | 73.48; 71.8, 76.2, 73.5 | 18.8; 22.2, 18.5, 18.8 | 36.78 | 141.53 | 309.66 | 0 |
+| 1 | control | 75.18; 76.2, 75.2, 73.2 | 23.7; 24.8, 22.5, 23.7 | 24.79 | 113.96 | 218.50 | 0 |
+| 1 | rust | 69.49; 69.5, 72.2, 67.3 | 23.7; 23.7, 24.7, 21.2 | 22.83 | 106.78 | 204.00 | 0 |
+| 16 | go | 93.92; 93.5, 93.9, 97.7 | 40.9; 41.3, 40.9, 40.7 | 352.59 | 714.91 | 1083.94 | 0 |
+| 16 | control | 88.91; 89.4, 84.3, 88.9 | 53.1; 66.5, 50.3, 53.1 | 246.98 | 558.32 | 754.51 | 0 |
+| 16 | rust | 88.76; 85.0, 88.8, 88.9 | 63.3; 57.0, 63.3, 68.5 | 204.58 | 526.49 | 755.16 | 0 |
+| 64 | go | 101.06; 98.1, 103.4, 101.1 | 20.5; 19.1, 20.5, 21.6 | 3070.94 | 5698.31 | 5969.88 | 0 |
+| 64 | control | 101.62; 95.5, 101.6, 121.7 | 59.6; 64.9, 53.1, 59.6 | 1072.67 | 1750.55 | 1897.51 | 0 |
+| 64 | rust | 111.18; 111.2, 112.3, 99.6 | 62.2; 63.2, 62.1, 62.2 | 1054.28 | 1812.03 | 2466.84 | 0 |
+
+- c1: Rust History is 69.5 MiB, against Go 73.5 and control 75.2. That is 4.0 MiB below Go and 5.7 MiB below control, which is outside the −1 to +3 MiB A/A range. c1 throughput matches control at 23.7 wf/s, and latency is equal or slightly lower.
+- c16: memory matches control (88.8 against 88.9 MiB). Throughput is 63.3 against 53.1 wf/s, but the control runs vary from 50.3 to 66.5, so this is noise.
+- c64: memory is 111.2 MiB against control 101.6 and Go 101.1. The three runs are 111.2, 112.3 and 99.6, and control had a 121.7 outlier, so the c64 comparison is inconclusive. The patch removes a fixed per-connection reservation and should not raise memory. Throughput is within noise (62.2 against 59.6). p99 is higher (2467 against 1898 ms), which is within the spread seen across runs.
+- Conclusion: c1 History memory is now below Go with no throughput regression. A c64 memory increase is not ruled out. Only one three-repetition run exists, so a repeat would be needed to settle it.
