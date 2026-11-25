@@ -84,3 +84,26 @@ limiter saturates on hot shards. Rust's limiter math (`queue_exec.rs`
 shard id, so the per-shard split could not be compared. The open question is
 whether Rust has the same shard imbalance or spreads waits across all shards.
 Next: trace line now carries `limiter=<ptr>` (one limiter per shard/category).
+
+## Per-shard split (traced run 45567552339, head bd77bcc80, 3 pairs, c1)
+
+Per shard (permits, wait sum ms, waits >30 ms), transfer queue only:
+
+| Pair | Go (4 shards) | Rust (4 limiters) |
+|---|---|---|
+| 0 | (765,2,0) (801,823,20) (723,2,0) (711,2,0) | (715,4815,96) (733,4177,87) (742,3148,65) (770,9148,191) |
+| 1 | (723,26,0) (729,739,14) (792,585,13) (755,312,6) | (711,7143,151) (713,4628,94) (808,7694,155) (735,3125,63) |
+| 2 | (812,3876,82) (699,1318,25) (674,1974,40) (800,7195,149) | (728,3198,65) (715,2131,45) (763,10919,224) (756,4495,94) |
+
+Conclusion: permits per shard are equal (~700-800 per 40 s, ~18/s against a 20 rps
+limit). Rust's waits hit all four shards in every pair; Go's are lower and vary
+by run (one pair is nearly idle). So the limiter math and permit count are at
+parity, and the extra Rust wait comes from burstier permit arrival times (more
+back-to-back loads inside a second), not from extra permits. No code change was
+made; no Go-parity divergence found in the load path. Not yet checked: Go's
+read batch/page size per load, and permit inter-arrival timestamps (the traces
+contain them; compute per-second max permits per shard next).
+Untraced run 45555552504, >60 ms at c1: Go 2.2-3.3%, master Rust 20.5-23%, branch
+Rust 19.4-24.6% (this branch is trace-only, no behaviour change).
+Gate/CI runs for this head: rust-ci 45567557600 success. History gate and the
+c1/c16/c64 re-benchmark were not re-run because no behaviour changed.
