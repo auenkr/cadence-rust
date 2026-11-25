@@ -101,7 +101,9 @@ impl ImmediateQueue {
         loop {
             tokio::select! {
                 Some(()) = notify_rx.recv() => {
-                    self.base.process_new_tasks().await;
+                    crate::pump_trace!("q1_notify_recv");
+                    let added = self.base.process_new_tasks().await;
+                    crate::pump_trace!("q2_process_new_tasks_done", "added={}", added);
                     *self.last_poll_time.lock().unwrap() = self.base.time_source.now();
                 }
                 _ = poll_timer.fired() => {
