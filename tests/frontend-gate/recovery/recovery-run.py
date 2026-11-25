@@ -20,7 +20,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[3]
 OUT = ROOT / "out" / "recovery"
-COMPOSE = ROOT / "tests/docker-drop-in/docker-compose.split.yml"
+COMPOSE_FILES = {"mysql": "docker-compose.split.yml", "cassandra": "docker-compose.cassandra.yml"}
 PROJECT = "cadence-recovery"
 SERVICES = ("history", "matching", "worker", "frontend")
 STABLE_N, STABLE_MAX_LAT_NS = 10, 2_000_000_000
@@ -73,6 +73,15 @@ def wait_stable(samples, t0, fresh_filter, limit):
     return False
 
 
+def schema_version(compose, env, name):
+    """Cassandra schema_version rows (both keyspaces), via cqlsh in the DB container."""
+    q = "select keyspace_name, curr_version from cadence.schema_version; select keyspace_name, curr_version from cadence_visibility.schema_version;"
+    r = subprocess.run(compose("exec", "-T", "cassandra", "cqlsh", "-e", q), cwd=ROOT, env=env, capture_output=True, text=True)
+    out = r.stdout.strip()
+    (OUT / f"schema-version-{name}.txt").write_text(out + "\n" + r.stderr)
+    return out
+
+
 def pct(v, p):
     s = sorted(v)
     return s[min(len(s) - 1, max(0, int(round(p / 100 * len(s) + 0.5)) - 1))]
@@ -83,6 +92,7 @@ def main():
     ap.add_argument("--repetitions", type=int, default=5)
     ap.add_argument("--rust-services", default="frontend,matching,history")
     ap.add_argument("--scenarios", default="cold_fresh,kill_frontend,kill_matching,kill_history,cold_restart")
+    ap.add_argument("--database", default="mysql", choices=("mysql", "cassandra"))
     ap.add_argument("--limit", type=int, default=120, help="seconds to wait for stable recovery per event")
     args = ap.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
@@ -93,7 +103,8 @@ def main():
     ov.write_text("services:\n" + "".join(
         f"  {n}:\n    mem_limit: 1400m\n    memswap_limit: 1400m\n    cpus: 1.0\n    pids_limit: 2048\n"
         for n in ("frontend", "matching", "history", "worker")))
-    env["COMPOSE_FILE"] = os.pathsep.join((str(COMPOSE), str(ov)))
+    compose_file = ROOT / "tests/docker-drop-in" / COMPOSE_FILES[args.database]
+    env["COMPOSE_FILE"] = os.pathsep.join((str(compose_file), str(ov)))
     for s in ("FRONTEND", "MATCHING", "HISTORY", "WORKER"):
         env[f"CADENCE_IMAGE_{s}"] = "cadence-go:ci"
     base_env = dict(env)
@@ -114,7 +125,17 @@ def main():
                 driver = subprocess.Popen([str(ROOT / "out/recovery-driver"), "-output", str(samples), "-stop-file", str(stop),
                                            "-ready-file", str(ready)], cwd=ROOT, stdout=(OUT / f"driver-{tag}.log").open("w"), stderr=subprocess.STDOUT)
                 events = []
+                baseline_sv = None
                 try:
+                    if "cold_fresh" not in scenarios:
+                        # Untimed bring-up so kill/restart scenarios have a running cluster.
+                        sh(compose("up", "-d"), arm_env, f"up-{tag}", timeout=900)
+                        t_up = time.time_ns()
+                        if not wait_stable(samples, t_up, False, 300):
+                            raise RuntimeError("cluster never became stable after untimed bring-up")
+                        time.sleep(3)
+                    if args.database == "cassandra":
+                        baseline_sv = schema_version(compose, arm_env, f"{tag}-baseline")
                     for sc in scenarios:
                         ev = {"scenario": sc, "arm": arm, "rep": rep}
                         if sc == "cold_fresh":
@@ -139,6 +160,9 @@ def main():
                             raise RuntimeError(f"unknown scenario {sc}")
                         ev["stable_reached"] = wait_stable(samples, ev["t0_ns"], fresh, args.limit)
                         ev.update(analyse(load(samples), ev["t0_ns"], fresh))
+                        if baseline_sv is not None:
+                            ev["schema_version"] = schema_version(compose, arm_env, f"{tag}-{sc}")
+                            ev["schema_version_intact"] = ev["schema_version"] == baseline_sv and bool(baseline_sv)
                         ev["restart_cmd_ms"] = (ev.get("restarted_ns", ev["t0_ns"]) - ev["t0_ns"]) / 1e6
                         events.append(ev)
                         time.sleep(3)
@@ -188,7 +212,7 @@ def main():
         lines.append(f"| {arm} | {len(rs)} | {sum(r['workflows'] for r in rs)} | {sum(r['completed'] for r in rs)} | {sum(r['lost'] for r in rs)} |")
     (OUT / "summary.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
-    if any(r["lost"] for r in results) or any(not e["stable_reached"] for r in results for e in r["events"]):
+    if any(r["lost"] for r in results) or any(not e["stable_reached"] or e.get("schema_version_intact") is False for r in results for e in r["events"]):
         sys.exit(1)
 
 

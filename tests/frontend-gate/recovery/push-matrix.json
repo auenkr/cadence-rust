@@ -1,0 +1,32 @@
+{
+ "include": [
+  {
+   "name": "fe1",
+   "repetitions": "10",
+   "rust_services": "frontend,matching,history",
+   "scenarios": "kill_frontend",
+   "database": "mysql"
+  },
+  {
+   "name": "fe2",
+   "repetitions": "10",
+   "rust_services": "frontend,matching,history",
+   "scenarios": "kill_frontend",
+   "database": "mysql"
+  },
+  {
+   "name": "fe3",
+   "repetitions": "10",
+   "rust_services": "frontend,matching,history",
+   "scenarios": "kill_frontend",
+   "database": "mysql"
+  },
+  {
+   "name": "cassandra",
+   "repetitions": "5",
+   "rust_services": "frontend,matching,history",
+   "scenarios": "kill_history,cold_restart",
+   "database": "cassandra"
+  }
+ ]
+}
