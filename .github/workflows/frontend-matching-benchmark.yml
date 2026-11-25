@@ -79,9 +79,6 @@ on:
       control_ref:
         description: Enables three-arm mode (Go, Rust control built from this ref, Rust candidate = dispatched ref), same job/runner, interleaved. Empty = two-arm. Use 'origin/master' for A/B.
         default: ''
-      sql_slow_ms:
-        description: Diagnostic - set CADENCE_HISTORY_SQL_SLOW_MS on history (both arms; empty = off) and count slow-transaction log lines
-        default: ''
       sticky:
         description: Enable SDK worker sticky execution in both benchmark arms
         type: boolean
@@ -314,7 +311,7 @@ jobs:
           REPETITIONS: ${{ inputs.repetitions || 5 }}
           CONCURRENCY: ${{ inputs.concurrency || '1,16,64' }}
           PAYLOAD_BYTES: ${{ inputs.payload_bytes || 1024 }}
-          BENCH_SQL_SLOW_MS: ${{ inputs.sql_slow_ms }}
+          BENCH_SQL_SLOW_MS: ''  # input removed: GitHub caps workflow_dispatch at 25 inputs
           BENCH_TRACE_DECISION: ${{ inputs.trace_decision }}
           BENCH_DYNAMIC_CONFIG_EXTRA: ${{ inputs.dynamic_config_extra }}
           TARGET_RATE: ${{ inputs.target_rate }}
