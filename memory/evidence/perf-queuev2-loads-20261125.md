@@ -63,3 +63,24 @@ to `measured_start_utc` through `measured_end_utc` from the corresponding
 join `result-*-c1-samples.json` on workflow and run ID, using Go task type 0
 and Rust `c0_transfer_task_read`. Each task identity is workflow, run and task
 ID. Count a delayed task if the joined wait duration exceeds the given threshold.
+
+## Result of paired c1 trace (run 45556131815, 3 pairs, 1000 workflows each)
+
+Permits: the earlier "per workflow" normalisation was wrong. Each pair measures
+1,000 workflows, so Go uses ~2.98-2.99 transfer-load permits per workflow and
+Rust ~2.93-2.94. **Rust does not consume more permits than Go.**
+
+| Pair | Go permits | Rust permits | Go wait sum ms | Rust wait sum ms | Go >30 ms | Rust >30 ms |
+|---|---|---|---|---|---|---|
+| 0 | 2984 | 2930 | 10390 | 26574 | 214 | 544 |
+| 1 | 2986 | 2935 | 11588 | 27740 | 244 | 577 |
+| 2 | 2988 | 2928 | 9051 | 25764 | 195 | 530 |
+
+Go's waits cap near 50 ms (1/20 s) and are concentrated on two of four shards
+(shards 0 and 2: 100 and 93 waits >30 ms; shards 1 and 3: 15 and 6). Total
+permit rate is ~72/s over 4 shards, near the 20 rps per-shard limit, so the
+limiter saturates on hot shards. Rust's limiter math (`queue_exec.rs`
+`DynamicRateLimiter::reserve`) matches x/time/rate. The Rust trace line had no
+shard id, so the per-shard split could not be compared. The open question is
+whether Rust has the same shard imbalance or spreads waits across all shards.
+Next: trace line now carries `limiter=<ptr>` (one limiter per shard/category).

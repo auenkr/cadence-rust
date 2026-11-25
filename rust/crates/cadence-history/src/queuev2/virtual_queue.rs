@@ -323,8 +323,10 @@ impl VirtualQueueImpl {
         let wait_result = self.task_load_rate_limiter.wait(&self.ctx).await;
         let limit_wait_ms = wait_started.map(|start| crate::decision_trace::now_ms() - start);
         if let Some(wait_ms) = limit_wait_ms {
-            self.logger
-                .info(&format!("DTRACE queuev2 load wait_ms={wait_ms:.3}"));
+            let limiter = Arc::as_ptr(&self.task_load_rate_limiter) as *const () as usize;
+            self.logger.info(&format!(
+                "DTRACE queuev2 load wait_ms={wait_ms:.3} limiter={limiter:x}"
+            ));
         }
         if let Err(e) = wait_result {
             if self.ctx.is_cancelled() {
