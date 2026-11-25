@@ -422,7 +422,7 @@ pub(crate) fn decode_go_cassandra_domain_metadata(
         put(39, Value::Bytes(data));
     }
     if let Some(encoding) = config.bad_binaries_encoding {
-        put(40, text(String::from_utf8_lossy(&encoding).into_owned()));
+        put(40, text(encoding));
     }
     if let Some(data) = config.isolation_groups {
         put(56, Value::Bytes(data));
@@ -553,7 +553,7 @@ impl CassandraFrontendDomainPersistence {
             bad_binaries_encoding: metadata
                 .bad_binaries
                 .as_ref()
-                .map(|blob| blob.encoding.as_bytes().to_vec()),
+                .map(|blob| blob.encoding.clone()),
             isolation_groups: metadata
                 .isolation_groups
                 .as_ref()
