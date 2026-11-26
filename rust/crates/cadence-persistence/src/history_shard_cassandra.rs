@@ -58,6 +58,25 @@ fn visibility_ts() -> DateTime<Utc> {
     DateTime::<Utc>::from_timestamp_millis(DEFAULT_VISIBILITY_MS).expect("valid default visibility timestamp")
 }
 
+/// Go `nosqlShardStore.CreateShard`: a lost `IF NOT EXISTS` race is a
+/// `ShardAlreadyExistError`, not an ownership loss (History re-reads the shard).
+fn create_conflict(shard_id: i32, request_range_id: i64, actual_range_id: i64) -> E {
+    E::AlreadyExists(format!(
+        "Shard already exists in executions table.  ShardId: {shard_id}, request_range_id: {request_range_id}, actual_range_id : {actual_range_id}"
+    ))
+}
+
+#[cfg(test)]
+mod create_conflict_tests {
+    use super::*;
+
+    #[test]
+    fn lost_create_race_is_already_exists() {
+        let error = create_conflict(7, 1, 4);
+        assert!(matches!(error, E::AlreadyExists(ref m) if m.contains("ShardId: 7") && m.contains("actual_range_id : 4")));
+    }
+}
+
 fn internal(error: impl std::fmt::Display) -> E {
     E::Internal(format!("Cassandra shard: {error}"))
 }
@@ -172,12 +191,7 @@ impl ShardStore for CassandraShardStore {
             if applied {
                 Ok(())
             } else {
-                // Go convertToConflictedShardRow -> ShardOperationConditionFailure.
-                Err(E::ShardOwnershipLost {
-                    shard_id: row.shard_id,
-                    previous_range_id: row.range_id,
-                    current_range_id: current,
-                })
+                Err(create_conflict(row.shard_id, row.range_id, current))
             }
         })
         .await

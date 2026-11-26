@@ -20,8 +20,31 @@ Rust: `rust/crates/cadence-persistence/src/matching_cassandra.rs`.
 | RangeDeleteTasks | tasks.go:~500 | :40, range_delete_tasks | match (ALL consistency, flag-gated, fallback to default) |
 | ListTaskList | tasks.go:~270 | n/a | Go returns "unsupported operation" |
 
+## History execution tasks (history_execution_cassandra_tasks.rs vs workflow.go / workflow_cql.go)
+| Statement | Result |
+|---|---|
+| Get transfer/replication tasks (`task_id >= ? and task_id < ?`, visibility_ts = default, PageSize+PageState) | match |
+| Get timer tasks (`visibility_ts >= ? and < ?`, ms truncation) | match (Go template lacks spaces e.g. `type = ?and`, CQL-equivalent) |
+| Complete transfer/timer/replication (logged batch chunks of 100, consistency ALL) | match |
+| Range delete transfer (`task_id >= min and < max`), replication (`task_id < max`), timer (visibility range) with ALL | match (returns UnknownNumRowsAffected) |
+| DLQ size/insert/delete/range-delete, cross-cluster delete | match |
+No mismatches found.
+
+## History shard (history_shard_cassandra.rs vs shard.go / shard_cql.go / nosql_shard_store.go)
+| Item | Result |
+|---|---|
+| Create `IF NOT EXISTS`, Get, Update `IF range_id = ?`, UpdateRangeID `IF range_id = ?` text/keys | match (UDT bound whole) |
+| GetShard repairs range_id column when UDT range is ahead | match |
+| Create not-applied error | MISMATCH, FIXED: Go returns ShardAlreadyExistError; Rust returned ShardOwnershipLost, so History's create-race re-read (`shard_events.rs` AlreadyExists arm) never ran on Cassandra. Now `E::AlreadyExists`; unit test `lost_create_race_is_already_exists`. |
+| Shard UDT contents | MISMATCH, NOT FIXED: Go writes all 19 UDT fields (owner, stolen_since_renew, ack levels, cluster maps, queue-state blobs, markers); Rust writes only shard_id, range_id, updated_at. The thriftrw `data` blob is authoritative on read in both, so Go<->Rust interop is unaffected; fixing needs decoding `ShardInfoRecord` into typed UDT fields and CI iteration. |
+
+## History execution write (history_execution_cassandra_write.rs) — spot check only
+All batches are LOGGED (matches Go workflow.go). Current-row insert `IF NOT EXISTS USING TTL 0`, current update `USING TTL 0 ... IF current_run_id = ?`,
+request rows `IF NOT EXISTS USING TTL ?` / `USING TTL ?`, policy `IF NOT EXISTS`, lease `IF range_id = ?`, update `IF next_event_id = ?` match workflow_cql.go lines 243-386.
+Full per-column UDT and cas_error mapping review not completed.
+
 ## Not yet audited
-history_cassandra, history_v2_cassandra, history_execution_cassandra{,_tasks,_write}, history_shard_cassandra,
+history_cassandra, history_v2_cassandra, history_execution_cassandra, (write: UDT columns + cas_error),
 history_visibility_cassandra, visibility_cassandra, matching_domain_cassandra, semaphores_cassandra_native,
 cassandra.rs (session defaults: Rust LOCAL_QUORUM/LOCAL_SERIAL), error mapping (timeout -> Cadence error).
 
