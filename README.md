@@ -49,7 +49,19 @@ The Docker Hub publish workflow publishes per-service images under the `auenkr` 
 
 ## Benchmarks
 
-The [2026-11-21 benchmark rerun](memory/evidence/bench-rerun-20261121.md) measured roughly 40–50% lower CPU use and 12–38% lower memory use for Rust in the reported lanes. p99 latency was equal or better except Frontend, where it was 3% higher, within run-to-run noise. At 40 workflows per second, Go p99 was 580 ms and Rust p99 was 108 ms.
+The [2026-11-26 benchmark report](memory/benchmark-results-5f6504e05-20261126.md) compares Go and Rust (Frontend, Matching and History) on GitHub-hosted runners:
+
+- **Throughput:** Rust handles 30–185% more workflows per second on MySQL and 28–38% more on PostgreSQL at concurrency 16 and 64.
+- **Latency:** Rust's p50 is 15–67% lower in every configuration.
+- **Workloads:** Rust gets 1.46× Go's throughput on activities, 1.40× on child workflows and 1.36× on long histories.
+- **Resources:** Rust uses about 40–55% less CPU, and about half the memory for Frontend and Matching.
+- **One workflow at a time, fixed rate:** Rust's p90 and p95 are 25–39% lower at every paced rate from 10 to 22 wf/s.
+- **Recovery:** Rust becomes stable faster after a kill or a full restart.
+
+Open gaps:
+
+- With one workflow at a time and no rate cap, Rust's p90 is 94 ms against Go's 53 ms, caused by queueing at History's 20 rps limiter.
+- On Cassandra, a full restart loses some workflows in Rust; the bug is being fixed.
 
 ## License
 
