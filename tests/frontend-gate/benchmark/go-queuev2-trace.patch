@@ -35,7 +35,7 @@
  		if q.ctx.Err() != nil {
  			return
  		}
-@@ -391,3 +400,8 @@
+@@ -391,3 +400,7 @@
  	q.logger.Debug("got tasks from virtual queue", tag.Counter(len(tasks)))
 +	if traceDecision {
 +		q.logger.Info("DTRACE queuev2 loaded", tag.Dynamic("t_ms", float64(started.UnixNano())/1e6), tag.Dynamic("tasks", len(tasks)),
@@ -43,7 +43,7 @@
 +	}
  
  	q.monitor.SetSlicePendingTaskCount(sliceToRead, sliceToRead.GetPendingTaskCount())
-@@ -394,6 +411,11 @@
+@@ -394,6 +410,11 @@
  
  	now := q.timeSource.Now()
  	for _, task := range tasks {
