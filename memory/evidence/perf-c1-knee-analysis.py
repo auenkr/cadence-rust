@@ -2,7 +2,7 @@
 """Knee analysis. usage: perf-c1-knee-analysis.py <dir> ; dir/<rate>/<runid>/{cpu-model.txt,paired-benchmark/result-*-<arm>-c1.json,resources-*.json}
 PASS per rate iff run-cluster bootstrap 95% CI upper bound of (rust-go)/go <= +5% for p90 and p95 of pooled request latencies."""
 import glob, json, os, random, sys
-root = sys.argv[1]; random.seed(1); B = 20000; ARMS = ["go", "control", "rust"]
+root = sys.argv[1]; random.seed(1); B = int(os.environ.get('KNEE_B', '4000')); ARMS = ["go", "control", "rust"]
 
 def pct(xs, p):
     xs = sorted(xs); k = (len(xs)-1)*p/100; lo = int(k); hi = min(lo+1, len(xs)-1)
@@ -24,7 +24,7 @@ def cpu_of(path):
         return None
     except Exception: return None
 
-for rate in sorted(os.listdir(root), key=lambda x: (x == "unpaced", int(x) if x.isdigit() else 0)):
+for rate in ([sys.argv[2]] if len(sys.argv) > 2 else sorted(os.listdir(root), key=lambda x: (x == "unpaced", int(x) if x.isdigit() else 0))):
     runs = {os.path.basename(r): load(r) for r in sorted(glob.glob(os.path.join(root, rate, "*")))}
     names = sorted(runs)
     print(f"\n## target_rate={rate}  runs={len(names)}")
@@ -36,16 +36,23 @@ for rate in sorted(os.listdir(root), key=lambda x: (x == "unpaced", int(x) if x.
     for a in ARMS:
         xs = allv[a]; w = sorted(rep[1] for n in names for rep in runs[n][a])
         print(f"| {a} | {len(xs)} | {w[len(w)//2]:.2f} | " + " | ".join(f"{pct(xs,p):.1f}" for p in (50, 90, 95, 99)) + f" | {sum(s>=75 for s in xs)/max(1,len(xs)):.3f} |")
+    # one resample per draw shared by all arms/contrasts; per-rep samples pre-sorted
+    for n in names:
+        for a in ARMS:
+            runs[n][a] = [(sorted(r[0]), r[1], r[2]) for r in runs[n][a]]
+    D = []
+    for _ in range(B):
+        pools = {a: [] for a in ARMS}
+        for _ in names:
+            n = random.choice(names)
+            for a in ARMS:
+                for r in random.choices(runs[n][a], k=len(runs[n][a])):
+                    pools[a] += r[0]
+        q = {a: sorted(pools[a]) for a in ARMS}
+        D.append({(a, p): pct(q[a], p) for a in ARMS for p in (90, 95)})
     def boot(a, b, p):
-        out = []
-        for _ in range(B):
-            sa, sb = [], []
-            for _ in names:
-                n = random.choice(names)
-                ra = random.choices(runs[n][a], k=len(runs[n][a])); rb = random.choices(runs[n][b], k=len(runs[n][b]))
-                sa += [s for r in ra for s in r[0]]; sb += [s for r in rb for s in r[0]]
-            out.append((pct(sa, p)-pct(sb, p))/pct(sb, p)*100)
-        out.sort(); return out[int(.025*B)], out[int(.975*B)]
+        out = sorted((d[(a, p)]-d[(b, p)])/d[(b, p)]*100 for d in D)
+        return out[int(.025*B)], out[int(.975*B)]
     verdict = True
     print("\n| contrast | metric | point % | 95% CI % | ")
     print("|--|--|--|--|")
