@@ -1,7 +1,7 @@
 # Cassandra persistence parity audit (2026-11-26) — IN PROGRESS
 
 Branch `audit-cassandra-parity`. No cargo/go/docker run locally. Status: matching task store (`matching_cassandra.rs`)
-audited; remaining files listed under "Not yet audited". No CI runs have been dispatched yet, so no run URLs or SHA256 exist.
+audited; remaining files listed under "Not yet audited". CI results are in the "CI" section.
 
 Go: `go/common/persistence/nosql/nosqlplugin/cassandra/tasks.go`, `tasks_cql.go`, `go/common/persistence/nosql/nosql_task_store.go`.
 Rust: `rust/crates/cadence-persistence/src/matching_cassandra.rs`.
@@ -49,4 +49,10 @@ history_visibility_cassandra, visibility_cassandra, matching_domain_cassandra, s
 cassandra.rs (session defaults: Rust LOCAL_QUORUM/LOCAL_SERIAL), error mapping (timeout -> Cadence error).
 
 ## CI
-None run yet (rust-ci cadence-persistence, workspace, recovery-timing kill_history,kill_matching x5 are pending).
+Head SHA of the CreateShard fix: 25d0dee92da7f5bb1facb5400e36f6ed14a0083e.
+- rust-ci package=cadence-persistence: success, https://github.com/auenkr/cadence-rust/actions/runs/45749245771
+- rust-ci workspace: success, https://github.com/auenkr/cadence-rust/actions/runs/45749928949
+- recovery-timing database=cassandra scenarios=kill_history,kill_matching repetitions=5: success, https://github.com/auenkr/cadence-rust/actions/runs/45751428633
+  - Rust cadence-server SHA256 f1322cc8b503a700765843c7f3f331dab015343562055a20c3db3b1091e13ecc; cadence-history c8f87c03eb41437fa26b10ee8beeb2ffcb95e1d87e953d6f56d107141f093e4a; Go cadence-server f04c1972a31588e28ccf0dbf92c8f928a80d0dc48375e4bc3e62a0642863d755.
+  - Workflows started/completed/lost: go 1049/1049/0, rust 942/942/0.
+  - Median first completion (ms): kill_history go 37 / rust 26; kill_matching go 2222 / rust 32. Stable median: kill_history go 2108 / rust 1809; kill_matching go 2573 / rust 2641. No unstable reps.
