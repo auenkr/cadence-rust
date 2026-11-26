@@ -140,30 +140,68 @@ impl EngineCore {
     }
 
     pub(super) fn notify_tasks_with(&self, transfer: &[pc::TransferTask], timer: &[pc::TimerTask], persistence_error: bool) {
-        use crate::engine::notify_tasks::{NotifiedTask, NotifyTaskInfo};
-        tracing::debug!(transfer = transfer.len(), timer = timer.len(), has_engine = self.engine_slot.get().is_some(), "notify queues of new tasks");
-        let Some(engine) = self.engine_slot.get().and_then(std::sync::Weak::upgrade) else { return };
-        let info_of = |d: &str, w: &str, r: &str, tasks: Vec<NotifiedTask>| {
-            let mut info = NotifyTaskInfo { tasks, persistence_error, ..Default::default() };
-            info.execution_info.domain_id = d.to_string();
-            info.execution_info.workflow_id = w.to_string();
-            info.execution_info.run_id = r.to_string();
-            info
-        };
-        if let Some(first) = transfer.first() {
-            let tasks = transfer
-                .iter()
-                .map(NotifiedTask::from_transfer)
-                .collect();
-            engine.notify_new_transfer_tasks(&info_of(&first.domain_id, &first.workflow_id, &first.run_id, tasks));
+        notify_tasks_via(&self.engine_slot, transfer, timer, persistence_error);
+    }
+
+    /// Arms a [`WriteCancelGuard`] for a task-bearing persistence write about to be issued.
+    pub(super) fn write_cancel_guard(&self, transfer: &[pc::TransferTask], timer: &[pc::TimerTask]) -> WriteCancelGuard {
+        WriteCancelGuard { engine_slot: self.engine_slot.clone(), transfer: transfer.to_vec(), timer: timer.to_vec(), armed: true }
+    }
+}
+
+/// Drop guard covering the await of a task-bearing persistence write. Go runs the write and the
+/// `taskNotifier` call to completion even when the caller's context is cancelled (the write returns
+/// a context error and the notifier then sends `PersistenceError`, which clears the cached queue
+/// reader). A Rust request future is dropped on cancellation (client timeout/hangup) instead, so
+/// without this guard a write that landed in Cassandra would never reach the cached queue reader and
+/// its decision task would be skipped. Dropping while armed = outcome unknown -> notify with
+/// `persistence_error = true`.
+pub(super) struct WriteCancelGuard {
+    engine_slot: Arc<std::sync::OnceLock<std::sync::Weak<crate::engine::runtime::HistoryEngine>>>,
+    transfer: Vec<pc::TransferTask>,
+    timer: Vec<pc::TimerTask>,
+    armed: bool,
+}
+
+impl WriteCancelGuard {
+    /// The write future completed (success or error): the normal notify path takes over.
+    pub(super) fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for WriteCancelGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            tracing::warn!("task write future dropped before completion; notifying queues with persistence error");
+            notify_tasks_via(&self.engine_slot, &self.transfer, &self.timer, true);
         }
-        if let Some(first) = timer.first() {
-            let tasks = timer
-                .iter()
-                .map(NotifiedTask::from_timer)
-                .collect();
-            engine.notify_new_timer_tasks(&info_of(&first.domain_id, &first.workflow_id, &first.run_id, tasks));
-        }
+    }
+}
+
+fn notify_tasks_via(
+    engine_slot: &std::sync::OnceLock<std::sync::Weak<crate::engine::runtime::HistoryEngine>>,
+    transfer: &[pc::TransferTask],
+    timer: &[pc::TimerTask],
+    persistence_error: bool,
+) {
+    use crate::engine::notify_tasks::{NotifiedTask, NotifyTaskInfo};
+    tracing::debug!(transfer = transfer.len(), timer = timer.len(), has_engine = engine_slot.get().is_some(), "notify queues of new tasks");
+    let Some(engine) = engine_slot.get().and_then(std::sync::Weak::upgrade) else { return };
+    let info_of = |d: &str, w: &str, r: &str, tasks: Vec<NotifiedTask>| {
+        let mut info = NotifyTaskInfo { tasks, persistence_error, ..Default::default() };
+        info.execution_info.domain_id = d.to_string();
+        info.execution_info.workflow_id = w.to_string();
+        info.execution_info.run_id = r.to_string();
+        info
+    };
+    if let Some(first) = transfer.first() {
+        let tasks = transfer.iter().map(NotifiedTask::from_transfer).collect();
+        engine.notify_new_transfer_tasks(&info_of(&first.domain_id, &first.workflow_id, &first.run_id, tasks));
+    }
+    if let Some(first) = timer.first() {
+        let tasks = timer.iter().map(NotifiedTask::from_timer).collect();
+        engine.notify_new_timer_tasks(&info_of(&first.domain_id, &first.workflow_id, &first.run_id, tasks));
     }
 }
 
@@ -545,7 +583,14 @@ impl EngineExecutionContext {
             workflow_request_mode: pc::WorkflowRequestMode::New,
             current_timestamp_unix_nanos: now,
         };
-        match crate::min_timeout::ensure_min_timeout(core.executions.update_workflow_execution(request)).await {
+        let mut cancel_guard = core.write_cancel_guard(&txn.transfer, &txn.timer);
+        let mut new_guard = new_tasks.as_ref().map(|(t, tm)| core.write_cancel_guard(t, tm));
+        let write_result = crate::min_timeout::ensure_min_timeout(core.executions.update_workflow_execution(request)).await;
+        cancel_guard.disarm();
+        if let Some(g) = new_guard.as_mut() {
+            g.disarm();
+        }
+        match write_result {
             Ok(()) => {
                 // Go notifyingExecutionManager notifies (cache inject) before updateMaxReadLevelLocked.
                 let traced = crate::decision_trace::enabled()
