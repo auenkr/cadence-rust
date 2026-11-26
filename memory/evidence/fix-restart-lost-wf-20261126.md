@@ -43,3 +43,4 @@ Fix: `wiring/server/grpc.rs` runs state-changing RPCs (start, signal, signal-wit
   Total Go 2/10221, Rust 2/9291 (before fix: Go 0/9693, Rust 9/8629).
 - All 2 Rust losses have full histories (DecisionTaskStarted/Completed, ActivityTaskStarted, then WorkflowExecutionTimedOut at 60s) = the known activity StartToClose race that Go loses identically (see perf-frontend-kill-loss-20261126.md). Zero first-decision-task losses.
 Verdict: first-decision-task loss fixed; Rust lost <= Go. Workspace-wide rust-ci not yet run.
+- Workspace rust-ci: https://github.com/auenkr/cadence-rust/actions/runs/45749371199 success (head 7087d829a).
