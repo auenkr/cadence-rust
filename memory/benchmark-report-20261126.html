@@ -1,0 +1,99 @@
+<title>Cadence Rust vs Go Benchmarks</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: single readable column, summary first, tables in scroll wrappers */
+:root{--bg:#f6f7f9;--fg:#1b2230;--muted:#5d6779;--line:#d9dee7;--card:#ffffff;--accent:#c0532a;--good:#1f7a4d;--bad:#b3261e;--warn:#8a6100;
+--sans:"IBM Plex Sans",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,monospace}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12161d;--fg:#e4e8ef;--muted:#9aa4b5;--line:#2a313d;--card:#191e27;--accent:#e98a62;--good:#5fcf97;--bad:#ff8a80;--warn:#e6c15c;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#12161d;--fg:#e4e8ef;--muted:#9aa4b5;--line:#2a313d;--card:#191e27;--accent:#e98a62;--good:#5fcf97;--bad:#ff8a80;--warn:#e6c15c;color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font:15px/1.55 var(--sans);padding-block:28px 48px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+main{max-width:980px;margin:0 auto;display:grid;gap:28px}
+h1{font-size:1.7rem;margin:0;text-wrap:balance}h2{font-size:1.15rem;margin:0 0 10px;text-wrap:balance}
+.sub{color:var(--muted);margin:4px 0 0}
+section{display:grid;gap:8px;min-width:0}
+.tw{overflow-x:auto;border:1px solid var(--line);border-radius:6px;background:var(--card)}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;font-size:.9rem}
+th,td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+th{font-weight:600;color:var(--muted);font-size:.78rem;letter-spacing:.04em;text-transform:uppercase}
+tr:last-child td{border-bottom:0}
+.g{color:var(--good);font-weight:600}.b{color:var(--bad);font-weight:600}.w{color:var(--warn);font-weight:600}
+.mono{font-family:var(--mono);font-size:.85em}
+p{margin:0;max-width:72ch}ul{margin:0;padding-left:20px;max-width:75ch}
+.pill{display:inline-block;padding:1px 8px;border-radius:99px;font-size:.78rem;font-weight:600;border:1px solid currentColor}
+</style>
+<main>
+<header>
+<h1>Cadence Rust vs Go benchmarks</h1>
+<p class="sub">Updated 2026-11-26 · master <span class="mono">5f6504e05</span> · Rust binary <span class="mono">f510cc3c…c0f74</span> · GitHub Actions runners (4 vCPU, 15 GiB; services capped at 1 CPU / 1.4 GiB, database 1.5 CPU / 1.8 GiB)</p>
+</header>
+
+<section>
+<h2>Council: last 3 rounds</h2>
+<div class="tw"><table>
+<tr><th>Reviewer</th><th>Round 9</th><th>Round 10</th><th>Round 11</th></tr>
+<tr><td>Claude Opus 5.5 (low)</td><td>9.5/10</td><td>9.5/10</td><td>9.5/10</td></tr>
+<tr><td>GPT 6.2 Sol (low)</td><td>9/10</td><td>9/10</td><td>9/10</td></tr>
+</table></div>
+<p>Round 12 runs after the Cassandra restart bug is fixed.</p>
+</section>
+
+<section>
+<h2>Throughput and latency, Go → Rust change (medians of 5 reps)</h2>
+<div class="tw"><table>
+<tr><th>Setup</th><th>Workflows in flight</th><th>Throughput</th><th>p50</th><th>p95</th><th>p99</th></tr>
+<tr><td>MySQL, default</td><td>1</td><td class="g">+9.6%</td><td class="g">−33.9%</td><td class="b">+25.6%</td><td class="g">−4.0%</td></tr>
+<tr><td>MySQL, default</td><td>16</td><td class="g">+50.5%</td><td class="g">−36.0%</td><td class="g">−31.4%</td><td>+0.6%</td></tr>
+<tr><td>MySQL, default</td><td>64</td><td class="g">+184.7%</td><td class="g">−65.2%</td><td class="g">−67.6%</td><td class="g">−68.6%</td></tr>
+<tr><td>MySQL, poll limit 1000</td><td>1</td><td class="g">+40.4%</td><td class="g">−35.9%</td><td class="g">−17.9%</td><td>+8.3%</td></tr>
+<tr><td>MySQL, poll limit 1000</td><td>16</td><td class="g">+30.1%</td><td class="g">−25.3%</td><td class="g">−8.1%</td><td class="g">−8.6%</td></tr>
+<tr><td>MySQL, poll limit 1000</td><td>64</td><td class="g">+160.3%</td><td class="g">−66.7%</td><td class="g">−51.6%</td><td class="g">−48.4%</td></tr>
+<tr><td>PostgreSQL, default</td><td>1</td><td>+1.3%</td><td class="g">−15.4%</td><td>+0.8%</td><td class="g">−5.6%</td></tr>
+<tr><td>PostgreSQL, default</td><td>16</td><td class="g">+37.7%</td><td class="g">−28.6%</td><td class="g">−27.8%</td><td class="g">−26.6%</td></tr>
+<tr><td>PostgreSQL, default</td><td>64</td><td class="g">+28.4%</td><td class="g">−38.4%</td><td class="g">−16.9%</td><td class="g">−16.7%</td></tr>
+</table></div>
+<p>Runs 45674162567, 45674167817 and 45674172513. Differences under about ±3% throughput or ±30% p99 are within the noise of the same Rust binary run twice in one job.</p>
+</section>
+
+<section>
+<h2>One workflow at a time, fixed request rate (36 runs)</h2>
+<div class="tw"><table>
+<tr><th>Rate (wf/s)</th><th>Runs</th><th>Rust − Go p90</th><th>Rust − Go p95</th><th>Verdict (within +5%)</th></tr>
+<tr><td>10</td><td>4</td><td class="g">−37.6%</td><td class="g">−37.9%</td><td class="g">Pass</td></tr>
+<tr><td>15</td><td>12</td><td class="g">−32.3%</td><td class="g">−30.1%</td><td class="g">Pass (worst case +4.6%)</td></tr>
+<tr><td>18</td><td>4</td><td class="g">−38.6%</td><td class="g">−37.4%</td><td class="g">Pass</td></tr>
+<tr><td>20</td><td>12</td><td class="g">−36.8%</td><td class="g">−31.9%</td><td class="g">Pass</td></tr>
+<tr><td>22</td><td>12</td><td class="g">−34.6%</td><td class="g">−25.2%</td><td class="g">Pass</td></tr>
+<tr><td>No rate cap</td><td>4</td><td class="b">+77.0%</td><td class="b">+51.3%</td><td class="b">Fail</td></tr>
+</table></div>
+<p>With no rate cap Rust completes more work (25.1 vs 22.5 wf/s) but its p90 is 94 ms against Go's 53 ms. Rust sends requests faster, so more of them wait at History's 20-requests-per-second limiter. A worker is now checking whether the Rust limiter differs from Go's.</p>
+</section>
+
+<section>
+<h2>Other results</h2>
+<div class="tw"><table>
+<tr><th>Test</th><th>Go</th><th>Rust</th><th>Result</th></tr>
+<tr><td>PostgreSQL soak, paced 50 wf/s, p99</td><td>—</td><td>−28.9%</td><td class="g">Rust better</td></tr>
+<tr><td>Activities workload, throughput</td><td>17.65 wf/s</td><td>25.84 wf/s</td><td class="g">1.46×</td></tr>
+<tr><td>Child workflows, throughput</td><td>8.24 wf/s</td><td>11.50 wf/s</td><td class="g">1.40×</td></tr>
+<tr><td>Signal + timer, throughput</td><td>14.22 wf/s</td><td>14.61 wf/s</td><td class="g">1.03×</td></tr>
+<tr><td>Long history (1,200 events), peak memory</td><td>154.2 MiB</td><td>151.7 MiB</td><td class="g">Rust lower</td></tr>
+<tr><td>Frontend + Matching memory</td><td>~32 MiB each</td><td>15–18 MiB each</td><td class="g">~50% less</td></tr>
+<tr><td>CPU per run, all three services</td><td>24–34 CPU-s</td><td>10–14.5 CPU-s</td><td class="g">~55% less</td></tr>
+<tr><td>Cassandra, kill History, time to recover</td><td>1,878 ms</td><td>1,532 ms</td><td class="g">Rust faster</td></tr>
+<tr><td>Cassandra, full restart, time to recover</td><td>14,857 ms</td><td>12,064 ms</td><td class="g">Rust faster</td></tr>
+<tr><td>Cassandra, full restart, lost workflows</td><td>0 / 9,693</td><td>9 / 8,629</td><td class="b">Bug, fix in progress</td></tr>
+<tr><td>MySQL, full restart, lost workflows</td><td>0 / 9,542</td><td>0 / 7,898</td><td class="g">Equal</td></tr>
+</table></div>
+</section>
+
+<section>
+<h2>Open items</h2>
+<ul>
+<li><span class="pill b">Bug</span> On Cassandra, a full-cluster restart drops the first decision task for some new workflows. A worker is fixing it.</li>
+<li><span class="pill w">Gap</span> No-rate-cap p90/p95 at one workflow in flight. No fix that keeps Go's behaviour has been found yet.</li>
+<li><span class="pill w">Running</span> First Go vs Rust benchmark on Cassandra, and a restart-test fix for a timeout race that affects Go and Rust equally.</li>
+</ul>
+</section>
+</main>
