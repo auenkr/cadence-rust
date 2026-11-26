@@ -7,7 +7,7 @@
 //! structs (`task::deps::*Task`) that the executors downcast to.
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use async_trait::async_trait;
 
@@ -24,48 +24,49 @@ use crate::task::interface as ti;
 // rate limiter
 // ---------------------------------------------------------------------------
 
-/// Go `quotas.NewDynamicRateLimiter(rps)`: a `golang.org/x/time/rate` token bucket whose rate is
-/// re-read on every call, with burst `max(ceil(rps), 1)` (Go `getLimitAndBurst`, `_minBurst = 1`).
-/// The bucket starts full, so an idle queue loads immediately instead of being paced 1/rps apart.
+/// Go `quotas.NewDynamicRateLimiter(rps)`: delegates to the x/time/rate-faithful
+/// `cadence_common::dynamic_rate_limiter::DynamicRateLimiter` (bucket starts full, burst
+/// `max(ceil(rps), 1)`, rps re-read at most every 5s, cancelled waits return their token).
 pub struct DynamicRateLimiter {
-    rps: q::IntFn,
-    /// (available tokens, time they were last computed); `None` until first use (starts full).
-    bucket: Mutex<Option<(f64, Instant)>>,
+    inner: cadence_common::dynamic_rate_limiter::DynamicRateLimiter,
 }
 
 impl DynamicRateLimiter {
     pub fn new(rps: q::IntFn) -> Arc<Self> {
-        Arc::new(Self { rps, bucket: Mutex::new(None) })
+        Arc::new(Self {
+            inner: cadence_common::dynamic_rate_limiter::DynamicRateLimiter::new(Box::new(
+                move || rps() as f64,
+            )),
+        })
     }
 
-    /// Go `rate.Limiter.reserveN(now, 1, maxWait)`: returns the wait before the token is usable,
-    /// or `None` (consuming nothing) when it would exceed `max_wait`.
-    pub(crate) fn reserve(&self, now: Instant, max_wait: Duration) -> Option<Duration> {
-        let rps = (self.rps)();
-        if rps <= 0 {
-            return None;
-        }
-        let rate = rps as f64;
-        let burst = (rate.ceil() as i64).max(1) as f64;
-        let mut bucket = self.bucket.lock().unwrap();
-        let (tokens, last) = bucket.unwrap_or((burst, now));
-        let elapsed = now.saturating_duration_since(last).as_secs_f64();
-        let tokens = (tokens + elapsed * rate).min(burst) - 1.0;
-        let wait = if tokens < 0.0 { Duration::from_secs_f64(-tokens / rate) } else { Duration::ZERO };
-        if wait > max_wait {
-            return None;
-        }
-        *bucket = Some((tokens, now.max(last)));
-        Some(wait)
+    /// Go `ratelimiter.Wait` reservation step at clock sample `now` (unix nanos).
+    pub(crate) fn reserve_at(
+        &self,
+        now: i64,
+        max_wait: Duration,
+    ) -> Option<(Duration, cadence_common::rate_limiter::Reservation)> {
+        self.inner.reserve_at(now, Some(max_wait))
+    }
+
+    pub(crate) fn reserve(
+        &self,
+        max_wait: Duration,
+    ) -> Option<(Duration, cadence_common::rate_limiter::Reservation)> {
+        self.inner.reserve_now(Some(max_wait))
+    }
+
+    pub(crate) fn cancel(&self, r: &cadence_common::rate_limiter::Reservation) {
+        self.inner.cancel(r)
     }
 }
 
 #[async_trait]
 impl q::Limiter for DynamicRateLimiter {
     async fn wait(&self, timeout: Duration) -> Result<(), q::QueueError> {
-        match self.reserve(Instant::now(), timeout) {
+        match self.reserve(timeout) {
             None => Err(q::QueueError::Other("rate: Wait(n=1) would exceed context deadline".into())),
-            Some(wait) => {
+            Some((wait, _)) => {
                 if !wait.is_zero() {
                     tokio::time::sleep(wait).await;
                 }
@@ -79,25 +80,74 @@ impl q::Limiter for DynamicRateLimiter {
 mod dynamic_rate_limiter_tests {
     use super::*;
 
+    const MS: i64 = 1_000_000;
+
+    /// Independent reference of x/time/rate single-token semantics (float tokens, reserve then sleep).
+    struct Reference {
+        rate: f64,
+        burst: f64,
+        tokens: f64,
+        last: i64,
+    }
+    impl Reference {
+        fn reserve(&mut self, now: i64) -> i64 {
+            let t = (self.tokens + (now - self.last).max(0) as f64 / 1e9 * self.rate).min(self.burst) - 1.0;
+            self.tokens = t;
+            self.last = now;
+            if t < 0.0 { ((-t / self.rate) * 1e9) as i64 } else { 0 }
+        }
+    }
+
     #[test]
     fn bursts_up_to_ceil_rps_then_paces() {
         let l = DynamicRateLimiter::new(Arc::new(|| 20));
-        let t0 = Instant::now();
+        let t0 = 1_700_000_000_000_000_000i64;
         for _ in 0..20 {
-            assert_eq!(l.reserve(t0, Duration::from_secs(1)), Some(Duration::ZERO));
+            assert_eq!(l.reserve_at(t0, Duration::from_secs(1)).unwrap().0, Duration::ZERO);
         }
-        let w = l.reserve(t0, Duration::from_secs(1)).unwrap();
+        let w = l.reserve_at(t0, Duration::from_secs(1)).unwrap().0;
         assert!((w.as_secs_f64() - 0.05).abs() < 1e-6, "{w:?}");
         // a wait beyond the deadline consumes nothing
-        assert_eq!(l.reserve(t0, Duration::from_millis(10)), None);
-        // refills at rps
-        assert!(l.reserve(t0 + Duration::from_secs(2), Duration::ZERO).is_some());
+        assert!(l.reserve_at(t0, Duration::from_millis(10)).is_none());
+        assert!(l.reserve_at(t0 + 2_000_000_000, Duration::ZERO).is_some());
     }
 
     #[test]
     fn zero_rps_rejects() {
         let l = DynamicRateLimiter::new(Arc::new(|| 0));
-        assert_eq!(l.reserve(Instant::now(), Duration::from_secs(10)), None);
+        assert!(l.reserve_at(1_700_000_000_000_000_000, Duration::from_secs(10)).is_none());
+    }
+
+    #[test]
+    fn replay_request_series_matches_reference_and_never_waits_longer() {
+        let l = DynamicRateLimiter::new(Arc::new(|| 20));
+        let t0 = 1_700_000_000_000_000_000i64;
+        let mut r = Reference { rate: 20.0, burst: 20.0, tokens: 20.0, last: t0 };
+        // bursty / sparse / closely packed arrivals (ms offsets)
+        let mut now = t0;
+        for (i, gap_ms) in [0, 0, 1, 2, 0, 3, 40, 0, 0, 120, 1, 1, 1, 500, 0, 0, 0, 0, 7, 7, 7, 900, 0, 1]
+            .iter()
+            .cycle()
+            .take(400)
+            .enumerate()
+        {
+            now += gap_ms * MS;
+            let want = r.reserve(now);
+            let got = l.reserve_at(now, Duration::MAX).unwrap().0.as_nanos() as i64;
+            assert!((got - want).abs() <= 1, "req {i} now+{}ms: got {got} want {want}", (now - t0) / MS);
+            // Go sleeps then proceeds; the sleeping caller does not advance the limiter clock.
+        }
+    }
+
+    #[test]
+    fn cancelled_wait_returns_token() {
+        let l = DynamicRateLimiter::new(Arc::new(|| 1));
+        let t0 = 1_700_000_000_000_000_000i64;
+        assert_eq!(l.reserve_at(t0, Duration::MAX).unwrap().0, Duration::ZERO);
+        let (d, res) = l.reserve_at(t0, Duration::MAX).unwrap();
+        assert_eq!(d, Duration::from_secs(1));
+        l.cancel(&res);
+        assert_eq!(l.reserve_at(t0, Duration::MAX).unwrap().0, Duration::from_secs(1));
     }
 }
 
