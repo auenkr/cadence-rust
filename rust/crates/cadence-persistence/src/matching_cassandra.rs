@@ -781,14 +781,8 @@ mod tests {
         for statement in [SELECT_LIST, DELETE_LIST, RANGE_DELETE_TASKS, COUNT_TASKS] {
             assert_in_go_ci(go, statement);
         }
-        // templateGetTasksQuery adds only an alias; the Rust reader appends the
-        // page limit that Go passes as a gocql page size.
-        assert_in_go_ci(
-            go,
-            &SELECT_TASKS
-                .replace("TTL(task)", "TTL(task) AS ttl")
-                .replace(" LIMIT ?", ""),
-        );
+        // templateGetTasksQuery verbatim; page size is set on the statement.
+        assert_in_go_ci(go, SELECT_TASKS);
         // templateInsertTaskListQuery / templateUpdateTaskListQuery with the
         // UDT literal replaced by one bound UDT parameter.
         let go_stripped = go_composed(go);
