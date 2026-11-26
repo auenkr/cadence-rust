@@ -1460,6 +1460,8 @@ pub struct ShardInfoRecord {
     pub cluster_timer_ack_level: std::collections::BTreeMap<String, i64>,
     pub owner: String,
     pub cluster_replication_level: std::collections::BTreeMap<String, i64>,
+    /// `ReplicationDlqAckLevel` (thrift field 46).
+    pub replication_dlq_ack_level: std::collections::BTreeMap<String, i64>,
     /// `(domain_id, failover_version, creation_time)`
     pub pending_failover_markers: Vec<(String, i64, i64)>,
     pub transfer_processing_queue_states: std::collections::BTreeMap<String, Vec<ShardProcessingQueueRecord>>,
@@ -1562,6 +1564,7 @@ impl ShardInfoRecord {
         if !self.cluster_transfer_ack_level.is_empty() { f.push((34, i64_map(&self.cluster_transfer_ack_level))); }
         if !self.cluster_timer_ack_level.is_empty() { f.push((36, i64_map(&self.cluster_timer_ack_level))); }
         if !self.cluster_replication_level.is_empty() { f.push((40, i64_map(&self.cluster_replication_level))); }
+        if !self.replication_dlq_ack_level.is_empty() { f.push((46, i64_map(&self.replication_dlq_ack_level))); }
         if !self.pending_failover_markers.is_empty() {
             let list = self.pending_failover_markers.iter().map(|(d, v, c)| Value::Struct(Struct { fields: vec![(10, string_field(d)), (20, Value::I64(*v)), (30, Value::I64(*c))] })).collect();
             let blob = versioned_blob(&Struct { fields: vec![(10, Value::List(list))] })?;
@@ -1601,7 +1604,7 @@ impl ShardInfoRecord {
             stolen_since_renew: contract_i32(v, 10)?, updated_at_nanos: contract_i64(v, 12)?, replication_ack_level: contract_i64(v, 14)?,
             transfer_ack_level: contract_i64(v, 16)?, timer_ack_level_nanos: contract_i64(v, 18)?, domain_notification_version: contract_i64(v, 24)?,
             cluster_transfer_ack_level: read_i64_map(v, 34)?, cluster_timer_ack_level: read_i64_map(v, 36)?, owner: contract_string(v, 38)?,
-            cluster_replication_level: read_i64_map(v, 40)?, ..Default::default()
+            cluster_replication_level: read_i64_map(v, 40)?, replication_dlq_ack_level: read_i64_map(v, 46)?, ..Default::default()
         };
         if let Some(root) = read_versioned_blob(v, 42, 44)? {
             if let Some(Value::List(list)) = root.get(10) {

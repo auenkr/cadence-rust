@@ -102,6 +102,7 @@ fn build_udt(row: &ShardRow, now: DateTime<Utc>) -> ShardUdt {
     (udt.timer_processing_queue_states, udt.timer_processing_queue_states_encoding) = raw_blob(&st, 55, 56);
     udt.domain_notification_version = Some(rec.domain_notification_version);
     udt.cluster_replication_level = non_empty(&rec.cluster_replication_level);
+    udt.replication_dlq_ack_level = non_empty(&rec.replication_dlq_ack_level);
     (udt.pending_failover_markers, udt.pending_failover_markers_encoding) = raw_blob(&st, 42, 44);
     udt
 }
@@ -142,6 +143,7 @@ mod create_conflict_tests {
         rec.cluster_transfer_ack_level.insert("c".into(), 6);
         rec.cluster_timer_ack_level.insert("c".into(), 1_700_000_000_123_000_000);
         rec.cluster_replication_level.insert("r".into(), 3);
+        rec.replication_dlq_ack_level.insert("d".into(), 4);
         let data = rec.encode(Encoding::ThriftRW).unwrap();
         let row = ShardRow { shard_id: 3, range_id: 8, data, data_encoding: "thriftrw".into() };
         let now = Utc::now();
@@ -158,6 +160,7 @@ mod create_conflict_tests {
         assert_eq!(udt.cluster_timer_ack_level.unwrap()["c"].timestamp_millis(), 1_700_000_000_123);
         assert_eq!(udt.domain_notification_version, Some(9));
         assert_eq!(udt.cluster_replication_level.unwrap()["r"], 3);
+        assert_eq!(udt.replication_dlq_ack_level.unwrap()["d"], 4);
         assert_eq!(udt.transfer_processing_queue_states, None);
         assert_eq!(udt.transfer_processing_queue_states_encoding.as_deref(), Some(""));
         assert_eq!(udt.pending_failover_markers_encoding.as_deref(), Some(""));

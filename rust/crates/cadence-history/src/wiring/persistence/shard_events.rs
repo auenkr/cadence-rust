@@ -144,6 +144,7 @@ fn shard_data_to_record(info: &ShardInfoData) -> ShardInfoRecord {
         cluster_timer_ack_level: to_btree(&info.cluster_timer_ack_level),
         owner: info.owner.clone(),
         cluster_replication_level: to_btree(&info.cluster_replication_level),
+        replication_dlq_ack_level: to_btree(&info.replication_dlq_ack_level),
         pending_failover_markers: info
             .pending_failover_markers
             .iter()
@@ -222,6 +223,7 @@ fn shard_row_to_data(row: &ShardRow) -> Result<ShardInfoData, String> {
         cluster_transfer_ack_level: rec.cluster_transfer_ack_level.into_iter().collect(),
         cluster_timer_ack_level: rec.cluster_timer_ack_level.into_iter().collect(),
         cluster_replication_level: rec.cluster_replication_level.into_iter().collect(),
+        replication_dlq_ack_level: rec.replication_dlq_ack_level.into_iter().collect(),
         queue_states: rec
             .queue_states
             .into_iter()

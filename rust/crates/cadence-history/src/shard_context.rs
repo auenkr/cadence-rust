@@ -147,6 +147,7 @@ pub struct ShardInfoData {
     pub cluster_transfer_ack_level: HashMap<String, i64>,
     pub cluster_timer_ack_level: HashMap<String, i64>,
     pub cluster_replication_level: HashMap<String, i64>,
+    pub replication_dlq_ack_level: HashMap<String, i64>,
     pub queue_states: HashMap<i32, QueueState>,
     pub transfer_processing_queue_states: HashMap<String, Vec<ProcessingQueueState>>,
     pub timer_processing_queue_states: HashMap<String, Vec<ProcessingQueueState>>,
