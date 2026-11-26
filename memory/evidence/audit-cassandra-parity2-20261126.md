@@ -28,4 +28,8 @@ Fix: `rust/crates/cadence-persistence/src/cassandra_errors.rs` (classifier + uni
 history_visibility_cassandra.rs, visibility_cassandra.rs statements/TTL, matching_domain_cassandra.rs, semaphores_cassandra_native*.rs, history_execution_cassandra.rs read paths, session defaults in cassandra.rs (defaults LOCAL_QUORUM/LOCAL_SERIAL, 10s timeout seen at cassandra.rs:751-754).
 
 ## CI evidence
-(pending)
+Head SHA df74191019b01961118231dcf7a68c14b2502373
+- rust-ci cadence-persistence: success https://github.com/auenkr/cadence-rust/actions/runs/45751576076
+- rust-ci workspace: success https://github.com/auenkr/cadence-rust/actions/runs/45752198612
+- recovery-timing database=cassandra kill_history,kill_matching 5 reps: success, lost=0 Go (876/876) and Rust (860/860) https://github.com/auenkr/cadence-rust/actions/runs/45752211702
+- Rust cadence-server SHA256 9494fc18278ebef99748c4f4c4de569903d1c51c1bfce2a63184c3e7ed6b5457 (cadence-history 4f62107baa955290e8f84cfeb79e535829b86c66273f791fe0539c8cfe801c24)
