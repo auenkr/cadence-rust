@@ -623,7 +623,7 @@ where
                 current_timestamp_unix_nanos: now_unix_nanos(),
             };
             let executions = executions.clone();
-            async move { executions.create_workflow_execution(request).await }
+            async move { crate::min_timeout::ensure_min_timeout(executions.create_workflow_execution(request)).await }
         })
         .await;
         match result {
@@ -670,7 +670,7 @@ where
                 current_timestamp_unix_nanos: now_unix_nanos(),
             };
             let executions = executions.clone();
-            async move { executions.update_workflow_execution(request).await }
+            async move { crate::min_timeout::ensure_min_timeout(executions.update_workflow_execution(request)).await }
         })
         .await;
         match result {
@@ -763,7 +763,7 @@ where
             workflow_request_mode: WorkflowRequestMode::New,
             current_timestamp_unix_nanos: now_unix_nanos(),
         };
-        match self.executions.conflict_resolve_workflow_execution(request).await {
+        match crate::min_timeout::ensure_min_timeout(self.executions.conflict_resolve_workflow_execution(request)).await {
             Ok(_) => {
                 self.hooks.tasks_committed();
                 Ok(())

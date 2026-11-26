@@ -421,18 +421,35 @@ async fn handle_call(w: Arc<Mutex<OwnedWriteHalf>>, id: u32, call: Call, state: 
             schedule_id
         );
     }
-    let remaining = (call.started + call.ttl).saturating_duration_since(Instant::now());
-    let res = tokio::time::timeout(
-        remaining,
-        cadence_persistence::caller_type::scope_from_headers(
-            &app_headers,
-            cadence_service_core::header_forwarding::INBOUND_HEADERS.scope(
-                app_headers.iter().map(|(k, v)| (k.to_ascii_lowercase(), v.clone())).collect(),
-                crate::wiring::assembly::engine_decision::CLIENT_HEADERS.scope(client_headers, dispatch(&state, &procedure, &args)),
-            ),
-        ),
-    )
-    .await;
+    let deadline = call.started + call.ttl;
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    // Go keeps running the handler after the caller's ttl expires (only ctx-aware calls fail), so a write
+    // already in flight still reaches its post-write bookkeeping / range renewal. Run the dispatch as a
+    // detached task and only stop waiting for it when the ttl elapses.
+    let work = {
+        let state = state.clone();
+        let procedure = procedure.clone();
+        async move {
+            crate::min_timeout::CALL_DEADLINE
+                .scope(
+                    deadline,
+                    cadence_persistence::caller_type::scope_from_headers(
+                        &app_headers,
+                        cadence_service_core::header_forwarding::INBOUND_HEADERS.scope(
+                            app_headers.iter().map(|(k, v)| (k.to_ascii_lowercase(), v.clone())).collect(),
+                            crate::wiring::assembly::engine_decision::CLIENT_HEADERS
+                                .scope(client_headers, async { dispatch(&state, &procedure, &args).await }),
+                        ),
+                    ),
+                )
+                .await
+        }
+    };
+    let res = match tokio::time::timeout(remaining, tokio::spawn(work)).await {
+        Ok(Ok(r)) => Ok(r),
+        Ok(Err(e)) => Ok(Err(format!("history handler task failed: {e}"))),
+        Err(t) => Err(t),
+    };
     let outcome = match res {
         Err(_) => return send_error(&w, id, 1, &call.trace, "Request timed out").await,
         Ok(Err(m)) => return send_error(&w, id, 6, &call.trace, &m).await,

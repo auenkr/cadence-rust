@@ -545,7 +545,7 @@ impl EngineExecutionContext {
             workflow_request_mode: pc::WorkflowRequestMode::New,
             current_timestamp_unix_nanos: now,
         };
-        match core.executions.update_workflow_execution(request).await {
+        match crate::min_timeout::ensure_min_timeout(core.executions.update_workflow_execution(request)).await {
             Ok(()) => {
                 // Go notifyingExecutionManager notifies (cache inject) before updateMaxReadLevelLocked.
                 let traced = crate::decision_trace::enabled()
