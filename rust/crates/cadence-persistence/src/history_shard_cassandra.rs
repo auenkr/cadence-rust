@@ -11,8 +11,10 @@ use crate::cassandra::CassandraBlockingSession;
 use crate::history_sql::{HistoryPersistenceError as E, ShardRow, ShardStore};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use crate::sqlblobs::{Encoding, ShardInfoRecord};
+use cadence_thrift::{Struct, Value};
 use scylla::{value::Row, SerializeValue};
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use uuid::Uuid;
 
 /// Go constants.go `rowTypeShard*`.
@@ -33,8 +35,9 @@ const UPDATE: &str = "UPDATE executions SET shard = ?, data = ?, data_encoding =
 /// Go `templateUpdateRangeIDQuery`.
 const UPDATE_RANGE_ID: &str = "UPDATE executions SET range_id = ? WHERE shard_id = ? and type = ? and domain_id = ? and workflow_id = ? and run_id = ? and visibility_ts = ? and task_id = ? IF range_id = ?";
 
-/// Go `shard` UDT (schema.cql). Only the fields History persists typed are set.
-#[derive(Debug, Clone, Default, SerializeValue, scylla::DeserializeValue)]
+/// Go `shard` UDT (schema.cql); all 19 fields Go `templateShardType` writes.
+/// Nil Go maps/blobs are bound as null (`None`).
+#[derive(Debug, Clone, Default, PartialEq, SerializeValue)]
 struct ShardUdt {
     shard_id: Option<i32>,
     owner: Option<String>,
@@ -44,7 +47,66 @@ struct ShardUdt {
     replication_ack_level: Option<i64>,
     transfer_ack_level: Option<i64>,
     timer_ack_level: Option<DateTime<Utc>>,
+    cluster_transfer_ack_level: Option<HashMap<String, i64>>,
+    cluster_timer_ack_level: Option<HashMap<String, DateTime<Utc>>>,
+    transfer_processing_queue_states: Option<Vec<u8>>,
+    transfer_processing_queue_states_encoding: Option<String>,
+    timer_processing_queue_states: Option<Vec<u8>>,
+    timer_processing_queue_states_encoding: Option<String>,
     domain_notification_version: Option<i64>,
+    cluster_replication_level: Option<HashMap<String, i64>>,
+    replication_dlq_ack_level: Option<HashMap<String, i64>>,
+    pending_failover_markers: Option<Vec<u8>>,
+    pending_failover_markers_encoding: Option<String>,
+}
+
+fn nanos_to_ts(nanos: i64) -> DateTime<Utc> {
+    DateTime::<Utc>::from_timestamp_millis(nanos.div_euclid(1_000_000)).unwrap_or_default()
+}
+
+fn non_empty<K: Clone + Eq + std::hash::Hash, V: Clone>(m: &std::collections::BTreeMap<K, V>) -> Option<HashMap<K, V>>
+where
+    K: Ord,
+{
+    if m.is_empty() { None } else { Some(m.iter().map(|(k, v)| (k.clone(), v.clone())).collect()) }
+}
+
+/// Raw nested blob (data, encoding) from the thriftrw ShardInfo struct; Go writes ("" encoding, nil data) when absent.
+fn raw_blob(st: &Struct, data_id: i16, enc_id: i16) -> (Option<Vec<u8>>, Option<String>) {
+    let data = match st.get(data_id) { Some(Value::Bytes(b)) if !b.is_empty() => Some(b.clone()), _ => None };
+    let enc = match st.get(enc_id) { Some(Value::Bytes(b)) => String::from_utf8(b.clone()).unwrap_or_default(), _ => String::new() };
+    (data, Some(enc))
+}
+
+/// Builds the typed UDT Go writes from the authoritative `data` blob
+/// (Go `shardInfoToShardsRow` + `InsertShard`/`UpdateShard`).
+fn build_udt(row: &ShardRow, now: DateTime<Utc>) -> ShardUdt {
+    let mut udt = ShardUdt {
+        shard_id: Some(row.shard_id),
+        range_id: Some(row.range_id),
+        updated_at: Some(now),
+        ..Default::default()
+    };
+    let Ok(encoding) = Encoding::parse(&row.data_encoding) else { return udt };
+    let Ok(st) = encoding.decode(&row.data) else { return udt };
+    let Ok(rec) = ShardInfoRecord::from_struct(&st) else { return udt };
+    udt.owner = Some(rec.owner.clone());
+    udt.stolen_since_renew = Some(rec.stolen_since_renew);
+    udt.replication_ack_level = Some(rec.replication_ack_level);
+    udt.transfer_ack_level = Some(rec.transfer_ack_level);
+    udt.timer_ack_level = Some(nanos_to_ts(rec.timer_ack_level_nanos));
+    udt.cluster_transfer_ack_level = non_empty(&rec.cluster_transfer_ack_level);
+    udt.cluster_timer_ack_level = if rec.cluster_timer_ack_level.is_empty() {
+        None
+    } else {
+        Some(rec.cluster_timer_ack_level.iter().map(|(k, v)| (k.clone(), nanos_to_ts(*v))).collect())
+    };
+    (udt.transfer_processing_queue_states, udt.transfer_processing_queue_states_encoding) = raw_blob(&st, 50, 51);
+    (udt.timer_processing_queue_states, udt.timer_processing_queue_states_encoding) = raw_blob(&st, 55, 56);
+    udt.domain_notification_version = Some(rec.domain_notification_version);
+    udt.cluster_replication_level = non_empty(&rec.cluster_replication_level);
+    (udt.pending_failover_markers, udt.pending_failover_markers_encoding) = raw_blob(&st, 42, 44);
+    udt
 }
 
 /// Read-side view of the `shard` UDT: Go writes empty (zero-byte) timestamps for fields like `timer_ack_level`,
@@ -74,6 +136,34 @@ mod create_conflict_tests {
     fn lost_create_race_is_already_exists() {
         let error = create_conflict(7, 1, 4);
         assert!(matches!(error, E::AlreadyExists(ref m) if m.contains("ShardId: 7") && m.contains("actual_range_id : 4")));
+    }
+
+    #[test]
+    fn udt_carries_all_go_fields_from_blob() {
+        let mut rec = ShardInfoRecord { owner: "host".into(), stolen_since_renew: 2, replication_ack_level: 5, transfer_ack_level: 6,
+            timer_ack_level_nanos: 1_700_000_000_123_000_000, domain_notification_version: 9, ..Default::default() };
+        rec.cluster_transfer_ack_level.insert("c".into(), 6);
+        rec.cluster_timer_ack_level.insert("c".into(), 1_700_000_000_123_000_000);
+        rec.cluster_replication_level.insert("r".into(), 3);
+        let data = rec.encode(Encoding::ThriftRW).unwrap();
+        let row = ShardRow { shard_id: 3, range_id: 8, data, data_encoding: "thriftrw".into() };
+        let now = Utc::now();
+        let udt = build_udt(&row, now);
+        assert_eq!(udt.shard_id, Some(3));
+        assert_eq!(udt.range_id, Some(8));
+        assert_eq!(udt.owner.as_deref(), Some("host"));
+        assert_eq!(udt.stolen_since_renew, Some(2));
+        assert_eq!(udt.updated_at, Some(now));
+        assert_eq!(udt.replication_ack_level, Some(5));
+        assert_eq!(udt.transfer_ack_level, Some(6));
+        assert_eq!(udt.timer_ack_level.unwrap().timestamp_millis(), 1_700_000_000_123);
+        assert_eq!(udt.cluster_transfer_ack_level.unwrap()["c"], 6);
+        assert_eq!(udt.cluster_timer_ack_level.unwrap()["c"].timestamp_millis(), 1_700_000_000_123);
+        assert_eq!(udt.domain_notification_version, Some(9));
+        assert_eq!(udt.cluster_replication_level.unwrap()["r"], 3);
+        assert_eq!(udt.transfer_processing_queue_states, None);
+        assert_eq!(udt.transfer_processing_queue_states_encoding.as_deref(), Some(""));
+        assert_eq!(udt.pending_failover_markers_encoding.as_deref(), Some(""));
     }
 }
 
@@ -162,12 +252,7 @@ impl CassandraShardStore {
 impl ShardStore for CassandraShardStore {
     async fn create_shard(&self, row: ShardRow) -> Result<(), E> {
         self.blocking(move |driver| {
-            let udt = ShardUdt {
-                shard_id: Some(row.shard_id),
-                range_id: Some(row.range_id),
-                updated_at: Some(Utc::now()),
-                ..Default::default()
-            };
+            let udt = build_udt(&row, Utc::now());
             let session = driver.session();
             let result = driver
                 .run(session.query_unpaged(
@@ -238,12 +323,7 @@ impl ShardStore for CassandraShardStore {
 
     async fn update_shard(&self, row: ShardRow, previous_range_id: i64) -> Result<(), E> {
         self.blocking(move |driver| {
-            let udt = ShardUdt {
-                shard_id: Some(row.shard_id),
-                range_id: Some(row.range_id),
-                updated_at: Some(Utc::now()),
-                ..Default::default()
-            };
+            let udt = build_udt(&row, Utc::now());
             let session = driver.session();
             let result = driver
                 .run(session.query_unpaged(

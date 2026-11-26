@@ -34,6 +34,8 @@ pub(crate) fn bound<T: BoundValue + 'static>(value: T) -> Box<dyn BoundValue> {
 pub struct CqlStatement {
     pub text: String,
     pub consistency: Option<Consistency>,
+    /// Driver page size (Go `PageSize(batch)`); only honored by `select_tasks`.
+    pub page_size: Option<i32>,
 }
 
 impl CqlStatement {
@@ -41,13 +43,20 @@ impl CqlStatement {
         Self {
             text: text.into(),
             consistency: None,
+            page_size: None,
         }
+    }
+
+    pub fn with_page_size(mut self, page_size: i32) -> Self {
+        self.page_size = Some(page_size);
+        self
     }
 
     pub fn with_consistency(text: impl Into<String>, consistency: Consistency) -> Self {
         Self {
             text: text.into(),
             consistency: Some(consistency),
+            page_size: None,
         }
     }
 
@@ -55,6 +64,9 @@ impl CqlStatement {
         let mut statement = Statement::new(self.text.as_str());
         if let Some(consistency) = self.consistency {
             statement.set_consistency(consistency);
+        }
+        if let Some(page_size) = self.page_size {
+            statement.set_page_size(page_size);
         }
         statement
     }
@@ -266,10 +278,18 @@ impl CqlExecutor for ScyllaExecutor {
         statement: &CqlStatement,
         values: BoundValues,
     ) -> ExecResult<Vec<(i64, CassandraTaskUdt, Option<i32>)>> {
-        let rows = self
-            .query(statement, &values)?
-            .into_rows_result()
-            .map_err(other)?;
+        // Go iterates one gocql page (PageSize(batch)) and stops at batch size,
+        // so a single page read is equivalent and never scans the whole range.
+        let session = self.driver.session();
+        let (result, _) = self
+            .driver
+            .run(session.query_single_page(
+                statement.to_statement(),
+                &values,
+                scylla::response::PagingState::start(),
+            ))
+            .map_err(|error| ExecFailure::Execution(Box::new(error)))?;
+        let rows = result.into_rows_result().map_err(other)?;
         let mut out = Vec::new();
         for row in rows
             .rows::<(i64, CassandraTaskUdt, Option<i32>)>()
