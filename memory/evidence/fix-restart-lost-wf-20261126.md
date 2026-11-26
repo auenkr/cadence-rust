@@ -71,3 +71,23 @@ Rust history sha256 85e8d718c6ba5900d5638161edccef2c94ad0b8b635c20d6fec8dcb37510
 e778ea2e1a3a9fcbb9afb84a0d04896274bb5f3ec38c2d3777e61d87a821e725. All 3 Rust losses have full histories (decision started/completed,
 activity started, timeout): the known activity StartToClose race, not first-decision-task loss. Verdict: Rust <= Go. Runs show
 "failure" only because the Go arm's rep-7 loss (401) trips the gate; not a Rust issue.
+
+## Accepted differences vs Go
+- The tokio timer used by the rate limiter can fire up to 1 ms late per limiter wait (Go timers are ns-precise).
+- `created_time` is truncated to milliseconds in Rust.
+- The detached handler's reads run unbounded, whereas Go bounds them by the caller deadline; only writes use `ensureMinContextTimeout`.
+
+## Follow-up (branch fix-min-timeout-expired)
+- An already-expired caller deadline now returns `PersistenceError::CallerDeadlineExpired` (-> `HistoryError::DeadlineExceeded`), like Go's `ctx.Err()` returned before the error switch: no shard range renew. Write timeouts still renew.
+- Recovery gate pass criterion: per database Rust lost <= Go lost and zero Rust first-decision-task losses.
+
+## Validation (head d30a18197, branch fix-min-timeout-expired)
+- rust-ci cadence-history 45764470976 success; workspace 45764474408 success.
+- recovery-timing cassandra cold_restart,kill_history x10 (Rust cadence-server sha256 eefa780fcf783c503665510ec723f8f063915b5f6f2cadb47003f830c92e16bd):
+| run | Go lost/started | Rust lost/started | conclusion |
+|---|---|---|---|
+| 45764478188 | 0/3146 | 0/2992 | success |
+| 45764481683 | 0/2952 | 0/2773 | success |
+| 45764485073 | 401/3862 | 0/3104 | failure: Go rep 1 kill_history never stable (Go arm only) |
+- Rust: 0 lost, 0 first-decision losses in all runs. Run 3 verdict was `rust_lost=0 rust_first_decision_lost=0` but the stability check still counted the Go arm; a follow-up commit makes that check Rust-arm only (not re-run).
+

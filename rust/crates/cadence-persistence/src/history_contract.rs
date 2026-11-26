@@ -533,6 +533,9 @@ pub enum PersistenceError {
     Internal(String),
     /// Go `persistence.TransactionSizeLimitError`.
     TransactionSizeLimit(String),
+    /// Go `ctx.Err()` of an already-expired caller context (`ensureMinContextTimeout`): nothing was written,
+    /// so the outcome is known and the shard range is not renewed.
+    CallerDeadlineExpired,
 }
 impl std::fmt::Display for PersistenceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

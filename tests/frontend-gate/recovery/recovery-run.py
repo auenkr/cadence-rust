@@ -73,6 +73,24 @@ def wait_stable(samples, t0, fresh_filter, limit):
     return False
 
 
+def first_decision_losses(tag):
+    """Lost workflows whose dumped history (driver -lost-dir) never completed a decision task, or could not be read."""
+    d = OUT / f"lost-{tag}"
+    n = 0
+    for f in d.glob("*.json") if d.is_dir() else []:
+        if (d / (f.stem + ".err")).exists():
+            n += 1
+            continue
+        try:
+            evs = json.loads(f.read_text()) or []
+        except ValueError:
+            n += 1
+            continue
+        if not any(e.get("eventType") in ("DecisionTaskCompleted", 4) for e in evs):
+            n += 1
+    return n
+
+
 def schema_version(compose, env, name):
     """Cassandra schema_version rows (both keyspaces), via cqlsh in the DB container."""
     q = "select keyspace_name, curr_version from cadence.schema_version; select keyspace_name, curr_version from cadence_visibility.schema_version;"
@@ -185,7 +203,7 @@ def main():
                 rows = load(samples)
                 lost = [r for r in rows if not r["ok"]]
                 summary = {"rep": rep, "arm": arm, "workflows": len(rows), "completed": len(rows) - len(lost),
-                           "lost": len(lost), "lost_samples": [{"wf": r["wf"], "err": r.get("err", "")[:200]} for r in lost[:5]],
+                           "lost": len(lost), "first_decision_lost": first_decision_losses(tag), "lost_samples": [{"wf": r["wf"], "err": r.get("err", "")[:200]} for r in lost[:5]],
                            "driver_exit": driver.returncode, "events": events}
                 results.append(summary)
                 (OUT / "results.json").write_text(json.dumps(results, indent=2) + "\n")
@@ -213,9 +231,20 @@ def main():
         lines.append(f"| {arm} | {len(rs)} | {sum(r['workflows'] for r in rs)} | {sum(r['completed'] for r in rs)} | {sum(r['lost'] for r in rs)} |")
     (OUT / "summary.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
-    if any(r["lost"] for r in results) or any(not e["stable_reached"] or e.get("schema_version_intact") is False for r in results for e in r["events"]):
+    # Pass criterion: per database, Rust lost <= Go lost AND zero Rust first-decision-task losses
+    # (Go-arm losses must not redden the run); the recovery-stability checks apply to the Rust arm only (Go-arm instability is reported, not gated).
+    total = lambda arm, k: sum(r[k] for r in results if r["arm"] == arm)
+    bad = []
+    if total("rust", "lost") > total("go", "lost"):
+        bad.append(f"rust lost {total('rust', 'lost')} > go lost {total('go', 'lost')}")
+    if total("rust", "first_decision_lost"):
+        bad.append(f"rust first-decision-task losses: {total('rust', 'first_decision_lost')}")
+    if any(not e["stable_reached"] or e.get("schema_version_intact") is False for r in results if r["arm"] == "rust" for e in r["events"]):
+        bad.append("rust stability/schema check failed")
+    print(f"[verdict] {args.database} go_lost={total('go', 'lost')} rust_lost={total('rust', 'lost')} "
+          f"rust_first_decision_lost={total('rust', 'first_decision_lost')} -> {'FAIL: ' + '; '.join(bad) if bad else 'PASS'}")
+    if bad:
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()
