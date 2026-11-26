@@ -6,7 +6,7 @@
 //!
 //! Wired into the queue factory by `queue_v2_wiring` (queue v2 piece C).
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use futures_util::FutureExt;
@@ -299,16 +299,19 @@ impl v2::Limiter for V2RateLimiter {
         if ctx.is_cancelled() {
             return Err("context canceled".into());
         }
-        let wait = self
+        let (wait, res) = self
             .inner
-            .reserve(Instant::now(), Duration::MAX)
+            .reserve(Duration::MAX)
             .ok_or_else(|| "rate: Wait(n=1) exceeds limiter's burst".to_string())?;
         if wait.is_zero() {
             return Ok(());
         }
         tokio::select! {
             _ = tokio::time::sleep(wait) => Ok(()),
-            _ = ctx.cancelled() => Err("context canceled".into()),
+            _ = ctx.cancelled() => {
+                self.inner.cancel(&res);
+                Err("context canceled".into())
+            }
         }
     }
 }

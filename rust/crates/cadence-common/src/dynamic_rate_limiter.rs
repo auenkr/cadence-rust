@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use crate::rate_limiter::RateLimiter;
+use crate::rate_limiter::{RateLimiter, Reservation};
 
 /// Go `_defaultOpts.TTL`.
 pub const DYNAMIC_LIMITER_TTL_NANOS: i64 = 5_000_000_000;
@@ -84,6 +84,40 @@ impl DynamicRateLimiter {
             .reserve_wait(now, None)
             .ok()?;
         Some(Duration::from_nanos(r.delay_nanos().max(0) as u64))
+    }
+}
+
+impl DynamicRateLimiter {
+    /// Go `Wait(ctx)` with an optional maximum wait (ctx deadline): reserves a
+    /// token and returns the delay plus the reservation so the caller can
+    /// `cancel` it if its sleep is interrupted. `None` mirrors Go's
+    /// errWaitZeroBurst / errWaitLongerThanDeadline (nothing consumed).
+    pub fn reserve_at(
+        &self,
+        now: i64,
+        max_wait: Option<Duration>,
+    ) -> Option<(Duration, Reservation)> {
+        self.maybe_refresh(now);
+        let deadline = max_wait
+            .filter(|d| *d < Duration::from_nanos(i64::MAX as u64))
+            .map(|d| now.saturating_add(d.as_nanos() as i64));
+        let r = self
+            .rl
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .reserve_wait(now, deadline)
+            .ok()?;
+        Some((Duration::from_nanos(r.delay_nanos().max(0) as u64), r))
+    }
+
+    /// Real-clock `reserve_at`.
+    pub fn reserve_now(&self, max_wait: Option<Duration>) -> Option<(Duration, Reservation)> {
+        self.reserve_at(unix_nanos(), max_wait)
+    }
+
+    /// Go `res.CancelAt(latestNow)` after an interrupted wait.
+    pub fn cancel(&self, r: &Reservation) {
+        self.rl.lock().unwrap_or_else(|e| e.into_inner()).cancel(r);
     }
 }
 
