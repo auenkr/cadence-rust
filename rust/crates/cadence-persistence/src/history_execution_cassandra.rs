@@ -40,6 +40,7 @@ pub(crate) fn internal<E: std::fmt::Display + std::any::Any>(error: E) -> Persis
     match classify(&error) {
         CassandraErrorKind::Timeout => PersistenceError::Timeout(format!("Cassandra execution timed out. Error: {error}")),
         CassandraErrorKind::Throttled => PersistenceError::ServiceBusy(format!("Cassandra execution operation failed. Error: {error}")),
+        CassandraErrorKind::DbUnavailable => PersistenceError::DbUnavailable(format!("Cassandra execution operation failed. Error: {error}")),
         _ => PersistenceError::Internal(format!("Cassandra execution: {error}")),
     }
 }

@@ -20,7 +20,7 @@ fn map_error(error: VisibilityError) -> CadenceError {
             CadenceError::EntityNotExists(cadence_api::errors::EntityNotExistsError::new(m))
         }
         VisibilityError::BadRequest(m) => bad_request(m),
-        VisibilityError::Internal(m) => internal(m),
+        VisibilityError::Internal(m) | VisibilityError::Timeout(m) | VisibilityError::DbUnavailable(m) => internal(m),
         VisibilityError::ServiceBusy(m) => {
             CadenceError::ServiceBusy(cadence_api::errors::ServiceBusyError::new(m))
         }

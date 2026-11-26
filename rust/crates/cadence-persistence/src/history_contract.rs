@@ -527,6 +527,8 @@ pub enum PersistenceError {
     InternalDataInconsistency(String),
     InvalidArgument(String),
     Timeout(String),
+    /// Go `persistence.DBUnavailableError`.
+    DbUnavailable(String),
     ServiceBusy(String),
     Internal(String),
     /// Go `persistence.TransactionSizeLimitError`.

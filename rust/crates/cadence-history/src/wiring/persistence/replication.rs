@@ -45,7 +45,7 @@ pub fn map_persistence_error(e: PersistenceError) -> ReplicationError {
         PersistenceError::InvalidArgument(m) | PersistenceError::InvalidPersistenceRequest(m) => {
             ReplicationError::BadRequest(m)
         }
-        PersistenceError::Internal(m) => ReplicationError::Transient(m),
+        PersistenceError::Internal(m) | PersistenceError::DbUnavailable(m) => ReplicationError::Transient(m),
         other => ReplicationError::Other(format!("{other:?}")),
     }
 }
@@ -56,7 +56,8 @@ fn map_read_error(e: HistoryReadError) -> ReplicationError {
         HistoryReadError::DataInconsistency(m) => ReplicationError::InternalDataInconsistency(m),
         HistoryReadError::InvalidRequest(m) => ReplicationError::BadRequest(m),
         HistoryReadError::ServiceBusy(m) => ReplicationError::ServiceBusy(m),
-        HistoryReadError::Internal(m) => ReplicationError::Transient(m),
+        HistoryReadError::Internal(m) | HistoryReadError::DbUnavailable(m) => ReplicationError::Transient(m),
+        HistoryReadError::Timeout(m) => ReplicationError::Other(m),
     }
 }
 

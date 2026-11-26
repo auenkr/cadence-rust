@@ -430,7 +430,10 @@ fn map_read_error(e: HistoryReadError) -> HistoryError {
         HistoryReadError::EntityNotExists(m) => HistoryError::entity_not_exists(m),
         HistoryReadError::InvalidRequest(m) => HistoryError::bad_request(m),
         HistoryReadError::ServiceBusy(m) => cadence_api::errors::ServiceBusyError::new(m).into(),
-        HistoryReadError::DataInconsistency(m) | HistoryReadError::Internal(m) => HistoryError::internal(m),
+        HistoryReadError::DataInconsistency(m)
+        | HistoryReadError::Internal(m)
+        | HistoryReadError::Timeout(m)
+        | HistoryReadError::DbUnavailable(m) => HistoryError::internal(m),
     }
 }
 

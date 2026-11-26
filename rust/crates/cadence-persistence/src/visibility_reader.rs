@@ -12,12 +12,16 @@ pub enum VisibilityError {
     Internal(String),
     /// Go `types.ServiceBusyError` (persistence QPS limiter).
     ServiceBusy(String),
+    /// Go `persistence.TimeoutError`.
+    Timeout(String),
+    /// Go `persistence.DBUnavailableError`.
+    DbUnavailable(String),
 }
 
 impl std::fmt::Display for VisibilityError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::EntityNotExists(m) | Self::BadRequest(m) | Self::Internal(m) | Self::ServiceBusy(m) => f.write_str(m),
+            Self::EntityNotExists(m) | Self::BadRequest(m) | Self::Internal(m) | Self::ServiceBusy(m) | Self::Timeout(m) | Self::DbUnavailable(m) => f.write_str(m),
         }
     }
 }
