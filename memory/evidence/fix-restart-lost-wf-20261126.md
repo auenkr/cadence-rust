@@ -44,3 +44,30 @@ Fix: `wiring/server/grpc.rs` runs state-changing RPCs (start, signal, signal-wit
 - All 2 Rust losses have full histories (DecisionTaskStarted/Completed, ActivityTaskStarted, then WorkflowExecutionTimedOut at 60s) = the known activity StartToClose race that Go loses identically (see perf-frontend-kill-loss-20261126.md). Zero first-decision-task losses.
 Verdict: first-decision-task loss fixed; Rust lost <= Go. Workspace-wide rust-ci not yet run.
 - Workspace rust-ci: https://github.com/auenkr/cadence-rust/actions/runs/45749371199 success (head 7087d829a).
+
+## Go-faithful rework (head b746b808f)
+
+Go `ensureMinContextTimeout` (shard/context.go:980, `minContextTimeout`=1s) is applied ONLY in the shard context's
+`CreateWorkflowExecution`, `UpdateWorkflowExecution` and `ConflictResolveWorkflowExecution` (not per RPC): expired parent ctx
+-> error before writing; parent with <1s left -> fresh 1s context; otherwise the parent deadline. Go handler goroutines are
+never cancelled by the caller deadline. The default error branch of those three renews the RangeID
+(`renew_range_after_unknown_write_error`, already ported and wired in engine_start/engine_cache/engine_resetter).
+
+Rust now: `cadence-history/src/min_timeout.rs` (`ensure_min_timeout`, task-local `CALL_DEADLINE`, `grpc-timeout` parser,
+unit tests) wraps every create/update/conflict-resolve write (engine_start, engine_cache, engine_resetter, engine_checksum,
+engine_ndc). A timeout is a `PersistenceError::Timeout`, so `write_outcome_unknown` triggers the range renew. gRPC `detached`
+sets `CALL_DEADLINE` from `grpc-timeout`; the TChannel `handle_call` dispatch now also runs detached (TTL deadline in
+`CALL_DEADLINE`) and the caller only stops waiting at the ttl.
+
+Validation (head b746b808f): rust-ci cadence-history 45751390778 success; workspace rust-ci 45754504596 success;
+recovery-timing cassandra cold_restart,kill_history x10 reps:
+| run | Go lost/started | Rust lost/started |
+|---|---|---|
+| 45754545827 | 401/3753 (one Go rep lost 401 in cold_restart) | 1/3039 |
+| 45754558006 | 0/3585 | 1/3264 |
+| 45754572192 | 1/3927 | 1/3440 |
+| total | 402/11265 | 3/9743 |
+Rust history sha256 85e8d718c6ba5900d5638161edccef2c94ad0b8b635c20d6fec8dcb375104651, cadence-server
+e778ea2e1a3a9fcbb9afb84a0d04896274bb5f3ec38c2d3777e61d87a821e725. All 3 Rust losses have full histories (decision started/completed,
+activity started, timeout): the known activity StartToClose race, not first-decision-task loss. Verdict: Rust <= Go. Runs show
+"failure" only because the Go arm's rep-7 loss (401) trips the gate; not a Rust issue.
