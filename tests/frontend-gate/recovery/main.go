@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.uber.org/cadence"
 	"go.uber.org/cadence/.gen/go/cadence/workflowserviceclient"
 	"go.uber.org/cadence/.gen/go/shared"
 	"go.uber.org/cadence/client"
@@ -27,7 +28,8 @@ import (
 
 func echo(_ context.Context, payload string) (string, error) { return payload, nil }
 func flow(ctx workflow.Context, payload string) (string, error) {
-	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{ScheduleToStartTimeout: time.Minute, StartToCloseTimeout: time.Minute})
+	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{ScheduleToStartTimeout: 20 * time.Second, ScheduleToCloseTimeout: 40 * time.Second, StartToCloseTimeout: 10 * time.Second,
+		RetryPolicy: &cadence.RetryPolicy{InitialInterval: time.Second, BackoffCoefficient: 1, MaximumAttempts: 5}})
 	var result string
 	err := workflow.ExecuteActivity(ctx, echo, payload).Get(ctx, &result)
 	return result, err
@@ -138,7 +140,7 @@ loop:
 			for {
 				r.Attempts++
 				sctx, scancel := context.WithTimeout(ctx, 5*time.Second)
-				exec, e = c.ExecuteWorkflow(sctx, client.StartWorkflowOptions{ID: id, TaskList: tl, ExecutionStartToCloseTimeout: time.Minute, DecisionTaskStartToCloseTimeout: 10 * time.Second}, flow, payload)
+				exec, e = c.ExecuteWorkflow(sctx, client.StartWorkflowOptions{ID: id, TaskList: tl, ExecutionStartToCloseTimeout: 90 * time.Second, DecisionTaskStartToCloseTimeout: 10 * time.Second}, flow, payload)
 				scancel()
 				if e == nil {
 					break
