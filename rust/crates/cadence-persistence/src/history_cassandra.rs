@@ -32,7 +32,10 @@ struct ExecutionStateUdt {
 type Result<T> = std::result::Result<T, HistoryReadError>;
 type Page = (Vec<HistoryNodeRow>, Option<Vec<u8>>);
 
-fn internal(error: impl std::fmt::Display) -> HistoryReadError {
+fn internal<E: std::fmt::Display + std::any::Any>(error: E) -> HistoryReadError {
+    if crate::cassandra_errors::classify(&error) == crate::cassandra_errors::CassandraErrorKind::Throttled {
+        return HistoryReadError::ServiceBusy(format!("Cassandra history_node operation failed. Error: {error}"));
+    }
     HistoryReadError::Internal(format!("Cassandra history_node: {error}"))
 }
 

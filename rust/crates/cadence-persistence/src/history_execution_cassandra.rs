@@ -34,8 +34,14 @@ pub(crate) fn vis_ts() -> DateTime<Utc> {
     DateTime::<Utc>::from_timestamp_millis(DEFAULT_VISIBILITY_MS).expect("valid default visibility timestamp")
 }
 
-pub(crate) fn internal(error: impl std::fmt::Display) -> PersistenceError {
-    PersistenceError::Internal(format!("Cassandra execution: {error}"))
+pub(crate) fn internal<E: std::fmt::Display + std::any::Any>(error: E) -> PersistenceError {
+    use crate::cassandra_errors::{classify, CassandraErrorKind};
+    // Go nosql.convertCommonErrors: timeout -> TimeoutError, throttle -> ServiceBusyError.
+    match classify(&error) {
+        CassandraErrorKind::Timeout => PersistenceError::Timeout(format!("Cassandra execution timed out. Error: {error}")),
+        CassandraErrorKind::Throttled => PersistenceError::ServiceBusy(format!("Cassandra execution operation failed. Error: {error}")),
+        _ => PersistenceError::Internal(format!("Cassandra execution: {error}")),
+    }
 }
 
 pub(crate) fn parse_uuid(value: &str) -> Result<Uuid, PersistenceError> {

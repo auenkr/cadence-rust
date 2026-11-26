@@ -5,6 +5,7 @@
 //! backends (SQL/NoSQL) implement the same traits in follow-ups.
 
 pub mod cassandra;
+pub mod cassandra_errors;
 pub mod config_store;
 pub mod domain_audit;
 pub mod domain_replication;
