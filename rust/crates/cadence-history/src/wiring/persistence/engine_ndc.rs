@@ -84,7 +84,7 @@ pub fn to_history_error(err: PersistenceError) -> HistoryError {
         PersistenceError::InternalDataInconsistency(m) | PersistenceError::Internal(m) => HistoryError::internal(m),
         PersistenceError::Timeout(m) => HistoryError::PersistenceTimeout(m),
         PersistenceError::TransactionSizeLimit(m) => HistoryError::TransactionSizeLimit(m),
-        PersistenceError::ServiceBusy(m) => HistoryError::internal(m),
+        PersistenceError::ServiceBusy(m) | PersistenceError::DbUnavailable(m) => HistoryError::internal(m),
     }
 }
 
@@ -108,7 +108,7 @@ fn history_to_ndc(err: HistoryError) -> NdcError {
 
 fn is_transient(err: &PersistenceError) -> bool {
     // Go `IsTransientError`: InternalService, ServiceBusy and DBUnavailable (never timeouts).
-    matches!(err, PersistenceError::Internal(_) | PersistenceError::ServiceBusy(_))
+    matches!(err, PersistenceError::Internal(_) | PersistenceError::ServiceBusy(_) | PersistenceError::DbUnavailable(_))
 }
 
 /// Go `persistenceOperationRetryPolicy`: exponential backoff, transient errors only.

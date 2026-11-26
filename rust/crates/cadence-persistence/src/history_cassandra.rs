@@ -33,10 +33,13 @@ type Result<T> = std::result::Result<T, HistoryReadError>;
 type Page = (Vec<HistoryNodeRow>, Option<Vec<u8>>);
 
 fn internal<E: std::fmt::Display + std::any::Any>(error: E) -> HistoryReadError {
-    if crate::cassandra_errors::classify(&error) == crate::cassandra_errors::CassandraErrorKind::Throttled {
-        return HistoryReadError::ServiceBusy(format!("Cassandra history_node operation failed. Error: {error}"));
+    use crate::cassandra_errors::{classify, CassandraErrorKind};
+    match classify(&error) {
+        CassandraErrorKind::Timeout => HistoryReadError::Timeout(format!("Cassandra history_node timed out. Error: {error}")),
+        CassandraErrorKind::Throttled => HistoryReadError::ServiceBusy(format!("Cassandra history_node operation failed. Error: {error}")),
+        CassandraErrorKind::DbUnavailable => HistoryReadError::DbUnavailable(format!("Cassandra history_node operation failed. Error: {error}")),
+        CassandraErrorKind::Internal => HistoryReadError::Internal(format!("Cassandra history_node: {error}")),
     }
-    HistoryReadError::Internal(format!("Cassandra history_node: {error}"))
 }
 
 #[derive(Debug)]
@@ -227,6 +230,43 @@ impl HistoryNodeStore for CassandraHistoryNodeStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn exec_err(db: scylla::errors::DbError, msg: &str) -> scylla::errors::ExecutionError {
+        scylla::errors::ExecutionError::LastAttemptError(scylla::errors::RequestAttemptError::DbError(db, msg.to_owned()))
+    }
+
+    #[test]
+    fn read_errors_map_like_go_convert_common_errors() {
+        use scylla::errors::DbError;
+        assert!(matches!(
+            internal(exec_err(DbError::Overloaded, "x")),
+            HistoryReadError::ServiceBusy(_)
+        ));
+        assert!(matches!(
+            internal(exec_err(
+                DbError::WriteTimeout {
+                    consistency: scylla::statement::Consistency::Quorum,
+                    received: 0,
+                    required: 1,
+                    write_type: scylla::errors::WriteType::Simple
+                },
+                "x"
+            )),
+            HistoryReadError::Timeout(_)
+        ));
+        assert!(matches!(
+            internal(exec_err(
+                DbError::Unavailable {
+                    consistency: scylla::statement::Consistency::Quorum,
+                    required: 2,
+                    alive: 1
+                },
+                "Cannot achieve consistency level QUORUM"
+            )),
+            HistoryReadError::DbUnavailable(_)
+        ));
+        assert!(matches!(internal("plain"), HistoryReadError::Internal(_)));
+    }
 
     #[test]
     fn go_execution_row_constants() {

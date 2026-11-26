@@ -28,10 +28,13 @@ pub enum Extra {
 }
 
 fn internal<E: std::fmt::Display + std::any::Any>(error: E) -> VisibilityError {
-    if crate::cassandra_errors::classify(&error) == crate::cassandra_errors::CassandraErrorKind::Throttled {
-        return VisibilityError::ServiceBusy(format!("Cassandra visibility operation failed. Error: {error}"));
+    use crate::cassandra_errors::{classify, CassandraErrorKind};
+    match classify(&error) {
+        CassandraErrorKind::Timeout => VisibilityError::Timeout(format!("Cassandra visibility timed out. Error: {error}")),
+        CassandraErrorKind::Throttled => VisibilityError::ServiceBusy(format!("Cassandra visibility operation failed. Error: {error}")),
+        CassandraErrorKind::DbUnavailable => VisibilityError::DbUnavailable(format!("Cassandra visibility operation failed. Error: {error}")),
+        CassandraErrorKind::Internal => VisibilityError::Internal(format!("Cassandra visibility: {error}")),
     }
-    VisibilityError::Internal(format!("Cassandra visibility: {error}"))
 }
 
 /// Go `SelectVisibility` template choice. Precedence mirrors the SQL reader:
@@ -348,6 +351,43 @@ impl VisibilityStore for CassandraVisibilityStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn exec_err(db: scylla::errors::DbError, msg: &str) -> scylla::errors::ExecutionError {
+        scylla::errors::ExecutionError::LastAttemptError(scylla::errors::RequestAttemptError::DbError(db, msg.to_owned()))
+    }
+
+    #[test]
+    fn read_errors_map_like_go_convert_common_errors() {
+        use scylla::errors::DbError;
+        assert!(matches!(
+            internal(exec_err(DbError::Overloaded, "x")),
+            VisibilityError::ServiceBusy(_)
+        ));
+        assert!(matches!(
+            internal(exec_err(
+                DbError::WriteTimeout {
+                    consistency: scylla::statement::Consistency::Quorum,
+                    received: 0,
+                    required: 1,
+                    write_type: scylla::errors::WriteType::Simple
+                },
+                "x"
+            )),
+            VisibilityError::Timeout(_)
+        ));
+        assert!(matches!(
+            internal(exec_err(
+                DbError::Unavailable {
+                    consistency: scylla::statement::Consistency::Quorum,
+                    required: 2,
+                    alive: 1
+                },
+                "Cannot achieve consistency level QUORUM"
+            )),
+            VisibilityError::DbUnavailable(_)
+        ));
+        assert!(matches!(internal("plain"), VisibilityError::Internal(_)));
+    }
 
     fn filter() -> VisibilityFilter {
         VisibilityFilter {

@@ -53,7 +53,10 @@ fn read_error(error: HistoryReadError) -> CadenceError {
         HistoryReadError::ServiceBusy(m) => {
             CadenceError::ServiceBusy(cadence_api::errors::ServiceBusyError::new(m))
         }
-        HistoryReadError::DataInconsistency(m) | HistoryReadError::Internal(m) => internal(m),
+        HistoryReadError::DataInconsistency(m)
+        | HistoryReadError::Internal(m)
+        | HistoryReadError::Timeout(m)
+        | HistoryReadError::DbUnavailable(m) => internal(m),
     }
 }
 
