@@ -306,7 +306,7 @@ impl EngineMutableState {
             workflow_request_mode: pc::WorkflowRequestMode::New,
             current_timestamp_unix_nanos: now,
         };
-        core.executions.update_workflow_execution(request).await.map_err(crate::wiring::persistence::engine_ndc::to_history_error)
+        crate::min_timeout::ensure_min_timeout(core.executions.update_workflow_execution(request)).await.map_err(crate::wiring::persistence::engine_ndc::to_history_error)
     }
 }
 

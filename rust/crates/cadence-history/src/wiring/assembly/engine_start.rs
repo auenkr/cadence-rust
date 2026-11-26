@@ -603,7 +603,7 @@ impl WorkflowStartHost for EngineStartHost {
             },
             current_timestamp_unix_nanos: self.core.clock.now(),
         };
-        match self.core.executions.create_workflow_execution(request).await {
+        match crate::min_timeout::ensure_min_timeout(self.core.executions.create_workflow_execution(request)).await {
             Ok(_) => {
                 // Go's queue reader takes the shard RLock for the max read level, so it never observes the notify
                 // before the level advanced; here the level is advanced first so a woken pump cannot read a stale level

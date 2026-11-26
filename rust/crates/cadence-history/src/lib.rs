@@ -1,6 +1,7 @@
 //! History service bootstrap and shard ownership primitives.
 
 pub mod decision_trace;
+pub mod min_timeout;
 pub mod wiring;
 pub mod launcher;
 pub mod client_tls;
