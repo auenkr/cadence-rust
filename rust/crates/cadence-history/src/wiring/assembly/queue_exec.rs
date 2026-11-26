@@ -40,6 +40,7 @@ impl DynamicRateLimiter {
         })
     }
 
+    #[cfg(test)]
     /// Go `ratelimiter.Wait` reservation step at clock sample `now` (unix nanos).
     pub(crate) fn reserve_at(
         &self,
