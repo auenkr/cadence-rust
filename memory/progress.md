@@ -2076,3 +2076,8 @@ During handoff merged documentation-only tips `origin/frontend-core2`
 - Merged `fix-cassandra-bad-binaries-encoding` (10c360159): Rust starts and restarts on Cassandra; schema_version intact.
 - OPEN BUG (figures as reported by the orchestrator, not yet in an evidence file): Cassandra cold_restart, Rust lost 9/8629 workflows vs Go 0/9693; the first decision task is never delivered. Fix in progress. The earlier pooled run recorded 1 Rust loss (`perf-recovery-pooled-20261126.md`).
 - Council round 11 (as reported): Opus 9.5, GPT Sol 9.
+
+## 2026-11-26 pause (master 6f7d8ba41)
+- Council r12 (Opus 5.5 low): 8.5/10; its expired-deadline renew bug fixed (b7ddfff7b).
+- Merged: restart-loss fix (8e46e8f12), Cassandra parity audits 1-5, kill_history first-completion = noise, load-burst trace (env-gated).
+- Open: Cassandra c16 −8.8 wf/s [−11.2,−7.0] (perf-cassandra-c16b); unpaced c1 p90 +27% [+10,+46] (perf-unpaced-c1-limiter), suspect wait_for_task_writes gate (perf-load-bursts); gocql retry policy; execution read-path audit; WriteCancelGuard unconfirmed; benchmark report refresh; council r13.

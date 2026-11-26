@@ -150,6 +150,13 @@
 <tr><td>FE+Matching paired c64 p99</td><td colspan="2">Rust +798 ms</td></tr>
 <tr><td>Soak query "init" line</td><td colspan="2">open (deferred until after History)</td></tr>
 </tbody></table><p>See performance-status-20261119.md.</p></section>
+<section class="card" id="status-20261126-pause"><h2>Paused — 2026-11-26 (master 6f7d8ba41)</h2><ul>
+<li>Council round 12 (Opus 5.5 low only): 8.5/10. Its parity bug (expired deadline renewed shard range) is fixed and merged.</li>
+<li>Merged: Cassandra cold-restart fix (Go ensureMinContextTimeout, detached handlers), parity audits 1-5 (CreateShard race, error mapping, SELECT_TASKS paging, full shard UDT, cas_error, DbUnavailable/Timeout), WriteCancelGuard (unconfirmed fix for a 1/895 first-decision loss), recovery gate Rust&lt;=Go.</li>
+<li>Open gap: Cassandra c16 Rust −8.8 wf/s [−11.2, −7.0], p99 +85 ms (6 runs; equal CQL op counts).</li>
+<li>Open gap: unpaced c1 p90 +27% [+10, +46] (16 runs); p95 passes. Load trace: same load count as Go, but Rust loads arrive in bursts; suspect shard.wait_for_task_writes gate.</li>
+<li>Open: gocql retry policy, execution-store read-path audit, refresh benchmark report on current master, council round 13.</li>
+</ul></section>
 <section class="card" id="status-20261126"><h2>Status — 2026-11-26</h2><ul>
 <li><b>c1 knee study:</b> Rust passes the p90/p95 +5% margin at paced 10, 15, 18, 20, 22 wf/s (15/20/22 with 12 runs each). Unpaced c1 still fails (Rust p90 94.0 vs Go 53.1 ms, limiter plateau; investigation ongoing). <a href="evidence/perf-c1-knee2-20261126.md">report</a></li>
 <li><b>PostgreSQL paced 50 wf/s:</b> Rust p99 -28.9% vs Go. <a href="evidence/perf-pg-paced50-20261126.md">report</a></li>
