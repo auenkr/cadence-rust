@@ -242,6 +242,9 @@ def main():
                             "--output-prefix", str(OUT / f"profile-{rep:02d}-{arm}-c{conc}"), "--flamegraph-dir", os.environ["FLAMEGRAPH_DIR"],
                             "--max-seconds", "1800", "--pids", *pids], stdout=(OUT / f"profile-{rep:02d}-{arm}-c{conc}.log").open("w"), stderr=subprocess.STDOUT)
                     monitor = subprocess.Popen(collector_command, cwd=ROOT, stdout=collector_stream, stderr=subprocess.STDOUT)
+                    snap_name = f"cass-{rep:02d}-{arm}-c{conc}"
+                    if db_service == "cassandra":
+                        run(["docker", "exec", database, "nodetool", "tablestats", "-F", "json"], snap_name + "-before", check=False)
                     try:
                         run([str(ROOT / "out/cadence-benchmark"), "-endpoint", "127.0.0.1:7933",
                              "-domain", "benchmark", "-label", arm,
@@ -253,6 +256,8 @@ def main():
                              "-collector-ready-file", ready_marker,
                              "-output", str(result)], f"run-{rep:02d}-{arm}-c{conc}",
                             env=arm_env, timeout=1800)
+                        if db_service == "cassandra":
+                            run(["docker", "exec", database, "nodetool", "tablestats", "-F", "json"], snap_name + "-after", check=False)
                         if monitor.wait(timeout=15) != 0:
                             raise RuntimeError(f"resource collector failed; see {collector_log}")
                         print(f"[progress] rep {rep + 1}/{args.repetitions} arm={arm} c{conc} done "
