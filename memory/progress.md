@@ -2068,3 +2068,11 @@ During handoff merged documentation-only tips `origin/frontend-core2`
 
 ## 2026-11-25 (post-compaction)
 - Merged workload-shape coverage (4219d987b): Rust trails on child (0.84x wf/s) and history-shape memory (1.21x). Workers started: perf-child-shape, perf-history-shape-mem. Council round 10 to follow.
+
+## 2026-11-26 status
+- c1 knee study (`evidence/perf-c1-knee-20261126.md`, `perf-c1-knee2-20261126.md`): Rust passes the p90/p95 +5% margin at paced 10, 15, 18, 20 and 22 wf/s. 15/20/22 were re-run to 12 runs each; 15 passes with p95 CI upper bound +4.6%. Unpaced c1 still FAILS (Rust p90/p95 94.0/100.2 ms vs Go 53.1/66.2); this is the limiter plateau and the investigation is ongoing.
+- PostgreSQL paced 50 wf/s (`perf-pg-paced50-20261126.md`): Rust p99 -28.9% vs Go (CI [-42.2,-15.7]).
+- Recovery (`perf-recovery-pooled-20261126.md`, `perf-recovery-timing-20261126.md`): Rust stable time is faster than Go. Cassandra kill_history 1532 vs 1878 ms; cold_restart 12064 vs 14857 ms. MySQL kill_frontend pooled -185 ms median.
+- Merged `fix-cassandra-bad-binaries-encoding` (10c360159): Rust starts and restarts on Cassandra; schema_version intact.
+- OPEN BUG (figures as reported by the orchestrator, not yet in an evidence file): Cassandra cold_restart, Rust lost 9/8629 workflows vs Go 0/9693; the first decision task is never delivered. Fix in progress. The earlier pooled run recorded 1 Rust loss (`perf-recovery-pooled-20261126.md`).
+- Council round 11 (as reported): Opus 9.5, GPT Sol 9.
