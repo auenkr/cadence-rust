@@ -80,3 +80,14 @@ activity started, timeout): the known activity StartToClose race, not first-deci
 ## Follow-up (branch fix-min-timeout-expired)
 - An already-expired caller deadline now returns `PersistenceError::CallerDeadlineExpired` (-> `HistoryError::DeadlineExceeded`), like Go's `ctx.Err()` returned before the error switch: no shard range renew. Write timeouts still renew.
 - Recovery gate pass criterion: per database Rust lost <= Go lost and zero Rust first-decision-task losses.
+
+## Validation (head d30a18197, branch fix-min-timeout-expired)
+- rust-ci cadence-history 45764470976 success; workspace 45764474408 success.
+- recovery-timing cassandra cold_restart,kill_history x10 (Rust cadence-server sha256 eefa780fcf783c503665510ec723f8f063915b5f6f2cadb47003f830c92e16bd):
+| run | Go lost/started | Rust lost/started | conclusion |
+|---|---|---|---|
+| 45764478188 | 0/3146 | 0/2992 | success |
+| 45764481683 | 0/2952 | 0/2773 | success |
+| 45764485073 | 401/3862 | 0/3104 | failure: Go rep 1 kill_history never stable (Go arm only) |
+- Rust: 0 lost, 0 first-decision losses in all runs. Run 3 verdict was `rust_lost=0 rust_first_decision_lost=0` but the stability check still counted the Go arm; a follow-up commit makes that check Rust-arm only (not re-run).
+

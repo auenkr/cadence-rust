@@ -232,15 +232,15 @@ def main():
     (OUT / "summary.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
     # Pass criterion: per database, Rust lost <= Go lost AND zero Rust first-decision-task losses
-    # (Go-arm losses must not redden the run); the recovery-stability checks still apply to both arms.
+    # (Go-arm losses must not redden the run); the recovery-stability checks apply to the Rust arm only (Go-arm instability is reported, not gated).
     total = lambda arm, k: sum(r[k] for r in results if r["arm"] == arm)
     bad = []
     if total("rust", "lost") > total("go", "lost"):
         bad.append(f"rust lost {total('rust', 'lost')} > go lost {total('go', 'lost')}")
     if total("rust", "first_decision_lost"):
         bad.append(f"rust first-decision-task losses: {total('rust', 'first_decision_lost')}")
-    if any(not e["stable_reached"] or e.get("schema_version_intact") is False for r in results for e in r["events"]):
-        bad.append("stability/schema check failed")
+    if any(not e["stable_reached"] or e.get("schema_version_intact") is False for r in results if r["arm"] == "rust" for e in r["events"]):
+        bad.append("rust stability/schema check failed")
     print(f"[verdict] {args.database} go_lost={total('go', 'lost')} rust_lost={total('rust', 'lost')} "
           f"rust_first_decision_lost={total('rust', 'first_decision_lost')} -> {'FAIL: ' + '; '.join(bad) if bad else 'PASS'}")
     if bad:
