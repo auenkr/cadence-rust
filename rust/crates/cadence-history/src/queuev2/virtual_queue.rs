@@ -1,6 +1,6 @@
 //! Port of queuev2/virtual_queue.go
 
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, Weak};
 use std::time::Duration;
 
@@ -18,6 +18,11 @@ use super::virtual_slice::{slice_key, VirtualSlice};
 pub const DAEMON_STATUS_INITIALIZED: i32 = 0;
 pub const DAEMON_STATUS_STARTED: i32 = 1;
 pub const DAEMON_STATUS_STOPPED: i32 = 2;
+
+const TRIG_START: u8 = 1;
+const TRIG_HAS_MORE: u8 = 2;
+const TRIG_NEXT_SLICE: u8 = 4;
+const TRIG_NEW_SLICE: u8 = 8;
 
 const TASK_SCHEDULER_THROTTLE_BACKOFF_INTERVAL: Duration = Duration::from_secs(5);
 const TASK_READER_ERROR_BACKOFF_INTERVAL: Duration = Duration::from_secs(1);
@@ -71,6 +76,8 @@ pub struct VirtualQueueImpl {
     ctx: CancelToken,
     notify_tx: mpsc::Sender<()>,
     notify_rx: StdMutex<Option<mpsc::Receiver<()>>>,
+    /// Trace-only: OR of TRIG_* bits that requested the next load (not read unless decision trace is on).
+    trigger_bits: AtomicU8,
     handle: StdMutex<Option<JoinHandle<()>>>,
     pause_controller: Arc<dyn PauseController>,
     inner: Mutex<QInner>,
@@ -105,6 +112,7 @@ pub fn new_virtual_queue(
         ctx: CancelToken::new(),
         notify_tx: tx,
         notify_rx: StdMutex::new(Some(rx)),
+        trigger_bits: AtomicU8::new(0),
         handle: StdMutex::new(None),
         inner: Mutex::new(QInner {
             virtual_slices,
@@ -137,7 +145,7 @@ impl Daemon for VirtualQueueImpl {
             *self.handle.lock().unwrap() = Some(h);
         }
 
-        self.notify();
+        self.notify_src(TRIG_START);
 
         self.logger.info("Virtual queue state changed: started");
     }
@@ -306,6 +314,13 @@ impl VirtualQueueImpl {
         let _ = self.notify_tx.try_send(());
     }
 
+    fn notify_src(&self, src: u8) {
+        if crate::decision_trace::enabled() {
+            self.trigger_bits.fetch_or(src, Ordering::Relaxed);
+        }
+        self.notify();
+    }
+
     async fn run(self: Arc<Self>, mut rx: mpsc::Receiver<()>) {
         loop {
             tokio::select! {
@@ -397,6 +412,7 @@ impl VirtualQueueImpl {
             slice_to_read.get_pending_task_count() as i64,
         );
 
+        let n_tasks = tasks.len();
         let now = self.time_source.now();
         for task in tasks {
             if let Some(wait_ms) = limit_wait_ms.filter(|wait_ms| *wait_ms > 5.0) {
@@ -461,8 +477,18 @@ impl VirtualQueueImpl {
             }
         }
 
+        if let Some(start) = wait_started {
+            let limiter = Arc::as_ptr(&self.task_load_rate_limiter) as *const () as usize;
+            let trig = self.trigger_bits.swap(0, Ordering::Relaxed);
+            self.logger.info(&format!(
+                "DTRACE queuev2 loaded limiter={limiter:x} t_ms={:.3} trig={trig} tasks={} page={page_size} has_more={}",
+                start,
+                n_tasks,
+                slice_to_read.has_more_tasks()
+            ));
+        }
         if slice_to_read.has_more_tasks() {
-            self.notify();
+            self.notify_src(TRIG_HAS_MORE);
             return;
         }
 
@@ -475,7 +501,7 @@ impl VirtualQueueImpl {
             .and_then(|i| inner.virtual_slices.get(i + 1).cloned());
         inner.slice_to_read = next;
         if inner.slice_to_read.is_some() {
-            self.notify();
+            self.notify_src(TRIG_NEXT_SLICE);
         }
     }
 
@@ -486,7 +512,7 @@ impl VirtualQueueImpl {
             .find(|s| s.has_more_tasks())
             .cloned();
         if inner.slice_to_read.is_some() {
-            self.notify();
+            self.notify_src(TRIG_NEW_SLICE);
         }
     }
 
