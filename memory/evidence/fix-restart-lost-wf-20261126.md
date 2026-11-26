@@ -29,3 +29,17 @@ Compared against Go: Cassandra transfer-task read/complete queries (`history_exe
 ## Next steps for whoever continues
 1. Re-run Cassandra cold_restart with Rust history/matching at debug (decision push result, transfer ack-level persisted at shutdown, shard acquire read level, matching task-list backlog load) to learn whether the task is lost in History (ack level advanced past the task on shutdown, or task never read after restart) or in Matching (persisted task not reloaded after restart).
 2. Rate is ~1 per 1000 workflows started during the restart window, ~1 in 3 repetitions of cold_restart on Cassandra lose one; 10-rep runs reproduce within 3 attempts.
+
+## ROOT CAUSE + FIX (2026-11-26, branch fix-restart-lost-wf, head 7087d829a)
+Root cause: Rust history gRPC handlers were dropped by tonic when the caller's grpc-timeout expired (frontend retried StartWorkflowExecution with attempt timeouts of 1-50 ms during restart; frontend log shows the "Timeout expired" attempts followed by WorkflowAlreadyStarted for the lost workflow ids). Dropping the handler mid-`create_workflow_execution` leaves the Cassandra write running in `spawn_blocking`; it commits late, but the handler never ran its post-write steps (max read level advance, unknown-outcome `renew_range`), and the gate was released so later task ids advanced the transfer queue past the late-committed task id. First decision task never delivered. Go avoids this via `ensureMinContextTimeout` (min 1s context) and renewing RangeID on unknown outcome.
+Fix: `wiring/server/grpc.rs` runs state-changing RPCs (start, signal, signal-with-start, terminate, cancel, record/respond task, reset, replicate, ...) via `detached()` (tokio::spawn) so they complete regardless of caller timeout.
+
+## Validation (head 7087d829a, history binary sha256 268cc9809c54648a161287353f21f2f0cb0406332e0128d4b65492eb8b2e5652; cadence-server e778ea2e...)
+- rust-ci package=cadence-history: https://github.com/auenkr/cadence-rust/actions/runs/45739973646 success (workspace run not done).
+- recovery-timing database=cassandra cold_restart,kill_history, 10 reps x 3 runs:
+  - .../runs/45739977016 failure: Go 1/3708, Rust 2/3268
+  - .../runs/45739980485 success: Go 0/3208, Rust 0/2985
+  - .../runs/45739984118 failure: Go 1/3305, Rust 0/3038
+  Total Go 2/10221, Rust 2/9291 (before fix: Go 0/9693, Rust 9/8629).
+- All 2 Rust losses have full histories (DecisionTaskStarted/Completed, ActivityTaskStarted, then WorkflowExecutionTimedOut at 60s) = the known activity StartToClose race that Go loses identically (see perf-frontend-kill-loss-20261126.md). Zero first-decision-task losses.
+Verdict: first-decision-task loss fixed; Rust lost <= Go. Workspace-wide rust-ci not yet run.
