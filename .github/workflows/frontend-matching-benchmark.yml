@@ -88,7 +88,7 @@ on:
       database:
         description: Persistence for the paired benchmark (mysql = unchanged default)
         type: choice
-        options: [mysql, postgres]
+        options: [mysql, postgres, cassandra]
         default: mysql
       trace_decision:
         description: Diagnostic - trace queue v2 permits in Go and Rust and decision timings in Rust
@@ -321,7 +321,7 @@ jobs:
           python3 -u tests/frontend-gate/benchmark/paired-run.py \
             --requests "$REQUESTS" --warmup "$WARMUP" \
             --repetitions "$REPETITIONS" --concurrency "$CONCURRENCY" \
-            --payload-bytes "$PAYLOAD_BYTES" --shape "${{ inputs.shape }}" ${TARGET_RATE:+--target-rate "$TARGET_RATE"} ${{ inputs.sticky && '--sticky' || '' }} ${{ inputs.control_ref != '' && '--control-image cadence-rust-control:ci' || '' }} ${{ inputs.database == 'postgres' && '--database postgres' || '' }} --rust-services "${{ inputs.rust_services || 'frontend,matching' }}" 2>&1 | tee out/paired-runner.log
+            --payload-bytes "$PAYLOAD_BYTES" --shape "${{ inputs.shape }}" ${TARGET_RATE:+--target-rate "$TARGET_RATE"} ${{ inputs.sticky && '--sticky' || '' }} ${{ inputs.control_ref != '' && '--control-image cadence-rust-control:ci' || '' }} ${{ inputs.database != 'mysql' && format('--database {0}', inputs.database) || '' }} --rust-services "${{ inputs.rust_services || 'frontend,matching' }}" 2>&1 | tee out/paired-runner.log
           status=${PIPESTATUS[0]}
           echo "$status" > out/paired-runner.exit
           exit "$status"
@@ -337,7 +337,7 @@ jobs:
             jeprof --text --inuse_space --lines "$d/cadence-history" "$best" 2>&1 | head -80 > "$d/jeprof-top-lines.txt" || true
           done
       - name: Verify complete paired benchmark evidence
-        if: ${{ inputs.control_ref == '' && inputs.database != 'postgres' }}
+        if: ${{ inputs.control_ref == '' && inputs.database == 'mysql' }}
         run: |
           set +e
           python3 tests/benchmark/verify_artifacts.py --out out --expected-head "$GITHUB_SHA" > out/artifact-verification.json
@@ -361,7 +361,7 @@ jobs:
             echo "- Kernel: $(uname -r)"
             echo "- OS: $(. /etc/os-release; echo "$PRETTY_NAME")"
             echo "- Runner image: ${ImageOS:-?} ${ImageVersion:-?}; runner name: ${RUNNER_NAME:-?}"
-            echo "- Database: $(docker image inspect ${{ inputs.database == 'postgres' && 'postgres:13' || 'mysql:8.0' }} --format '{{index .RepoTags 0}} {{.Id}}' 2>/dev/null)"
+            echo "- Database: $(docker image inspect ${{ inputs.database == 'postgres' && 'postgres:13' || inputs.database == 'cassandra' && 'cassandra:4.1' || 'mysql:8.0' }} --format '{{index .RepoTags 0}} {{.Id}}' 2>/dev/null)"
             echo "- Container limits (mem/cpu per service):"
             for f in out/paired-benchmark/compose-*-rust.yaml; do [ -f "$f" ] && grep -E 'mem_limit|cpus:' "$f" | sort | uniq -c | sed 's/^/    /' && break; done
             echo "- rust_services: ${{ inputs.rust_services || 'frontend,matching' }}"
