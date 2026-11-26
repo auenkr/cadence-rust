@@ -150,6 +150,13 @@
 <tr><td>FE+Matching paired c64 p99</td><td colspan="2">Rust +798 ms</td></tr>
 <tr><td>Soak query "init" line</td><td colspan="2">open (deferred until after History)</td></tr>
 </tbody></table><p>See performance-status-20261119.md.</p></section>
+<section class="card" id="status-20261126"><h2>Status — 2026-11-26</h2><ul>
+<li><b>c1 knee study:</b> Rust passes the p90/p95 +5% margin at paced 10, 15, 18, 20, 22 wf/s (15/20/22 with 12 runs each). Unpaced c1 still fails (Rust p90 94.0 vs Go 53.1 ms, limiter plateau; investigation ongoing). <a href="evidence/perf-c1-knee2-20261126.md">report</a></li>
+<li><b>PostgreSQL paced 50 wf/s:</b> Rust p99 -28.9% vs Go. <a href="evidence/perf-pg-paced50-20261126.md">report</a></li>
+<li><b>Recovery:</b> Rust stable time faster. Cassandra kill_history 1532 vs 1878 ms, cold_restart 12064 vs 14857 ms. <a href="evidence/perf-recovery-pooled-20261126.md">report</a></li>
+<li><b>Merged:</b> Cassandra bad_binaries_encoding fix; Rust starts and restarts on Cassandra.</li>
+<li><b>OPEN BUG:</b> Cassandra cold_restart, Rust lost 9/8629 vs Go 0/9693 (first decision task never delivered); fix in progress (figures as reported, not yet in evidence).</li>
+<li><b>Council round 11:</b> Opus 9.5, GPT Sol 9.</li></ul></section>
 <section class="card" id="status-20261121"><h2>Status — 2026-11-21</h2>
 <p><strong>Benchmark rerun on master <code>616107912</code></strong> (<a href="evidence/bench-rerun-20261121.md">bench-rerun-20261121</a>; medians of 3 alternating pairs, 0 errors, EPYC 7763 runs rejected). Frontend start-p99 tail spikes seen on 2026-11-20 are gone (Rust 806 → 112 ms).</p>
 <table><thead><tr><th>Lane</th><th>p99 Go / Rust ms</th><th>p99 R/Go</th><th>CPU R/Go</th><th>RSS R/Go</th><th>Run</th></tr></thead><tbody>
@@ -366,5 +373,5 @@ function recompute(){
 ["v","p","e","o"].forEach(i=>document.getElementById(i).addEventListener("input",recompute));
 recompute();
 </script>
-<p>2026-11-25: workload shapes merged; child + history-shape memory follow-ups running.</p></body>
+<p>2026-11-26: see status-20261126 above.</p><p>2026-11-25: workload shapes merged; child + history-shape memory follow-ups running.</p></body>
 </html>
