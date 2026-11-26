@@ -27,7 +27,10 @@ pub enum Extra {
     Status(i32),
 }
 
-fn internal(error: impl std::fmt::Display) -> VisibilityError {
+fn internal<E: std::fmt::Display + std::any::Any>(error: E) -> VisibilityError {
+    if crate::cassandra_errors::classify(&error) == crate::cassandra_errors::CassandraErrorKind::Throttled {
+        return VisibilityError::ServiceBusy(format!("Cassandra visibility operation failed. Error: {error}"));
+    }
     VisibilityError::Internal(format!("Cassandra visibility: {error}"))
 }
 
