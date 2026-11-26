@@ -133,7 +133,7 @@ pub struct CassandraDomainConfigUdt {
     pub visibility_archival_status: Option<i32>,
     pub visibility_archival_uri: Option<String>,
     pub bad_binaries: Option<Vec<u8>>,
-    pub bad_binaries_encoding: Option<Vec<u8>>,
+    pub bad_binaries_encoding: Option<String>,
     pub isolation_groups: Option<Vec<u8>>,
     pub isolation_groups_encoding: Option<String>,
     pub async_workflow_config: Option<Vec<u8>>,
