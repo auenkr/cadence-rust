@@ -1,0 +1,61 @@
+
+## target_rate=unpaced  runs=16
+- 45750371177: AMD EPYC 9V74 80-Core Processor reps go/ctl/rust=5/5
+- 45750374664: AMD EPYC 9V74 80-Core Processor reps go/ctl/rust=5/5
+- 45750377978: AMD EPYC 9V45 96-Core Processor reps go/ctl/rust=5/5
+- 45750381921: AMD EPYC 9V74 80-Core Processor reps go/ctl/rust=5/5
+- 45753023726: Intel(R) Xeon(R) 6975P-C reps go/ctl/rust=5/5
+- 45753036563: AMD EPYC 9V74 80-Core Processor reps go/ctl/rust=5/5
+- 45753049571: AMD EPYC 7763 64-Core Processor reps go/ctl/rust=5/5
+- 45753063352: AMD EPYC 7763 64-Core Processor reps go/ctl/rust=5/5
+- 45753075894: AMD EPYC 9V74 80-Core Processor reps go/ctl/rust=5/5
+- 45753087894: AMD EPYC 9V45 96-Core Processor reps go/ctl/rust=5/5
+- 45753099285: Intel(R) Xeon(R) 6975P-C reps go/ctl/rust=5/5
+- 45753110514: AMD EPYC 9V45 96-Core Processor reps go/ctl/rust=5/5
+- 45753122592: AMD EPYC 9V74 80-Core Processor reps go/ctl/rust=5/5
+- 45753133971: AMD EPYC 9V45 96-Core Processor reps go/ctl/rust=5/5
+- 45753147808: Intel(R) Xeon(R) 6973P-C reps go/ctl/rust=5/5
+- 45753161257: AMD EPYC 7763 64-Core Processor reps go/ctl/rust=5/5
+
+| arm | N | wf/s median | p50 | p90 | p95 | p99 | share>=75ms |
+|--|--|--|--|--|--|--|--|
+| go | 80000 | 23.44 | 36.2 | 77.4 | 100.3 | 172.6 | 0.109 |
+| rust | 80000 | 25.40 | 24.6 | 98.2 | 100.9 | 134.4 | 0.182 |
+
+| contrast | metric | point % | 95% CI % | 
+|--|--|--|--|
+| rust-go | p90 | +27.0 | [+10.2, +46.0] |
+| rust-go | p95 | +0.6 | [-3.1, +2.8] |
+
+**Verdict rate unpaced: FAIL**
+
+Sensitivity A (CPU-stratified): strata = EPYC 7763:3, EPYC 9V45:4, EPYC 9V74:6, XEON:3
+- stratified rust-go p90: [+16.3, +35.5]
+- stratified rust-go p95: [-0.6, +1.4]
+- stratified verdict (same +5% criterion): FAIL
+
+Sensitivity B (per CPU stratum point estimates, pooled within stratum; rust-go %):
+- EPYC 7763 (runs=3): p90 +84.0%  p95 +80.6%  (go p90/p95 51/55, rust 94/100)
+- EPYC 9V45 (runs=4): p90 +14.8%  p95 +0.8%  (go p90/p95 86/100, rust 99/101)
+- EPYC 9V74 (runs=6): p90 +11.9%  p95 -8.2%  (go p90/p95 88/118, rust 99/109)
+- XEON (runs=3): p90 +16.9%  p95 +0.1%  (go p90/p95 85/100, rust 99/100)
+
+Sensitivity C (paired per run, same runner for both arms): median rust-go p90 +14.4%, p95 +0.8%; runs with rust<=go: p90 3/16, p95 5/16; worst run p95 +83.1%
+
+Per-run p90/p95 (go | control | rust):
+- 45750371177: 102/150 | 99/120
+- 45750374664: 88/128 | 99/129
+- 45750377978: 84/99 | 98/100
+- 45750381921: 101/148 | 99/112
+- 45753023726: 98/101 | 100/101
+- 45753036563: 66/93 | 98/102
+- 45753049571: 52/56 | 93/100
+- 45753063352: 50/56 | 97/100
+- 45753075894: 74/100 | 99/101
+- 45753087894: 88/100 | 99/100
+- 45753099285: 99/101 | 100/101
+- 45753110514: 81/100 | 99/101
+- 45753122592: 99/143 | 99/114
+- 45753133971: 91/100 | 99/100
+- 45753147808: 50/86 | 89/100
+- 45753161257: 50/54 | 92/100
