@@ -64,10 +64,7 @@ fn nanos_to_ts(nanos: i64) -> DateTime<Utc> {
     DateTime::<Utc>::from_timestamp_millis(nanos.div_euclid(1_000_000)).unwrap_or_default()
 }
 
-fn non_empty<K: Clone + Eq + std::hash::Hash, V: Clone>(m: &std::collections::BTreeMap<K, V>) -> Option<HashMap<K, V>>
-where
-    K: Ord,
-{
+fn non_empty<K: Clone + Eq + std::hash::Hash + Ord, V: Clone>(m: &std::collections::BTreeMap<K, V>) -> Option<HashMap<K, V>> {
     if m.is_empty() { None } else { Some(m.iter().map(|(k, v)| (k.clone(), v.clone())).collect()) }
 }
 
