@@ -1,0 +1,86 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>Cadence Go vs Rust Charts</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: stacked chart panels, one measure per chart, Rust=slot1 blue, Go=slot2 orange */
+:root{--bg:#f7f7f8;--surface:#ffffff;--fg:#191919;--muted:#666666;--grid:#e6e6e8;--line:#d4d4d8;--rust:#257de0;--go:#f47230;--bad:#c4314b;color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#111111;--surface:#191919;--fg:#efefef;--muted:#9c9c9c;--grid:#2a2a2a;--line:#333333;--rust:#338ced;--go:#e76624;--bad:#ff7a8f;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#111111;--surface:#191919;--fg:#efefef;--muted:#9c9c9c;--grid:#2a2a2a;--line:#333333;--rust:#338ced;--go:#e76624;--bad:#ff7a8f;color-scheme:dark}
+body{color:var(--fg);font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1000px;margin:0 auto;display:grid;gap:20px}
+h1{margin:0;font-size:1.5rem}.sub{margin:4px 0 0;color:var(--muted)}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:16px;min-width:0}
+.panel h2{margin:0;font-size:1rem}.panel p{margin:4px 0 8px;color:var(--muted);max-width:75ch}
+.legend{display:flex;gap:16px;font-size:.85rem;color:var(--muted);margin-bottom:6px}
+.legend span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px;background:var(--c)}
+.cw{overflow-x:auto}svg{display:block;width:100%;height:auto;font-variant-numeric:tabular-nums}
+svg text{fill:var(--muted);font-size:11px}svg .val{fill:var(--fg)}
+#tip{position:fixed;pointer-events:none;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 9px;font-size:12px;box-shadow:0 4px 14px rgba(0,0,0,.15);z-index:5}
+.grid2{display:grid;gap:20px;grid-template-columns:repeat(auto-fit,minmax(min(100%,440px),1fr))}
+</style>
+</head><body><main>
+<header><h1>Cadence: Go vs Rust</h1><p class="sub">Benchmarks on GitHub-hosted runners, master 5f6504e05 / 0af6d5f3b, 2026-11-26. Rust runs Frontend, Matching and History.</p></header>
+
+<div class="panel"><h2>Throughput (workflows per second, higher is better)</h2><p>Medians of 5 reps per setup. "c" is the number of workflows running at once.</p>
+<div class="legend"><span style="--c:var(--go)">Go</span><span style="--c:var(--rust)">Rust</span></div><div class="cw" id="tp"></div></div>
+
+<div class="panel"><h2>p95 latency (ms, lower is better)</h2><p>Same runs. Axis capped at 2,000 ms; the two Go MySQL c64 bars above it are labeled with their values.</p>
+<div class="legend"><span style="--c:var(--go)">Go</span><span style="--c:var(--rust)">Rust</span></div><div class="cw" id="p95"></div></div>
+
+<div class="panel"><h2>One workflow at a time: Rust p90 vs Go (%)</h2><p>Point estimate with 95% bootstrap interval. Below 0 means Rust is faster. The dashed line is the +5% pass margin.</p><div class="cw" id="knee"></div></div>
+
+<div class="grid2">
+<div class="panel"><h2>Recovery time after a kill (ms, lower is better)</h2><p>Median time to stable, MySQL. 0 workflows lost in either.</p>
+<div class="legend"><span style="--c:var(--go)">Go</span><span style="--c:var(--rust)">Rust</span></div><div class="cw" id="rec"></div></div>
+<div class="panel"><h2>CPU-seconds by workload (lower is better)</h2><p>Sum of Frontend, Matching and History, MySQL.</p>
+<div class="legend"><span style="--c:var(--go)">Go</span><span style="--c:var(--rust)">Rust</span></div><div class="cw" id="cpu"></div></div>
+</div>
+</main>
+<div id="tip" hidden></div>
+<script>
+const tip=document.getElementById('tip');
+function showTip(e,h){tip.innerHTML=h;tip.hidden=false;const x=Math.min(e.clientX+12,innerWidth-tip.offsetWidth-8);tip.style.left=x+'px';tip.style.top=(e.clientY+12)+'px'}
+function hide(){tip.hidden=true}
+const NS='http://www.w3.org/2000/svg';
+function el(t,a,p){const n=document.createElementNS(NS,t);for(const k in a)n.setAttribute(k,a[k]);p&&p.appendChild(n);return n}
+function fmt(v){return v>=100?Math.round(v).toLocaleString():(+v.toFixed(1)).toString()}
+// grouped bars: rows=[{label, go, rust}], cap = optional axis max
+function grouped(id,rows,unit,cap){
+  const W=Math.max(520,rows.length*80),H=260,m={l:48,r:8,t:16,b:44},iw=W-m.l-m.r,ih=H-m.t-m.b;
+  const mx=cap||Math.max(...rows.flatMap(r=>[r.go,r.rust]))*1.12;
+  const step=niceStep(mx);const top=Math.ceil(mx/step)*step;const y=v=>m.t+ih-Math.min(v,top)/top*ih;
+  const s=el('svg',{width:W,height:H,viewBox:`0 0 ${W} ${H}`,role:'img'});
+  for(let v=0;v<=top+1e-9;v+=step){el('line',{x1:m.l,x2:W-m.r,y1:y(v),y2:y(v),stroke:'var(--grid)'},s);const t=el('text',{x:m.l-6,y:y(v)+4,'text-anchor':'end'},s);t.textContent=fmt(v)}
+  const gw=iw/rows.length,bw=Math.min(26,gw/3);
+  rows.forEach((r,i)=>{const cx=m.l+gw*i+gw/2;
+    [['go',-1],['rust',1]].forEach(([k,d])=>{const v=r[k],x=cx+(d<0?-bw-1:1),yy=y(v),h=m.t+ih-yy;
+      const p=el('path',{d:`M${x},${m.t+ih}V${yy+4}q0,-4 4,-4h${bw-8}q4,0 4,4V${m.t+ih}Z`,fill:`var(--${k})`},s);
+      const hit=el('rect',{x:x-2,y:m.t,width:bw+4,height:ih,fill:'transparent'},s);
+      const pct=k==='rust'?` (${((r.rust/r.go-1)*100).toFixed(1)}% vs Go)`:'';
+      hit.addEventListener('mousemove',e=>showTip(e,`<b>${r.label}</b><br>${k==='go'?'Go':'Rust'}: ${fmt(v)} ${unit}${pct}`));hit.addEventListener('mouseleave',hide);
+      if(v>top){const t=el('text',{x:x+bw/2,y:m.t+10,'text-anchor':'middle',class:'val'},s);t.textContent=fmt(v)+'↑'}});
+    r.label.split('|').forEach((ln,j)=>{const t=el('text',{x:cx,y:H-m.b+16+j*13,'text-anchor':'middle'},s);t.textContent=ln})});
+  el('line',{x1:m.l,x2:W-m.r,y1:m.t+ih,y2:m.t+ih,stroke:'var(--line)'},s);
+  document.getElementById(id).appendChild(s)}
+function niceStep(mx){const r=mx/5,p=10**Math.floor(Math.log10(r)),f=r/p;return (f<1.5?1:f<3?2:f<7?5:10)*p}
+const echo=[['MySQL|c1',23.3,25.5,79.6,100.0],['MySQL|c16',47.2,71.1,459.9,315.5],['MySQL|c64',23.0,65.6,4262.3,1380.5],['MySQL 1000rps|c1',26.5,37.2,60.1,49.4],['MySQL 1000rps|c16',53.5,69.6,457.9,420.7],['MySQL 1000rps|c64',25.1,65.4,3888.7,1880.2],['Postgres|c1',25.0,25.4,99.5,100.3],['Postgres|c16',63.3,87.2,351.1,253.5],['Postgres|c64',60.3,77.4,1450.4,1204.9]];
+grouped('tp',echo.map(r=>({label:r[0],go:r[1],rust:r[2]})),'wf/s');
+grouped('p95',echo.map(r=>({label:r[0],go:r[3],rust:r[4]})),'ms',2000);
+grouped('rec',[{label:'kill Frontend',go:2810,rust:1876},{label:'kill Matching',go:2456,rust:2330},{label:'kill History',go:1521,rust:1233}],'ms');
+grouped('cpu',[{label:'activities',go:21.4,rust:14.3},{label:'signal-timer',go:8.4,rust:4.4},{label:'child',go:45.5,rust:26.8},{label:'history',go:48.8,rust:36.5}],'CPU-s');
+// knee: dot + CI whisker, diverging around 0
+(function(){const d=[['10 wf/s',-37.6,-38.4,-33.6],['15 wf/s',-32.3,-38.2,-25.7],['18 wf/s',-38.6,-42.7,-30.4],['20 wf/s',-36.8,-38.2,-29.8],['22 wf/s',-34.6,-37.0,-26.8],['no rate cap',77.0,47.9,101.2]];
+ const W=620,H=250,m={l:90,r:16,t:10,b:30},iw=W-m.l-m.r,rh=(H-m.t-m.b)/d.length,lo=-60,hi=120,x=v=>m.l+(v-lo)/(hi-lo)*iw;
+ const s=el('svg',{width:W,height:H,viewBox:`0 0 ${W} ${H}`,role:'img'});
+ for(let v=lo;v<=hi;v+=20){el('line',{x1:x(v),x2:x(v),y1:m.t,y2:H-m.b,stroke:v===0?'var(--line)':'var(--grid)','stroke-width':v===0?2:1},s);const t=el('text',{x:x(v),y:H-m.b+16,'text-anchor':'middle'},s);t.textContent=(v>0?'+':'')+v+'%'}
+ el('line',{x1:x(5),x2:x(5),y1:m.t,y2:H-m.b,stroke:'var(--bad)','stroke-dasharray':'4 3'},s);
+ d.forEach((r,i)=>{const cy=m.t+rh*i+rh/2,c=r[3]<=5?'var(--rust)':'var(--bad)';
+  const t=el('text',{x:m.l-10,y:cy+4,'text-anchor':'end'},s);t.textContent=r[0];
+  el('line',{x1:x(r[2]),x2:x(r[3]),y1:cy,y2:cy,stroke:c,'stroke-width':2,'stroke-linecap':'round'},s);
+  el('circle',{cx:x(r[1]),cy,r:5,fill:c,stroke:'var(--surface)','stroke-width':2},s);
+  const v=el('text',{x:x(r[3])+8,y:cy+4,class:'val'},s);v.textContent=(r[1]>0?'+':'')+r[1]+'%';
+  const hit=el('rect',{x:m.l,y:cy-rh/2,width:iw,height:rh,fill:'transparent'},s);
+  hit.addEventListener('mousemove',e=>showTip(e,`<b>${r[0]}</b><br>Rust vs Go p90: ${r[1]}%<br>95% CI ${r[2]}% to ${r[3]}%<br>${r[3]<=5?'Pass':'Fail'}`));hit.addEventListener('mouseleave',hide)});
+ document.getElementById('knee').appendChild(s)})();
+</script></body>
+</html>
