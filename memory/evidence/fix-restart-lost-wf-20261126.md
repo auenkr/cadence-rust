@@ -71,3 +71,12 @@ Rust history sha256 85e8d718c6ba5900d5638161edccef2c94ad0b8b635c20d6fec8dcb37510
 e778ea2e1a3a9fcbb9afb84a0d04896274bb5f3ec38c2d3777e61d87a821e725. All 3 Rust losses have full histories (decision started/completed,
 activity started, timeout): the known activity StartToClose race, not first-decision-task loss. Verdict: Rust <= Go. Runs show
 "failure" only because the Go arm's rep-7 loss (401) trips the gate; not a Rust issue.
+
+## Accepted differences vs Go
+- The tokio timer used by the rate limiter can fire up to 1 ms late per limiter wait (Go timers are ns-precise).
+- `created_time` is truncated to milliseconds in Rust.
+- The detached handler's reads run unbounded, whereas Go bounds them by the caller deadline; only writes use `ensureMinContextTimeout`.
+
+## Follow-up (branch fix-min-timeout-expired)
+- An already-expired caller deadline now returns `PersistenceError::CallerDeadlineExpired` (-> `HistoryError::DeadlineExceeded`), like Go's `ctx.Err()` returned before the error switch: no shard range renew. Write timeouts still renew.
+- Recovery gate pass criterion: per database Rust lost <= Go lost and zero Rust first-decision-task losses.

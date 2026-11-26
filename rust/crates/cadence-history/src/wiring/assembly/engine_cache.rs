@@ -79,7 +79,7 @@ pub struct EngineCore {
 /// Go `isNotifyTaskNeeded` for a non-nil error: `DuplicateRequestError` means no new tasks
 /// were written; otherwise `IsOperationPossiblySuccessfulError`.
 pub(super) fn notify_needed_on_error(err: &pc::PersistenceError) -> bool {
-    if matches!(err, pc::PersistenceError::DuplicateRequest { .. }) {
+    if matches!(err, pc::PersistenceError::DuplicateRequest { .. } | pc::PersistenceError::CallerDeadlineExpired) {
         return false;
     }
     crate::common::is_operation_possibly_successful_error(Some(err))
@@ -97,6 +97,7 @@ pub(super) fn write_outcome_unknown(err: &pc::PersistenceError) -> bool {
             | pc::PersistenceError::CurrentWorkflowConditionFailed { .. }
             | pc::PersistenceError::DuplicateRequest { .. }
             | pc::PersistenceError::ServiceBusy { .. }
+            | pc::PersistenceError::CallerDeadlineExpired
     )
 }
 
@@ -1283,5 +1284,19 @@ mod notify_tests {
             actual_range_id: 2,
         }));
         assert!(!notify_needed_on_error(&pc::PersistenceError::ConditionFailed("x".into())));
+    }
+}
+
+#[cfg(test)]
+mod range_renew_tests {
+    use super::*;
+
+    /// Go returns `ctx.Err()` before the error switch: an expired caller deadline never renews the range,
+    /// while a write timeout (unknown outcome) still does.
+    #[test]
+    fn expired_caller_deadline_does_not_renew_range() {
+        assert!(!write_outcome_unknown(&pc::PersistenceError::CallerDeadlineExpired));
+        assert!(!notify_needed_on_error(&pc::PersistenceError::CallerDeadlineExpired));
+        assert!(write_outcome_unknown(&pc::PersistenceError::Timeout("t".into())));
     }
 }

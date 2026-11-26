@@ -83,6 +83,7 @@ pub fn to_history_error(err: PersistenceError) -> HistoryError {
         PersistenceError::InvalidPersistenceRequest(m) | PersistenceError::InvalidArgument(m) => HistoryError::bad_request(m),
         PersistenceError::InternalDataInconsistency(m) | PersistenceError::Internal(m) => HistoryError::internal(m),
         PersistenceError::Timeout(m) => HistoryError::PersistenceTimeout(m),
+        PersistenceError::CallerDeadlineExpired => HistoryError::DeadlineExceeded,
         PersistenceError::TransactionSizeLimit(m) => HistoryError::TransactionSizeLimit(m),
         PersistenceError::ServiceBusy(m) => HistoryError::internal(m),
     }

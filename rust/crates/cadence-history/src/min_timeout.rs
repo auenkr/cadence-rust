@@ -51,14 +51,15 @@ pub fn parse_grpc_timeout(value: &str) -> Option<Duration> {
 
 /// Runs a workflow write under Go's `ensureMinContextTimeout` bound. On expiry the write future is dropped
 /// (the driver may still commit it, as with a cancelled Go context) and a timeout error, whose outcome is
-/// unknown, is returned so the caller renews the range.
+/// unknown, is returned so the caller renews the range. An already-expired caller deadline returns
+/// `CallerDeadlineExpired` (Go returns `ctx.Err()` before the error switch: no renew).
 pub async fn ensure_min_timeout<T>(
     write: impl Future<Output = Result<T, PersistenceError>>,
 ) -> Result<T, PersistenceError> {
     let deadline = CALL_DEADLINE.try_with(|d| *d).ok();
     match write_bound(deadline, Instant::now()) {
         WriteBound::None => write.await,
-        WriteBound::Expired => Err(PersistenceError::Timeout("context deadline exceeded".into())),
+        WriteBound::Expired => Err(PersistenceError::CallerDeadlineExpired),
         WriteBound::Within(limit) => tokio::time::timeout(limit, write)
             .await
             .unwrap_or_else(|_| Err(PersistenceError::Timeout("context deadline exceeded".into()))),
@@ -134,7 +135,7 @@ mod tests {
                 .await
             })
             .await;
-        assert!(out.is_err());
+        assert_eq!(out, Err(PersistenceError::CallerDeadlineExpired));
         assert!(!wrote.load(std::sync::atomic::Ordering::SeqCst));
     }
 
