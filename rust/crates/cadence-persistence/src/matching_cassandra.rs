@@ -40,7 +40,7 @@ const DELETE_LIST: &str = "DELETE FROM tasks WHERE domain_id=? AND task_list_nam
 const RANGE_DELETE_TASKS: &str = "DELETE FROM tasks WHERE domain_id = ? AND task_list_name = ? AND task_list_type = ? AND type = ? AND task_id > ? AND task_id <= ?";
 const INSERT_TASK_LIST: &str = "INSERT INTO tasks (domain_id, task_list_name, task_list_type, type, task_id, range_id, task_list, created_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?) IF NOT EXISTS";
 const COUNT_TASKS: &str = "SELECT count(1) as count FROM tasks WHERE domain_id = ? AND task_list_name = ? AND task_list_type = ? AND type = ? AND task_id > ?";
-const SELECT_TASKS: &str = "SELECT task_id, task, TTL(task) FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id>? AND task_id<=? LIMIT ?";
+const SELECT_TASKS: &str = "SELECT task_id, task, TTL(task) AS ttl FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id>? AND task_id<=?";
 pub struct CassandraMatchingTaskStore {
     executor: Arc<dyn CqlExecutor>,
     all_consistency_delete: Arc<dyn Fn() -> bool + Send + Sync>,
@@ -656,7 +656,7 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
         let rows = self
             .executor
             .select_tasks(
-                &CqlStatement::new(SELECT_TASKS),
+                &CqlStatement::new(SELECT_TASKS).with_page_size(cql_batch_size),
                 vec![
                     bound(key.domain_id),
                     bound(key.name.clone()),
@@ -664,7 +664,6 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
                     bound(TASK_ROW),
                     bound(read_level),
                     bound(max_read_level),
-                    bound(cql_batch_size),
                 ],
             )
             .map_err(|error| Self::operation_error("GetTasks", error))?;
@@ -782,14 +781,8 @@ mod tests {
         for statement in [SELECT_LIST, DELETE_LIST, RANGE_DELETE_TASKS, COUNT_TASKS] {
             assert_in_go_ci(go, statement);
         }
-        // templateGetTasksQuery adds only an alias; the Rust reader appends the
-        // page limit that Go passes as a gocql page size.
-        assert_in_go_ci(
-            go,
-            &SELECT_TASKS
-                .replace("TTL(task)", "TTL(task) AS ttl")
-                .replace(" LIMIT ?", ""),
-        );
+        // templateGetTasksQuery verbatim; page size is set on the statement.
+        assert_in_go_ci(go, SELECT_TASKS);
         // templateInsertTaskListQuery / templateUpdateTaskListQuery with the
         // UDT literal replaced by one bound UDT parameter.
         let go_stripped = go_composed(go);
@@ -1108,6 +1101,7 @@ mod recording_tests {
         consistency: Option<Consistency>,
         values: Vec<String>,
         batch: bool,
+        page_size: Option<i32>,
     }
 
     #[derive(Default)]
@@ -1131,10 +1125,14 @@ mod recording_tests {
                 consistency: statement.consistency,
                 values: render(values),
                 batch,
+                page_size: statement.page_size,
             });
         }
         fn calls(&self) -> Vec<Call> {
             self.calls.lock().unwrap().clone()
+        }
+        fn page_sizes(&self) -> Vec<Option<i32>> {
+            self.calls().iter().map(|c| c.page_size).collect()
         }
         fn push_lwt(&self, reply: ExecResult<LwtOutcome>) {
             self.lwt.lock().unwrap().push_back(reply);
@@ -1679,7 +1677,7 @@ mod recording_tests {
         let calls = recorder.calls();
         assert_call(
             &calls[0],
-            "SELECT task_id, task, TTL(task) FROM tasks WHERE domain_id=? and task_list_name=? and task_list_type=? and type=? and task_id>? and task_id<=? LIMIT ?",
+            "SELECT task_id, task, TTL(task) AS ttl FROM tasks WHERE domain_id=? and task_list_name=? and task_list_type=? and type=? and task_id>? and task_id<=?",
             vec![
                 dbg(key().domain_id),
                 dbg("tasklist1".to_string()),
@@ -1687,9 +1685,9 @@ mod recording_tests {
                 dbg(TASK_ROW),
                 dbg(0_i64),
                 dbg(100_i64),
-                dbg(100_i32),
             ],
         );
+        assert_eq!(recorder.page_sizes(), vec![Some(100)]);
     }
 
     /// TestGetTasksCount "success" (:881).

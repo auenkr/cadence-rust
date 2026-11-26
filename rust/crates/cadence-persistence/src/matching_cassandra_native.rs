@@ -598,10 +598,9 @@ impl MatchingTaskStoreBytes for Store {
         })?;
         let mut values = key_values(key, TASK_ROW, read_level);
         values.push(bound(max_read_level));
-        values.push(bound(limit));
         let rows = self
             .executor
-            .select_tasks(&CqlStatement::new(SELECT_TASKS), values)
+            .select_tasks(&CqlStatement::new(SELECT_TASKS).with_page_size(limit), values)
             .map_err(|error| BytesError::Legacy(Store::operation_error("GetTasks", error)))?;
         let mut tasks = Vec::new();
         for (id, task, _ttl) in rows {

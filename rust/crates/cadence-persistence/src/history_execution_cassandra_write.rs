@@ -1221,14 +1221,21 @@ pub(crate) fn cas_error(rows: &[RowMap], c: &CasContext<'_>) -> E {
                         }
                     }
                 } else if c.create.is_none() {
-                    // update path: expected current run differs
-                    run_mismatch = Some(get_str(cell(row, "current_run_id")));
+                    // update path (Go): only a non-empty conditional run id that differs is a mismatch
+                    let actual_run = get_str(cell(row, "current_run_id"));
+                    let conditional = match c.requested_current {
+                        Some(CurrentWrite::Update { current_run_id, .. }) => current_run_id.as_str(),
+                        _ => "",
+                    };
+                    if !conditional.is_empty() && actual_run != conditional {
+                        run_mismatch = Some(actual_run);
+                    }
                 }
             } else if row_run == c.run_id {
                 if c.create.is_some() {
                     concrete_exists = Some(row);
                 } else {
-                    next_event_mismatch = get_i64(cell(row, "next_event_id"));
+                    next_event_mismatch = get_i64(cell(row, "next_event_id")).filter(|actual| *actual != c.previous_next_event_id);
                 }
             }
         }
@@ -1302,10 +1309,14 @@ pub(crate) fn cas_error(rows: &[RowMap], c: &CasContext<'_>) -> E {
         ))
     } else {
         E::ConditionFailed(format!(
-            "Failed to update mutable state. ShardID: {}, RangeID: {}, previousNextEventIDCondition: {}, requestConditionalRunID: , columns: ({})",
+            "Failed to update mutable state. ShardID: {}, RangeID: {}, previousNextEventIDCondition: {}, requestConditionalRunID: {}, columns: ({})",
             c.shard,
             c.request_range_id,
             c.previous_next_event_id,
+            match c.requested_current {
+                Some(CurrentWrite::Update { current_run_id, .. }) => current_run_id.as_str(),
+                _ => "",
+            },
             columns.join(",")
         ))
     }
@@ -1936,6 +1947,42 @@ mod semaphore_and_history_task_tests {
                 }
                 other => panic!("offset {offset}: expected DuplicateRequest, got {other:?}"),
             }
+        }
+    }
+
+    fn update_ctx<'a>(current: Option<&'a CurrentWrite>) -> CasContext<'a> {
+        CasContext { shard: 1, request_range_id: 5, workflow_id: "wf", run_id: "run", create: None, current_insert: false, requested_current: current, previous_next_event_id: 7 }
+    }
+
+    fn current_row_map(run: &str) -> RowMap {
+        [
+            ("type".to_owned(), Some(CqlValue::Int(ROW_TYPE_EXECUTION))),
+            ("run_id".to_owned(), Some(CqlValue::Text(PERMANENT_RUN_ID.to_string()))),
+            ("current_run_id".to_owned(), Some(CqlValue::Text(run.into()))),
+        ]
+        .into_iter()
+        .collect()
+    }
+
+    #[test]
+    fn update_cas_run_id_mismatch_requires_nonempty_differing_condition() {
+        // Go: empty conditional run id never produces a run-id mismatch.
+        assert!(!matches!(cas_error(&[current_row_map("other")], &update_ctx(None)), E::CurrentWorkflowConditionFailed(_)));
+        assert!(matches!(cas_error(&[current_row_map("other")], &update_ctx(None)), E::ConditionFailed(_)));
+    }
+
+    #[test]
+    fn update_cas_next_event_id_equal_is_not_a_mismatch() {
+        let row: RowMap = [
+            ("type".to_owned(), Some(CqlValue::Int(ROW_TYPE_EXECUTION))),
+            ("run_id".to_owned(), Some(CqlValue::Text("run".into()))),
+            ("next_event_id".to_owned(), Some(CqlValue::BigInt(7))),
+        ]
+        .into_iter()
+        .collect();
+        match cas_error(&[row], &update_ctx(None)) {
+            E::ConditionFailed(m) => assert!(m.starts_with("Failed to update mutable state. ShardID: 1, RangeID: 5")),
+            other => panic!("unexpected {other:?}"),
         }
     }
 }

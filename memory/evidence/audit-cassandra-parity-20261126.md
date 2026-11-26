@@ -56,3 +56,17 @@ Head SHA of the CreateShard fix: 25d0dee92da7f5bb1facb5400e36f6ed14a0083e.
   - Rust cadence-server SHA256 f1322cc8b503a700765843c7f3f331dab015343562055a20c3db3b1091e13ecc; cadence-history c8f87c03eb41437fa26b10ee8beeb2ffcb95e1d87e953d6f56d107141f093e4a; Go cadence-server f04c1972a31588e28ccf0dbf92c8f928a80d0dc48375e4bc3e62a0642863d755.
   - Workflows started/completed/lost: go 1049/1049/0, rust 942/942/0.
   - Median first completion (ms): kill_history go 37 / rust 26; kill_matching go 2222 / rust 32. Stable median: kill_history go 2108 / rust 1809; kill_matching go 2573 / rust 2641. No unstable reps.
+
+
+## Follow-up fixes: branch fix-cassandra-parity3 (2026-11-26)
+Head SHA tested: b0976006962df792ecac67762117fde35441ca3e.
+- SELECT_TASKS: now Go's verbatim `templateGetTasksQuery` (no LIMIT, `TTL(task) AS ttl`); `CqlStatement::with_page_size(batch)` sets the driver page size and the Scylla executor reads one page (`query_single_page`), matching Go's `PageSize(batch)` + stop at batch size. Unit test asserts page size; Go-source oracle test now compares the statement verbatim. Native (bytes) store uses the same path.
+- Shard UDT: `build_udt` decodes the thriftrw `data` blob (ShardInfoRecord + raw queue-state/marker blobs) and writes all 19 UDT fields on create and update like Go (`replication_dlq_ack_level` not carried by the Rust record, written null; nil maps/blobs null). Unit test `udt_carries_all_go_fields_from_blob`.
+- history_execution_cassandra_write.rs `cas_error` (update path) vs `workflow_utils.go`: FIXED 3 mismatches: (1) current-run mismatch only when the conditional run id is non-empty and differs; (2) next_event_id mismatch only when actual != previousNextEventIDCondition; (3) fallback message now includes requestConditionalRunID. Unit tests added. Create path, shard range mismatch, duplicate-request mapping match Go. Column list formatting in the "unknown" messages differs (`{row:?}` vs Go `i: k=v`, Go's order is map-random anyway) - not fixed, message text only.
+CI:
+- rust-ci package=cadence-persistence: success, https://github.com/auenkr/cadence-rust/actions/runs/45758808827 (earlier runs 45757889713 clippy bound, 45758345846 oracle test: failed, fixed).
+- rust-ci workspace: success, https://github.com/auenkr/cadence-rust/actions/runs/45759278188
+- recovery-timing database=cassandra scenarios=cold_restart,kill_history repetitions=3: success, https://github.com/auenkr/cadence-rust/actions/runs/45759281887
+  - Rust cadence-server SHA256 7c22d05635b496a6dbfafd4ebf336b6539c411ddc703fe1a5222f668ade8ada9; cadence-history 789e292a805130c51a19fa3dbd2a17bb9babcc1d66194ce9a3dd86ca3a5f9ed3; Go cadence-server 5ed8be2d0506003a1ccefe455a89e7c513780c8bf6c767ec144a388bd9e8572b.
+  - Workflows started/completed/lost: go 1143/1143/0, rust 993/993/0.
+  - First completion median (ms): cold_restart go 11714 / rust 10238; kill_history go 58 / rust 1590. Stable median: cold_restart go 14971 / rust 14013; kill_history go 2476 / rust 1905. No unstable reps.
