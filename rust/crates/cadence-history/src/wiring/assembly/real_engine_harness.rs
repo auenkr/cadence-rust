@@ -57,6 +57,7 @@ pub struct Inner {
 pub struct MemExecutions {
     pub inner: Mutex<Inner>,
     pub update_pause: Mutex<Option<PersistencePause>>,
+    pub create_pause: Mutex<Option<PersistencePause>>,
 }
 
 fn merge_keyed<K: Clone + Ord>(dst: &mut Vec<pc::KeyedBlob<K>>, upserts: &[pc::KeyedBlob<K>], deletes: &[K]) {
@@ -145,6 +146,11 @@ impl MemExecutions {
 #[async_trait]
 impl pc::GoExecutionStore for MemExecutions {
     async fn create_workflow_execution(&self, r: pc::CreateWorkflowExecutionRequest) -> Result<pc::CurrentExecution, PersistenceError> {
+        let pause = self.create_pause.lock().unwrap().clone();
+        if let Some((entered, resume)) = pause {
+            entered.notify_one();
+            resume.notified().await;
+        }
         let mut g = self.inner.lock().unwrap();
         let mode_name = match r.mode {
             pc::CreateWorkflowMode::BrandNew => "BrandNew",

@@ -392,8 +392,7 @@ mod read_store_tests {
 /// `ServiceBusyError("Persistence Max QPS Reached for List Operations.")`.
 pub struct ListSampler {
     enabled: Arc<dyn Fn() -> bool + Send + Sync>,
-    qps: Arc<dyn Fn(&str) -> i64 + Send + Sync>,
-    buckets: std::sync::Mutex<std::collections::HashMap<String, (f64, std::time::Instant)>>,
+    buckets: cadence_common::priority_token_bucket::DomainToBucketMap,
 }
 
 impl ListSampler {
@@ -403,8 +402,8 @@ impl ListSampler {
     ) -> Self {
         Self {
             enabled,
-            qps,
-            buckets: Default::default(),
+            // Go numOfPriorityForList = 1, NewDomainToBucketMap / NewFullPriorityTokenBucket.
+            buckets: cadence_common::priority_token_bucket::DomainToBucketMap::new(1, qps),
         }
     }
 
@@ -412,16 +411,13 @@ impl ListSampler {
         if !(self.enabled)() {
             return Ok(());
         }
-        let rate = (self.qps)(domain).max(0) as f64;
-        let burst = rate.max(1.0);
         let now = std::time::Instant::now();
-        let mut map = self.buckets.lock().unwrap_or_else(|e| e.into_inner());
-        let entry = map.entry(domain.to_string()).or_insert((burst, now));
-        let elapsed = now.duration_since(entry.1).as_secs_f64();
-        entry.0 = (entry.0 + elapsed * rate).min(burst);
-        entry.1 = now;
-        if entry.0 >= 1.0 {
-            entry.0 -= 1.0;
+        if self
+            .buckets
+            .get_rate_limiter(domain, now)
+            .get_token_at(0, 1, now)
+            .0
+        {
             Ok(())
         } else {
             Err(CadenceError::ServiceBusy(
@@ -439,7 +435,7 @@ mod solfix16_tests {
 
     #[test]
     fn list_sampler_limits_per_domain_when_enabled() {
-        let s = ListSampler::new(Arc::new(|| true), Arc::new(|_| 1));
+        let s = ListSampler::new(Arc::new(|| true), Arc::new(|_| 10));
         assert!(s.try_consume("a").is_ok());
         assert!(matches!(
             s.try_consume("a"),

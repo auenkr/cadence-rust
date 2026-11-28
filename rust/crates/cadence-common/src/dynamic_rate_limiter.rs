@@ -163,4 +163,111 @@ mod tests {
         let later = now + DYNAMIC_LIMITER_TTL_NANOS + 1;
         assert!(!l.allow_at(later));
     }
+
+    const MS: i64 = 1_000_000;
+
+    fn shared(rps: f64) -> (std::sync::Arc<std::sync::Mutex<f64>>, DynamicRateLimiter) {
+        let cell = std::sync::Arc::new(std::sync::Mutex::new(rps));
+        let c = cell.clone();
+        (cell, DynamicRateLimiter::new(Box::new(move || *c.lock().unwrap())))
+    }
+
+    /// History transferProcessorMaxPollRPS default: 20 rps, burst 20 (Go x/time/rate).
+    #[test]
+    fn history_default_20rps_burst_20_table() {
+        // (offset_ms, allows attempted, expected allowed count)
+        let table = [(0, 25, 20), (50, 3, 1), (100, 1, 1), (1100, 25, 20), (1100, 1, 0)];
+        let (_c, l) = shared(20.0);
+        let base = unix_nanos();
+        for (off, tries, want) in table {
+            let got = (0..tries).filter(|_| l.allow_at(base + off * MS)).count();
+            assert_eq!(got, want, "offset {off}ms");
+        }
+    }
+
+    #[test]
+    fn wait_delays_are_spaced_at_rate_after_burst() {
+        let (_c, l) = shared(20.0);
+        let base = unix_nanos();
+        for _ in 0..20 {
+            assert_eq!(l.reserve_at(base, None).unwrap().0, Duration::ZERO);
+        }
+        for i in 1..=3u64 {
+            assert_eq!(l.reserve_at(base, None).unwrap().0, Duration::from_millis(50 * i));
+        }
+    }
+
+    #[test]
+    fn wait_longer_than_deadline_consumes_nothing() {
+        let (_c, l) = shared(20.0);
+        let base = unix_nanos();
+        for _ in 0..20 {
+            assert!(l.allow_at(base));
+        }
+        assert!(l.reserve_at(base, Some(Duration::from_millis(40))).is_none());
+        assert_eq!(
+            l.reserve_at(base, Some(Duration::from_millis(50))).unwrap().0,
+            Duration::from_millis(50)
+        );
+    }
+
+    #[test]
+    fn fractional_tokens_accumulate() {
+        // 2.5 rps => burst 3; one token per 400ms.
+        let (_c, l) = shared(2.5);
+        let base = unix_nanos();
+        for _ in 0..3 {
+            assert!(l.allow_at(base));
+        }
+        assert!(!l.allow_at(base + 200 * MS)); // 0.5 token
+        assert!(l.allow_at(base + 400 * MS)); // 1.0 token
+        assert!(!l.allow_at(base + 600 * MS)); // 0.5 token
+        assert!(l.allow_at(base + 800 * MS));
+    }
+
+    #[test]
+    fn dynamic_rps_decrease_clamps_bucket_to_new_burst_after_ttl() {
+        let (c, l) = shared(20.0);
+        let base = unix_nanos();
+        for _ in 0..5 {
+            assert!(l.allow_at(base));
+        }
+        *c.lock().unwrap() = 10.0;
+        // Before TTL the old limit still applies (15 tokens left).
+        assert_eq!((0..30).filter(|_| l.allow_at(base + 4 * 1000 * MS)).count(), 20);
+        // After TTL the new rps (burst 10) applies; bucket refills capped at 10.
+        let later = base + DYNAMIC_LIMITER_TTL_NANOS + 1000 * MS;
+        assert_eq!((0..30).filter(|_| l.allow_at(later)).count(), 10);
+    }
+
+    #[test]
+    fn dynamic_rps_increase_raises_burst_and_refills_at_new_rate() {
+        let (c, l) = shared(1.0);
+        let base = unix_nanos();
+        assert!(l.allow_at(base) && !l.allow_at(base));
+        *c.lock().unwrap() = 20.0;
+        let later = base + DYNAMIC_LIMITER_TTL_NANOS + 1;
+        // 5s at the new 20 rps fills to burst 20.
+        assert_eq!((0..30).filter(|_| l.allow_at(later)).count(), 20);
+    }
+
+    #[test]
+    fn dynamic_rps_zero_then_restored() {
+        let (c, l) = shared(20.0);
+        let base = unix_nanos();
+        *c.lock().unwrap() = 0.0;
+        let t1 = base + DYNAMIC_LIMITER_TTL_NANOS + 1;
+        assert!(!l.allow_at(t1));
+        assert!(l.reserve_at(t1, None).is_none());
+        *c.lock().unwrap() = 20.0;
+        let t2 = t1 + DYNAMIC_LIMITER_TTL_NANOS + 1;
+        assert!(l.allow_at(t2));
+    }
+
+    #[test]
+    fn limit_and_burst_table() {
+        for (rps, want) in [(0.0, (0.0, 0)), (0.2, (0.2, 1)), (2.5, (2.5, 3)), (20.0, (20.0, 20))] {
+            assert_eq!(limit_and_burst(rps), want);
+        }
+    }
 }

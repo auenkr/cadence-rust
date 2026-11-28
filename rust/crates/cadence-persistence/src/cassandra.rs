@@ -122,6 +122,76 @@ impl CassandraNullableDomainUdt {
     }
 }
 
+/// A string column that the Go schema declares inconsistently: the fresh
+/// `schema.cql` has `domain_config.bad_binaries_encoding blob`, while clusters
+/// upgraded through `versioned/v0.15` have it as `text`. gocql reads/writes a
+/// Go `string` against either, so accept both and write in the column's type.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CassandraTextOrBlob(pub String);
+
+impl CassandraTextOrBlob {
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
+impl From<String> for CassandraTextOrBlob {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+fn is_blob_column(typ: &scylla::frame::response::result::ColumnType) -> bool {
+    matches!(
+        typ,
+        scylla::frame::response::result::ColumnType::Native(
+            scylla::frame::response::result::NativeType::Blob
+        )
+    )
+}
+
+impl<'frame, 'metadata> scylla::deserialize::value::DeserializeValue<'frame, 'metadata>
+    for CassandraTextOrBlob
+{
+    fn type_check(
+        typ: &scylla::frame::response::result::ColumnType,
+    ) -> Result<(), scylla::deserialize::TypeCheckError> {
+        if is_blob_column(typ) {
+            <Vec<u8> as scylla::deserialize::value::DeserializeValue>::type_check(typ)
+        } else {
+            <String as scylla::deserialize::value::DeserializeValue>::type_check(typ)
+        }
+    }
+
+    fn deserialize(
+        typ: &'metadata scylla::frame::response::result::ColumnType<'metadata>,
+        v: Option<scylla::deserialize::FrameSlice<'frame>>,
+    ) -> Result<Self, scylla::deserialize::DeserializationError> {
+        if is_blob_column(typ) {
+            let bytes =
+                <Vec<u8> as scylla::deserialize::value::DeserializeValue>::deserialize(typ, v)?;
+            Ok(Self(String::from_utf8_lossy(&bytes).into_owned()))
+        } else {
+            <String as scylla::deserialize::value::DeserializeValue>::deserialize(typ, v).map(Self)
+        }
+    }
+}
+
+impl scylla::serialize::value::SerializeValue for CassandraTextOrBlob {
+    fn serialize<'b>(
+        &self,
+        typ: &scylla::frame::response::result::ColumnType,
+        writer: scylla::serialize::writers::CellWriter<'b>,
+    ) -> Result<scylla::serialize::writers::WrittenCellProof<'b>, scylla::serialize::SerializationError>
+    {
+        if is_blob_column(typ) {
+            self.0.as_bytes().serialize(typ, writer)
+        } else {
+            self.0.serialize(typ, writer)
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, DeserializeValue, SerializeValue)]
 pub struct CassandraDomainConfigUdt {
     pub retention: i32,
@@ -133,7 +203,7 @@ pub struct CassandraDomainConfigUdt {
     pub visibility_archival_status: Option<i32>,
     pub visibility_archival_uri: Option<String>,
     pub bad_binaries: Option<Vec<u8>>,
-    pub bad_binaries_encoding: Option<String>,
+    pub bad_binaries_encoding: Option<CassandraTextOrBlob>,
     pub isolation_groups: Option<Vec<u8>>,
     pub isolation_groups_encoding: Option<String>,
     pub async_workflow_config: Option<Vec<u8>>,
@@ -1759,5 +1829,124 @@ impl rustls::client::danger::ServerCertVerifier for NoCertificateVerification {
 
     fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
         self.algorithms.supported_schemes()
+    }
+}
+
+#[cfg(test)]
+mod schema_type_check_tests {
+    use super::*;
+    use scylla::deserialize::value::DeserializeValue as _;
+    use scylla::frame::response::result::{
+        CollectionType, ColumnType, NativeType, UserDefinedType,
+    };
+    use std::borrow::Cow;
+
+    const SCHEMA: &str = include_str!("../../../../go/schema/cassandra/cadence/schema.cql");
+
+    fn udt_fields(schema: &str, name: &str) -> Vec<(String, String)> {
+        let start = schema
+            .find(&format!("CREATE TYPE {name} ("))
+            .unwrap_or_else(|| panic!("type {name} missing"));
+        let body = &schema[start..];
+        let body = &body[body.find('(').unwrap() + 1..body.find(");").unwrap()];
+        body.lines()
+            .map(|l| l.split("--").next().unwrap().trim().trim_end_matches(','))
+            .filter(|l| !l.is_empty())
+            .map(|l| {
+                let (n, t) = l.split_once(char::is_whitespace).unwrap();
+                (n.to_string(), t.trim().to_string())
+            })
+            .collect()
+    }
+
+    fn native(t: &str) -> ColumnType<'static> {
+        ColumnType::Native(match t {
+            "text" => NativeType::Text,
+            "blob" => NativeType::Blob,
+            "int" => NativeType::Int,
+            "bigint" => NativeType::BigInt,
+            "boolean" => NativeType::Boolean,
+            "uuid" => NativeType::Uuid,
+            "timestamp" => NativeType::Timestamp,
+            other => panic!("unsupported native type {other}"),
+        })
+    }
+
+    fn column_type(schema: &str, t: &str) -> ColumnType<'static> {
+        if let Some(inner) = t.strip_prefix("frozen<").and_then(|r| r.strip_suffix('>')) {
+            return match column_type(schema, inner) {
+                ColumnType::UserDefinedType { definition, .. } => ColumnType::UserDefinedType {
+                    frozen: true,
+                    definition,
+                },
+                other => other,
+            };
+        }
+        if let Some(inner) = t.strip_prefix("list<").and_then(|r| r.strip_suffix('>')) {
+            return ColumnType::Collection {
+                frozen: false,
+                typ: CollectionType::List(Box::new(column_type(schema, inner))),
+            };
+        }
+        if let Some(inner) = t.strip_prefix("map<").and_then(|r| r.strip_suffix('>')) {
+            let (k, v) = inner.split_once(',').unwrap();
+            return ColumnType::Collection {
+                frozen: false,
+                typ: CollectionType::Map(
+                    Box::new(column_type(schema, k.trim())),
+                    Box::new(column_type(schema, v.trim())),
+                ),
+            };
+        }
+        if schema.contains(&format!("CREATE TYPE {t} (")) {
+            return udt(schema, t);
+        }
+        native(t)
+    }
+
+    fn udt(schema: &str, name: &str) -> ColumnType<'static> {
+        let field_types = udt_fields(schema, name)
+            .into_iter()
+            .map(|(n, t)| (Cow::Owned(n), column_type(schema, &t)))
+            .collect();
+        ColumnType::UserDefinedType {
+            frozen: false,
+            definition: Arc::new(UserDefinedType {
+                name: Cow::Owned(name.to_string()),
+                keyspace: Cow::Borrowed("cadence"),
+                field_types,
+            }),
+        }
+    }
+
+    /// Fresh-install schema (what the gates apply): every Rust domain UDT must
+    /// type-check against the Go CQL column types.
+    #[test]
+    fn domain_udts_type_check_against_go_schema() {
+        CassandraDomainUdt::type_check(&udt(SCHEMA, "domain")).unwrap();
+        CassandraNullableDomainUdt::type_check(&udt(SCHEMA, "domain")).unwrap();
+        CassandraDomainConfigUdt::type_check(&udt(SCHEMA, "domain_config")).unwrap();
+        CassandraClusterReplicationConfigUdt::type_check(&udt(
+            SCHEMA,
+            "cluster_replication_config",
+        ))
+        .unwrap();
+        CassandraDomainReplicationConfigUdt::type_check(&udt(SCHEMA, "domain_replication_config"))
+            .unwrap();
+    }
+
+    /// Upgraded clusters (versioned v0.15) declare bad_binaries_encoding text.
+    #[test]
+    fn domain_config_type_checks_with_text_bad_binaries_encoding() {
+        let upgraded = SCHEMA.replace("bad_binaries_encoding blob", "bad_binaries_encoding text");
+        assert_ne!(upgraded, SCHEMA);
+        CassandraDomainConfigUdt::type_check(&udt(&upgraded, "domain_config")).unwrap();
+    }
+
+    #[test]
+    fn text_or_blob_accepts_text_and_blob_only() {
+        CassandraTextOrBlob::type_check(&native("text")).unwrap();
+        CassandraTextOrBlob::type_check(&native("blob")).unwrap();
+        assert!(CassandraTextOrBlob::type_check(&native("int")).is_err());
     }
 }
