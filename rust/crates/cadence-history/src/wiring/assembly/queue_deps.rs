@@ -191,12 +191,62 @@ fn matching_metadata<T>(request: &mut tonic::Request<T>) {
 pub struct TransferDepsImpl {
     env: Arc<HistoryEnv>,
     domains: Arc<dyn DomainCache>,
+    /// Go `persistence/wrappers/sampled` write limiters; present only when
+    /// `system.enableVisibilitySampling` was true at construction (Go factory.go).
+    sampling: Option<VisibilitySampling>,
+}
+
+/// Go `sampled.visibilityManager` rate limiters for open/closed writes
+/// (`numOfPriorityForOpen = 1`, `numOfPriorityForClosed = 2`).
+pub(crate) struct VisibilitySampling {
+    open: cadence_common::priority_token_bucket::DomainToBucketMap,
+    closed: cadence_common::priority_token_bucket::DomainToBucketMap,
+}
+
+impl VisibilitySampling {
+    pub(crate) fn new(
+        open_qps: Arc<dyn Fn(&str) -> i64 + Send + Sync>,
+        closed_qps: Arc<dyn Fn(&str) -> i64 + Send + Sync>,
+    ) -> Self {
+        use cadence_common::priority_token_bucket::DomainToBucketMap;
+        Self {
+            open: DomainToBucketMap::new(1, open_qps),
+            closed: DomainToBucketMap::new(2, closed_qps),
+        }
+    }
+
+    fn allow(map: &cadence_common::priority_token_bucket::DomainToBucketMap, domain: &str, priority: usize) -> bool {
+        let now = std::time::Instant::now();
+        map.get_rate_limiter(domain, now).get_token_at(priority, 1, now).0
+    }
+
+    /// Go `RecordWorkflowExecutionStarted`: open limiter, priority 0.
+    pub(crate) fn allow_started(&self, domain: &str) -> bool {
+        Self::allow(&self.open, domain, 0)
+    }
+
+    /// Go `RecordWorkflowExecutionClosed`: closed limiter; Completed -> priority 1.
+    pub(crate) fn allow_closed(&self, domain: &str, close_status: i32) -> bool {
+        // Go getRequestPriority: WorkflowExecutionCloseStatusCompleted (0) is low priority.
+        Self::allow(&self.closed, domain, usize::from(close_status == 0))
+    }
+
+    /// Go `UpsertWorkflowExecution`: closed limiter, priority 0.
+    pub(crate) fn allow_upsert(&self, domain: &str) -> bool {
+        Self::allow(&self.closed, domain, 0)
+    }
 }
 
 impl TransferDepsImpl {
     pub fn new(env: Arc<HistoryEnv>) -> Arc<Self> {
         let domains = env.domain_cache.clone() as Arc<dyn DomainCache>;
-        Arc::new(Self { env, domains })
+        let sampling = (env.config.enable_visibility_sampling)().then(|| {
+            VisibilitySampling::new(
+                env.config.visibility_open_max_qps.clone(),
+                env.config.visibility_closed_max_qps.clone(),
+            )
+        });
+        Arc::new(Self { env, domains, sampling })
     }
 
     async fn matching_client(
@@ -389,10 +439,21 @@ impl TransferDependencies for TransferDepsImpl {
     }
 
     async fn record_workflow_execution_started(&self, record: VisibilityRecord) -> TaskResult<()> {
+        if let Some(s) = &self.sampling {
+            if !s.allow_started(&record.domain) {
+                // Go: logs "Request for open workflow is sampled" and drops the record.
+                return Ok(());
+            }
+        }
         self.env.visibility.record_started_async(to_row(&record, false)).await.map_err(pe)
     }
 
     async fn upsert_workflow_execution(&self, record: VisibilityRecord) -> TaskResult<()> {
+        if let Some(s) = &self.sampling {
+            if !s.allow_upsert(&record.domain) {
+                return Ok(());
+            }
+        }
         // Go IsNopUpsertWorkflowRequest: a CadenceChangeVersion-only upsert is a no-op.
         if record.search_attributes.contains_key("CadenceChangeVersion") {
             return Ok(());
@@ -408,6 +469,11 @@ impl TransferDependencies for TransferDepsImpl {
     }
 
     async fn record_workflow_execution_closed(&self, record: VisibilityRecord) -> TaskResult<()> {
+        if let Some(s) = &self.sampling {
+            if !s.allow_closed(&record.domain, record.close_status) {
+                return Ok(());
+            }
+        }
         self.env.visibility.record_closed_async(to_row(&record, true)).await.map_err(pe)
     }
 
@@ -664,5 +730,33 @@ mod matching_metadata_tests {
         let mut r = tonic::Request::new(());
         matching_metadata(&mut r);
         assert!(r.metadata().get("grpc-timeout").is_some(), "yarpc requires a TTL");
+    }
+}
+
+#[cfg(test)]
+mod visibility_sampling_tests {
+    use super::VisibilitySampling;
+    use std::sync::Arc;
+
+    #[test]
+    fn open_limiter_drops_after_bucket_empty_per_domain() {
+        let s = VisibilitySampling::new(Arc::new(|_| 10), Arc::new(|_| 10));
+        assert!(s.allow_started("d")); // 10 rps -> 1 token per 100ms
+        assert!(!s.allow_started("d"));
+        assert!(s.allow_started("other"));
+    }
+
+    #[test]
+    fn closed_and_upsert_share_closed_limiter() {
+        let s = VisibilitySampling::new(Arc::new(|_| 10), Arc::new(|_| 10));
+        assert!(s.allow_upsert("d")); // priority 0 takes the single token
+        assert!(!s.allow_closed("d", 1));
+    }
+
+    #[test]
+    fn zero_qps_drops_everything() {
+        let s = VisibilitySampling::new(Arc::new(|_| 0), Arc::new(|_| 0));
+        assert!(!s.allow_started("d"));
+        assert!(!s.allow_closed("d", 1));
     }
 }
