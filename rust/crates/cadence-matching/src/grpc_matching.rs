@@ -4444,7 +4444,13 @@ fn adaptive_scaler_trace(task_list: &str, boundary: &str, fields: &str) {
     if *HOP_TRACE.get_or_init(|| {
         std::env::var("CADENCE_TRACE_DECISION").is_ok_and(|v| v == "1" || v == "true")
     }) {
-        eprintln!("HOPTRACE svc=matching epoch_ns={} boundary={} task_list={} {}", matching_now(), boundary, task_list, fields);
+        eprintln!(
+            "HOPTRACE svc=matching epoch_ns={} boundary={} task_list={} {}",
+            matching_now(),
+            boundary,
+            task_list,
+            fields
+        );
         return;
     }
     if std::env::var("CADENCE_MATCHING_ADAPTIVE_TRACE").as_deref() != Ok(PROBE) {

@@ -240,7 +240,10 @@ impl GrpcOutbound {
         let timeout = cadence_service_core::header_forwarding::clamp_to_inbound_deadline(timeout);
         let started = std::time::Instant::now();
         let hop_traced = crate::hop_trace::enabled()
-            && matches!(method, "StartWorkflowExecution" | "RespondDecisionTaskCompleted" | "PollForDecisionTask");
+            && matches!(
+                method,
+                "StartWorkflowExecution" | "RespondDecisionTaskCompleted" | "PollForDecisionTask"
+            );
         if hop_traced {
             crate::hop_trace::emit(&format!("fe_out_sent method={method}"), "-", "-");
         }
@@ -261,7 +264,11 @@ impl GrpcOutbound {
             }
         };
         if hop_traced {
-            crate::hop_trace::emit(&format!("fe_out_returned method={method} ok={}", result.is_ok()), "-", "-");
+            crate::hop_trace::emit(
+                &format!("fe_out_returned method={method} ok={}", result.is_ok()),
+                "-",
+                "-",
+            );
         }
         if let Err(e) = &result {
             eprintln!(

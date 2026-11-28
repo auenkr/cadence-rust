@@ -24,7 +24,10 @@ pub fn now_ms() -> f64 {
 
 /// Wall-clock nanoseconds since the Unix epoch (comparable across service processes).
 pub fn epoch_ns() -> i128 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as i128).unwrap_or_default()
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as i128)
+        .unwrap_or_default()
 }
 
 /// `decision_trace!("stage", workflow_id, run_id, "extra {}", x)`; the arguments are not evaluated when off.

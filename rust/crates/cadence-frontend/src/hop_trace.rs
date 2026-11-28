@@ -6,7 +6,9 @@ static ENABLED: OnceLock<bool> = OnceLock::new();
 
 #[inline]
 pub fn enabled() -> bool {
-    *ENABLED.get_or_init(|| std::env::var("CADENCE_TRACE_DECISION").is_ok_and(|v| v == "1" || v == "true"))
+    *ENABLED.get_or_init(|| {
+        std::env::var("CADENCE_TRACE_DECISION").is_ok_and(|v| v == "1" || v == "true")
+    })
 }
 
 pub fn emit(stage: &str, workflow_id: &str, run_id: &str) {
