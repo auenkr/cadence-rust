@@ -22,5 +22,5 @@ Unit tests added in `session_config_tests`: Go defaults, option overrides, nil r
 
 ## CI evidence
 Head SHA d462a73f35e927f471cd51670b7f0ecf19e85ee3.
-- rust-ci (package=cadence-persistence): https://github.com/auenkr/cadence-rust/actions/runs/46108705540 — still queued when this was written; conclusion NOT yet recorded.
-- matching-cassandra-mixed-gate: https://github.com/auenkr/cadence-rust/actions/runs/46108707851 — still queued; conclusion NOT yet recorded.
+- rust-ci (package=cadence-persistence): https://github.com/auenkr/cadence-rust/actions/runs/46108705540 — **success** (head d462a73f3).
+- matching-cassandra-mixed-gate: https://github.com/auenkr/cadence-rust/actions/runs/46108707851 — **failure** at `Go baseline probe failed` (RuntimeError in tests/run-go-service-baseline.py, probe.log not retrievable from step log). The same workflow also failed on branch gate-sweep-20261128 (run 46108484364) 3 min earlier without this change; last success was 2026-11-23 (run 45220115542). So failure is not attributable to this change but the gate gives NO passing evidence for it. Rust binary SHA256 not recorded (gate failed before reporting).
