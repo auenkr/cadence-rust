@@ -24,7 +24,7 @@ struct State {
 
 impl State {
     fn due(t: Option<Instant>, now: Instant) -> bool {
-        t.map_or(true, |t| now >= t)
+        t.is_none_or(|t| now >= t)
     }
 
     fn refill_overflow(&mut self, now: Instant) {
