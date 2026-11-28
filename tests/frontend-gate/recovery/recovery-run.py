@@ -20,7 +20,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[3]
 OUT = ROOT / "out" / "recovery"
-COMPOSE_FILES = {"mysql": "docker-compose.split.yml", "cassandra": "docker-compose.cassandra.yml"}
+COMPOSE_FILES = {"mysql": "docker-compose.split.yml", "cassandra": "docker-compose.cassandra.yml", "postgres": "docker-compose.split.postgres.yml"}
 PROJECT = "cadence-recovery"
 SERVICES = ("history", "matching", "worker", "frontend")
 STABLE_N, STABLE_MAX_LAT_NS = 10, 2_000_000_000
@@ -110,7 +110,7 @@ def main():
     ap.add_argument("--repetitions", type=int, default=5)
     ap.add_argument("--rust-services", default="frontend,matching,history")
     ap.add_argument("--scenarios", default="cold_fresh,kill_frontend,kill_matching,kill_history,cold_restart")
-    ap.add_argument("--database", default="mysql", choices=("mysql", "cassandra"))
+    ap.add_argument("--database", default="mysql", choices=("mysql", "cassandra", "postgres"))
     ap.add_argument("--limit", type=int, default=120, help="seconds to wait for stable recovery per event")
     args = ap.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
