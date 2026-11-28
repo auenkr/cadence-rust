@@ -584,6 +584,8 @@ pub struct CqlSession {
     inner: scylla::client::caching_session::CachingSession,
 }
 
+// Return types mirror scylla::Session's own methods (driver-owned error type).
+#[allow(clippy::result_large_err)]
 impl CqlSession {
     pub fn new(session: Session) -> Self {
         Self {
