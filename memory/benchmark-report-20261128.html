@@ -1,0 +1,79 @@
+<title>Cadence Rust vs Go Benchmarks</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: single readable column, summary first, tables in scroll wrappers */
+:root{--bg:#f6f7f9;--fg:#1b2230;--muted:#5d6779;--line:#d9dee7;--card:#ffffff;--accent:#c0532a;--good:#1f7a4d;--bad:#b3261e;--warn:#8a6100;
+--sans:"IBM Plex Sans",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,monospace}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12161d;--fg:#e4e8ef;--muted:#9aa4b5;--line:#2a313d;--card:#191e27;--accent:#e98a62;--good:#5fcf97;--bad:#ff8a80;--warn:#e6c15c;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#12161d;--fg:#e4e8ef;--muted:#9aa4b5;--line:#2a313d;--card:#191e27;--accent:#e98a62;--good:#5fcf97;--bad:#ff8a80;--warn:#e6c15c;color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font:15px/1.55 var(--sans);padding-block:28px 48px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+main{max-width:980px;margin:0 auto;display:grid;gap:28px}
+h1{font-size:1.7rem;margin:0;text-wrap:balance}h2{font-size:1.15rem;margin:0 0 10px;text-wrap:balance}
+.sub{color:var(--muted);margin:4px 0 0}
+section{display:grid;gap:8px;min-width:0}
+.tw{overflow-x:auto;border:1px solid var(--line);border-radius:6px;background:var(--card)}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;font-size:.9rem}
+th,td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+th{font-weight:600;color:var(--muted);font-size:.78rem;letter-spacing:.04em;text-transform:uppercase}
+tr:last-child td{border-bottom:0}
+.g{color:var(--good);font-weight:600}.b{color:var(--bad);font-weight:600}.w{color:var(--warn);font-weight:600}
+.mono{font-family:var(--mono);font-size:.85em}
+p{margin:0;max-width:72ch}ul{margin:0;padding-left:20px;max-width:75ch}
+.pill{display:inline-block;padding:1px 8px;border-radius:99px;font-size:.78rem;font-weight:600;border:1px solid currentColor}
+</style>
+<main>
+<header>
+<h1>Cadence Rust vs Go benchmarks</h1>
+<p class="sub">Updated 2026-11-28 · master <span class="mono">50bdf2041</span> · Rust binary <span class="mono">037a9c60…53acaa2</span> · GitHub Actions runners (4 vCPU, 15 GiB; services capped at 1 CPU / 1.4 GiB, database 1.5 CPU / 1.8 GiB)</p>
+</header>
+
+<section>
+<h2>Gates on this head</h2>
+<p><span class="pill g">31 / 31 passed</span> rust-ci on the full workspace, Matching, Frontend and History gates on MySQL, PostgreSQL and Cassandra, the soaks, restart gates, ES and OpenSearch visibility, and 8 benchmark runs. Every Cassandra lane passes now that the cached prepared statements, the nil retry policy and the text-or-blob column work together.</p>
+</section>
+
+<section>
+<h2>Throughput and latency, Go → Rust change (medians of 5 reps; Cassandra 4)</h2>
+<div class="tw"><table>
+<tr><th>Setup</th><th>Workflows in flight</th><th>Throughput</th><th>p50</th><th>p95</th><th>p99</th></tr>
+<tr><td>MySQL, default</td><td>1</td><td class="g">+6.1%</td><td class="g">−35.2%</td><td>+1.9%</td><td>−1.3%</td></tr>
+<tr><td>MySQL, default</td><td>16</td><td class="g">+7.0%</td><td class="g">−17.8%</td><td class="b">+18.8%</td><td class="b">+25.3%</td></tr>
+<tr><td>MySQL, default</td><td>64</td><td class="g">+127.3%</td><td class="g">−59.2%</td><td class="g">−53.1%</td><td class="g">−52.5%</td></tr>
+<tr><td>MySQL, poll limit 1000</td><td>1</td><td class="g">+43.9%</td><td class="g">−31.9%</td><td class="g">−39.4%</td><td class="g">−22.6%</td></tr>
+<tr><td>MySQL, poll limit 1000</td><td>16</td><td>−2.5%</td><td class="g">−12.2%</td><td class="b">+35.7%</td><td class="b">+38.4%</td></tr>
+<tr><td>MySQL, poll limit 1000</td><td>64</td><td class="g">+60.7%</td><td class="g">−37.2%</td><td class="g">−42.7%</td><td class="g">−44.3%</td></tr>
+<tr><td>PostgreSQL, default</td><td>1</td><td class="g">+3.1%</td><td class="g">−14.4%</td><td>−0.9%</td><td class="g">−4.7%</td></tr>
+<tr><td>PostgreSQL, default</td><td>16</td><td class="g">+38.7%</td><td class="g">−30.4%</td><td class="g">−30.3%</td><td class="g">−25.8%</td></tr>
+<tr><td>PostgreSQL, default</td><td>64</td><td class="g">+35.9%</td><td class="g">−22.0%</td><td class="g">−27.9%</td><td class="g">−28.7%</td></tr>
+<tr><td>Cassandra, default</td><td>1</td><td class="g">+13.5%</td><td class="g">−42.2%</td><td class="b">+34.7%</td><td>+0.3%</td></tr>
+<tr><td>Cassandra, default</td><td>16</td><td class="g">+12.6%</td><td class="g">−10.2%</td><td class="g">−13.9%</td><td class="g">−27.5%</td></tr>
+<tr><td>Cassandra, default</td><td>64</td><td class="g">+17.2%</td><td class="g">−25.6%</td><td class="g">−6.7%</td><td>−1.3%</td></tr>
+</table></div>
+<p>Runs 46128676756, 46128680323, 46128682679 and 46128685122, each on one runner. The same Rust binary run twice in one job (A/A) differed by up to 16.6% in throughput in the MySQL poll-limit-1000 c16 cell, so that cell is noise.</p>
+</section>
+
+<section>
+<h2>Other results</h2>
+<div class="tw"><table>
+<tr><th>Test</th><th>Go</th><th>Rust</th><th>Result</th></tr>
+<tr><td>Activities workload, throughput</td><td>11.2 wf/s</td><td>16.9 wf/s</td><td class="g">1.51×</td></tr>
+<tr><td>Child workflows, throughput</td><td>8.6 wf/s</td><td>12.7 wf/s</td><td class="g">1.49×</td></tr>
+<tr><td>Signal + timer, throughput</td><td>13.9 wf/s</td><td>14.6 wf/s</td><td class="g">1.05×</td></tr>
+<tr><td>Long history (1,200 events), throughput</td><td>0.33 wf/s</td><td>0.35 wf/s</td><td class="g">1.08×</td></tr>
+<tr><td>Long history, CPU</td><td>48.9 CPU-s</td><td>49.5 CPU-s</td><td>Equal</td></tr>
+<tr><td>Frontend + Matching memory</td><td>30–49 MiB each</td><td>14–24 MiB each</td><td class="g">~50% less</td></tr>
+<tr><td>CPU per rep, all three services (echo)</td><td>16–43 CPU-s</td><td>7.6–14 CPU-s</td><td class="g">23–67% less</td></tr>
+<tr><td>Full restart, lost workflows (all databases)</td><td>0</td><td>0</td><td class="g">Fixed</td></tr>
+</table></div>
+</section>
+
+<section>
+<h2>Open items</h2>
+<ul>
+<li><span class="pill w">Gap</span> Unpaced p95 at one workflow in flight (Cassandra +34.7%). The cause is Go's own per-shard limit of 20 polls per second on the transfer queue; the code matches Go and there is no fix.</li>
+<li><span class="pill w">Check</span> MySQL c16 p95/p99 were worse than Go in this run (+19% to +38%) but better in earlier runs. This needs a repeat on several runners.</li>
+</ul>
+</section>
+</main>
