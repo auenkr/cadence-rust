@@ -239,6 +239,14 @@ impl GrpcOutbound {
             cadence_service_core::header_forwarding::forward_for_current_call(header_rules, &[]);
         let timeout = cadence_service_core::header_forwarding::clamp_to_inbound_deadline(timeout);
         let started = std::time::Instant::now();
+        let hop_traced = crate::hop_trace::enabled()
+            && matches!(
+                method,
+                "StartWorkflowExecution" | "RespondDecisionTaskCompleted" | "PollForDecisionTask"
+            );
+        if hop_traced {
+            crate::hop_trace::emit(&format!("fe_out_sent method={method}"), "-", "-");
+        }
         let (target, result) = match service {
             "cadence-history" => {
                 let target = resolve_grpc_target(addr, member_grpc, self.history_port);
@@ -255,6 +263,13 @@ impl GrpcOutbound {
                 (target, r)
             }
         };
+        if hop_traced {
+            crate::hop_trace::emit(
+                &format!("fe_out_returned method={method} ok={}", result.is_ok()),
+                "-",
+                "-",
+            );
+        }
         if let Err(e) = &result {
             eprintln!(
                 "WARN gRPC outbound {service}/{method} to {target} failed after {:?} (timeout {timeout:?}): {e:?}",

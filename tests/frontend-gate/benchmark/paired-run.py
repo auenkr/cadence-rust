@@ -111,7 +111,7 @@ def main():
            + ("      CADENCE_TRACE_DECISION: \"1\"\n"
               "      RUST_LOG: warn,decision_trace=info,cadence_history::wiring::assembly::queue_v2_wiring=info\n"
               if os.environ.get("BENCH_TRACE_DECISION") == "true" else "")
-           if name == "history" and (os.environ.get("BENCH_MEM_REPORT") == "1" or os.environ.get("BENCH_HEAP_PROFILE") == "1" or os.environ.get("BENCH_SQL_SLOW_MS") or os.environ.get("BENCH_TRACE_DECISION") == "true") else "")
+           if (name == "history" or os.environ.get("BENCH_TRACE_DECISION") == "true") and (os.environ.get("BENCH_MEM_REPORT") == "1" or os.environ.get("BENCH_HEAP_PROFILE") == "1" or os.environ.get("BENCH_SQL_SLOW_MS") or os.environ.get("BENCH_TRACE_DECISION") == "true") else "")
         for name in ("frontend", "matching", "history", "worker")))
     if os.environ.get("BENCH_DYNAMIC_CONFIG_EXTRA"):
         # Diagnostic: identical dynamic config for every arm; extra top-level keys replace base keys.
