@@ -108,24 +108,48 @@ fn history_to_ndc(err: HistoryError) -> NdcError {
 }
 
 fn is_transient(err: &PersistenceError) -> bool {
-    // Go `IsTransientError`: InternalService, ServiceBusy and DBUnavailable (never timeouts).
+    // Go `IsTransientError` minus timeouts (create/update paths never retry timeouts).
     matches!(err, PersistenceError::Internal(_) | PersistenceError::ServiceBusy(_) | PersistenceError::DbUnavailable(_))
 }
 
-/// Go `persistenceOperationRetryPolicy`: exponential backoff, transient errors only.
-async fn retry_transient<T, F, Fut>(mut op: F) -> Result<T, PersistenceError>
+/// Go `persistence.IsTransientError` exactly: also retries `TimeoutError` (read and append paths).
+fn is_transient_with_timeout(err: &PersistenceError) -> bool {
+    is_transient(err) || matches!(err, PersistenceError::Timeout(_))
+}
+
+/// Go `persistenceOperationRetryPolicy` (initial 50ms, x2, max 10s, 30s expiration), transient errors
+/// only; timeouts are not retried (Go create/update `isRetryable`).
+async fn retry_transient<T, F, Fut>(op: F) -> Result<T, PersistenceError>
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<T, PersistenceError>>,
 {
+    retry_policy(op, is_transient).await
+}
+
+/// Same policy with Go `IsTransientError` (timeouts retried): GetWorkflowExecution,
+/// GetCurrentExecution and AppendHistoryNodes.
+async fn retry_transient_read<T, F, Fut>(op: F) -> Result<T, PersistenceError>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, PersistenceError>>,
+{
+    retry_policy(op, is_transient_with_timeout).await
+}
+
+async fn retry_policy<T, F, Fut>(mut op: F, retryable: fn(&PersistenceError) -> bool) -> Result<T, PersistenceError>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, PersistenceError>>,
+{
+    const EXPIRATION: Duration = Duration::from_secs(30);
+    let start = std::time::Instant::now();
     let mut delay = Duration::from_millis(50);
-    let mut attempt = 0;
     loop {
         match op().await {
-            Err(err) if is_transient(&err) && attempt < 4 => {
-                attempt += 1;
+            Err(err) if retryable(&err) && start.elapsed() + delay < EXPIRATION => {
                 tokio::time::sleep(delay).await;
-                delay = (delay * 2).min(Duration::from_secs(1));
+                delay = (delay * 2).min(Duration::from_secs(10));
             }
             other => return other,
         }
@@ -230,7 +254,7 @@ impl SqlHistoryManager {
             request.info = info.to_string();
         }
         request.current_timestamp_unix_nanos = now_unix_nanos();
-        retry_transient(|| self.store.append_history_nodes(request.clone())).await?;
+        retry_transient_read(|| self.store.append_history_nodes(request.clone())).await?;
         Ok(blob)
     }
 }
@@ -344,7 +368,7 @@ impl TransactionManagerEnv for SqlTransactionManagerEnv {
         self.domains.get_domain_name(domain_id).map_err(history_to_ndc)
     }
     fn get_workflow_execution(&self, domain_id: &str, _domain_name: &str, workflow_id: &str, run_id: &str) -> NdcResult<()> {
-        block_on(retry_transient(|| {
+        block_on(retry_transient_read(|| {
             self.executions.get_workflow_execution(
                 self.shard_id,
                 domain_id.to_string(),
@@ -357,7 +381,7 @@ impl TransactionManagerEnv for SqlTransactionManagerEnv {
         .map_err(to_ndc_error)
     }
     fn get_current_execution(&self, domain_id: &str, _domain_name: &str, workflow_id: &str) -> NdcResult<String> {
-        block_on(retry_transient(|| {
+        block_on(retry_transient_read(|| {
             self.executions.get_current_execution(self.shard_id, domain_id.to_string(), workflow_id.to_string())
         }))
         .map(|c| c.run_id)
@@ -554,7 +578,7 @@ where
     }
     async fn get_workflow_with_retry(&mut self, key: &WorkflowExecutionKey, domain: &str) -> Result<M, M::Error> {
         let range_id = (self.range_id)();
-        let snapshot = retry_transient(|| {
+        let snapshot = retry_transient_read(|| {
             self.executions.get_workflow_execution(
                 self.shard_id,
                 key.domain_id.clone(),
@@ -926,7 +950,7 @@ impl ExecutionCacheBackend for SqlExecutionCacheBackend {
     fn current_execution_with_retry(&mut self, domain_id: &str, _domain_name: &str, workflow_id: &str) -> Result<String, Self::Error> {
         let executions = self.executions.clone();
         let shard = self.shard_id;
-        block_on(retry_transient(|| executions.get_current_execution(shard, domain_id.to_string(), workflow_id.to_string())))
+        block_on(retry_transient_read(|| executions.get_current_execution(shard, domain_id.to_string(), workflow_id.to_string())))
             .map(|c| c.run_id)
             .map_err(to_history_error)
     }
@@ -964,6 +988,18 @@ mod xrfix_tests {
         let e = to_history_error(PersistenceError::Timeout("t".into()));
         assert!(e.is_timeout());
         assert!(!to_history_error(PersistenceError::Internal("x".into())).is_timeout());
+    }
+
+    #[tokio::test]
+    async fn read_path_retries_timeouts_like_go_is_transient_error() {
+        let calls = AtomicUsize::new(0);
+        let r: Result<i32, PersistenceError> = retry_transient_read(|| {
+            let n = calls.fetch_add(1, Ordering::SeqCst);
+            async move { if n < 1 { Err(PersistenceError::Timeout("t".into())) } else { Ok(1) } }
+        })
+        .await;
+        assert_eq!(r.unwrap(), 1);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]
