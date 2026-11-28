@@ -1765,7 +1765,9 @@ mod write_cancel_guard {
         assert!(h.execs.transfer_types().is_empty(), "aborted create stores nothing");
         *h.execs.create_pause.lock().unwrap() = None;
         let run = start(&h).await;
-        assert_eq!(h.execs.transfer_types().len(), 1, "decision task stored once after retry");
+        let baseline = Harness::new();
+        start(&baseline).await;
+        assert_eq!(h.execs.transfer_types(), baseline.execs.transfer_types(), "same tasks as a clean start, none duplicated");
         assert!(!run.is_empty());
         let notes = transfer.0.lock().unwrap();
         assert_eq!(notes.len(), 2);
