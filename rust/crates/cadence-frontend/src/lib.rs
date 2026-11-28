@@ -6,6 +6,7 @@
 //! module without changing the wire surface.
 
 pub mod archive_readers;
+pub mod hop_trace;
 pub mod async_kafka;
 pub mod async_kafka_tls;
 pub mod async_publisher;

@@ -22,17 +22,22 @@ pub fn now_ms() -> f64 {
     START.get_or_init(Instant::now).elapsed().as_secs_f64() * 1000.0
 }
 
+/// Wall-clock nanoseconds since the Unix epoch (comparable across service processes).
+pub fn epoch_ns() -> i128 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as i128).unwrap_or_default()
+}
+
 /// `decision_trace!("stage", workflow_id, run_id, "extra {}", x)`; the arguments are not evaluated when off.
 #[macro_export]
 macro_rules! decision_trace {
     ($stage:expr, $wf:expr, $run:expr) => {
         if $crate::decision_trace::enabled() {
-            tracing::info!(target: "decision_trace", "DTRACE t_ms={:.3} stage={} wf={} run={}", $crate::decision_trace::now_ms(), $stage, $wf, $run);
+            tracing::info!(target: "decision_trace", "DTRACE epoch_ns={} t_ms={:.3} stage={} wf={} run={}", $crate::decision_trace::epoch_ns(), $crate::decision_trace::now_ms(), $stage, $wf, $run);
         }
     };
     ($stage:expr, $wf:expr, $run:expr, $($arg:tt)+) => {
         if $crate::decision_trace::enabled() {
-            tracing::info!(target: "decision_trace", "DTRACE t_ms={:.3} stage={} wf={} run={} {}", $crate::decision_trace::now_ms(), $stage, $wf, $run, format!($($arg)+));
+            tracing::info!(target: "decision_trace", "DTRACE epoch_ns={} t_ms={:.3} stage={} wf={} run={} {}", $crate::decision_trace::epoch_ns(), $crate::decision_trace::now_ms(), $stage, $wf, $run, format!($($arg)+));
         }
     };
 }
@@ -42,12 +47,12 @@ macro_rules! decision_trace {
 macro_rules! pump_trace {
     ($stage:expr) => {
         if $crate::decision_trace::enabled() {
-            tracing::info!(target: "decision_trace", "DTRACE t_ms={:.3} stage={} wf=- run=-", $crate::decision_trace::now_ms(), $stage);
+            tracing::info!(target: "decision_trace", "DTRACE epoch_ns={} t_ms={:.3} stage={} wf=- run=-", $crate::decision_trace::epoch_ns(), $crate::decision_trace::now_ms(), $stage);
         }
     };
     ($stage:expr, $($arg:tt)+) => {
         if $crate::decision_trace::enabled() {
-            tracing::info!(target: "decision_trace", "DTRACE t_ms={:.3} stage={} wf=- run=- {}", $crate::decision_trace::now_ms(), $stage, format!($($arg)+));
+            tracing::info!(target: "decision_trace", "DTRACE epoch_ns={} t_ms={:.3} stage={} wf=- run=- {}", $crate::decision_trace::epoch_ns(), $crate::decision_trace::now_ms(), $stage, format!($($arg)+));
         }
     };
 }

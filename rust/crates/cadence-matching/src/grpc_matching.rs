@@ -4439,6 +4439,14 @@ fn log_received_add_task(
 /// setting CADENCE_MATCHING_ADAPTIVE_TRACE to the root task-list name.
 fn adaptive_scaler_trace(task_list: &str, boundary: &str, fields: &str) {
     const PROBE: &str = "production-adaptive-scaler-probe";
+    // Diagnostic hop trace (perf-c1-hop-trace): CADENCE_TRACE_DECISION=1 logs every task list.
+    static HOP_TRACE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *HOP_TRACE.get_or_init(|| {
+        std::env::var("CADENCE_TRACE_DECISION").is_ok_and(|v| v == "1" || v == "true")
+    }) {
+        eprintln!("HOPTRACE svc=matching epoch_ns={} boundary={} task_list={} {}", matching_now(), boundary, task_list, fields);
+        return;
+    }
     if std::env::var("CADENCE_MATCHING_ADAPTIVE_TRACE").as_deref() != Ok(PROBE) {
         return;
     }
