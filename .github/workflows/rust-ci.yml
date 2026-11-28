@@ -44,6 +44,10 @@ on:
         description: "Apply rustfmt to Frontend persistence adapter files and upload the patch"
         type: boolean
         default: false
+      regen_lock:
+        description: "Run cargo update --workspace and upload rust/Cargo.lock (skips other jobs)"
+        type: boolean
+        default: false
       format_all:
         description: "Run cargo fmt --all and upload the patch"
         type: boolean
@@ -99,7 +103,7 @@ jobs:
   fmt:
     # Fast fail: the enforced rustfmt checks finish in ~30s on their own runner; on failure the whole
     # run is cancelled so `gh run watch` returns before clippy/test (previously ~4-7 min).
-    if: inputs.heap_profile_run_id == '' && inputs.format_all != true
+    if: inputs.heap_profile_run_id == '' && inputs.format_all != true && inputs.regen_lock != true
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -115,8 +119,27 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh run cancel ${{ github.run_id }} -R ${{ github.repository }}
+  lock-regen:
+    if: inputs.regen_lock == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Init IDL submodule
+        run: git submodule update --init --recursive go && scripts/go-overlay.sh
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cargo update --workspace
+        working-directory: rust
+        run: |
+          cargo update --workspace
+          cargo metadata --locked --format-version 1 > /dev/null
+      - uses: actions/upload-artifact@v5
+        with:
+          name: Cargo.lock
+          path: rust/Cargo.lock
+          retention-days: 3
   clippy-test:
-    if: inputs.heap_profile_run_id == ''
+    if: inputs.heap_profile_run_id == '' && inputs.regen_lock != true
     runs-on: ubuntu-latest
     timeout-minutes: 90
     services:
@@ -351,6 +374,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+      - name: Verify Cargo.lock is up to date
+        working-directory: rust
+        run: cargo metadata --locked --format-version 1 > /dev/null
       - name: Format whole workspace
         if: inputs.format_all == true
         working-directory: rust
