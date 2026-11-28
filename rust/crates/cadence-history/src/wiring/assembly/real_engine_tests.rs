@@ -71,7 +71,11 @@ fn token(run: &str, schedule_id: i64) -> Vec<u8> {
 }
 
 async fn decision_completed(h: &Harness, run: &str, schedule_id: i64, decisions: Vec<Decision>) -> HResult<HistoryRespondDecisionTaskCompletedResponse> {
-    h.engine
+    decision_completed_on(&h.engine, run, schedule_id, decisions).await
+}
+
+async fn decision_completed_on(engine: &crate::engine::runtime::HistoryEngine, run: &str, schedule_id: i64, decisions: Vec<Decision>) -> HResult<HistoryRespondDecisionTaskCompletedResponse> {
+    engine
         .respond_decision_task_completed(&HistoryRespondDecisionTaskCompletedRequest {
             domain_uuid: DOMAIN_ID.into(),
             complete_request: Some(RespondDecisionTaskCompletedRequest {
@@ -1647,5 +1651,144 @@ mod notify_order {
         for (id, level) in seen.iter() {
             assert!(level >= id, "max read level {level} behind notified transfer task {id}");
         }
+    }
+}
+
+// ---- WriteCancelGuard: a dropped task-bearing write future must wake the queues (persistence_error)
+mod write_cancel_guard {
+    use super::*;
+    use crate::engine::notify_tasks::NotifyTaskInfo;
+    use crate::engine::runtime::{QueueAction, QueueProcessor};
+    use std::sync::{Arc, Mutex};
+    use tokio::sync::Notify;
+
+    /// Records (task ids, persistence_error) per notification.
+    #[derive(Default)]
+    struct Rec(Mutex<Vec<(Vec<i64>, bool)>>);
+
+    #[async_trait::async_trait]
+    impl QueueProcessor for Rec {
+        fn start(&self) {}
+        async fn stop(&self) {}
+        async fn handle_action(&self, _: &str, _: QueueAction) -> HResult<Vec<String>> {
+            Ok(vec![])
+        }
+        fn notify_new_task(&self, _: &str, info: &NotifyTaskInfo) {
+            self.0.lock().unwrap().push((info.tasks.iter().map(|t| t.task_id).collect(), info.persistence_error));
+        }
+        async fn failover_domain(&self, _: &std::collections::HashSet<String>) {}
+        async fn lock_task_processing(&self) {}
+        fn unlock_task_processing(&self) {}
+    }
+
+    fn harness() -> (Harness, Arc<Rec>, Arc<Rec>) {
+        let (tr, ti) = (Arc::new(Rec::default()), Arc::new(Rec::default()));
+        let (a, b) = (tr.clone(), ti.clone());
+        let h = Harness::build(move |e| {
+            e.queue_processors.insert(crate::engine::deps::HistoryTaskCategory::Transfer, a);
+            e.queue_processors.insert(crate::engine::deps::HistoryTaskCategory::Timer, b);
+        });
+        (h, tr, ti)
+    }
+
+    fn pause() -> (Arc<Notify>, Arc<Notify>) {
+        (Arc::new(Notify::new()), Arc::new(Notify::new()))
+    }
+
+    /// Update path: abort while the write is in flight -> woken once with persistence_error, nothing stored;
+    /// retry lands the tasks exactly once.
+    #[tokio::test]
+    async fn dropped_update_write_notifies_with_persistence_error_and_loses_no_task() {
+        let (h, transfer, _timer) = harness();
+        let run = start(&h).await;
+        decision_started(&h, &run, 2, "dec-req").await.expect("started");
+        let (entered, resume) = pause();
+        *h.execs.update_pause.lock().unwrap() = Some((entered.clone(), resume));
+        let before_tasks = h.execs.transfer_types().len();
+        let before_notes = transfer.0.lock().unwrap().len();
+        let (engine, r) = (h.engine.clone(), run.clone());
+        let task = tokio::spawn(async move {
+            let _ = decision_completed_on(&engine, &r, 2, vec![schedule_activity_decision("act-1")]).await;
+        });
+        entered.notified().await;
+        assert_eq!(transfer.0.lock().unwrap().len(), before_notes, "no notify while write is in flight");
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        {
+            let notes = transfer.0.lock().unwrap();
+            assert_eq!(notes.len(), before_notes + 1, "exactly one wake-up from the guard: {notes:?}");
+            let (ids, err) = notes.last().unwrap();
+            assert!(*err && !ids.is_empty(), "guard notifies with persistence_error and the task ids");
+        }
+        assert_eq!(h.execs.transfer_types().len(), before_tasks, "aborted write must not store tasks");
+        // Retry after cancel: succeeds, task stored exactly once, notified without persistence_error.
+        *h.execs.update_pause.lock().unwrap() = None;
+        h.cache.clear_all_for_test();
+        decision_completed(&h, &run, 2, vec![schedule_activity_decision("act-1")]).await.expect("retry");
+        let activity_tasks = h.execs.transfer_types().len() - before_tasks;
+        assert_eq!(activity_tasks, 1, "activity transfer task stored exactly once");
+        let notes = transfer.0.lock().unwrap();
+        assert_eq!(notes.len(), before_notes + 2);
+        assert!(!notes.last().unwrap().1, "successful write notifies without persistence_error");
+    }
+
+    /// Completed (not dropped) write: guard is disarmed, so exactly one normal notification.
+    #[tokio::test]
+    async fn completed_update_write_notifies_once_without_error() {
+        let (h, transfer, _timer) = harness();
+        let run = start(&h).await;
+        decision_started(&h, &run, 2, "dec-req").await.expect("started");
+        let before = transfer.0.lock().unwrap().len();
+        decision_completed(&h, &run, 2, vec![schedule_activity_decision("act-1")]).await.expect("completed");
+        let notes = transfer.0.lock().unwrap();
+        assert_eq!(notes.len(), before + 1);
+        assert!(!notes.last().unwrap().1);
+    }
+
+    /// Create path: abort the start while the create write is in flight.
+    #[tokio::test]
+    async fn dropped_create_write_notifies_with_persistence_error() {
+        let (h, transfer, _timer) = harness();
+        let (entered, resume) = pause();
+        *h.execs.create_pause.lock().unwrap() = Some((entered.clone(), resume));
+        let engine = h.engine.clone();
+        let task = tokio::spawn(async move { engine.start_workflow_execution(&start_req("start-req")).await });
+        entered.notified().await;
+        assert!(transfer.0.lock().unwrap().is_empty());
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        {
+            let notes = transfer.0.lock().unwrap();
+            assert_eq!(notes.len(), 1, "{notes:?}");
+            assert!(notes[0].1 && !notes[0].0.is_empty());
+        }
+        assert!(h.execs.transfer_types().is_empty(), "aborted create stores nothing");
+        *h.execs.create_pause.lock().unwrap() = None;
+        let run = start(&h).await;
+        assert_eq!(h.execs.transfer_types().len(), 1, "decision task stored once after retry");
+        assert!(!run.is_empty());
+        let notes = transfer.0.lock().unwrap();
+        assert_eq!(notes.len(), 2);
+        assert!(!notes[1].1);
+    }
+
+    /// tokio::time::timeout cancellation (client deadline) behaves like abort.
+    #[tokio::test]
+    async fn timeout_cancellation_wakes_waiters() {
+        let (h, transfer, _timer) = harness();
+        let run = start(&h).await;
+        decision_started(&h, &run, 2, "dec-req").await.expect("started");
+        let (entered, resume) = pause();
+        *h.execs.update_pause.lock().unwrap() = Some((entered, resume));
+        let before = transfer.0.lock().unwrap().len();
+        let res = tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            decision_completed(&h, &run, 2, vec![schedule_activity_decision("act-1")]),
+        )
+        .await;
+        assert!(res.is_err(), "timed out");
+        let notes = transfer.0.lock().unwrap();
+        assert_eq!(notes.len(), before + 1);
+        assert!(notes.last().unwrap().1);
     }
 }
