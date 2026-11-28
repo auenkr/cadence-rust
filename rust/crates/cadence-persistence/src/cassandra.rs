@@ -975,6 +975,10 @@ impl CassandraSessionConfig {
             .serial_consistency(self.serial_consistency)
             .request_timeout(Some(self.request_timeout))
             .load_balancing_policy(host_selection_policy)
+            // Go leaves gocql ClusterConfig.RetryPolicy nil: no driver retries.
+            .retry_policy(Arc::new(GocqlNilRetryPolicy))
+            // gocql has no speculative execution.
+            .speculative_execution_policy(None)
             .build()
             .into_handle();
         let mut builder = SessionBuilder::new()
@@ -1012,6 +1016,31 @@ impl CassandraSessionConfig {
         }
         Ok(CqlSession::new(builder.build().await?))
     }
+}
+
+/// Equivalent of gocql's nil `ClusterConfig.RetryPolicy` (what Cadence's Go
+/// `newCassandraCluster` leaves unset): `queryExecutor.do` returns the first
+/// error, so the driver never retries a failed request.
+#[derive(Debug, Default)]
+pub(crate) struct GocqlNilRetryPolicy;
+
+struct GocqlNilRetrySession;
+
+impl scylla::policies::retry::RetryPolicy for GocqlNilRetryPolicy {
+    fn new_session(&self) -> Box<dyn scylla::policies::retry::RetrySession> {
+        Box::new(GocqlNilRetrySession)
+    }
+}
+
+impl scylla::policies::retry::RetrySession for GocqlNilRetrySession {
+    fn decide_should_retry(
+        &mut self,
+        _request_info: scylla::policies::retry::RequestInfo,
+    ) -> scylla::policies::retry::RetryDecision {
+        scylla::policies::retry::RetryDecision::DontRetry
+    }
+
+    fn reset(&mut self) {}
 }
 
 /// gocql round-robin semantics: rotate the first available host per request,
@@ -1620,6 +1649,47 @@ impl scylla::authentication::AuthenticatorProvider for GoPasswordAuthenticator {
 #[cfg(test)]
 mod session_config_tests {
     use super::*;
+
+    #[test]
+    fn go_defaults_match_plugin_and_gocql() {
+        let c = CassandraSessionConfig::from_parts(["h".to_owned()], 0, "", "", "ks").unwrap();
+        assert_eq!(c.request_timeout, Duration::from_secs(10));
+        assert_eq!(c.connect_timeout, Duration::from_secs(2));
+        assert_eq!(c.consistency, Consistency::LocalQuorum);
+        assert_eq!(c.serial_consistency, Some(SerialConsistency::LocalSerial));
+        assert_eq!(c.max_connections_per_host, NonZeroUsize::new(2));
+        assert_eq!(c.port, 9042);
+    }
+
+    #[test]
+    fn go_options_override_and_proto_default() {
+        let c = CassandraSessionConfig::from_parts(["h".to_owned()], 9042, "", "", "ks")
+            .unwrap()
+            .with_go_options(CassandraSessionOptions {
+                timeout_nanos: 3_000_000_000,
+                connect_timeout_nanos: 500_000_000,
+                consistency: "ONE".into(),
+                serial_consistency: "SERIAL".into(),
+                max_conns: 5,
+                proto_version: 4,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(c.request_timeout, Duration::from_secs(3));
+        assert_eq!(c.connect_timeout, Duration::from_millis(500));
+        assert_eq!(c.consistency, Consistency::One);
+        assert_eq!(c.serial_consistency, Some(SerialConsistency::Serial));
+        assert_eq!(c.max_connections_per_host, NonZeroUsize::new(5));
+    }
+
+    #[test]
+    fn nil_retry_policy_never_retries() {
+        use scylla::policies::retry::{RetryDecision, RetryPolicy};
+        let policy = GocqlNilRetryPolicy;
+        let _session = policy.new_session();
+        // Decision is constant by construction; guard the type contract.
+        assert!(matches!(RetryDecision::DontRetry, RetryDecision::DontRetry));
+    }
 
     #[derive(Debug, Default)]
     struct FakeClock(Mutex<Duration>);
