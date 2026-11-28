@@ -24,3 +24,13 @@ Unit tests added in `session_config_tests`: Go defaults, option overrides, nil r
 Head SHA d462a73f35e927f471cd51670b7f0ecf19e85ee3.
 - rust-ci (package=cadence-persistence): https://github.com/auenkr/cadence-rust/actions/runs/46108705540 — **success** (head d462a73f3).
 - matching-cassandra-mixed-gate: https://github.com/auenkr/cadence-rust/actions/runs/46108707851 — **failure** at `Go baseline probe failed` (RuntimeError in tests/run-go-service-baseline.py, probe.log not retrievable from step log). The same workflow also failed on branch gate-sweep-20261128 (run 46108484364) 3 min earlier without this change; last success was 2026-11-23 (run 45220115542). So failure is not attributable to this change but the gate gives NO passing evidence for it. Rust binary SHA256 not recorded (gate failed before reporting).
+
+# Cassandra gates after merging master (head 4554a10f974c9ace6b4c98ea503e18f6a8e4e45b)
+Merged origin/master (fix-cassandra-domain-typecheck) into gocql-retry-parity with no conflicts. All runs were dispatched on `gocql-retry-parity`.
+
+| Run | Conclusion | Binary SHA256 |
+|---|---|---|
+| rust-ci cadence-persistence [46124074415](https://github.com/auenkr/cadence-rust/actions/runs/46124074415) | success | - |
+| matching-cassandra-mixed-gate [46124076775](https://github.com/auenkr/cadence-rust/actions/runs/46124076775) | success | cadence-matching 82d103acb1158a6b599c971708ab6ca28ad2b7835177b2677c5c485393bb40fe |
+| history-mixed-gate cassandra [46124079364](https://github.com/auenkr/cadence-rust/actions/runs/46124079364) | success | cadence-server d3ff7e139a590ecb991fa663288d95949f925d920bc653bab3d262e7f001f72d, cadence-history 599b9bf76aa0ed71e0f22353c8fef9a6fa94fd87c23a0fc2cab6f8123ee3350a |
+| history-restartgate cassandra [46124081888](https://github.com/auenkr/cadence-rust/actions/runs/46124081888) | success | release cadence-server 73063f9886396fe72650ded8abbeac7be986ecca282274622bb12ece2c00734a, cadence-history bd7c98c94baa2a9b32187510515a8588177a3e9ec3cf55d45ccc3cc3eff8cb76 |
