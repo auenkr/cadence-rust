@@ -40,3 +40,5 @@ CI on head bb2e81eb2 (dispatched; conclusions pending at time of writing, still 
 - rust-ci cadence-history https://github.com/auenkr/cadence-rust/actions/runs/46108824890
 - history-mixed-gate https://github.com/auenkr/cadence-rust/actions/runs/46108827054
 Earlier runs on fc77c7763 (46108569335/46108576248/46108579516) were cancelled while still queued, superseded by the fix.
+
+CI result on bb2e81eb2: all three runs (46108822393, 46108824890, 46108827054) concluded success.
