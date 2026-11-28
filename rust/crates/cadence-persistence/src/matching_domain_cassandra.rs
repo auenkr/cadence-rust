@@ -485,7 +485,7 @@ impl CassandraDomainMetadataPersistence {
             bad_binaries_encoding: metadata
                 .decoded_bad_binaries
                 .as_ref()
-                .map(|_| encoding.as_str().to_string()),
+                .map(|_| encoding.as_str().to_string().into()),
             isolation_groups: blob(isolation_groups, encoding)?,
             isolation_groups_encoding: metadata
                 .decoded_isolation_groups
