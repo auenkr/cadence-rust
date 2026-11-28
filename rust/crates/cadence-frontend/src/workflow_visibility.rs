@@ -412,7 +412,12 @@ impl ListSampler {
             return Ok(());
         }
         let now = std::time::Instant::now();
-        if self.buckets.get_rate_limiter(domain, now).get_token_at(0, 1, now).0 {
+        if self
+            .buckets
+            .get_rate_limiter(domain, now)
+            .get_token_at(0, 1, now)
+            .0
+        {
             Ok(())
         } else {
             Err(CadenceError::ServiceBusy(
