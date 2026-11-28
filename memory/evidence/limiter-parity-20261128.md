@@ -13,4 +13,4 @@ History default 20 rps/burst 20 allow table; Wait spacing (50ms steps) after bur
 ## CI
 - Run: https://github.com/auenkr/cadence-rust/actions/runs/46108552667 (`rust-ci.yml`, package=cadence-common)
 - Head SHA at dispatch: d6df99b23ee971dee526cbea203cccc2a23ae66f
-- Conclusion: **PENDING** — still `queued` (shared runner backlog) when this note was written. Not verified; the new tests have not been run by anyone.
+- Conclusion: **success** (clippy-test: success, fmt: success). New tests passed; no expectation corrections needed.
