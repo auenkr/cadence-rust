@@ -150,6 +150,13 @@
 <tr><td>FE+Matching paired c64 p99</td><td colspan="2">Rust +798 ms</td></tr>
 <tr><td>Soak query "init" line</td><td colspan="2">open (deferred until after History)</td></tr>
 </tbody></table><p>See performance-status-20261119.md.</p></section>
+<section class="card" id="status-20261128-pause"><h2>Paused — 2026-11-28 (master 36f6502a0)</h2><ul>
+<li>Fixed: Cassandra c16 gap (prepared statements; now +10 wf/s vs Go), Cassandra startup type check, stale Cargo.lock, gocql nil retry, 4 read-path divergences, visibility sampling.</li>
+<li>Confirmed equal to Go: rate limiter, WriteCancelGuard, task-write gate; 0 lost workflows on cold restart (all 3 DBs).</li>
+<li>c1 p90 gap = Go's per-shard transferProcessorMaxPollRPS=20 limit; not a Rust bug.</li>
+<li>50bdf2041: 23/23 gates, rust-ci, 8 benchmark runs green. Report benchmark-results-50bdf2041-20261128.md.</li>
+<li>Open: MySQL c16 p95 tails (needs repeats), JSON history decode, 4 unaudited read paths, History throttled log, council r13, Rust Worker (kept Go).</li>
+</ul></section>
 <section class="card" id="status-20261126-pause"><h2>Paused — 2026-11-26 (master 6f7d8ba41)</h2><ul>
 <li>Council round 12 (Opus 5.5 low only): 8.5/10. Its parity bug (expired deadline renewed shard range) is fixed and merged.</li>
 <li>Merged: Cassandra cold-restart fix (Go ensureMinContextTimeout, detached handlers), parity audits 1-5 (CreateShard race, error mapping, SELECT_TASKS paging, full shard UDT, cas_error, DbUnavailable/Timeout), WriteCancelGuard (unconfirmed fix for a 1/895 first-decision loss), recovery gate Rust&lt;=Go.</li>

@@ -2081,3 +2081,10 @@ During handoff merged documentation-only tips `origin/frontend-core2`
 - Council r12 (Opus 5.5 low): 8.5/10; its expired-deadline renew bug fixed (b7ddfff7b).
 - Merged: restart-loss fix (8e46e8f12), Cassandra parity audits 1-5, kill_history first-completion = noise, load-burst trace (env-gated).
 - Open: Cassandra c16 −8.8 wf/s [−11.2,−7.0] (perf-cassandra-c16b); unpaced c1 p90 +27% [+10,+46] (perf-unpaced-c1-limiter), suspect wait_for_task_writes gate (perf-load-bursts); gocql retry policy; execution read-path audit; WriteCancelGuard unconfirmed; benchmark report refresh; council r13.
+
+## 2026-11-28 pause (master 36f6502a0)
+- Fixed and merged: Cassandra c16 gap (prepared-statement CachingSession like gocql; c16 +10 wf/s vs Go), Cassandra domain type check (bad_binaries_encoding text-or-blob), stale Cargo.lock (+ --locked CI check), gocql nil retry policy, 4 execution read-path divergences, visibility sampling + PriorityTokenBucket.
+- Confirmed equal to Go (tests added): rate limiter (x/time/rate), WriteCancelGuard, wait_for_task_writes gate. Cassandra/MySQL/PostgreSQL cold restart: 0 lost workflows, Rust and Go.
+- c1 unpaced p90 gap root cause: per-shard transferProcessorMaxPollRPS=20 limiter (same as Go); Rust is faster so it hits the limit (evidence/perf-c1-hop-trace-20261128.md). Product decision, not parity.
+- Final validation on 50bdf2041: 23/23 gates + rust-ci + 8 benchmark runs green. Report: memory/benchmark-results-50bdf2041-20261128.md.
+- Open: MySQL c16 p95 +19/+36% (A/A noise 16.6%, needs repeats on several runners); history-shape CPU parity (1.01x); Intel-runner binary hash differs; JSON history batch decode; unaudited read paths (GetWorkflowExecution deser, mutableState Load, cache eviction, Cassandra/SQL paging); History throttled-log call sites; visibility sampled metric/log + wrapper order; gocql protocol version/reconnect/session refresh; Rust Worker service (kept Go by decision); council round 13.
