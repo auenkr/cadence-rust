@@ -232,6 +232,11 @@ fn parse_uuid(value: &str) -> Result<[u8; 16]> {
 }
 
 fn decode_batch(row: &HistoryNodeRowData) -> Result<Vec<HistoryEvent>> {
+    // Go `DeserializeBatchEvents`: empty data yields zero events (caller then
+    // reports "corrupted history event batch, empty events").
+    if row.data.is_empty() {
+        return Ok(Vec::new());
+    }
     let encoding = match row.encoding.to_ascii_lowercase().as_str() {
         "thriftrw" => cadence_api::enums::EncodingType::ThriftRW,
         other => {
@@ -333,7 +338,8 @@ fn read_branch_page(
         }
     } else {
         serde_json::from_slice(&request.next_page_token)
-            .map_err(|e| HistoryReadError::InvalidRequest(e.to_string()))?
+            // Go returns the raw json.Unmarshal error (not a typed bad request).
+            .map_err(|e| HistoryReadError::Internal(e.to_string()))?
     };
     let branch = crate::history_branch::decode(&request.branch_token)
         .map_err(|e| HistoryReadError::InvalidRequest(e.message))?;
@@ -610,6 +616,20 @@ mod tests {
         assert_eq!(response.events().len(), 6);
         assert!(response.next_page_token.is_empty());
         assert_eq!(response.last_first_event_id, 6);
+    }
+
+    #[test]
+    fn empty_batch_blob_is_data_inconsistency() {
+        let mut r = row(1, 1, 1);
+        r.data = Vec::new();
+        let err = read_history_branch(&Fixed(vec![r]), &request(vec![])).unwrap_err();
+        assert!(matches!(&err, HistoryReadError::DataInconsistency(m) if m == "corrupted history event batch, empty events"));
+    }
+
+    #[test]
+    fn malformed_page_token_is_not_bad_request() {
+        let err = read_history_branch(&Fixed(vec![]), &request(b"not json".to_vec())).unwrap_err();
+        assert!(matches!(err, HistoryReadError::Internal(_)));
     }
 
     #[test]
