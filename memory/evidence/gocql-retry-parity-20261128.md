@@ -21,4 +21,6 @@ Rust: `rust/crates/cadence-persistence/src/cassandra.rs` (`CassandraSessionConfi
 Unit tests added in `session_config_tests`: Go defaults, option overrides, nil retry policy session creation.
 
 ## CI evidence
-Filled in below after runs.
+Head SHA d462a73f35e927f471cd51670b7f0ecf19e85ee3.
+- rust-ci (package=cadence-persistence): https://github.com/auenkr/cadence-rust/actions/runs/46108705540 — still queued when this was written; conclusion NOT yet recorded.
+- matching-cassandra-mixed-gate: https://github.com/auenkr/cadence-rust/actions/runs/46108707851 — still queued; conclusion NOT yet recorded.
