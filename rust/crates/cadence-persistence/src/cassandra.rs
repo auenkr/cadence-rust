@@ -157,7 +157,7 @@ pub struct CassandraDomainReplicationConfigUdt {
 /// The session is shared by Matching task/domain/semaphore stores when the
 /// configured Cassandra backend is wired by cadence-server.
 pub struct CassandraSemaphorePersistence {
-    session: Arc<Session>,
+    session: Arc<CqlSession>,
 }
 
 #[path = "semaphores_cassandra_native.rs"]
@@ -171,7 +171,7 @@ impl fmt::Debug for CassandraSemaphorePersistence {
 }
 
 impl CassandraSemaphorePersistence {
-    pub fn new(session: Arc<Session>) -> Self {
+    pub fn new(session: Arc<CqlSession>) -> Self {
         Self { session }
     }
 
@@ -568,11 +568,78 @@ pub struct CassandraSessionOptions {
     pub host_selection_policy: String,
 }
 
+/// gocql `ClusterConfig.MaxPreparedStmts` default (gocql/cluster.go).
+const GOCQL_MAX_PREPARED_STMTS: usize = 1000;
+
+/// Driver session with gocql's prepared-statement cache semantics.
+///
+/// gocql prepares every bound query once and then reuses the cached prepared
+/// id (`Session.stmtsLRU`, `MaxPreparedStmts` = 1000), so each Go query is a
+/// single EXECUTE round trip. The Scylla driver's `query_unpaged` /
+/// `query_single_page` / `batch` instead send a PREPARE before every call
+/// that has bound values, i.e. two round trips per statement. This wrapper
+/// keeps the call names used by the stores but routes them through Scylla's
+/// `CachingSession`, matching gocql's one-prepare-per-statement behaviour.
+pub struct CqlSession {
+    inner: scylla::client::caching_session::CachingSession,
+}
+
+impl CqlSession {
+    pub fn new(session: Session) -> Self {
+        Self {
+            inner: scylla::client::caching_session::CachingSession::from(
+                session,
+                GOCQL_MAX_PREPARED_STMTS,
+            ),
+        }
+    }
+
+    pub async fn query_unpaged(
+        &self,
+        statement: impl Into<scylla::statement::Statement>,
+        values: impl scylla::serialize::row::SerializeRow,
+    ) -> Result<scylla::response::query_result::QueryResult, scylla::errors::ExecutionError> {
+        self.inner.execute_unpaged(statement, values).await
+    }
+
+    pub async fn query_single_page(
+        &self,
+        statement: impl Into<scylla::statement::Statement>,
+        values: impl scylla::serialize::row::SerializeRow,
+        paging_state: scylla::response::PagingState,
+    ) -> Result<
+        (
+            scylla::response::query_result::QueryResult,
+            scylla::response::PagingStateResponse,
+        ),
+        scylla::errors::ExecutionError,
+    > {
+        self.inner
+            .execute_single_page(statement, values, paging_state)
+            .await
+    }
+
+    pub async fn batch(
+        &self,
+        batch: &scylla::statement::batch::Batch,
+        values: impl scylla::serialize::batch::BatchValues,
+    ) -> Result<scylla::response::query_result::QueryResult, scylla::errors::ExecutionError> {
+        self.inner.batch(batch, values).await
+    }
+}
+
+impl std::ops::Deref for CqlSession {
+    type Target = Session;
+    fn deref(&self) -> &Session {
+        self.inner.get_session()
+    }
+}
+
 /// Session and dedicated async driver runtime for Matching's synchronous
 /// persistence traits. Calls are made from the server's blocking pool using
 /// `run`; the runtime is independent of the RPC runtime.
 pub struct CassandraBlockingSession {
-    session: Option<Arc<Session>>,
+    session: Option<Arc<CqlSession>>,
     runtime: Option<Arc<tokio::runtime::Runtime>>,
     default_consistency: Consistency,
 }
@@ -606,7 +673,7 @@ impl CassandraBlockingSession {
         })
     }
 
-    pub(crate) fn session(&self) -> Arc<Session> {
+    pub(crate) fn session(&self) -> Arc<CqlSession> {
         self.session
             .as_ref()
             .expect("live Cassandra session")
@@ -804,7 +871,7 @@ impl CassandraSessionConfig {
 
     /// Connect to all configured contact points and select Cadence's existing
     /// keyspace. This never creates a keyspace or applies schema migrations.
-    pub async fn connect(&self) -> anyhow::Result<Session> {
+    pub async fn connect(&self) -> anyhow::Result<CqlSession> {
         let nodes: Vec<String> = self
             .hosts
             .iter()
@@ -871,7 +938,7 @@ impl CassandraSessionConfig {
                 allowed: self.allowed_authenticators.clone(),
             }));
         }
-        Ok(builder.build().await?)
+        Ok(CqlSession::new(builder.build().await?))
     }
 }
 
