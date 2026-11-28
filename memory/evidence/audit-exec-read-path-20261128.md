@@ -34,3 +34,9 @@ Fixes: cadence-persistence/src/history_reader.rs (decode_batch empty data; token
 CI evidence: see section below (filled after runs).
 
 Fix 3: cadence-history/src/wiring/persistence/engine_ndc.rs: retry_transient now 30s-expiry/10s-max backoff; new retry_transient_read retries Timeout (Go IsTransientError) for get/current/append; test `read_path_retries_timeouts_like_go_is_transient_error`.
+
+CI on head bb2e81eb2 (dispatched; conclusions pending at time of writing, still queued):
+- rust-ci cadence-persistence https://github.com/auenkr/cadence-rust/actions/runs/46108822393
+- rust-ci cadence-history https://github.com/auenkr/cadence-rust/actions/runs/46108824890
+- history-mixed-gate https://github.com/auenkr/cadence-rust/actions/runs/46108827054
+Earlier runs on fc77c7763 (46108569335/46108576248/46108579516) were cancelled while still queued, superseded by the fix.
