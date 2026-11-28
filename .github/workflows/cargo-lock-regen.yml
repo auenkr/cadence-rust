@@ -1,0 +1,29 @@
+name: cargo-lock-regen
+
+# Regenerates rust/Cargo.lock minimally (cargo update --workspace) and uploads it. Never run cargo locally.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Init IDL submodule
+        run: git submodule update --init --recursive go && scripts/go-overlay.sh
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cargo update --workspace
+        working-directory: rust
+        run: |
+          cargo update --workspace
+          cargo metadata --locked --format-version 1 > /dev/null
+          git diff --stat -- Cargo.lock || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Cargo.lock
+          path: rust/Cargo.lock
+          retention-days: 3
